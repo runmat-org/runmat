@@ -1,121 +1,40 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use log::info;
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-use crate::runtime::{
-    AccelerateConfig, FeaConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
-    PlottingConfig, RunMatRuntimeConfig, TelemetryConfig,
-};
+use crate::document::{migrate_legacy_desktop_config, RunmatConfigDocument, RunmatConfigFormat};
+use crate::runtime::RunMatRuntimeConfig;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ConfigFormat {
-    Toml,
-    Json,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct RuntimeFileDocument {
-    #[serde(default)]
-    runtime: RuntimeFileSection,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-struct RuntimeFileSection {
-    callstack_limit: Option<usize>,
-    error_namespace: Option<String>,
-    verbose: Option<bool>,
-    language: Option<LanguageConfig>,
-    logging: Option<LoggingConfig>,
-    telemetry: Option<TelemetryConfig>,
-    jit: Option<JitConfig>,
-    gc: Option<GcConfig>,
-    accelerate: Option<AccelerateConfig>,
-    plotting: Option<PlottingConfig>,
-    fea: Option<FeaConfig>,
-}
-
-impl RuntimeFileSection {
-    fn apply_to(self, config: &mut RunMatRuntimeConfig) {
-        if let Some(callstack_limit) = self.callstack_limit {
-            config.runtime.callstack_limit = callstack_limit;
-        }
-        if let Some(error_namespace) = self.error_namespace {
-            config.runtime.error_namespace = error_namespace;
-        }
-        if let Some(verbose) = self.verbose {
-            config.runtime.verbose = verbose;
-        }
-        if let Some(language) = self.language {
-            config.language = language;
-        }
-        if let Some(logging) = self.logging {
-            config.logging = logging;
-        }
-        if let Some(telemetry) = self.telemetry {
-            config.telemetry = telemetry;
-        }
-        if let Some(jit) = self.jit {
-            config.jit = jit;
-        }
-        if let Some(gc) = self.gc {
-            config.gc = gc;
-        }
-        if let Some(accelerate) = self.accelerate {
-            config.accelerate = accelerate;
-        }
-        if let Some(plotting) = self.plotting {
-            config.plotting = plotting;
-        }
-        if let Some(fea) = self.fea {
-            config.fea = fea;
-        }
-    }
-}
-
-impl From<&RunMatRuntimeConfig> for RuntimeFileDocument {
-    fn from(value: &RunMatRuntimeConfig) -> Self {
-        Self {
-            runtime: RuntimeFileSection {
-                callstack_limit: Some(value.runtime.callstack_limit),
-                error_namespace: Some(value.runtime.error_namespace.clone()),
-                verbose: Some(value.runtime.verbose),
-                language: Some(value.language.clone()),
-                logging: Some(value.logging.clone()),
-                telemetry: Some(value.telemetry.clone()),
-                jit: Some(value.jit.clone()),
-                gc: Some(value.gc.clone()),
-                accelerate: Some(value.accelerate.clone()),
-                plotting: Some(value.plotting.clone()),
-                fea: Some(value.fea.clone()),
-            },
-        }
-    }
-}
-
-/// Load runtime configuration from a canonical runmat.toml/runmat.json file.
+/// Load runtime configuration through the canonical RunMat config document.
 pub(crate) fn load_from_file(path: &Path) -> Result<RunMatRuntimeConfig> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file: {}", path.display()))?;
-
-    let format = format_from_path(path)?;
-    let parsed: RuntimeFileDocument = parse_document(&content, format, path)?;
-
-    let mut config = RunMatRuntimeConfig::default();
-    parsed.runtime.apply_to(&mut config);
-    Ok(config)
+    let format = RunmatConfigFormat::from_path(path)?;
+    let migrated = migrate_legacy_desktop_config(&content, format)
+        .with_context(|| format!("Failed to migrate config: {}", path.display()))?;
+    let document = RunmatConfigDocument::parse(migrated.source, format)
+        .with_context(|| format!("Failed to parse config: {}", path.display()))?;
+    Ok(document.runtime().clone())
 }
 
-/// Save runtime configuration to a canonical runmat.toml/runmat.json file.
+/// Save runtime configuration without replacing package, Desktop, test, or
+/// future top-level sections.
 pub(crate) fn save_to_file(config: &RunMatRuntimeConfig, path: &Path) -> Result<()> {
-    let format = format_from_path(path)?;
-    let content = render_runtime_config(config, format)?;
-
-    fs::write(path, content)
+    let format = RunmatConfigFormat::from_path(path)?;
+    let source = if path.exists() {
+        fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {}", path.display()))?
+    } else {
+        empty_document(format)
+    };
+    let migrated = migrate_legacy_desktop_config(&source, format)
+        .with_context(|| format!("Failed to migrate config: {}", path.display()))?;
+    let document = RunmatConfigDocument::parse(migrated.source, format)
+        .with_context(|| format!("Failed to parse config: {}", path.display()))?;
+    let updated = document.with_runtime(config)?;
+    fs::write(path, updated.source())
         .with_context(|| format!("Failed to write config file: {}", path.display()))?;
-
     info!("Configuration saved to: {}", path.display());
     Ok(())
 }
@@ -166,56 +85,22 @@ geometry_prep_require_latest_revision = true
     sample.to_string()
 }
 
-pub(crate) fn render_runtime_config(
-    config: &RunMatRuntimeConfig,
-    format: ConfigFormat,
-) -> Result<String> {
-    let doc = RuntimeFileDocument::from(config);
-    match format {
-        ConfigFormat::Toml => {
-            toml::to_string_pretty(&doc).context("Failed to serialize config to TOML")
-        }
-        ConfigFormat::Json => {
-            serde_json::to_string_pretty(&doc).context("Failed to serialize config to JSON")
-        }
-    }
+pub(crate) fn render_runtime_config(config: &RunMatRuntimeConfig, path: &Path) -> Result<String> {
+    let format = RunmatConfigFormat::from_path(path)?;
+    let document = RunmatConfigDocument::parse(empty_document(format), format)?;
+    Ok(document.with_runtime(config)?.into_source())
 }
 
-pub(crate) fn format_from_path(path: &Path) -> Result<ConfigFormat> {
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some("toml") => Ok(ConfigFormat::Toml),
-        Some("json") => Ok(ConfigFormat::Json),
-        Some(other) => Err(anyhow!(
-            "Unsupported config extension .{other}; expected .toml or .json"
-        )),
-        None => Err(anyhow!("Config file must have .toml or .json extension")),
-    }
-}
-
-fn parse_document(content: &str, format: ConfigFormat, path: &Path) -> Result<RuntimeFileDocument> {
+fn empty_document(format: RunmatConfigFormat) -> String {
     match format {
-        ConfigFormat::Toml => toml::from_str(content)
-            .with_context(|| format!("Failed to parse TOML config: {}", path.display())),
-        ConfigFormat::Json => serde_json::from_str(content)
-            .with_context(|| format!("Failed to parse JSON config: {}", path.display())),
+        RunmatConfigFormat::Toml => String::new(),
+        RunmatConfigFormat::Json => "{}\n".into(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_sample_config, parse_document, ConfigFormat};
-    use std::path::Path;
-
-    #[test]
-    fn removed_snapshot_path_is_rejected() {
-        let error = parse_document(
-            "[runtime]\nsnapshot_path = \"stdlib.snapshot\"\n",
-            ConfigFormat::Toml,
-            Path::new("runmat.toml"),
-        )
-        .expect_err("removed startup snapshot configuration must be rejected");
-        assert!(format!("{error:#}").contains("snapshot_path"));
-    }
+    use super::generate_sample_config;
 
     #[test]
     fn generated_config_has_no_startup_snapshot_setting() {

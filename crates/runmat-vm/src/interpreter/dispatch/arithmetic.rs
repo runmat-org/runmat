@@ -4,11 +4,11 @@ use crate::accel::auto_promote::{
 use crate::interpreter::dispatch::logical_truth_from_value;
 use crate::ops::arithmetic as arithmetic_ops;
 use crate::ops::comparison as comparison_ops;
-use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
 async fn call_operator_method(obj: Value, method: &str, arg: Value) -> Result<Value, RuntimeError> {
-    crate::call::shared::call_object_operator_method(obj, method, arg).await
+    runmat_runtime::object::dispatch::call_object_operator_method(obj, method, arg).await
 }
 
 async fn call_right_operator_method_ordered(
@@ -16,7 +16,8 @@ async fn call_right_operator_method_ordered(
     rhs: Value,
     method: &str,
 ) -> Result<Value, RuntimeError> {
-    crate::call::shared::call_rhs_object_operator_method_ordered(lhs, rhs, method).await
+    runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered(lhs, rhs, method)
+        .await
 }
 
 pub async fn dispatch_arithmetic(
@@ -169,7 +170,7 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::Neg => {
-            arithmetic_ops::unary(stack, |value| async move {
+            arithmetic_ops::unary_arithmetic(stack, |value| async move {
                 match &value {
                     Value::Object(obj) => {
                         let args = vec![Value::Object(obj.clone())];
@@ -221,7 +222,7 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::UPlus => {
-            arithmetic_ops::unary(stack, |value| async move {
+            arithmetic_ops::unary_arithmetic(stack, |value| async move {
                 match &value {
                     Value::Object(obj) => {
                         let args = vec![Value::Object(obj.clone())];

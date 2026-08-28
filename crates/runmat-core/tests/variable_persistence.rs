@@ -3,9 +3,9 @@
 // runmat-runtime wasm binary per test file with zero executable tests.
 #![cfg(not(target_arch = "wasm32"))]
 
-use runmat_builtins::Value;
 use runmat_core::RunMatSession;
 use runmat_gc::gc_test_context;
+use runmat_value::Value;
 
 #[test]
 fn test_variable_persistence_basic() {

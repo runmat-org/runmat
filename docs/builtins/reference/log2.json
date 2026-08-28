@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host implementation when the provider lacks unary_log2 or when complex results are required."
+    "notes": "Uses the provider unary_log2 hook for supported real inputs. Provider results are checked for shape, precision, storage kind, and exact device ownership before being accepted."
   },
   "fusion": {
     "elementwise": true,
@@ -31,11 +31,13 @@
     "integration": "builtins::math::elementwise::log2::tests::log2_gpu_provider_roundtrip",
     "gpu": "builtins::math::elementwise::log2::tests::log2_wgpu_matches_cpu_elementwise"
   },
-  "description": "`Y = log2(X)` computes the base-2 logarithm of each element of `X`. Domain promotion to complex values and type handling follow MATLAB semantics.",
+  "description": "`Y = log2(X)` computes the base-2 logarithm of each element of `X`. Real and complex single inputs preserve single precision, while double inputs preserve double precision. When RunMat extensions are enabled, integer, logical, and character inputs are additionally accepted and promoted to double.",
   "behaviors": [
-    "`log2` operates element-wise with MATLAB broadcasting rules.",
-    "Logical inputs convert to doubles (`true → 1.0`, `false → 0.0`) before the logarithm is applied.",
-    "Character arrays are interpreted as their numeric code points and return dense double tensors of the same shape.",
+    "Only the one-output `Y = log2(X)` form is implemented; the two-output mantissa/exponent form is not available yet.",
+    "`log2` operates element-wise and preserves the input shape.",
+    "When RunMat extensions are enabled, logical inputs convert to doubles (`true → 1.0`, `false → 0.0`) before the logarithm is applied.",
+    "When RunMat extensions are enabled, character arrays are interpreted as their numeric code points and return dense double tensors of the same shape.",
+    "When RunMat extensions are enabled, integer inputs are promoted to double before the logarithm is applied.",
     "`log2(0)` returns `-Inf`; positive infinity stays `Inf`; `NaN` propagates unchanged.",
     "Negative real values promote to complex results: `log2([-1 1])` returns `[0 + i·π/ln(2), 0]`.",
     "Complex inputs follow MATLAB's definition `log2(z) = log(z) / ln(2)` and clamp subnormal imaginary parts to zero for readability."
@@ -67,7 +69,7 @@
       "output": "host = [0 2 4 6]"
     },
     {
-      "description": "Applying `log2` to character codes",
+      "description": "Computing base-2 logarithms of character codes",
       "input": "C = 'ABC';\nvalues = log2(C)",
       "output": "values = [6.0224 6.0444 6.0661]"
     }
@@ -91,11 +93,11 @@
     },
     {
       "question": "Does the GPU implementation support complex outputs?",
-      "answer": "Current providers operate on real buffers. When complex outputs are required, RunMat gathers the tensor to the host while keeping fusion metadata consistent."
+      "answer": "The device hook currently operates on real buffers. A real GPU input that would require complex promotion raises an error asking for an explicitly complex GPU input; RunMat does not silently gather that explicit input and change its residency contract."
     },
     {
       "question": "Is `log2` numerically stable for very small or large values?",
-      "answer": "Yes. The implementation promotes to 64-bit doubles throughout and clamps tiny imaginary parts to zero, mirroring MATLAB's behavior for well-conditioned inputs."
+      "answer": "The implementation preserves single precision for single inputs and double precision for double inputs. Integer, logical, and character extensions are promoted to double. Tiny imaginary components introduced by floating-point evaluation may be normalized to zero."
     }
   ],
   "links": [
@@ -208,8 +210,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/log2.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/log2.rs"
   },
-  "gpu_residency": "You typically do **not** need to call `gpuArray` yourself. The auto-offload planner keeps tensors on the GPU when profitable and the result stays real. When complex results are required, RunMat automatically gathers the data to the host to produce the precise MATLAB-compatible answer. Use `gpuArray`/`gather` only when you want to mirror MathWorks MATLAB workflows explicitly.",
+  "gpu_residency": "Automatically resident inputs may gather to the host when the provider cannot perform the operation. Explicit `gpuArray` inputs use the same exact device owner for supported fallback restoration. If a real GPU input would require promotion to a complex result, RunMat reports that the input must be explicitly complex instead of silently returning a host value.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors on the GPU when the active provider implements `unary_log2` and the data is known to remain in the real domain. If complex outputs are required (for example, negative inputs) or the provider lacks the hook, RunMat gathers the tensor to the host, computes the exact MATLAB-compatible result, updates residency metadata, and returns the host-resident value."
+    "RunMat Accelerate keeps supported real inputs on their exact GPU owner when the active provider implements `unary_log2`. If the provider lacks the hook, automatic residency may fall back to a host result, while explicit residency is restored to the originating owner. Real GPU inputs that require complex promotion must be made explicitly complex before calling `log2`."
   ]
 }

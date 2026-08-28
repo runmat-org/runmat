@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs on the host. Values that already reside on the GPU stay resident; no kernels are dispatched."
+    "notes": "Direct field retrieval is metadata-only and preserves resident handles. The independently gated indexed-resident form gathers authoritative storage through the owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -27,14 +27,14 @@
     "unit": "builtins::structs::core::getfield::tests",
     "integration": "runmat-vm/tests/functions.rs::member_get_set_and_method_call_skeleton"
   },
-  "description": "`value = getfield(S, field)` returns the contents of `S.field`. Nested field access, struct-array indexing forms, and object property access follow MATLAB semantics.",
+  "description": "`value = getfield(S, field)` returns the contents of `S.field`. Nested field access and structure-array indexing follow MATLAB semantics; RunMat object-family access is a separately gated extension.",
   "behaviors": [
     "Field names must be character vectors or string scalars. Several field names in a row navigate nested structs: `getfield(S, \"outer\", \"inner\")` is equivalent to `S.outer.inner`.",
     "When `S` is a struct array, `getfield(S, \"field\")` examines the first element by default. Provide indices in a cell array to target another element: `getfield(S, {k}, \"field\")` yields `S(k).field`.",
-    "After a field name you may supply an index cell to subscript the field value, e.g. `getfield(S, \"values\", {row, col})`. Each position accepts positive integers or the keyword `end` to reference the last element in that dimension.",
-    "MATLAB-style objects honour property attributes: static or private properties raise errors, while dependent properties invoke `get.<name>` when available.",
-    "Handle objects dereference to their underlying instance automatically. Deleted handles raise the standard MATLAB-style error.",
-    "`MException` values expose the `message`, `identifier`, and `stack` fields for compatibility with MATLAB error handling."
+    "After a field name you may supply an index cell to subscript the field value, e.g. `getfield(S, \"values\", {row, col})`. Numeric indices accept exact positive scalar or vector values from every integer class, and logical vectors select matching elements.",
+    "Direct integer field access and host subarray selection preserve the field's exact class, shape, storage, and magnitude; an index class never determines the output class.",
+    "RunMat mode additionally accepts textual `end` or numeric selectors, object/handle/listener/exception property access, and indexed resident-field gather. Each family is independently disabled in MATLAB-compatible modes.",
+    "Directly retrieved resident fields retain their original handle without provider access. Indexed resident fields use the explicit RunMat-only typed host-gather form and return host data."
   ],
   "examples": [
     {
@@ -58,8 +58,8 @@
       "output": "firstName = \"Ada\""
     },
     {
-      "description": "Using `end` to reference the last item in a field",
-      "input": "series = struct(\"values\", {1:5});\nlastValue = getfield(series, \"values\", {\"end\"})",
+      "description": "Selecting the last item in a field",
+      "input": "series = struct(\"values\", {1:5});\nlastValue = getfield(series, \"values\", {5})",
       "output": "lastValue = 5"
     },
     {
@@ -76,7 +76,7 @@
   "faqs": [
     {
       "question": "Does `getfield` work on non-struct values?",
-      "answer": "No. The first argument must be a scalar struct, a struct array (possibly empty), an object instance created with `new_object`, a handle object, or an `MException`. Passing other types raises an error."
+      "answer": "The MATLAB-compatible surface requires a scalar or nonscalar structure. RunMat mode additionally supports selected object, handle, listener, and exception values through an explicit extension gate."
     },
     {
       "question": "How do I access nested struct fields?",
@@ -88,15 +88,15 @@
     },
     {
       "question": "Can I index the value stored in a field?",
-      "answer": "Yes. You may supply scalars or `end` inside the index cell to reference elements of the field value."
+      "answer": "Yes. Supply numeric or logical values inside an index cell. RunMat mode also provides a separately gated textual `end` convenience."
     },
     {
       "question": "Do dependent properties run their getter methods?",
-      "answer": "Yes. If a property is marked `Dependent` and a `get.propertyName` builtin exists, `getfield` invokes it. Otherwise the backing field `<property>_backing` is inspected."
+      "answer": "In RunMat mode, yes. Object-family access is a RunMat extension; dependent properties invoke `get.<name>` when available, otherwise the backing field `<property>_backing` is inspected."
     },
     {
       "question": "What happens when I query a deleted handle object?",
-      "answer": "RunMat mirrors MATLAB by raising `Invalid or deleted handle object 'ClassName'.`"
+      "answer": "The RunMat object-family extension raises `Invalid or deleted handle object 'ClassName'.`"
     }
   ],
   "links": [
@@ -133,8 +133,8 @@
     "label": "`crates/runmat-runtime/src/builtins/structs/core/getfield.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/structs/core/getfield.rs"
   },
-  "gpu_residency": "You do not have to move data between CPU and GPU explicitly when calling `getfield`. The builtin works entirely with metadata and returns handles or tensors in whatever memory space they already inhabit.",
+  "gpu_residency": "Direct field access is metadata-only and preserves an existing resident handle. Indexing into a resident field is a separately gated RunMat form that gathers exact typed storage to the host.",
   "gpu_behavior": [
-    "`getfield` is metadata-only. When structs or objects contain GPU tensors, the tensors remain on the device. The builtin manipulates only the host-side metadata and does not dispatch GPU kernels or gather buffers back to the CPU. Results inherit residency from the values being returned."
+    "Direct resident field retrieval performs no provider operation. Indexed resident-field access is not presented as metadata-only: in RunMat mode it routes through the owning provider, downloads authoritative storage, and returns a host result; MATLAB-compatible modes reject it before provider access."
   ]
 }

@@ -1,0 +1,61 @@
+{
+  "title": "text",
+  "category": "plotting",
+  "keywords": ["text", "annotation", "label", "plotting"],
+  "summary": "Add text at a position in a 2-D or 3-D plot.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Text is rendered on the host. Automatically resident coordinates are gathered through their owning provider. Explicit gpuArray coordinates are available only in RunMat mode."
+  },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
+  "requires_feature": "plot-core",
+  "tested": { "unit": "builtins::plotting::text::tests", "integration": null },
+  "description": "`text(x,y,txt)` adds an annotation at a 2-D position. Include `z` for a 3-D position, or provide an axes handle first to select the target axes.",
+  "behaviors": [
+    "Coordinates can use single, double, or any of the eight integer classes.",
+    "The `Position` property retains the coordinate class, shape, and exact values. Rendering uses a separate floating-point geometry cache.",
+    "A two-element `Position` value is stored with a third coordinate of zero in the same numeric class.",
+    "The returned graphics handle supports `get` and `set` for `String`, `Position`, `FontWeight`, `FontAngle`, `Interpreter`, `Color`, `FontSize`, and `Visible`.",
+    "Typed-integer numeric axes aliases and explicit gpuArray coordinates are RunMat-mode extensions."
+  ],
+  "examples": [
+    {
+      "description": "Label a point on a curve",
+      "input": "plot(1:5, [2 4 3 5 4]);\nh = text(4, 5, \"peak\");"
+    },
+    {
+      "description": "Add a 3-D annotation",
+      "input": "plot3(1:3, 2:4, 5:7);\nh = text(2, 3, 6, \"sample\");"
+    },
+    {
+      "description": "Use integer coordinates",
+      "input": "h = text(int64(12), int64(-3), \"checkpoint\");\nposition = get(h, \"Position\")",
+      "output": "position = 1×3 int64\n    12    -3     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are integer positions converted to double?",
+      "answer": "No. The graphics property keeps native integer storage and exact values. Only the derived coordinates sent to the renderer are converted."
+    },
+    {
+      "question": "Can `text` label several points in one call?",
+      "answer": "Not yet. Each call currently accepts one scalar 2-D or 3-D position; vector coordinates and per-point label arrays remain unsupported."
+    },
+    {
+      "question": "Can I pass resident coordinates?",
+      "answer": "Automatically resident coordinates are gathered transparently through their owning provider. Explicit gpuArray coordinates require RunMat mode because the current public compatibility target does not document an interactive GPU form for `text`."
+    }
+  ],
+  "links": [
+    { "label": "plot", "url": "./plot" },
+    { "label": "title", "url": "./title" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/text.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/text.rs"
+  }
+}

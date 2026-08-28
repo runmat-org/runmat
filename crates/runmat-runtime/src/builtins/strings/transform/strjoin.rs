@@ -1,7 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+use runmat_value::Value;
 
 const STRJOIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -41,9 +43,16 @@ pub const STRJOIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &[],
 };
 
+pub const STRJOIN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "strjoin joins text using a text delimiter. Integer, numeric, and provider-resident values have no input role and reject before provider access without implicit text conversion.",
+};
+
 #[runmat_macros::runtime_builtin(
     name = "strjoin",
     descriptor(self::STRJOIN_DESCRIPTOR),
+    integer_audit(self::STRJOIN_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::strjoin"
 )]
 pub async fn strjoin_builtin(a: Value, delim: Value) -> crate::BuiltinResult<Value> {

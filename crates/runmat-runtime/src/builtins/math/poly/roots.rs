@@ -8,11 +8,15 @@
 use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -71,6 +75,35 @@ pub const ROOTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ROOTS_ERRORS,
 };
 
+const ROOTS_INTEGER_COEFFICIENTS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "roots-integer-coefficients",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "roots accepts typed-integer polynomial coefficients as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:RootsIntegerCoefficientsExtension"),
+    };
+pub const ROOTS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [ROOTS_INTEGER_COEFFICIENTS_EXTENSION];
+const ROOTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "c",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double coefficients; RunMat admits typed integers only when every coefficient is exactly representable in binary64.",
+    }];
+pub const ROOTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "r = roots(integer_c)",
+        inputs: &ROOTS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The checked extension crosses once into the double companion-matrix/eigenvalue algorithm. Automatic residency gathers through the owning provider; explicit typed-integer input is gated before provider access.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::roots")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "roots",
@@ -121,6 +154,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(roots_type),
     descriptor(crate::builtins::math::poly::roots::ROOTS_DESCRIPTOR),
+    extensions(crate::builtins::math::poly::roots::ROOTS_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::poly::roots::ROOTS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::poly::roots"
 )]
 async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
@@ -128,6 +163,14 @@ async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
 }
 
 pub(crate) async fn roots_value(coefficients: Value) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&coefficients, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &coefficients,
+        &ROOTS_INTEGER_COEFFICIENTS_EXTENSION,
+        BUILTIN_NAME,
+        "coefficient",
+    )
+    .await?;
     let coeffs = coefficients_to_complex(coefficients).await?;
     let trimmed = trim_leading_zeros(coeffs);
     if trimmed.is_empty() || trimmed.len() == 1 {
@@ -172,8 +215,7 @@ async fn coefficients_to_complex(value: Value) -> BuiltinResult<Vec<Complex64>> 
 
 fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<Vec<Complex64>> {
     ensure_vector_shape("roots", &tensor.shape)?;
-    Ok(tensor
-        .data
+    Ok(tensor::tensor_values_f64(&tensor)
         .into_iter()
         .map(|value| Complex64::new(value, 0.0))
         .collect())
@@ -182,7 +224,7 @@ fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<Vec<Complex64>> {
 fn complex_tensor_to_vec(tensor: ComplexTensor) -> BuiltinResult<Vec<Complex64>> {
     ensure_vector_shape("roots", &tensor.shape)?;
     Ok(tensor
-        .data
+        .materialize_f64()
         .into_iter()
         .map(|(re, im)| Complex64::new(re, im))
         .collect())
@@ -344,7 +386,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ComplexTensor, LogicalArray, Tensor};
+    use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -383,7 +425,24 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
+                roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                assert!((roots[0] - 1.0).abs() < 1e-10);
+                assert!((roots[1] - 2.0).abs() < 1e-10);
+            }
+            other => panic!("expected real tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roots_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let coeffs = Tensor::new_integer(IntegerStorage::I16(vec![1, -3, 2]), vec![3, 1]).unwrap();
+        let result = roots_builtin(Value::Tensor(coeffs)).expect("roots");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 1]);
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 assert!((roots[0] - 1.0).abs() < 1e-10);
                 assert!((roots[1] - 2.0).abs() < 1e-10);
@@ -400,7 +459,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!((t.data[0] - 4.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[0] - 4.0).abs() < 1e-10);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -414,7 +473,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 assert!((roots[0].0).abs() < 1e-10);
                 assert!((roots[0].1 + 1.0).abs() < 1e-10);
@@ -434,13 +493,13 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 1]);
-                for &r in &t.data {
+                for &r in &t.materialize_f64() {
                     assert!(r.abs() < 1e-8);
                 }
             }
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![4, 1]);
-                for &(re, im) in &t.data {
+                for &(re, im) in &t.materialize_f64() {
                     assert!(re.abs() < 1e-7 && im.abs() < 1e-7);
                 }
             }
@@ -459,7 +518,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
                 // roots at i and -i
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 assert!(roots[0].0.abs() < 1e-10 && (roots[0].1 + 1.0).abs() < 1e-6);
                 assert!(roots[1].0.abs() < 1e-10 && (roots[1].1 - 1.0).abs() < 1e-6);
@@ -477,7 +536,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!(t.data[0].abs() < 1e-12);
+                assert!(t.materialize_f64()[0].abs() < 1e-12);
             }
             other => panic!("expected real tensor, got {other:?}"),
         }
@@ -490,7 +549,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 1]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -513,7 +572,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 1]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -525,14 +584,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let coeffs = Tensor::new(vec![1.0, 0.0, -9.0, 0.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
-                data: &coeffs.data,
+                data: &coeffs.materialize_f64(),
                 shape: &coeffs.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = roots_builtin(Value::GpuTensor(handle)).expect("roots");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            let mut roots = gathered.data;
+            let mut roots = gathered.materialize_f64();
             roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
             assert!((roots[0] + 3.0).abs() < 1e-9);
             assert!((roots[1]).abs() < 1e-9);

@@ -30,6 +30,7 @@
   },
   "description": "`polarscatter` converts angular/radial point data to cartesian scatter coordinates, marks the active axes as polar, and preserves the original `ThetaData` and `RData` on returned scatter handles.",
   "behaviors": [
+    "All eight integer classes are accepted for coordinates, marker sizes, and numeric color data before the explicit floating renderer boundary; integer table-variable selectors remain structural.",
     "`polarscatter(theta, rho)` interprets theta values as radians and requires theta and rho to have compatible element counts.",
     "Vector theta with matrix rho, matrix theta with vector rho, and matching theta/rho matrices create one scatter object per matrix column.",
     "`polarscatter(theta, rho, sz)` accepts scalar, vector, or matrix marker-size data. Matrix sizes are sliced by series when theta/rho expands to multiple scatter objects.",

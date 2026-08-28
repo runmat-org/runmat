@@ -27,11 +27,11 @@
     "unit": "builtins::timing::tic::tests",
     "integration": "runmat_runtime::io::tests::test_tic_toc"
   },
-  "description": "`tic` starts a high-resolution stopwatch used by `toc` to report elapsed wall-clock seconds. Captured handles from `t = tic` can be passed to `toc(t)` for independent timing scopes, matching MATLAB semantics.",
+  "description": "`tic` starts a high-resolution stopwatch used by `toc` to report elapsed wall-clock seconds. Assign its opaque `uint64` token when you need to measure from a specific start time.",
   "behaviors": [
     "Uses the host's monotonic clock for nanosecond-resolution timing.",
-    "Supports nested timers: each call pushes a new start time on an internal stack. `toc` without inputs always reads the most recent `tic` and removes it, leaving earlier timers intact so outer scopes continue measuring.",
-    "Returns an opaque scalar handle (a `double`) that encodes the monotonic timestamp. The handle can be stored or passed explicitly to `toc`.",
+    "Each call makes its start time the latest stopwatch. `toc` without inputs can read that latest start repeatedly; it does not consume the timer.",
+    "Returns an opaque `uint64` token. The bits identify a monotonic-clock instant and must not be treated as a numeric timestamp or duration.",
     "Executes entirely on the CPU. There are no GPU variants because `tic` interacts with wall-clock state.",
     "Calling `toc` before `tic` raises the MATLAB-compatible error `RunMat:toc:NoMatchingTic`."
   ],
@@ -46,7 +46,7 @@
     },
     {
       "description": "Nesting timers for staged profiling",
-      "input": "tic;              % Outer stopwatch\nstage1();         % Work you want to measure once\ninner = tic;      % Nested stopwatch\nstage2();\ninnerT = toc(inner);  % Elapsed time for stage2 only\nouterT = toc;         % Elapsed time for everything since the first tic"
+      "input": "outer = tic;      % Keep the outer timer token\nstage1();         % Work you want to measure once\ninner = tic;      % Start a second stopwatch\nstage2();\ninnerT = toc(inner);  % Elapsed time for stage2 only\nouterT = toc(outer);  % Elapsed time for both stages"
     },
     {
       "description": "Measuring asynchronous work",
@@ -68,7 +68,7 @@
     },
     {
       "question": "Can I run `tic` on a worker thread?",
-      "answer": "Yes. Each thread shares the same stopwatch stack. Nested `tic`/`toc` pairs remain well-defined, but you should serialise access at the script level to avoid interleaving unrelated timings."
+      "answer": "Yes. Stopwatch state is process-wide, so concurrent scripts should retain and pass their own `uint64` tokens when timings might interleave."
     },
     {
       "question": "How accurate is the measurement?",

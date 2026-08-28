@@ -13,6 +13,7 @@ New to RunMat? Follow these in order:
 3. [Command Line Interface](./getting-started/cli.md) — the REPL, running scripts, and runtime flags.
 4. [Projects](./getting-started/projects.md) — multi-file projects, packages, classes, and entrypoints.
 5. [Language Compatibility](./getting-started/compatability.md) — what MATLAB syntax and semantics are supported.
+6. [MATLAB Language Extensions](./getting-started/language-extensions.md) — how RunMat-only syntax and builtin forms relate to compatibility modes.
 
 If you want to understand how the runtime works internally, start with the [Compilation Pipeline](./compiler/index.md) and follow the cross-links from there.
 
@@ -24,6 +25,7 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Projects](./getting-started/projects.md)
 - [Configuration](./getting-started/config.md)
 - [Language Compatibility](./getting-started/compatability.md)
+- [MATLAB Language Extensions](./getting-started/language-extensions.md)
 - [Hello World](./getting-started/hello-world.md)
 
 ## Reference
@@ -86,6 +88,15 @@ If you want to understand how the runtime works internally, start with the [Comp
 ## WebAssembly & TypeScript
 
 - [WASM & TypeScript/JavaScript](./wasm/index.md)
+
+## Packages
+
+- [Packages](./packages/index.md)
+- [Hosted Package Registry](./packages/registry.md)
+- [Publishing Packages](./packages/publishing.md)
+- [Package Security](./packages/security.md)
+- [Migrating Existing Toolboxes](./packages/migration.md)
+- [Packages In CI](./packages/ci.md)
 
 ## Language Server Protocol (LSP)
 

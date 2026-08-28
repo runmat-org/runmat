@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use super::{
     canonical_vendor_name, install_device_error_handlers, parse_two_pass_mode,
-    ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuProvider,
+    ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuDeviceCaches, WgpuProvider,
     WgpuProviderOptions, WorkgroupConfig,
 };
 use crate::backend::wgpu::autotune::AutotuneController;
@@ -47,6 +47,33 @@ impl WgpuProvider {
                 }
             },
             Err(_) => Self::BUFFER_RESIDENCY_MAX_PER_KEY,
+        }
+    }
+
+    pub(super) fn buffer_residency_total_limit() -> usize {
+        const VAR: &str = "RUNMAT_WGPU_POOL_MAX_BUFFERS";
+        match std::env::var(VAR) {
+            Ok(raw) => match raw.parse::<usize>() {
+                Ok(value) => {
+                    log::info!(
+                        "RunMat Accelerate: total buffer residency pool capacity set to {} via {}",
+                        value,
+                        VAR
+                    );
+                    value
+                }
+                Err(err) => {
+                    log::warn!(
+                        "RunMat Accelerate: failed to parse {}='{}' ({}); using default {}",
+                        VAR,
+                        raw,
+                        err,
+                        Self::BUFFER_RESIDENCY_MAX_TOTAL
+                    );
+                    Self::BUFFER_RESIDENCY_MAX_TOTAL
+                }
+            },
+            Err(_) => Self::BUFFER_RESIDENCY_MAX_TOTAL,
         }
     }
 
@@ -112,6 +139,12 @@ impl WgpuProvider {
         let mut instance_desc = wgpu::InstanceDescriptor::default();
         #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
         {
+            // D3D12 is the native presentation backend used by RunMat Desktop.
+            // Keeping compute and presentation on this one backend is required
+            // for provider-owned buffers to remain WGPU-resident through draw.
+            // Advanced users can still opt into another backend explicitly.
+            instance_desc.backends =
+                wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
             instance_desc.dx12_shader_compiler = wgpu::util::dx12_shader_compiler_from_env()
                 .unwrap_or(wgpu::Dx12Compiler::Dxc {
                     dxil_path: None,
@@ -366,9 +399,10 @@ impl WgpuProvider {
             lane_count: sanitized_bootstrap.lane_count,
             spatial_tile: sanitized_bootstrap.spatial_tile,
         };
-        let pipelines = WgpuPipelines::new(&device, precision, image_norm_bootstrap);
+        let pipelines = Arc::new(WgpuPipelines::new(&device, precision, image_norm_bootstrap));
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
+        let buffer_pool_total_limit = Self::buffer_residency_total_limit();
         let max_poolable_bytes =
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
 
@@ -381,7 +415,10 @@ impl WgpuProvider {
             adapter_limits: satisfied_limits,
             workgroup_config,
             buffers: Mutex::new(HashMap::new()),
-            buffer_residency: BufferResidency::new(buffer_pool_limit),
+            buffer_residency: Arc::new(BufferResidency::new(
+                buffer_pool_limit,
+                buffer_pool_total_limit,
+            )),
             buffer_residency_max_poolable_bytes: max_poolable_bytes,
             next_id: AtomicU64::new(1),
             pipelines,
@@ -389,9 +426,7 @@ impl WgpuProvider {
             cache_device_id,
             precision,
             element_size,
-            fused_pipeline_cache: Mutex::new(HashMap::new()),
-            bind_group_layout_cache: Mutex::new(HashMap::new()),
-            bind_group_layout_tags: Mutex::new(HashMap::new()),
+            device_caches: Arc::new(WgpuDeviceCaches::default()),
             bind_group_cache: BindGroupCache::default(),
             kernel_resources: KernelResourceRegistry::default(),
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
@@ -402,18 +437,77 @@ impl WgpuProvider {
             pipeline_cache_dir,
             reduction_autotune,
             image_norm_autotune,
-            image_norm_pipeline_cache: Mutex::new(HashMap::new()),
             autotune_base_dir,
             autotune_device_tag,
             pow2_of: Mutex::new(HashMap::new()),
             moments_cache: Mutex::new(HashMap::new()),
-            fft_twiddle_cache: Mutex::new(HashMap::new()),
         })
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(opts: WgpuProviderOptions) -> Result<Self> {
         block_on(Self::new_async(opts))
+    }
+
+    /// Create an independent runtime session on this provider's physical GPU context.
+    ///
+    /// Device-level objects and immutable pipeline definitions are shared, while
+    /// handle ownership, residency, operation caches, metrics, and telemetry begin
+    /// empty. This is the same boundary a caller needs when multiple logical
+    /// sessions use one adapter without repeatedly creating native GPU devices.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn new_session(&self) -> Self {
+        let reduction_autotune = AutotuneController::new_from_env(
+            "RUNMAT_REDUCTION_AUTOTUNE",
+            "fused_reduction",
+            self.autotune_base_dir.clone(),
+            &self.autotune_device_tag,
+        );
+        let image_norm_autotune = AutotuneController::new_from_env(
+            "RUNMAT_IMAGE_NORMALIZE_AUTOTUNE",
+            "image_normalize",
+            self.autotune_base_dir.clone(),
+            &self.autotune_device_tag,
+        );
+
+        Self {
+            instance: self.instance.clone(),
+            device: self.device.clone(),
+            queue: self.queue.clone(),
+            adapter: self.adapter.clone(),
+            adapter_info: self.adapter_info.clone(),
+            adapter_limits: self.adapter_limits.clone(),
+            workgroup_config: self.workgroup_config,
+            buffers: Mutex::new(HashMap::new()),
+            buffer_residency: self.buffer_residency.clone(),
+            buffer_residency_max_poolable_bytes: self.buffer_residency_max_poolable_bytes,
+            next_id: AtomicU64::new(1),
+            pipelines: self.pipelines.clone(),
+            runtime_device_id: runmat_accelerate_api::next_device_id(),
+            cache_device_id: self.cache_device_id,
+            precision: self.precision,
+            element_size: self.element_size,
+            device_caches: self.device_caches.clone(),
+            bind_group_cache: BindGroupCache::default(),
+            kernel_resources: KernelResourceRegistry::default(),
+            metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
+            telemetry: AccelTelemetry::default(),
+            reduction_two_pass_mode: self.reduction_two_pass_mode,
+            reduction_two_pass_threshold: self.reduction_two_pass_threshold,
+            reduction_workgroup_size_default: self.reduction_workgroup_size_default,
+            pipeline_cache_dir: self.pipeline_cache_dir.clone(),
+            reduction_autotune,
+            image_norm_autotune,
+            autotune_base_dir: self.autotune_base_dir.clone(),
+            autotune_device_tag: self.autotune_device_tag.clone(),
+            pow2_of: Mutex::new(HashMap::new()),
+            moments_cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn test_device_handle(&self) -> Arc<wgpu::Device> {
+        self.device.clone()
     }
 
     #[cfg(target_arch = "wasm32")]

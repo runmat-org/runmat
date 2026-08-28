@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Runs entirely on the GPU when the active provider implements `logical_and`; otherwise inputs gather back to the host automatically."
+    "notes": "Runs entirely on the GPU when the active provider implements `logical_and`; otherwise inputs gather through authoritative storage and the logical result is restored to the owning provider."
   },
   "fusion": {
     "elementwise": true,
@@ -31,13 +31,14 @@
     "integration": "builtins::logical::bit::and::tests::and_gpu_roundtrip",
     "gpu": "builtins::logical::bit::and::tests::and_wgpu_matches_host_path"
   },
-  "description": "`and(A, B)` (or `A & B`) computes the element-wise logical AND of its inputs. Nonzero values (including `NaN`) are treated as `true`, and scalar/singleton expansion follows MATLAB and RunMat broadcasting rules.",
+  "description": "`and(A, B)` (or `A & B`) computes the element-wise logical AND of numeric or logical inputs. Nonzero values (including `NaN`) are treated as `true`, and scalar/singleton expansion follows MATLAB and RunMat broadcasting rules. Complex and character operands are RunMat-only extensions.",
   "behaviors": [
-    "Accepts logical, numeric, complex, and character arrays; character code points of zero evaluate to `false`.",
+    "Accepts logical and real numeric arrays in MATLAB-compatible modes; all eight integer classes use exact zero/nonzero truth tests.",
+    "RunMat mode additionally accepts complex and character arrays; either nonzero complex component is true, and character code points of zero evaluate to false.",
     "Supports MATLAB-style implicit expansion so scalars and singleton dimensions broadcast automatically.",
     "Propagates empty dimensions: if a broadcasted axis has length `0`, the output is an empty logical array with the same shape.",
     "Treats `NaN` values as `true`, matching MATLAB's element-wise logical semantics.",
-    "Keeps `gpuArray` inputs on device when the active provider exposes the `logical_and` hook; otherwise the runtime gathers to host transparently."
+    "Keeps `gpuArray` inputs on device when the active provider exposes the `logical_and` hook; otherwise the runtime gathers authoritative typed storage, computes on the host, and restores the logical result to the owning provider."
   ],
   "examples": [
     {
@@ -81,7 +82,7 @@
     },
     {
       "question": "Can I use `and` with complex numbers?",
-      "answer": "Yes. Real or complex inputs return `true` when either the real or imaginary component is non-zero. For example, `and(1 + 0i, 0 + 2i)` returns `true`."
+      "answer": "In RunMat mode, yes: a complex value is true when either component is nonzero. Complex operands are a RunMat extension and reject in MATLAB-compatible modes because they are outside the compatibility target's datatype list used for compatibility."
     },
     {
       "question": "How does `and` differ from the `&` operator?",
@@ -120,6 +121,6 @@
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's native auto-offload logic moves data to the GPU when a fused expression benefits from device execution, and results stay resident until you gather them or the planner needs host access. Call `gpuArray` only when you want to seed residency manually, or when you are porting MATLAB code that already uses explicit device transfers.",
   "gpu_behavior": [
-    "When both operands reside on the GPU and the active provider implements the `logical_and` hook, RunMat lowers the call into a device kernel that writes `0` or `1` for each element. The fusion planner treats `and` as an element-wise operation, so fused expressions (for example, `and(A > 0, B)`) stay on device without intermediate gathers. If the provider lacks the hook, the runtime gathers the inputs to host memory automatically and executes the CPU implementation instead of failing."
+    "When both operands reside on the GPU and the active provider implements the `logical_and` hook for their storage and shape, RunMat lowers the call into a device kernel that writes `0` or `1` for each element. The fusion planner treats `and` as an element-wise operation, so fused floating expressions (for example, `and(A > 0, B)`) stay on device without intermediate gathers. Unsupported provider forms, including native integer storage when no integer logical kernel is available, gather authoritative typed data and restore the logical result to the input provider."
   ]
 }

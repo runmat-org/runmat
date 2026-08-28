@@ -1,9 +1,9 @@
 #![allow(clippy::result_large_err)]
 
 use futures::executor::block_on;
-use runmat_builtins::Value;
 use runmat_hir::LoweringContext;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
 const EXEC_STACK_BYTES: usize = 32 * 1024 * 1024;
 

@@ -1,0 +1,14 @@
+[package]
+name = "runmat-canonical-codec"
+version = "0.6.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "Bounded canonical contract encoding for RunMat domains"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+minicbor = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

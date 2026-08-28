@@ -1,14 +1,59 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ReferenceLineOrientation;
+use runmat_value::Value;
 
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "yline";
+
+const YLINE_INTEGER_COORDINATE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented for reference-line coordinates.",
+    }];
+const YLINE_INTEGER_COLOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Color",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer RGB components are accepted when every component is zero or one.",
+    }];
+const YLINE_INTEGER_WIDTH_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "LineWidth",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer line widths are accepted when positive.",
+    }];
+const YLINE_INTEGER_VISIBLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Visible",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Numeric visibility values must be exactly zero or one.",
+    }];
+pub const YLINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "h = yline(integer_y, ...)", inputs: &YLINE_INTEGER_COORDINATE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Coordinates cross the graphics floating-point boundary; returned graphics handles are double." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = yline(..., 'Color', integer_rgb)", inputs: &YLINE_INTEGER_COLOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Validated RGB components cross the renderer color boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = yline(..., 'LineWidth', integer_width)", inputs: &YLINE_INTEGER_WIDTH_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The validated positive width crosses the renderer scalar boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = yline(..., 'Visible', integer_visible)", inputs: &YLINE_INTEGER_VISIBLE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The integer is classified exactly as zero or one before graphics state is updated." },
+];
 
 const YLINE_OUTPUT_HANDLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -142,6 +187,7 @@ pub const YLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::yline::YLINE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::yline::YLINE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::yline"
 )]
 pub fn yline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -155,7 +201,7 @@ mod tests {
     use crate::builtins::plotting::state::PlotTestLockGuard;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();

@@ -159,4 +159,18 @@ impl KernelResourceRegistry {
             map.remove(&product_id);
         }
     }
+
+    /// Release resources whose contents and handle references belong to one
+    /// logical provider session.
+    pub fn clear(&self) {
+        if let Ok(mut buffers) = self.uniform_buffers.lock() {
+            buffers.clear();
+        }
+        if let Ok(mut sources) = self.matmul_sources.lock() {
+            sources.clear();
+        }
+        if let Ok(mut buffers) = self.scratch_buffers.lock() {
+            buffers.clear();
+        }
+    }
 }

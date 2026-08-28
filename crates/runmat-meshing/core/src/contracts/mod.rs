@@ -4,6 +4,7 @@ pub mod artifact;
 pub mod backend;
 pub mod boundary;
 pub mod cad;
+pub mod canonical;
 pub mod curve;
 pub mod material;
 pub mod options;
@@ -30,6 +31,7 @@ pub use cad::{
     CadEdgeContract, CadEvaluatorCapabilities, CadFaceContract, CadModel, CadShellContract,
     CadVertexContract, CadVolumeContract,
 };
+pub use canonical::*;
 pub use curve::{CurveMesh, CurveMeshElement, CurveMeshNode};
 pub use material::{DEFAULT_MATERIAL_REGION_ID, UNCLASSIFIED_MATERIAL_REGION_ID};
 pub use options::{

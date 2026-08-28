@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Frequency-response analysis is host-side. GPU coefficient inputs are gathered automatically."
+    "notes": "Interactive resident inputs are a RunMat-only extension. They are compatibility-gated before provider access, then gathered for host analysis and return host outputs."
   },
   "fusion": {
     "elementwise": false,
@@ -29,6 +29,8 @@
   "description": "`freqz(b, a, n)` evaluates the complex frequency response of a digital filter at `n` points between 0 and Nyquist. With `fs`, returned frequencies are in Hz instead of radians/sample.",
   "behaviors": [
     "Default response length is 512 samples.",
+    "An explicit numeric point count must be at least 2; an empty point-count argument selects the default.",
+    "Single-precision coefficients produce a single-precision complex response.",
     "`[H, w] = freqz(...)` returns complex response `H` and frequency vector `w` as column vectors.",
     "Without `fs`, `w` is in radians/sample over `[0, pi)`.",
     "With `fs`, `w` is in Hz over `[0, fs/2)`."
@@ -83,7 +85,7 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/freqz.rs"
   },
   "gpu_behavior": [
-    "Host-side analysis only.",
-    "GPU coefficient inputs are gathered before evaluation."
+    "Interactive resident input is a RunMat-only extension.",
+    "The extension is checked before provider access, then inputs are gathered and outputs remain on the host."
   ]
 }

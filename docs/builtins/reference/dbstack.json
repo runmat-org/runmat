@@ -24,10 +24,10 @@
   "description": "`dbstack` inspects RunMat's runtime call-stack context and returns MATLAB-style frame metadata.",
   "behaviors": [
     "`dbstack` with no output displays the active stack.",
-    "`ST = dbstack` returns stack entries as a 1-by-N cell row of scalar structs because RunMat does not yet have first-class MATLAB struct arrays.",
-    "Each frame struct contains `file`, `name`, `line`, and `I` fields.",
-    "`dbstack(n)` omits the first `n` returned entries. `'-completenames'` is accepted; RunMat already reports the full source path when the source catalog has one.",
-    "`[ST,I] = dbstack(...)` returns the stack cell row and a current workspace index of `1` when a stack is available."
+    "`ST = dbstack` returns stack entries as an N-by-1 cell column of scalar structs because RunMat does not yet have first-class MATLAB struct arrays.",
+    "Each frame struct contains exactly the public `file`, `name`, and `line` fields; `I` is a separate second output.",
+    "`dbstack(n)` omits the first `n` returned entries; both `dbstack('-completenames', n)` and `dbstack(n, '-completenames')` additionally report full source paths when the source catalog has them.",
+    "`[ST,I] = dbstack(...)` returns the stack cell column and a current workspace index of `1` when a stack is available; more than two requested outputs reject."
   ],
   "examples": [
     {
@@ -36,13 +36,13 @@
     },
     {
       "description": "Skip the current frame",
-      "input": "ST = dbstack(1, '-completenames');"
+      "input": "ST = dbstack('-completenames', 1);"
     }
   ],
   "faqs": [
     {
-      "question": "Why is `ST` a cell row instead of a struct array?",
-      "answer": "RunMat currently represents heterogeneous struct-list results as cell rows of scalar structs. This preserves the frame fields until struct-array infrastructure lands."
+      "question": "Why is `ST` a cell column instead of a struct array?",
+      "answer": "RunMat currently represents heterogeneous struct-list results as an N-by-1 cell column of scalar structs. This preserves the public frame fields and shape orientation until struct-array infrastructure lands."
     }
   ],
   "links": [

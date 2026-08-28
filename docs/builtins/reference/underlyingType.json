@@ -30,10 +30,10 @@
   "description": "`underlyingType(X)` returns the name of the underlying data type that determines how `X` behaves. For most values this matches `class(X)`. For `gpuArray` values, `class(X)` returns `\"gpuArray\"` while `underlyingType(X)` returns the resident element type such as `\"double\"`, `\"single\"`, `\"int32\"`, `\"uint8\"`, or `\"logical\"`.",
   "behaviors": [
     "Double scalars, complex values, sparse arrays, and double tensors report `\"double\"`.",
-    "Single-precision tensors report `\"single\"`; integer values report their concrete integer class such as `\"int32\"` or `\"uint16\"`.",
+    "Single-precision tensors report `\"single\"`; all eight integer classes report their exact signedness and width, such as `\"int32\"` or `\"uint16\"`.",
     "Logical scalars and logical arrays report `\"logical\"`. Character arrays report `\"char\"`, and string scalars or arrays report `\"string\"`.",
     "Cell arrays, structs, objects, handles, listeners, function handles, and metadata values report the same name as `class` because their behavior is not modeled by a different underlying numeric element type.",
-    "`gpuArray` inputs are metadata-only: RunMat checks handle class-name, logical, and precision metadata and does not copy the device buffer back to the host."
+    "`gpuArray` inputs are metadata-only: RunMat validates coherent floating, logical, or integer class metadata and does not copy the device buffer back to the host."
   ],
   "examples": [
     {

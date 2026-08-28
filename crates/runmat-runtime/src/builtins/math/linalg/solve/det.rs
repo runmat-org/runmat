@@ -1,14 +1,20 @@
 //! MATLAB-compatible `det` builtin with GPU-aware semantics for RunMat.
 
+use std::collections::HashSet;
+
 use nalgebra::{DMatrix, LU};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, NumericScalar, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -19,6 +25,39 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "det";
+
+const DET_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "det-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "det with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DetIntegerInputExtension"),
+};
+const DET_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "det-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "det with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DetLogicalInputExtension"),
+};
+const DET_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [DET_INTEGER_INPUT_EXTENSION, DET_LOGICAL_INPUT_EXTENSION];
+const DET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The compatibility target documents square single/double matrices; RunMat mode additionally admits all eight real integer classes.",
+}];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "d = det(integer_A)",
+        inputs: &DET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Authoritative integer values enter one explicit binary64 LU boundary. Resident integer input gathers exactly before LU and restores the double scalar to the owning provider.",
+    }];
 
 const DET_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "d",
@@ -55,8 +94,18 @@ const DET_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Runtime fails while evaluating determinant or device fallback paths.",
     message: "det: internal runtime failure",
 };
+const DET_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DET.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:det:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "det: too many output arguments",
+};
 
-const DET_ERRORS: [BuiltinErrorDescriptor; 2] = [DET_ERROR_INVALID_INPUT, DET_ERROR_INTERNAL];
+const DET_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DET_ERROR_INVALID_INPUT,
+    DET_ERROR_INTERNAL,
+    DET_ERROR_TOO_MANY_OUTPUTS,
+];
 
 pub const DET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DET_SIGNATURES,
@@ -85,13 +134,33 @@ impl Determinant {
             Self::Complex(re, im) => Value::Complex(re, im),
         }
     }
+
+    fn into_value_for_prototype(self, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
+        let single = runmat_accelerate_api::handle_integer_type(prototype).is_none()
+            && !runmat_accelerate_api::handle_is_logical(prototype)
+            && runmat_accelerate_api::handle_precision(prototype)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32);
+        if !single {
+            return Ok(self.into_value());
+        }
+        match self {
+            Self::Real(value) => Tensor::from_f32(vec![value as f32], vec![1, 1])
+                .map(Value::Tensor)
+                .map_err(builtin_error),
+            Self::Complex(re, im) => {
+                ComplexTensor::from_f32(vec![(re as f32, im as f32)], vec![1, 1])
+                    .map(Value::ComplexTensor)
+                    .map_err(builtin_error)
+            }
+        }
+    }
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::det")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("det"),
-    supported_precisions: &[ScalarType::F64],
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("lu")],
     constant_strategy: ConstantStrategy::InlineLiteral,
@@ -100,7 +169,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Real inputs re-upload their determinant to preserve residency; complex inputs currently return host scalars when LU hooks are available.",
+    notes: "Floating inputs use owner-resolved LU when available; typed integer, logical, and complex storage uses an explicit gathered fallback. Restored results preserve input single/double precision and owner/device residency.",
 };
 
 fn det_error_with_message(
@@ -142,10 +211,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "det,determinant,linear algebra,matrix,gpu",
     accel = "det",
     type_resolver(numeric_scalar_type),
+    extensions(DET_EXTENSIONS),
+    integer_capabilities(INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::linalg::solve::det::DET_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::det"
 )]
 async fn det_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::math::trigonometry::inverse_helpers::reject_excess_outputs(NAME)?;
+    ensure_extensions(&value)?;
+    crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(&value, NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => det_gpu(handle).await,
         Value::ComplexTensor(tensor) => det_complex_value(tensor),
@@ -158,7 +233,20 @@ async fn det_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+        .ok_or_else(|| builtin_error(format!("{NAME}: GPU input has no owning provider")))?;
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_storage(&handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    {
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+        let result = determinant_from_value(gathered)?.into_value_for_prototype(&handle)?;
+        return crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+            provider, result, NAME, &handle,
+        );
+    }
+    {
         match det_gpu_via_provider(provider, &handle).await {
             Ok(Some(value)) => return Ok(value),
             Ok(None) => {}
@@ -179,8 +267,8 @@ async fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let det_result = determinant_from_value(gathered_value)?;
     match det_result {
         Determinant::Real(det) => {
-            if let Some(provider) = runmat_accelerate_api::provider() {
-                match upload_scalar(provider, det) {
+            {
+                match upload_scalar(provider, det, &handle) {
                     Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
                     Err(err) => {
                         if err.message() == "interaction pending..." {
@@ -195,16 +283,62 @@ async fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }
 }
 
+fn ensure_extensions(value: &Value) -> BuiltinResult<()> {
+    let is_integer = matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some());
+    if is_integer {
+        crate::compatibility::ensure_builtin_extension_enabled(&DET_INTEGER_INPUT_EXTENSION, NAME)?;
+    }
+    let is_logical = matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle));
+    if is_logical {
+        crate::compatibility::ensure_builtin_extension_enabled(&DET_LOGICAL_INPUT_EXTENSION, NAME)?;
+    }
+    Ok(())
+}
+
 fn det_real_value(tensor: Tensor) -> BuiltinResult<Value> {
+    if tensor.numeric_dtype() == NumericDType::F32 {
+        let (rows, cols) = matrix_dimensions(tensor.shape.as_slice())?;
+        if rows != cols {
+            return Err(builtin_error(format!(
+                "{NAME}: input must be a square matrix."
+            )));
+        }
+        let values = match tensor.into_numeric_storage().map_err(builtin_error)? {
+            NumericStorage::F32(values) => values,
+            _ => unreachable!("F32 dtype must have F32 storage"),
+        };
+        let value = if rows == 0 {
+            1.0f32
+        } else if values.len() == 1 {
+            values[0]
+        } else {
+            LU::new(DMatrix::from_column_slice(rows, cols, &values)).determinant()
+        };
+        let output = Tensor::from_f32(vec![value], vec![1, 1]).map_err(builtin_error)?;
+        return Ok(Value::Tensor(output));
+    }
     Ok(Determinant::Real(det_real_tensor(&tensor)?).into_value())
 }
 
 fn det_complex_value(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let (re, im) = det_complex_tensor(&tensor)?;
+    if tensor.numeric_dtype() == NumericDType::F32 {
+        let output = ComplexTensor::from_f64_values_with_dtype(
+            vec![(re, im)],
+            vec![1, 1],
+            NumericDType::F32,
+        )
+        .map_err(builtin_error)?;
+        return Ok(Value::ComplexTensor(output));
+    }
     Ok(Determinant::Complex(re, im).into_value())
 }
 
 fn determinant_from_value(value: Value) -> BuiltinResult<Determinant> {
+    crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(&value, NAME)?;
     match value {
         Value::Num(n) => Ok(Determinant::Real(n)),
         Value::Tensor(tensor) => det_real_tensor(&tensor).map(Determinant::Real),
@@ -235,10 +369,11 @@ fn det_real_tensor(matrix: &Tensor) -> BuiltinResult<f64> {
     if rows == 0 && cols == 0 {
         return Ok(1.0);
     }
-    if matrix.data.len() == 1 {
-        return Ok(matrix.data[0]);
+    let values = tensor::tensor_values_f64_cow(matrix);
+    if values.len() == 1 {
+        return Ok(values[0]);
     }
-    let lu = LU::new(DMatrix::from_column_slice(rows, cols, &matrix.data));
+    let lu = LU::new(DMatrix::from_column_slice(rows, cols, &values));
     Ok(lu.determinant())
 }
 
@@ -252,11 +387,11 @@ fn det_complex_tensor(matrix: &ComplexTensor) -> BuiltinResult<(f64, f64)> {
     if rows == 0 && cols == 0 {
         return Ok((1.0, 0.0));
     }
-    if matrix.data.len() == 1 {
-        return Ok(matrix.data[0]);
+    if matrix.materialize_f64().len() == 1 {
+        return Ok(matrix.materialize_f64()[0]);
     }
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -287,6 +422,7 @@ fn matrix_dimensions(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
 fn upload_scalar(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     value: f64,
+    prototype: &GpuTensorHandle,
 ) -> BuiltinResult<GpuTensorHandle> {
     let data = [value];
     let shape = [1usize, 1usize];
@@ -294,9 +430,38 @@ fn upload_scalar(
         data: &data,
         shape: &shape,
     };
-    provider
+    let expected_precision = if runmat_accelerate_api::handle_integer_type(prototype).is_some()
+        || runmat_accelerate_api::handle_is_logical(prototype)
+    {
+        runmat_accelerate_api::ProviderPrecision::F64
+    } else {
+        runmat_accelerate_api::handle_precision(prototype).unwrap_or_else(|| provider.precision())
+    };
+    if provider.precision() != expected_precision {
+        return Err(builtin_error(format!(
+            "{NAME}: input provider cannot restore the requested result precision"
+        )));
+    }
+    let handle = provider
         .upload(&view)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    let valid = handle.shape == shape
+        && handle.device_id == prototype.device_id
+        && runmat_accelerate_api::handle_storage(&handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&handle)
+        && runmat_accelerate_api::handle_precision(&handle) == Some(expected_precision)
+        && runmat_accelerate_api::provider_for_handle(&handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider));
+    if !valid {
+        let owner = runmat_accelerate_api::provider_for_handle(&handle).unwrap_or(provider);
+        let _ = owner.free(&handle);
+        return Err(builtin_error(format!(
+            "{NAME}: provider returned an incompatible scalar result"
+        )));
+    }
+    Ok(handle)
 }
 
 async fn det_gpu_via_provider(
@@ -310,7 +475,7 @@ async fn det_gpu_via_provider(
         )));
     }
     if rows == 0 {
-        let uploaded = upload_scalar(provider, 1.0)?;
+        let uploaded = upload_scalar(provider, 1.0, handle)?;
         return Ok(Some(Value::GpuTensor(uploaded)));
     }
 
@@ -318,14 +483,10 @@ async fn det_gpu_via_provider(
         Ok(result) => result,
         Err(_) => return Ok(None),
     };
-
-    let handles_to_free = [
-        lu_result.combined.clone(),
-        lu_result.lower.clone(),
-        lu_result.upper.clone(),
-        lu_result.perm_matrix.clone(),
-        lu_result.perm_vector.clone(),
-    ];
+    if !validate_lu_result(&lu_result, provider, handle, rows) {
+        free_lu_result_unique(&lu_result, provider, handle);
+        return Ok(None);
+    }
 
     let outcome = {
         async {
@@ -404,7 +565,7 @@ async fn det_gpu_via_provider(
             let determinant = determinant.apply_sign(permutation_sign);
 
             match determinant {
-                Determinant::Real(value) => match upload_scalar(provider, value) {
+                Determinant::Real(value) => match upload_scalar(provider, value, handle) {
                     Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
                     Err(err) => {
                         if err.message() == "interaction pending..." {
@@ -420,11 +581,74 @@ async fn det_gpu_via_provider(
         .await
     };
 
-    for handle_to_free in &handles_to_free {
-        let _ = provider.free(handle_to_free);
-    }
+    free_lu_result_unique(&lu_result, provider, handle);
 
     outcome
+}
+
+fn lu_handles(result: &runmat_accelerate_api::ProviderLuResult) -> [&GpuTensorHandle; 5] {
+    [
+        &result.combined,
+        &result.lower,
+        &result.upper,
+        &result.perm_matrix,
+        &result.perm_vector,
+    ]
+}
+
+fn validate_lu_result(
+    result: &runmat_accelerate_api::ProviderLuResult,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
+    dimension: usize,
+) -> bool {
+    let expected_precision =
+        runmat_accelerate_api::handle_precision(input).unwrap_or_else(|| provider.precision());
+    let expected_shapes = [
+        vec![dimension, dimension],
+        vec![dimension, dimension],
+        vec![dimension, dimension],
+        vec![dimension, dimension],
+        vec![dimension, 1],
+    ];
+    let mut identities = HashSet::new();
+    for (handle, expected_shape) in lu_handles(result).into_iter().zip(expected_shapes.iter()) {
+        if handle.buffer_id == input.buffer_id && handle.device_id == input.device_id {
+            return false;
+        }
+        if !identities.insert((handle.device_id, handle.buffer_id)) {
+            return false;
+        }
+        if handle.device_id != input.device_id
+            || handle.shape != *expected_shape
+            || runmat_accelerate_api::provider_for_handle(handle)
+                .is_none_or(|owner| !std::ptr::eq(owner, provider))
+            || runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_precision(handle) != Some(expected_precision)
+            || runmat_accelerate_api::handle_integer_type(handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(handle)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn free_lu_result_unique(
+    result: &runmat_accelerate_api::ProviderLuResult,
+    invoked_provider: &dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
+) {
+    let mut freed = HashSet::new();
+    for handle in lu_handles(result) {
+        let identity = (handle.device_id, handle.buffer_id);
+        if identity == (input.device_id, input.buffer_id) || !freed.insert(identity) {
+            continue;
+        }
+        let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);
+        let _ = owner.free(handle);
+    }
 }
 
 fn diagonal_product_real(upper: &Tensor, dimension: usize) -> BuiltinResult<f64> {
@@ -441,11 +665,10 @@ fn diagonal_product_real(upper: &Tensor, dimension: usize) -> BuiltinResult<f64>
     let mut product = 1.0f64;
     for i in 0..dimension {
         let idx = i + i * rows;
-        let value = *upper
-            .data
-            .get(idx)
+        let value = upper
+            .numeric_value_at(idx)
             .ok_or_else(|| builtin_error(format!("{NAME}: upper factor diagonal out of range")))?;
-        product *= value;
+        product *= floating_scalar_to_f64(value)?;
     }
     Ok(product)
 }
@@ -465,7 +688,7 @@ fn diagonal_product_complex(upper: &ComplexTensor, dimension: usize) -> BuiltinR
     for i in 0..dimension {
         let idx = i + i * rows;
         let (re, im) = *upper
-            .data
+            .materialize_f64()
             .get(idx)
             .ok_or_else(|| builtin_error(format!("{NAME}: upper factor diagonal out of range")))?;
         product *= Complex64::new(re, im);
@@ -477,37 +700,20 @@ fn permutation_sign_from_tensor(pivots: &Tensor, expected_len: usize) -> Builtin
     if expected_len == 0 {
         return Ok(1.0);
     }
-    if pivots.data.len() != expected_len {
+    if pivots.len() != expected_len {
         return Err(builtin_error(format!(
             "{NAME}: pivot vector length mismatch"
         )));
     }
-    let len = pivots.data.len();
+    let len = pivots.len();
     let mut permutation = Vec::with_capacity(len);
     let mut seen = vec![false; len];
-    for &raw in &pivots.data {
-        if !raw.is_finite() {
-            return Err(builtin_error(format!(
-                "{NAME}: pivot vector contains non-finite entries"
-            )));
-        }
-        let rounded = raw.round();
-        if (rounded - raw).abs() > 1.0e-6 {
-            return Err(builtin_error(format!(
-                "{NAME}: pivot vector must contain integer values"
-            )));
-        }
-        if rounded < 1.0 {
-            return Err(builtin_error(format!(
-                "{NAME}: pivot vector index out of range"
-            )));
-        }
-        let idx = (rounded as isize - 1) as usize;
-        if idx >= len {
-            return Err(builtin_error(format!(
-                "{NAME}: pivot vector index out of range"
-            )));
-        }
+    for position in 0..len {
+        let raw = pivots
+            .numeric_value_at(position)
+            .ok_or_else(|| builtin_error(format!("{NAME}: pivot vector length mismatch")))?;
+        let one_based = pivot_index(raw, len)?;
+        let idx = one_based - 1;
         if seen[idx] {
             return Err(builtin_error(format!(
                 "{NAME}: pivot vector must describe a permutation"
@@ -517,6 +723,56 @@ fn permutation_sign_from_tensor(pivots: &Tensor, expected_len: usize) -> Builtin
         permutation.push(idx);
     }
     Ok(permutation_sign(&permutation))
+}
+
+fn floating_scalar_to_f64(value: NumericScalar) -> BuiltinResult<f64> {
+    match value {
+        NumericScalar::F64(value) => Ok(value),
+        NumericScalar::F32(value) => Ok(f64::from(value)),
+        _ => Err(builtin_error(format!(
+            "{NAME}: provider upper factor must use floating storage"
+        ))),
+    }
+}
+
+fn pivot_index(value: NumericScalar, len: usize) -> BuiltinResult<usize> {
+    match value {
+        NumericScalar::F64(value) => floating_pivot_index(value, len),
+        NumericScalar::F32(value) => floating_pivot_index(f64::from(value), len),
+        integer => {
+            let one_based = integer
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer")
+                .try_to_usize()
+                .ok_or_else(|| builtin_error(format!("{NAME}: pivot vector index out of range")))?;
+            if one_based == 0 || one_based > len {
+                return Err(builtin_error(format!(
+                    "{NAME}: pivot vector index out of range"
+                )));
+            }
+            Ok(one_based)
+        }
+    }
+}
+
+fn floating_pivot_index(value: f64, len: usize) -> BuiltinResult<usize> {
+    if !value.is_finite() {
+        return Err(builtin_error(format!(
+            "{NAME}: pivot vector contains non-finite entries"
+        )));
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > 1.0e-6 {
+        return Err(builtin_error(format!(
+            "{NAME}: pivot vector must contain integer values"
+        )));
+    }
+    if rounded < 1.0 || rounded > len as f64 {
+        return Err(builtin_error(format!(
+            "{NAME}: pivot vector index out of range"
+        )));
+    }
+    Ok(rounded as usize)
 }
 
 fn permutation_sign(permutation: &[usize]) -> f64 {
@@ -543,11 +799,10 @@ fn permutation_sign(permutation: &[usize]) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
-    #[cfg(feature = "wgpu")]
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -566,6 +821,57 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 14.0).abs() < 1e-12),
             other => panic!("expected scalar, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn det_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![4, 1, 2, 3]), vec![2, 2])
+            .expect("integer");
+        let result = det_real_value(tensor).expect("det");
+        match result {
+            Value::Num(v) => assert!((v - 10.0).abs() < 1e-12),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn det_integer_extension_is_gated_and_wide_values_reject() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(super::det_builtin(Value::Int(IntValue::I32(1))))
+            .expect_err("strict mode rejects integer extension");
+        assert_eq!(
+            error.identifier(),
+            DET_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        drop(strict);
+
+        let compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(super::det_builtin(Value::Int(IntValue::U64(
+            (1u64 << 53) + 1,
+        ))))
+        .expect_err("inexact binary64 boundary rejects");
+        assert!(error.message().contains("exactly representable as double"));
+        drop(compat);
+    }
+
+    #[test]
+    fn det_preserves_single_result_class() {
+        let tensor = Tensor::from_f32(vec![2.0, 0.0, 0.0, 3.0], vec![2, 2]).expect("single");
+        match block_on(super::det_builtin(Value::Tensor(tensor))).expect("det") {
+            Value::Tensor(output) => assert_eq!(output.numeric_dtype(), NumericDType::F32),
+            other => panic!("expected single tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn det_provider_helpers_read_authoritative_storage() {
+        let upper =
+            Tensor::from_f32(vec![2.0, 0.0, 0.0, 3.0], vec![2, 2]).expect("single upper factor");
+        assert!((diagonal_product_real(&upper, 2).unwrap() - 6.0).abs() < 1.0e-12);
+
+        let pivots =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![2, 1]).expect("pivots");
+        assert_eq!(permutation_sign_from_tensor(&pivots, 2).unwrap(), -1.0);
     }
 
     #[test]
@@ -594,6 +900,54 @@ pub(crate) mod tests {
         let codes: Vec<&str> = DET_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
         assert!(codes.contains(&"RM.DET.INVALID_INPUT"));
         assert!(codes.contains(&"RM.DET.INTERNAL"));
+        assert!(codes.contains(&"RM.DET.TOO_MANY_OUTPUTS"));
+    }
+
+    #[test]
+    fn det_rejects_aliased_or_mistyped_provider_lu_results_and_frees_safely() {
+        use runmat_accelerate_api::ProviderLuResult;
+
+        test_support::with_test_provider(|provider| {
+            let upload = |data: &[f64], shape: &[usize]| {
+                provider
+                    .upload(&HostTensorView { data, shape })
+                    .expect("upload")
+            };
+            let input = upload(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
+            let combined = upload(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
+            let lower = upload(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
+            let upper = upload(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
+            let perm_matrix = upload(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
+            let perm_vector = upload(&[1.0, 2.0], &[2, 1]);
+            let valid = ProviderLuResult {
+                combined: combined.clone(),
+                lower: lower.clone(),
+                upper: upper.clone(),
+                perm_matrix: perm_matrix.clone(),
+                perm_vector: perm_vector.clone(),
+            };
+            assert!(validate_lu_result(&valid, provider, &input, 2));
+
+            let mut duplicate = valid.clone();
+            duplicate.lower = duplicate.combined.clone();
+            assert!(!validate_lu_result(&duplicate, provider, &input, 2));
+
+            let mistyped = valid.clone();
+            runmat_accelerate_api::set_handle_logical(&mistyped.upper, true);
+            assert!(!validate_lu_result(&mistyped, provider, &input, 2));
+            runmat_accelerate_api::set_handle_logical(&mistyped.upper, false);
+
+            let aliasing = ProviderLuResult {
+                combined: input.clone(),
+                lower: combined.clone(),
+                upper: combined.clone(),
+                perm_matrix: perm_matrix.clone(),
+                perm_vector: perm_vector.clone(),
+            };
+            free_lu_result_unique(&aliasing, provider, &input);
+            assert!(block_on(provider.download(&input)).is_ok());
+            assert!(block_on(provider.download(&combined)).is_err());
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -621,15 +975,17 @@ pub(crate) mod tests {
         .unwrap();
         let cpu_det = det_real_tensor(&tensor).expect("cpu det");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let data = tensor.as_f64_slice().expect("double tensor");
         let view = HostTensorView {
-            data: &tensor.data,
+            data,
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let result = det_builtin(Value::GpuTensor(handle)).expect("det");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 1]);
-        let det_gpu = gathered.data[0];
+        let det_gpu = gathered.numeric_value_at(0).unwrap();
+        let det_gpu = floating_scalar_to_f64(det_gpu).unwrap();
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,

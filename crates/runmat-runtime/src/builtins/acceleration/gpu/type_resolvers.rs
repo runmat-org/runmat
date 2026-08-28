@@ -16,14 +16,6 @@ pub fn arrayfun_type(args: &[Type], _context: &ResolveContext) -> Type {
     arrayfun_output_type(returns)
 }
 
-pub fn gather_type(args: &[Type], _context: &ResolveContext) -> Type {
-    match args.len() {
-        0 => Type::Unknown,
-        1 => args[0].clone(),
-        _ => Type::cell(),
-    }
-}
-
 pub fn gpuarray_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Logical { shape }) => logical_type_from_shape(shape.as_ref()),
@@ -67,6 +59,7 @@ fn arrayfun_output_type(returns: &Type) -> Type {
         | Type::Cell { .. }
         | Type::String
         | Type::Struct { .. }
+        | Type::Object { .. }
         | Type::Symbolic
         | Type::SymbolicArray { .. } => Type::Unknown,
         Type::Function { .. } | Type::Void | Type::Union(_) | Type::OutputList(_) => Type::Unknown,

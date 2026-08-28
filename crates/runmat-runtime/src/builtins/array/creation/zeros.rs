@@ -1,12 +1,19 @@
 //! MATLAB-compatible `zeros` builtin with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, SparseTensor, Value,
+use runmat_accelerate_api::{
+    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
+    ProviderPrecision,
 };
+use runmat_builtins::catalog::definitions::{
+    ZEROS_COLUMN_SIZE_VECTOR_EXTENSION, ZEROS_ERROR_CLASS_CONFLICT, ZEROS_ERROR_LIKE_DUPLICATE,
+    ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE, ZEROS_ERROR_UNRECOGNIZED_OPTION,
+    ZEROS_IMPLICIT_PROTOTYPE_EXTENSION, ZEROS_RESIDENT_SIZE_EXTENSION,
+};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
+};
 use std::sync::OnceLock;
 
 use crate::build_runtime_error;
@@ -15,12 +22,16 @@ use crate::builtins::common::spec::{
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
-use runmat_builtins::NumericDType;
-use runmat_builtins::Type;
-
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
-use runmat_builtins::ResolveContext;
+use crate::builtins::common::{
+    gpu_helpers,
+    random_args::{
+        extract_constructor_dimensions, normalize_constructor_shape,
+        validate_constructor_gpu_output,
+    },
+    shape::normalize_scalar_shape,
+    tensor,
+};
+use runmat_value::NumericDType;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -67,179 +78,6 @@ fn zeros_error_with_message(
     builder.build()
 }
 
-fn zeros_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Num;
-    }
-    if args.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    tensor_type_from_rank(args, ctx)
-}
-
-const ZEROS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Output array.",
-}];
-
-const ZEROS_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const ZEROS_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Square size.",
-}];
-
-const ZEROS_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "size_vector",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Size vector defining output dimensions.",
-}];
-
-const ZEROS_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "prototype",
-    ty: BuiltinParamType::LikePrototype,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Prototype value when no numeric dimension arguments are provided.",
-}];
-
-const ZEROS_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "dims",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Dimension sizes.",
-}];
-
-const ZEROS_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "dims",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Dimension sizes.",
-    },
-    BuiltinParamDescriptor {
-        name: "typename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
-        description: "Class name override (double|single|logical|gpuArray).",
-    },
-];
-
-const ZEROS_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "dims",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Dimension sizes.",
-    },
-    BuiltinParamDescriptor {
-        name: "like_kw",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Like keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype array used for class/device.",
-    },
-];
-
-const ZEROS_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
-    BuiltinSignatureDescriptor {
-        label: "A = zeros()",
-        inputs: &ZEROS_SIG_EMPTY_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(n)",
-        inputs: &ZEROS_SIG_N_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(size_vector)",
-        inputs: &ZEROS_SIG_SIZE_VECTOR_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(m, n, ...)",
-        inputs: &ZEROS_SIG_DIMS_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(prototype)",
-        inputs: &ZEROS_SIG_PROTOTYPE_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(..., typename)",
-        inputs: &ZEROS_SIG_CLASS_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = zeros(..., \"like\", prototype)",
-        inputs: &ZEROS_SIG_LIKE_INPUTS,
-        outputs: &ZEROS_OUTPUT,
-    },
-];
-
-const ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZEROS.LIKE_EXPECTED_PROTOTYPE",
-    identifier: None,
-    when: "The 'like' keyword is provided without a prototype argument.",
-    message: "zeros: expected prototype after 'like'",
-};
-
-const ZEROS_ERROR_CLASS_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZEROS.CLASS_CONFLICT",
-    identifier: None,
-    when: "A class keyword and a 'like' prototype are both provided.",
-    message: "zeros: cannot combine 'like' with other class specifiers",
-};
-
-const ZEROS_ERROR_UNRECOGNIZED_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZEROS.UNRECOGNIZED_OPTION",
-    identifier: None,
-    when: "A trailing option string is not a supported class keyword.",
-    message: "zeros: unrecognised option",
-};
-
-const ZEROS_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZEROS.LIKE_DUPLICATE",
-    identifier: None,
-    when: "The 'like' keyword is specified more than once.",
-    message: "zeros: multiple 'like' specifications are not supported",
-};
-
-const ZEROS_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE,
-    ZEROS_ERROR_CLASS_CONFLICT,
-    ZEROS_ERROR_UNRECOGNIZED_OPTION,
-    ZEROS_ERROR_LIKE_DUPLICATE,
-];
-
-pub const ZEROS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ZEROS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ZEROS_ERRORS,
-};
-
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "zeros",
@@ -264,12 +102,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "zeros",
-    category = "array/creation",
-    summary = "Create arrays filled with zero values.",
-    keywords = "zeros,array,logical,gpu,like",
-    accel = "array_construct",
-    type_resolver(zeros_type),
-    descriptor(crate::builtins::array::creation::zeros::ZEROS_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
 async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -285,11 +118,10 @@ struct ParsedZeros {
 #[derive(Clone)]
 enum OutputTemplate {
     Double,
-    /// Single-precision request. Host tensors are stored as f64 today; we
-    /// treat 'single' as a request for a numeric zeros tensor and honour
-    /// single precision when allocating on GPU via 'like' or provider hooks.
+    /// Single-precision output request.
     Single,
     Logical,
+    Integer(IntegerStorage),
     /// GPU-resident zeros array request via 'gpuArray' keyword or gpuArray.zeros() static method
     GpuArray,
     Like(Value),
@@ -359,6 +191,21 @@ impl ParsedZeros {
                         idx += 1;
                         continue;
                     }
+                    "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
+                    | "uint64" => {
+                        if like_proto.is_some() {
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                format!("{keyword} class override"),
+                            ));
+                        }
+                        class_override = Some(OutputTemplate::Integer(
+                            integer_storage_prototype_from_keyword(keyword.as_str())
+                                .expect("matched integer class keyword"),
+                        ));
+                        idx += 1;
+                        continue;
+                    }
                     "gpuArray" | "gpuarray" => {
                         if like_proto.is_some() {
                             return Err(zeros_error_with_detail(
@@ -379,13 +226,28 @@ impl ParsedZeros {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg).await? {
+            if matches!(arg, Value::GpuTensor(_)) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ZEROS_RESIDENT_SIZE_EXTENSION,
+                    "zeros",
+                )?;
+            }
+            if let Some(parsed_dims) = extract_constructor_dimensions(&arg, "zeros")
+                .await
+                .map_err(builtin_error)?
+            {
                 tracing::trace!("zeros: parsed dimension arguments {:?}", parsed_dims);
+                if parsed_dims.is_column_vector {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &ZEROS_COLUMN_SIZE_VECTOR_EXTENSION,
+                        "zeros",
+                    )?;
+                }
                 saw_dims_arg = true;
                 if dims.is_empty() {
-                    dims = parsed_dims;
+                    dims = parsed_dims.values;
                 } else {
-                    dims.extend(parsed_dims);
+                    dims.extend(parsed_dims.values);
                 }
                 idx += 1;
                 continue;
@@ -397,6 +259,10 @@ impl ParsedZeros {
             );
 
             if shape_source.is_none() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ZEROS_IMPLICIT_PROTOTYPE_EXTENSION,
+                    "zeros",
+                )?;
                 shape_source = Some(shape_from_value(&arg)?);
             }
             if implicit_proto.is_none() {
@@ -408,10 +274,8 @@ impl ParsedZeros {
         let shape = if saw_dims_arg {
             if dims.is_empty() {
                 vec![0, 0]
-            } else if dims.len() == 1 {
-                vec![dims[0], dims[0]]
             } else {
-                dims
+                normalize_constructor_shape(dims)
             }
         } else if let Some(shape) = shape_source {
             tracing::warn!(
@@ -448,9 +312,24 @@ async fn build_output(parsed: ParsedZeros) -> crate::BuiltinResult<Value> {
         OutputTemplate::Double => zeros_double(&parsed.shape),
         OutputTemplate::Single => zeros_single(&parsed.shape),
         OutputTemplate::Logical => zeros_logical(&parsed.shape),
+        OutputTemplate::Integer(storage) => zeros_integer_like(&storage, &parsed.shape),
         OutputTemplate::GpuArray => zeros_gpu(&parsed.shape).await,
         OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape).await,
     }
+}
+
+fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorage> {
+    Some(match keyword {
+        "int8" => IntegerStorage::I8(Vec::new()),
+        "int16" => IntegerStorage::I16(Vec::new()),
+        "int32" => IntegerStorage::I32(Vec::new()),
+        "int64" => IntegerStorage::I64(Vec::new()),
+        "uint8" => IntegerStorage::U8(Vec::new()),
+        "uint16" => IntegerStorage::U16(Vec::new()),
+        "uint32" => IntegerStorage::U32(Vec::new()),
+        "uint64" => IntegerStorage::U64(Vec::new()),
+        _ => return None,
+    })
 }
 
 fn value_tag(value: &Value) -> &'static str {
@@ -471,7 +350,7 @@ fn value_tag(value: &Value) -> &'static str {
         Value::SymbolicArray(_) => "SymbolicArray",
         Value::Cell(_) => "Cell",
         Value::Struct(_) => "Struct",
-        Value::Object(_) => "Object",
+        Value::ObjectArray(_) | Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::Listener(_) => "Listener",
         Value::FunctionHandle(_)
@@ -482,6 +361,11 @@ fn value_tag(value: &Value) -> &'static str {
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
         Value::OutputList(_) => "OutputList",
+        Value::Future(_) => "Future",
+        Value::Task(_) => "Task",
+        Value::Pool(_) => "Pool",
+        Value::Job(_) => "Job",
+        Value::Foreign(_) => "Foreign",
     }
 }
 
@@ -513,66 +397,138 @@ fn zeros_logical(shape: &[usize]) -> crate::BuiltinResult<Value> {
     Ok(Value::LogicalArray(LogicalArray::zeros(shape.to_vec())))
 }
 
-/// Create a GPU-resident zeros array. Falls back to host tensor if no GPU provider.
+/// Create an explicitly GPU-resident zeros array.
 async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
-    // Try to allocate on GPU with default precision (usually F32)
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let precision = provider.precision();
-        let dtype = dtype_from_precision(precision);
-        match provider.zeros(shape) {
-            Ok(handle) => {
-                runmat_accelerate_api::set_handle_precision(&handle, precision);
-                return Ok(Value::GpuTensor(handle));
-            }
-            Err(err) => {
-                log::debug!(
-                    "zeros_gpu: provider.zeros failed ({err}); falling back to host upload"
-                );
-            }
-        }
-        // Fallback: build a host tensor and upload
-        let host = tensor::zeros_with_dtype(shape, dtype)?;
-        let view = HostTensorView {
-            data: &host.data,
-            shape: &host.shape,
-        };
-        if let Ok(gpu) = provider.upload(&view) {
-            runmat_accelerate_api::set_handle_precision(&gpu, precision);
-            return Ok(Value::GpuTensor(gpu));
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| builtin_error("zeros: no acceleration provider is available"))?;
+    let precision = provider.precision();
+    let dtype = dtype_from_precision(precision);
+    if let Ok(handle) = provider.zeros(shape) {
+        if let Ok(handle) = validate_constructor_gpu_output(
+            "zeros",
+            provider,
+            handle,
+            shape,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            Some(precision),
+            None,
+            false,
+        ) {
+            return Ok(Value::GpuTensor(handle));
         }
     }
-    // No GPU provider: fall back to host double tensor
-    zeros_double(shape)
+    let host = tensor::zeros_with_dtype(shape, dtype)?;
+    if let Ok(handle) = gpu_helpers::upload_tensor(provider, &host) {
+        if let Ok(handle) = validate_constructor_gpu_output(
+            "zeros",
+            provider,
+            handle,
+            shape,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            Some(precision),
+            None,
+            false,
+        ) {
+            return Ok(Value::GpuTensor(handle));
+        }
+    }
+    Err(builtin_error(
+        "zeros: provider cannot preserve explicit gpuArray output",
+    ))
+}
+
+fn validate_zeros_gpu_output(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    output: GpuTensorHandle,
+    shape: &[usize],
+    storage: runmat_accelerate_api::GpuTensorStorage,
+    precision: Option<ProviderPrecision>,
+    integer_type: Option<IntegerElementType>,
+    logical: bool,
+) -> crate::BuiltinResult<Value> {
+    validate_constructor_gpu_output(
+        "zeros",
+        provider,
+        output,
+        shape,
+        storage,
+        precision,
+        integer_type,
+        logical,
+    )
+    .map(Value::GpuTensor)
+    .map_err(builtin_error)
 }
 
 #[async_recursion::async_recursion(?Send)]
 async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => zeros_logical(shape),
+        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
+            zeros_complex_integer_like(
+                tensor
+                    .integer_storage()
+                    .as_ref()
+                    .expect("guarded typed complex integer storage"),
+                shape,
+            )
+        }
         Value::ComplexTensor(_) | Value::Complex(_, _) => {
             let tensor = ComplexTensor::zeros(shape.to_vec());
             Ok(Value::ComplexTensor(tensor))
         }
         Value::GpuTensor(handle) => zeros_like_gpu(handle, shape).await,
-        Value::SparseTensor(_) => zeros_sparse(shape),
-        Value::Tensor(t) => match t.dtype {
+        Value::SparseTensor(sparse) => zeros_sparse_like(sparse, shape),
+        Value::Tensor(t) => match t.numeric_dtype() {
             NumericDType::F32 => zeros_single(shape),
             NumericDType::F64 => zeros_double(shape),
-            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-                tensor::zeros_with_dtype(shape, t.dtype)
-                    .map(Value::Tensor)
-                    .map_err(|e| builtin_error(format!("zeros: {e}")))
-            }
+            dtype => tensor::zeros_with_dtype(shape, dtype)
+                .map(Value::Tensor)
+                .map_err(|e| builtin_error(format!("zeros: {e}"))),
         },
-        Value::Num(_) | Value::Int(_) => zeros_double(shape),
+        Value::Int(value) => zeros_integer_like(&IntegerStorage::from_scalar(value.clone()), shape),
+        Value::Num(_) => zeros_double(shape),
         Value::CharArray(_) | Value::Cell(_) => zeros_double(shape),
         _ => zeros_double(shape),
     }
 }
 
-fn zeros_sparse(shape: &[usize]) -> crate::BuiltinResult<Value> {
+fn zeros_integer_like(storage: &IntegerStorage, shape: &[usize]) -> crate::BuiltinResult<Value> {
+    let tensor = runmat_value::Tensor::new_integer(
+        storage.zeros_like(tensor::element_count(shape)),
+        shape.to_vec(),
+    )
+    .map_err(|e| builtin_error(format!("zeros: {e}")))?;
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+fn zeros_complex_integer_like(
+    storage: &IntegerComplexStorage,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
+    let len = tensor::element_count(shape);
+    let storage =
+        IntegerComplexStorage::new(storage.real.zeros_like(len), storage.imag.zeros_like(len))
+            .map_err(|e| builtin_error(format!("zeros: {e}")))?;
+    ComplexTensor::new_integer(storage, shape.to_vec())
+        .map(Value::ComplexTensor)
+        .map_err(|e| builtin_error(format!("zeros: {e}")))
+}
+
+fn zeros_sparse_like(proto: &SparseTensor, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match shape {
-        [rows, cols] => Ok(Value::SparseTensor(SparseTensor::zeros(*rows, *cols))),
+        [rows, cols] => Ok(Value::SparseTensor(match proto.numeric_dtype() {
+            Some(NumericDType::F32) => SparseTensor::zeros_f32(*rows, *cols),
+            Some(NumericDType::F64) => SparseTensor::zeros(*rows, *cols),
+            None => SparseTensor::zeros_logical(*rows, *cols),
+            Some(_) => SparseTensor::zeros_with_integer_storage(
+                *rows,
+                *cols,
+                proto
+                    .integer_storage()
+                    .expect("integer sparse dtype has integer storage"),
+            ),
+        })),
         other => Err(builtin_error(format!(
             "zeros: sparse 'like' output must be 2-D, got {} dimensions",
             other.len()
@@ -582,42 +538,118 @@ fn zeros_sparse(shape: &[usize]) -> crate::BuiltinResult<Value> {
 
 #[async_recursion::async_recursion(?Send)]
 async fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let precision =
-            runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
-        let dtype = dtype_from_precision(precision);
-        let attempt = if handle.shape == shape {
-            provider.zeros_like(handle)
-        } else {
-            provider.zeros(shape)
-        };
-        if let Ok(gpu) = attempt {
-            runmat_accelerate_api::set_handle_precision(&gpu, precision);
-            return Ok(Value::GpuTensor(gpu));
-        } else {
-            log_zeros_fallback(shape, dtype, "provider-like-error");
+    let provider = runmat_accelerate_api::provider_for_handle(handle)
+        .ok_or_else(|| builtin_error("zeros: no provider owns the explicit gpuArray prototype"))?;
+    if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
+        let prototype = integer_storage_prototype_from_element_type(integer_type);
+        let storage = prototype.zeros_like(tensor::element_count(shape));
+        let view = integer_tensor_view(&storage, shape);
+        if let Ok(gpu) = provider.upload_integer(&view) {
+            return validate_zeros_gpu_output(
+                provider,
+                gpu,
+                shape,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                None,
+                Some(integer_type),
+                false,
+            );
         }
-        // Fallback: build a host tensor with dtype matching provider precision and upload
-        let host = tensor::zeros_with_dtype(shape, dtype)?;
-        let view = HostTensorView {
-            data: &host.data,
-            shape: &host.shape,
-        };
-        if let Ok(gpu) = provider.upload(&view) {
-            runmat_accelerate_api::set_handle_precision(&gpu, precision);
-            return Ok(Value::GpuTensor(gpu));
-        } else {
-            log_zeros_fallback(shape, dtype, "upload-error");
-        }
-    } else {
-        log_zeros_fallback(shape, NumericDType::F32, "no-provider-like");
+        return Err(builtin_error(
+            "zeros: provider cannot preserve explicit integer gpuArray output",
+        ));
     }
 
-    let gathered = crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
-        .await
-        .map_err(|e| format!("zeros: {e}"))?;
-    log_zeros_fallback(shape, NumericDType::F32, "gather-fallback");
-    zeros_like(&gathered, shape).await
+    let precision =
+        runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
+    let dtype = dtype_from_precision(precision);
+    let storage = runmat_accelerate_api::handle_storage(handle);
+    let logical = runmat_accelerate_api::handle_is_logical(handle);
+    if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved {
+        let complex = ComplexTensor::from_f64_values_with_dtype(
+            vec![(0.0, 0.0); tensor::element_count(shape)],
+            shape.to_vec(),
+            dtype,
+        )
+        .map_err(|error| builtin_error(format!("zeros: {error}")))?;
+        if let Ok(gpu) = gpu_helpers::upload_complex_tensor(provider, &complex) {
+            return validate_zeros_gpu_output(
+                provider,
+                gpu,
+                shape,
+                storage,
+                Some(precision),
+                None,
+                false,
+            );
+        }
+        return Err(builtin_error(
+            "zeros: provider cannot preserve explicit complex gpuArray output",
+        ));
+    }
+    let attempt = if handle.shape == shape {
+        provider.zeros_like(handle)
+    } else {
+        provider.zeros(shape)
+    };
+    if let Ok(gpu) = attempt {
+        if let Ok(value) = validate_zeros_gpu_output(
+            provider,
+            gpu,
+            shape,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            Some(precision),
+            None,
+            logical,
+        ) {
+            return Ok(value);
+        }
+    }
+    let host = tensor::zeros_with_dtype(shape, dtype)?;
+    if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
+        return validate_zeros_gpu_output(
+            provider,
+            gpu,
+            shape,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            Some(precision),
+            None,
+            logical,
+        );
+    }
+    Err(builtin_error(
+        "zeros: provider cannot preserve explicit gpuArray output",
+    ))
+}
+
+fn integer_storage_prototype_from_element_type(element_type: IntegerElementType) -> IntegerStorage {
+    match element_type {
+        IntegerElementType::I8 => IntegerStorage::I8(Vec::new()),
+        IntegerElementType::I16 => IntegerStorage::I16(Vec::new()),
+        IntegerElementType::I32 => IntegerStorage::I32(Vec::new()),
+        IntegerElementType::I64 => IntegerStorage::I64(Vec::new()),
+        IntegerElementType::U8 => IntegerStorage::U8(Vec::new()),
+        IntegerElementType::U16 => IntegerStorage::U16(Vec::new()),
+        IntegerElementType::U32 => IntegerStorage::U32(Vec::new()),
+        IntegerElementType::U64 => IntegerStorage::U64(Vec::new()),
+    }
+}
+
+fn integer_tensor_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> HostIntegerTensorView<'a> {
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    HostIntegerTensorView { data, shape }
 }
 
 fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Option<Value>> {
@@ -628,7 +660,14 @@ fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
     let precision = match dtype {
         NumericDType::F32 => ProviderPrecision::F32,
         NumericDType::F64 => ProviderPrecision::F64,
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => {
             log_zeros_fallback(shape, dtype, "integer-dtype");
             return Ok(None);
         }
@@ -639,7 +678,18 @@ fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
     }
     match provider.zeros(shape) {
         Ok(handle) => {
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
+            let mut handle = validate_constructor_gpu_output(
+                "zeros",
+                provider,
+                handle,
+                shape,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                Some(precision),
+                None,
+                false,
+            )
+            .map_err(builtin_error)?;
+            runmat_accelerate_api::mark_handle_automatic(&mut handle);
             Ok(Some(Value::GpuTensor(handle)))
         }
         Err(err) => {
@@ -696,28 +746,6 @@ fn keyword_of(value: &Value) -> Option<String> {
     }
 }
 
-async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
-    if matches!(value, Value::LogicalArray(_)) {
-        return Ok(None);
-    }
-    let gpu_scalar = match value {
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
-        _ => false,
-    };
-    match tensor::dims_from_value_async(value).await {
-        Ok(dims) => Ok(dims),
-        Err(err) => {
-            if matches!(value, Value::Tensor(_))
-                || (matches!(value, Value::GpuTensor(_)) && !gpu_scalar)
-            {
-                Ok(None)
-            } else {
-                Err(builtin_error(format!("zeros: {err}")))
-            }
-        }
-    }
-}
-
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
     match value {
         Value::Tensor(t) => Ok(t.shape.clone()),
@@ -725,8 +753,8 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(normalize_scalar_shape(&h.shape)),
-        Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
-        Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
+        Value::CharArray(ca) => Ok(ca.shape.clone()),
+        Value::Cell(cell) => Ok(cell.shape.clone()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
         other => Err(format!("zeros: unsupported prototype {other:?}")),
     }
@@ -737,7 +765,46 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{SparseTensor, Tensor};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor, Tensor};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct InvalidAutomaticZerosProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        frees: AtomicUsize,
+    }
+
+    impl runmat_accelerate_api::AccelProvider for InvalidAutomaticZerosProvider {
+        fn upload(
+            &self,
+            host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+
+        fn download<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.inner.download(handle)
+        }
+
+        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            self.frees.fetch_add(1, Ordering::SeqCst);
+            self.inner.free(handle)
+        }
+
+        fn device_info(&self) -> String {
+            self.inner.device_info()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+
+        fn zeros(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.zeros(&[1, 1])
+        }
+    }
 
     fn clear_accel_provider_state() -> test_support::AccelTestGuard {
         test_support::accel_test_lock()
@@ -752,31 +819,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn zeros_type_defaults_to_num() {
-        assert_eq!(zeros_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
-    }
+    fn automatic_zeros_rejects_and_frees_invalid_provider_output() {
+        let _guard = clear_accel_provider_state();
+        let provider = Box::leak(Box::new(InvalidAutomaticZerosProvider {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            frees: AtomicUsize::new(0),
+        }));
+        let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
 
-    #[test]
-    fn zeros_type_infers_rank_from_scalar_dim() {
-        assert_eq!(
-            zeros_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
-    }
-
-    #[test]
-    fn zeros_type_infers_rank_from_size_vector() {
-        let size_vec = Type::Tensor {
-            shape: Some(vec![Some(1), Some(3)]),
-        };
-        assert_eq!(
-            zeros_type(&[size_vec], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![None, None, None])
-            }
-        );
+        let error = zeros_double(&[2, 2]).expect_err("invalid provider output must be terminal");
+        assert!(error.message().contains("invalid constructor result"));
+        assert_eq!(provider.frees.load(Ordering::SeqCst), 1);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -787,7 +840,7 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![3, 3]);
-        assert!(tensor.data.iter().all(|&x| x == 0.0));
+        assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -798,14 +851,14 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 4]);
-        assert_eq!(tensor.data.len(), 8);
+        assert_eq!(tensor.len(), 8);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_from_size_vector() {
         let _guard = clear_accel_provider_state();
-        let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
+        let size_vec = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
@@ -831,12 +884,13 @@ pub(crate) mod tests {
     #[test]
     fn zeros_like_tensor_infers_shape() {
         let _guard = clear_accel_provider_state();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert!(tensor.data.iter().all(|&x| x == 0.0));
+        assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -852,16 +906,52 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert!(t.data.iter().all(|&(re, im)| re == 0.0 && im == 0.0));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&(re, im)| re == 0.0 && im == 0.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn zeros_like_typed_complex_uint64_keeps_exact_integer_storage() {
+        let prototype = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                IntegerStorage::U64(vec![u64::MAX, 1]),
+            )
+            .expect("typed complex prototype"),
+            vec![1, 2],
+        )
+        .expect("typed complex tensor");
+        let result = block_on(zeros_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::ComplexTensor(prototype),
+        ]))
+        .expect("zeros like");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected typed complex output");
+        };
+        assert_eq!(
+            output.integer_storage().cloned(),
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![0; 4]),
+                    IntegerStorage::U64(vec![0; 4]),
+                )
+                .expect("typed complex zeros"),
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_uses_shape_argument_when_combined_with_like() {
         let _guard = clear_accel_provider_state();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let shape_source = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let proto = Tensor::new(vec![7.0, 8.0], vec![1, 2]).unwrap();
         let args = vec![
@@ -872,7 +962,7 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 3]);
-        assert!(tensor.data.iter().all(|&x| x == 0.0));
+        assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -884,7 +974,79 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert!(tensor.data.iter().all(|&x| x == 0.0));
+        assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn zeros_like_preserves_every_exact_integer_class() {
+        let _guard = clear_accel_provider_state();
+        let storages = vec![
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let prototype = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("prototype");
+            let result = block_on(zeros_builtin(vec![
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ]))
+            .expect("zeros like");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.integer_storage(), Some(&storage.zeros_like(2)));
+        }
+
+        let result = block_on(zeros_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::Int(IntValue::I64(i64::MAX)),
+        ]))
+        .expect("integer scalar prototype");
+        let Value::Tensor(output) = result else {
+            panic!("expected int64 tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I64(vec![0; 4]))
+        );
+    }
+
+    #[test]
+    fn zeros_class_strings_create_exact_integer_storage() {
+        let _guard = clear_accel_provider_state();
+        let cases = [
+            ("int8", IntegerStorage::I8(vec![0; 6])),
+            ("int16", IntegerStorage::I16(vec![0; 6])),
+            ("int32", IntegerStorage::I32(vec![0; 6])),
+            ("int64", IntegerStorage::I64(vec![0; 6])),
+            ("uint8", IntegerStorage::U8(vec![0; 6])),
+            ("uint16", IntegerStorage::U16(vec![0; 6])),
+            ("uint32", IntegerStorage::U32(vec![0; 6])),
+            ("uint64", IntegerStorage::U64(vec![0; 6])),
+        ];
+
+        for (class_name, expected) in cases {
+            let result = block_on(zeros_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::from(class_name),
+            ]))
+            .expect("zeros integer class");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor for {class_name}");
+            };
+            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -905,7 +1067,7 @@ pub(crate) mod tests {
                 assert_eq!(sparse.cols, 4);
                 assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0]);
                 assert!(sparse.row_indices.is_empty());
-                assert!(sparse.values.is_empty());
+                assert!(sparse.materialize_f64().is_empty());
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
@@ -923,10 +1085,31 @@ pub(crate) mod tests {
                 assert_eq!(sparse.shape(), vec![2, 5]);
                 assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0, 0]);
                 assert!(sparse.row_indices.is_empty());
-                assert!(sparse.values.is_empty());
+                assert!(sparse.materialize_f64().is_empty());
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn zeros_like_single_sparse_preserves_native_single_storage() {
+        let _guard = clear_accel_provider_state();
+        let proto =
+            SparseTensor::new_f32(2, 2, vec![0, 1, 1], vec![0], vec![1.25]).expect("single sparse");
+        let result = block_on(zeros_builtin(vec![
+            Value::Num(3.0),
+            Value::Num(4.0),
+            Value::from("like"),
+            Value::SparseTensor(proto),
+        ]))
+        .expect("zeros");
+        let Value::SparseTensor(sparse) = result else {
+            panic!("expected sparse tensor");
+        };
+        assert_eq!(sparse.shape(), vec![3, 4]);
+        assert_eq!(sparse.numeric_dtype(), Some(NumericDType::F32));
+        assert!(sparse.as_f32_slice().is_some_and(<[f32]>::is_empty));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -938,7 +1121,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -963,11 +1146,7 @@ pub(crate) mod tests {
     fn zeros_gpu_like_alloc() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let args = vec![
                 Value::Num(2.0),
                 Value::Num(2.0),
@@ -979,7 +1158,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape, vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
-                    assert!(gathered.data.iter().all(|&x| x == 0.0));
+                    assert!(gathered.materialize_f64().iter().all(|&x| x == 0.0));
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -988,10 +1167,69 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn zeros_gpu_integer_like_preserves_exact_class_resident() {
+        test_support::with_test_provider(|provider| {
+            let prototype_values = [u64::MAX, 9_007_199_254_740_993];
+            let prototype = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&prototype_values),
+                    shape: &[1, 2],
+                })
+                .expect("upload uint64 prototype");
+            let args = vec![
+                Value::Num(2.0),
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(prototype),
+            ];
+            let result = block_on(zeros_builtin(args)).expect("zeros integer gpu like");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            assert_eq!(handle.shape, vec![2, 2]);
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![0; 4]))
+            );
+        });
+    }
+
+    #[test]
+    fn zeros_column_size_vector_is_independently_gated() {
+        let size = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![2, 1]).expect("column size"),
+        );
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(zeros_builtin(vec![size.clone()])).expect_err("strict gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:ZerosColumnSizeVectorExtension")
+        );
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let output = test_support::gather(block_on(zeros_builtin(vec![size])).expect("extension"))
+            .expect("gather output");
+        assert_eq!(output.shape, vec![2, 3]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn zeros_wgpu_single_allocates_gpu_without_like() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        assert_eq!(
+            runmat_accelerate_api::AccelProvider::precision(provider),
+            ProviderPrecision::F32
         );
         let value = zeros_single(&[2, 2]).expect("zeros single");
         match value {
@@ -999,7 +1237,7 @@ pub(crate) mod tests {
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle)).expect("gather to host");
                 assert_eq!(gathered.shape, vec![2, 2]);
-                assert!(gathered.data.iter().all(|&x| x == 0.0));
+                assert!(gathered.materialize_f64().iter().all(|&x| x == 0.0));
             }
             other => panic!("expected gpu tensor, got {other:?}"),
         }

@@ -1,10 +1,12 @@
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, ObjectInstance, StructValue, Tensor, Value,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
+use runmat_types::MemberAccess;
+use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -23,6 +25,19 @@ const GEOMETRY_LOAD_NAME: &str = "geometry.load";
 const GEOMETRY_INSPECT_NAME: &str = "geometry.inspect";
 const GEOMETRY_LIST_REGIONS_NAME: &str = "geometry.listRegions";
 const GEOMETRY_MESHES_NAME: &str = "geometry.meshes";
+
+pub const GEOMETRY_LIST_REGIONS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "geometry.listRegions accepts only a geometry.Asset object and returns imported-region metadata; it has no direct integer data or control argument.",
+    };
+pub const GEOMETRY_MESHES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "geometry.meshes accepts only a geometry.Asset object and returns host mesh structs; vertices, 1-based faces/triangles, and region ranges are deliberate double-valued API outputs rather than a typed-integer input surface.",
+    };
 
 const STRUCT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "result",
@@ -179,6 +194,7 @@ pub async fn geometry_inspect_builtin(path: String) -> BuiltinResult<Value> {
     summary = "List regions imported into a geometry asset.",
     keywords = "geometry,regions,cad,selectors,fea",
     descriptor(crate::builtins::geometry::GEOMETRY_LIST_REGIONS_DESCRIPTOR),
+    integer_audit(crate::builtins::geometry::GEOMETRY_LIST_REGIONS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::geometry"
 )]
 pub async fn geometry_list_regions_builtin(asset: Value) -> BuiltinResult<Value> {
@@ -199,6 +215,7 @@ pub async fn geometry_list_regions_builtin(asset: Value) -> BuiltinResult<Value>
     summary = "Return renderable surface mesh topology for a geometry asset.",
     keywords = "geometry,mesh,vertices,triangles,faces,patch,fea",
     descriptor(crate::builtins::geometry::GEOMETRY_MESHES_DESCRIPTOR),
+    integer_audit(crate::builtins::geometry::GEOMETRY_MESHES_INTEGER_AUDIT),
     builtin_path = "crate::builtins::geometry"
 )]
 pub async fn geometry_meshes_builtin(asset: Value) -> BuiltinResult<Value> {
@@ -426,23 +443,23 @@ fn serializable_to_object<T: Serialize>(
 fn ensure_geometry_classes_registered() {
     static REGISTER: OnceLock<()> = OnceLock::new();
     REGISTER.get_or_init(|| {
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: GEOMETRY_ASSET_CLASS.to_string(),
             parent: None,
             properties: HashMap::new(),
             methods: geometry_asset_methods(),
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: GEOMETRY_INSPECT_RESULT_CLASS.to_string(),
             parent: None,
             properties: HashMap::new(),
-            methods: HashMap::<String, MethodDef>::new(),
+            methods: HashMap::<String, crate::class_registry::RuntimeMethod>::new(),
         });
         triangulation::register_delaunaytri_class();
     });
 }
 
-fn geometry_asset_methods() -> HashMap<String, MethodDef> {
+fn geometry_asset_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     [
         ("listRegions", GEOMETRY_LIST_REGIONS_NAME),
         ("meshes", GEOMETRY_MESHES_NAME),
@@ -451,12 +468,12 @@ fn geometry_asset_methods() -> HashMap<String, MethodDef> {
     .map(|(name, function_name)| {
         (
             name.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: name.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: function_name.to_string(),
                 implicit_class_argument: None,
             },
@@ -515,7 +532,7 @@ where
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Value;
+    use runmat_value::Value;
 
     #[test]
     fn geometry_inspect_builtin_returns_object_value() {
@@ -588,6 +605,6 @@ mod tests {
             panic!("expected faces tensor");
         };
         assert_eq!(faces.shape, vec![1, 3]);
-        assert_eq!(faces.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(faces.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 }

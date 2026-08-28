@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "Evaluation is host-only. Integer, numeric, and provider-resident inputs are not text and reject before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "[x, tf] = str2num(text) - Convert text containing numeric matrix literals to a numeric array.",
+  "description": "`str2num(text)` parses a scalar string or character array as a numeric matrix expression. It is a text parser, not a numeric conversion function; use `string` to turn numeric data into text and `str2double` for element-wise text parsing.",
   "signatures": [
     {
       "label": "[x, tf] = str2num(text)",
@@ -55,7 +55,8 @@
   "behaviors": [
     "Convert text containing numeric matrix literals to a numeric array.",
     "Parses bracketed numeric matrix text with whitespace, comma, and semicolon separators.",
-    "When a second output is requested, returns a logical success flag instead of throwing for malformed numeric text."
+    "When a second output is requested, returns a logical success flag instead of throwing for malformed numeric text.",
+    "RunMat currently implements numeric matrix literal parsing. The compatibility target's `Evaluation` option and general expression-evaluation surface remain implementation gaps."
   ],
   "examples": [
     "[x,tf] = str2num(\"[1 2; 3 4]\") returns a 2-by-2 numeric matrix and true."

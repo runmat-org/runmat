@@ -1,11 +1,15 @@
 //! MATLAB-compatible `pulstran` builtin for sampled pulse trains.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -165,6 +169,103 @@ pub const PULSTRAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PULSTRAN_ERRORS,
 };
 
+const PULSTRAN_INTEGER_T_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pulstran-integer-time",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pulstran with typed-integer sample times is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PulstranIntegerTimeExtension"),
+};
+const PULSTRAN_INTEGER_D_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pulstran-integer-delay",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pulstran with typed-integer delays or gains is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PulstranIntegerDelayExtension"),
+};
+const PULSTRAN_INTEGER_P_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pulstran-integer-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pulstran with a typed-integer sampled prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PulstranIntegerPrototypeExtension"),
+};
+const PULSTRAN_INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pulstran-integer-parameter",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pulstran with typed-integer built-in pulse parameters is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PulstranIntegerParameterExtension"),
+    };
+const PULSTRAN_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pulstran-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pulstran with an explicit gpuArray computation input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PulstranExplicitGpuInputExtension"),
+};
+pub const PULSTRAN_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    PULSTRAN_INTEGER_T_EXTENSION,
+    PULSTRAN_INTEGER_D_EXTENSION,
+    PULSTRAN_INTEGER_P_EXTENSION,
+    PULSTRAN_INTEGER_PARAMETER_EXTENSION,
+    PULSTRAN_EXPLICIT_GPU_EXTENSION,
+];
+
+const PULSTRAN_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "T",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public page does not document typed-integer sample times; RunMat admits them only at an exact binary64 waveform boundary.",
+    }];
+const PULSTRAN_INTEGER_D_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "D",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "Typed delays and optional gains are independently gated before waveform evaluation.",
+    }];
+const PULSTRAN_INTEGER_P_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "P/FS/built-in pulse parameters",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed sampled prototypes and numeric controls cross checked floating interpolation or pulse-generation boundaries; callback extra arguments remain exact pass-through values.",
+    }];
+pub const PULSTRAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pulstran(integer_T,D,FUN,...) or pulstran(integer_T,D,P,FS)",
+        inputs: &PULSTRAN_INTEGER_T_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Sample times are checked before provider access and converted once for waveform evaluation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pulstran(T,integer_D,FUN,...) or pulstran(T,integer_D,P,FS)",
+        inputs: &PULSTRAN_INTEGER_D_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Delay and gain values are checked independently before summation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pulstran(T,D,integer_P,integer_FS) or built-in pulse with integer parameters",
+        inputs: &PULSTRAN_INTEGER_P_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each typed numeric role is admitted separately; function-handle callback payloads are not reclassified as pulstran computation controls.",
+    },
+];
+
 #[derive(Clone, Copy, Debug)]
 struct PulseInstance {
     delay: f64,
@@ -223,6 +324,8 @@ fn pulstran_error_with_source(
     keywords = "pulstran,pulse train,rectpuls,tripuls,gauspuls,signal processing",
     type_resolver(pulse_train_type),
     descriptor(crate::builtins::math::signal::pulstran::PULSTRAN_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::pulstran::PULSTRAN_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::pulstran::PULSTRAN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::pulstran"
 )]
 async fn pulstran_builtin(
@@ -231,11 +334,117 @@ async fn pulstran_builtin(
     pulse: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    ensure_pulstran_extensions(&t, &d, &pulse, &rest).await?;
+    let gpu_source = pulstran_gpu_source(&t, &d, &pulse, &rest)?;
     let t = real_tensor_arg(t, &PULSTRAN_ERROR_INVALID_INPUT).await?;
     let delays = parse_delays(real_tensor_arg(d, &PULSTRAN_ERROR_INVALID_DELAY).await?)?;
     let source = parse_pulse_source(pulse, rest).await?;
     let y = evaluate_pulse_train(&t, &delays, &source).await?;
-    Ok(tensor_into_value(y))
+    let Some(source) = gpu_source else {
+        return Ok(tensor_into_value(y));
+    };
+    let restored =
+        gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(y), BUILTIN_NAME)?;
+    if runmat_accelerate_api::handle_is_explicit(&source)
+        && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(pulstran_error_with_detail(
+            &PULSTRAN_ERROR_INTERNAL,
+            "provider cannot preserve explicit gpuArray output residency",
+        ));
+    }
+    Ok(restored)
+}
+
+async fn ensure_pulstran_extensions(
+    t: &Value,
+    d: &Value,
+    pulse: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    crate::builtins::common::validation::reject_typed_complex_integer(t, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(d, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        t,
+        &PULSTRAN_INTEGER_T_EXTENSION,
+        BUILTIN_NAME,
+        "T",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        d,
+        &PULSTRAN_INTEGER_D_EXTENSION,
+        BUILTIN_NAME,
+        "D",
+    )
+    .await?;
+    let sampled = is_numeric_or_gpu(pulse);
+    if sampled && crate::builtins::common::validation::value_has_native_integer_class(pulse) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PULSTRAN_INTEGER_P_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if (sampled || pulse_uses_builtin_parameters(pulse))
+        && rest
+            .iter()
+            .any(|value| crate::builtins::common::validation::value_has_native_integer_class(value))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PULSTRAN_INTEGER_PARAMETER_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if pulstran_resident_values(t, d, pulse, rest).any(|value| {
+        matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PULSTRAN_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn pulse_uses_builtin_parameters(pulse: &Value) -> bool {
+    let name = text_scalar(pulse).or_else(|| match pulse {
+        Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => Some(name.clone()),
+        _ => None,
+    });
+    name.is_some_and(|name| {
+        matches!(
+            name.trim().to_ascii_lowercase().as_str(),
+            "rectpuls" | "tripuls" | "gauspuls"
+        )
+    })
+}
+
+fn pulstran_resident_values<'a>(
+    t: &'a Value,
+    d: &'a Value,
+    pulse: &'a Value,
+    rest: &'a [Value],
+) -> impl Iterator<Item = &'a Value> {
+    let uses_controls = is_numeric_or_gpu(pulse) || pulse_uses_builtin_parameters(pulse);
+    std::iter::once(t)
+        .chain(std::iter::once(d))
+        .chain(std::iter::once(pulse).filter(|value| is_numeric_or_gpu(value)))
+        .chain(rest.iter().filter(move |_| uses_controls))
+}
+
+fn pulstran_gpu_source(
+    t: &Value,
+    d: &Value,
+    pulse: &Value,
+    rest: &[Value],
+) -> BuiltinResult<Option<runmat_accelerate_api::GpuTensorHandle>> {
+    gpu_helpers::select_resident_output_source(
+        pulstran_resident_values(t, d, pulse, rest).filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        }),
+        BUILTIN_NAME,
+    )
 }
 
 async fn real_tensor_arg(
@@ -264,25 +473,25 @@ async fn real_tensor_arg(
 }
 
 fn parse_delays(tensor: Tensor) -> BuiltinResult<Vec<PulseInstance>> {
-    if tensor.data.is_empty() {
+    if tensor.is_empty() {
         return Ok(Vec::new());
     }
+    let values = tensor::tensor_values_f64(&tensor);
     let shape = tensor.shape.as_slice();
     if shape.len() <= 2 {
-        let rows = shape.first().copied().unwrap_or(tensor.data.len());
+        let rows = shape.first().copied().unwrap_or(values.len());
         let cols = shape.get(1).copied().unwrap_or(1);
-        let is_vector = rows == 1 || cols == 1 || tensor.data.len() == 1;
+        let is_vector = rows == 1 || cols == 1 || values.len() == 1;
         if !is_vector && cols == 2 {
             return Ok((0..rows)
                 .map(|row| PulseInstance {
-                    delay: tensor.data[row],
-                    amplitude: tensor.data[row + rows],
+                    delay: values[row],
+                    amplitude: values[row + rows],
                 })
                 .collect());
         }
         if is_vector {
-            return Ok(tensor
-                .data
+            return Ok(values
                 .into_iter()
                 .map(|delay| PulseInstance {
                     delay,
@@ -346,6 +555,14 @@ async fn parse_sampled_prototype(pulse: Value, rest: Vec<Value>) -> BuiltinResul
             format!("got {}", rest.len() + 3),
         ));
     }
+    crate::builtins::common::validation::reject_typed_complex_integer(&pulse, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &pulse,
+        &PULSTRAN_INTEGER_P_EXTENSION,
+        BUILTIN_NAME,
+        "prototype",
+    )
+    .await?;
     let prototype = real_tensor_arg(pulse, &PULSTRAN_ERROR_INVALID_PULSE).await?;
     if !is_vector_shape(&prototype.shape) {
         return Err(pulstran_error_with_detail(
@@ -355,6 +572,14 @@ async fn parse_sampled_prototype(pulse: Value, rest: Vec<Value>) -> BuiltinResul
     }
     let fs = match rest.first() {
         Some(value) => {
+            crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                value,
+                &PULSTRAN_INTEGER_PARAMETER_EXTENSION,
+                BUILTIN_NAME,
+                "FS",
+            )
+            .await?;
             let raw = scalar_f64_from_value_async(value)
                 .await
                 .map_err(|err| pulstran_error_with_detail(&PULSTRAN_ERROR_INVALID_PARAMETER, err))?
@@ -370,7 +595,7 @@ async fn parse_sampled_prototype(pulse: Value, rest: Vec<Value>) -> BuiltinResul
         None => 1.0,
     };
     Ok(PulseSource::Prototype {
-        samples: prototype.data,
+        samples: tensor::tensor_into_values_f64(prototype),
         fs,
     })
 }
@@ -475,6 +700,14 @@ async fn parse_gauspuls_params(rest: &[Value]) -> BuiltinResult<GauspulsParams> 
 }
 
 async fn scalar_arg(value: &Value, label: &str) -> BuiltinResult<f64> {
+    crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        value,
+        &PULSTRAN_INTEGER_PARAMETER_EXTENSION,
+        BUILTIN_NAME,
+        label,
+    )
+    .await?;
     scalar_f64_from_value_async(value)
         .await
         .map_err(|err| {
@@ -493,26 +726,27 @@ async fn evaluate_pulse_train(
     delays: &[PulseInstance],
     source: &PulseSource,
 ) -> BuiltinResult<Tensor> {
-    let mut out = vec![0.0; t.data.len()];
+    let times = tensor::tensor_values_f64_cow(t);
+    let mut out = vec![0.0; times.len()];
     for pulse in delays {
         match source {
             PulseSource::Rect { width } => {
-                for (idx, &time) in t.data.iter().enumerate() {
+                for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * rectpuls_scalar(time - pulse.delay, *width);
                 }
             }
             PulseSource::Tri { width, skew } => {
-                for (idx, &time) in t.data.iter().enumerate() {
+                for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * tripuls_scalar(time - pulse.delay, *width, *skew);
                 }
             }
             PulseSource::Gaus { params } => {
-                for (idx, &time) in t.data.iter().enumerate() {
+                for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * gauspuls_scalar(time - pulse.delay, *params);
                 }
             }
             PulseSource::Prototype { samples, fs } => {
-                for (idx, &time) in t.data.iter().enumerate() {
+                for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * prototype_value(samples, *fs, time - pulse.delay);
                 }
             }
@@ -530,7 +764,7 @@ async fn evaluate_pulse_train(
                             err,
                         )
                     })?;
-                let samples = callback_samples(value, t.data.len()).await?;
+                let samples = callback_samples(value, times.len()).await?;
                 for (idx, sample) in samples.into_iter().enumerate() {
                     out[idx] += pulse.amplitude * sample;
                 }
@@ -542,7 +776,10 @@ async fn evaluate_pulse_train(
 }
 
 fn shifted_time_value(t: &Tensor, delay: f64) -> BuiltinResult<Value> {
-    let data = t.data.iter().map(|value| value - delay).collect::<Vec<_>>();
+    let data = tensor::tensor_values_f64_cow(t)
+        .iter()
+        .map(|value| value - delay)
+        .collect::<Vec<_>>();
     Tensor::new(data, t.shape.clone())
         .map(tensor_into_value)
         .map_err(|err| pulstran_error_with_detail(&PULSTRAN_ERROR_INTERNAL, &err))
@@ -550,16 +787,17 @@ fn shifted_time_value(t: &Tensor, delay: f64) -> BuiltinResult<Value> {
 
 async fn callback_samples(value: Value, expected_len: usize) -> BuiltinResult<Vec<f64>> {
     let tensor = real_tensor_arg(value, &PULSTRAN_ERROR_INVALID_PULSE).await?;
-    if tensor.data.len() == expected_len {
-        Ok(tensor.data)
-    } else if tensor.data.len() == 1 {
-        Ok(vec![tensor.data[0]; expected_len])
+    let actual_len = tensor.len();
+    if actual_len == expected_len {
+        Ok(tensor::tensor_into_values_f64(tensor))
+    } else if actual_len == 1 {
+        Ok(vec![tensor::tensor_value_f64(&tensor, 0); expected_len])
     } else {
         Err(pulstran_error_with_detail(
             &PULSTRAN_ERROR_INVALID_PULSE,
             format!(
                 "pulse function returned {} samples for {expected_len} input samples",
-                tensor.data.len()
+                actual_len
             ),
         ))
     }
@@ -591,7 +829,8 @@ fn prototype_value(samples: &[f64], fs: f64, t: f64) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, CharArray, StringArray};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{CharArray, IntegerStorage, StringArray};
 
     fn call(t: Value, d: Value, pulse: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(pulstran_builtin(t, d, pulse, rest))
@@ -602,6 +841,24 @@ mod tests {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor")
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn all_integer_storages() -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(vec![0, 1]),
+            IntegerStorage::I16(vec![0, 1]),
+            IntegerStorage::I32(vec![0, 1]),
+            IntegerStorage::I64(vec![0, 1]),
+            IntegerStorage::U8(vec![0, 1]),
+            IntegerStorage::U16(vec![0, 1]),
+            IntegerStorage::U32(vec![0, 1]),
+            IntegerStorage::U64(vec![0, 1]),
+        ]
     }
 
     #[test]
@@ -619,7 +876,7 @@ mod tests {
             .expect("pulstran"),
         );
         assert_eq!(out.shape, vec![1, 4]);
-        assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -637,7 +894,45 @@ mod tests {
             )
             .expect("pulstran"),
         );
-        assert_eq!(out.data, vec![2.0, 3.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0, 3.0]);
+    }
+
+    #[test]
+    fn pulstran_reads_typed_integer_times_and_delay_amplitudes_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let t = integer_tensor(vec![0, 1], vec![1, 2]);
+        let d = integer_tensor(vec![0, 1, 2, 3], vec![2, 2]);
+        let pulse =
+            Value::StringArray(StringArray::new(vec!["rectpuls".to_string()], vec![1, 1]).unwrap());
+        let out = expect_tensor(
+            call(
+                Value::Tensor(t),
+                Value::Tensor(d),
+                pulse,
+                vec![Value::Num(0.25)],
+            )
+            .expect("pulstran"),
+        );
+        assert_eq!(out.materialize_f64(), vec![2.0, 3.0]);
+    }
+
+    #[test]
+    fn pulstran_reads_native_single_times_and_delays_authoritatively() {
+        let t = Tensor::from_f32(vec![0.0, 1.0], vec![1, 2]).expect("single times");
+        let d = Tensor::from_f32(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2])
+            .expect("single delay amplitudes");
+        let pulse =
+            Value::StringArray(StringArray::new(vec!["rectpuls".to_string()], vec![1, 1]).unwrap());
+        let out = expect_tensor(
+            call(
+                Value::Tensor(t),
+                Value::Tensor(d),
+                pulse,
+                vec![Value::Num(0.25)],
+            )
+            .expect("pulstran"),
+        );
+        assert_eq!(out.materialize_f64(), vec![2.0, 3.0]);
     }
 
     #[test]
@@ -654,7 +949,42 @@ mod tests {
             )
             .expect("pulstran"),
         );
-        assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn pulstran_reads_typed_integer_sampled_prototype_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let t = Tensor::new(vec![0.0, 0.5, 1.0, 1.5, 2.0], vec![1, 5]).unwrap();
+        let d = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
+        let prototype = integer_tensor(vec![0, 1, 0], vec![1, 3]);
+        let out = expect_tensor(
+            call(
+                Value::Tensor(t),
+                Value::Tensor(d),
+                Value::Tensor(prototype),
+                vec![Value::Num(2.0)],
+            )
+            .expect("pulstran"),
+        );
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn pulstran_callback_samples_read_typed_integer_storage_exactly() {
+        let samples = block_on(callback_samples(
+            Value::Tensor(integer_tensor(vec![2, 4, 6], vec![1, 3])),
+            3,
+        ))
+        .expect("callback samples");
+        assert_eq!(samples, vec![2.0, 4.0, 6.0]);
+
+        let repeated = block_on(callback_samples(
+            Value::Tensor(integer_tensor(vec![7], vec![1, 1])),
+            3,
+        ))
+        .expect("scalar callback sample");
+        assert_eq!(repeated, vec![7.0, 7.0, 7.0]);
     }
 
     #[test]
@@ -677,6 +1007,91 @@ mod tests {
             err.identifier(),
             PULSTRAN_ERROR_INVALID_PARAMETER.identifier
         );
+    }
+
+    #[test]
+    fn pulstran_automatic_residency_is_transparent_and_explicit_residency_is_gated() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let times = Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("times");
+            let automatic = gpu_helpers::upload_tensor(provider, &times).expect("upload");
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let output = call(
+                Value::GpuTensor(automatic),
+                Value::Num(0.0),
+                Value::from("rectpuls"),
+                vec![Value::Num(0.25)],
+            )
+            .expect("automatic resident input");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected automatic resident output");
+            };
+            assert!(!runmat_accelerate_api::handle_is_explicit(output_handle));
+            assert_eq!(
+                test_support::gather(output)
+                    .expect("gather")
+                    .materialize_f64(),
+                vec![1.0, 0.0]
+            );
+
+            let explicit = gpu_helpers::upload_tensor(provider, &times).expect("upload");
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let error = call(
+                Value::GpuTensor(explicit),
+                Value::Num(0.0),
+                Value::from("rectpuls"),
+                vec![Value::Num(0.25)],
+            )
+            .expect_err("strict explicit input");
+            assert_eq!(
+                error.identifier(),
+                PULSTRAN_EXPLICIT_GPU_EXTENSION.error_identifier
+            );
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn pulstran_wgpu_fallback_enforces_double_residency_for_all_integer_classes() {
+        use crate::builtins::common::test_support;
+
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_integer_storages() {
+            let times = Tensor::new_integer(storage, vec![1, 2]).expect("integer times");
+            let handle = gpu_helpers::upload_tensor(provider, &times).expect("upload");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let result = call(
+                Value::GpuTensor(handle),
+                Value::Num(0.0),
+                Value::from("rectpuls"),
+                vec![Value::Num(0.25)],
+            );
+            let output = result.expect("resident integer pulstran");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(output_handle),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            assert_eq!(
+                test_support::gather(output)
+                    .expect("gather")
+                    .materialize_f64(),
+                vec![1.0, 0.0]
+            );
+        }
     }
 
     #[test]

@@ -1,11 +1,15 @@
 //! MATLAB-compatible legacy `histc` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -125,6 +129,87 @@ pub const HISTC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const HISTC_WIDE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "histc-wide-integer",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "histc with int64 or uint64 input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HistcWideIntegerExtension"),
+};
+const HISTC_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "histc-logical",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "histc with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HistcLogicalExtension"),
+};
+const HISTC_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "histc-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "histc with gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HistcGpuInputExtension"),
+};
+pub const HISTC_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    HISTC_WIDE_INTEGER_EXTENSION,
+    HISTC_LOGICAL_EXTENSION,
+    HISTC_GPU_EXTENSION,
+];
+const HISTC_DOCUMENTED_CLASSES: [BuiltinIntegerClass; 6] = [
+    BuiltinIntegerClass::Int8,
+    BuiltinIntegerClass::Int16,
+    BuiltinIntegerClass::Int32,
+    BuiltinIntegerClass::Uint8,
+    BuiltinIntegerClass::Uint16,
+    BuiltinIntegerClass::Uint32,
+];
+const HISTC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &HISTC_DOCUMENTED_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB documents integer classes through 32 bits; int64 and uint64 are gated RunMat extensions.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "binranges",
+        classes: &HISTC_DOCUMENTED_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB documents integer classes through 32 bits for bin ranges.",
+    },
+];
+const HISTC_WIDE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x_or_binranges",
+        classes: &[
+            BuiltinIntegerClass::Int64,
+            BuiltinIntegerClass::Uint64,
+        ],
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "int64 and uint64 are not documented for legacy histc and require the wide-integer extension gate.",
+    }];
+pub const HISTC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[bincounts, ind] = histc(integer_x, integer_binranges, dim)",
+        inputs: &HISTC_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Documented integer inputs are host-only and produce double counts and indices; unsupported classes and residency gate before conversion or gather.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[bincounts, ind] = histc(wide_integer_x_or_binranges, ...)",
+        inputs: &HISTC_WIDE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "A gated RunMat extension; values enter the legacy floating histogram domain only after the compatibility gate.",
+    },
+];
+
 fn histc_type(args: &[Type], ctx: &runmat_builtins::ResolveContext) -> Type {
     let Some(edge_len) = args.get(1).and_then(edge_count_from_type) else {
         return Type::tensor();
@@ -172,6 +257,8 @@ fn histc_type(args: &[Type], ctx: &runmat_builtins::ResolveContext) -> Type {
     sink = true,
     type_resolver(histc_type),
     descriptor(crate::builtins::stats::hist::histc::HISTC_DESCRIPTOR),
+    extensions(crate::builtins::stats::hist::histc::HISTC_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::hist::histc::HISTC_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::hist::histc"
 )]
 async fn histc_builtin(x: Value, binranges: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -190,6 +277,8 @@ async fn histc_builtin(x: Value, binranges: Value, rest: Vec<Value>) -> BuiltinR
             ))
         }
     };
+    ensure_histc_input_extensions(&x)?;
+    ensure_histc_input_extensions(&binranges)?;
     let eval = evaluate(x, binranges, dim).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
@@ -209,11 +298,34 @@ async fn histc_builtin(x: Value, binranges: Value, rest: Vec<Value>) -> BuiltinR
     Ok(Value::Tensor(eval.counts))
 }
 
+fn ensure_histc_input_extensions(value: &Value) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(&HISTC_GPU_EXTENSION, NAME)?;
+        return Ok(());
+    }
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(&HISTC_LOGICAL_EXTENSION, NAME)?;
+    }
+    let wide = matches!(
+        value,
+        Value::Int(runmat_value::IntValue::I64(_) | runmat_value::IntValue::U64(_))
+    ) || matches!(value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::I64 | NumericDType::U64));
+    if wide {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HISTC_WIDE_INTEGER_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
 pub async fn evaluate(
     x: Value,
     binranges: Value,
     dim: Option<usize>,
 ) -> BuiltinResult<HistcResult> {
+    ensure_histc_input_extensions(&x)?;
+    ensure_histc_input_extensions(&binranges)?;
     let x = value_to_real_tensor(x).await?;
     let edges = EdgeSets::from_tensor(value_to_real_tensor(binranges).await?)?;
     histc_from_tensors(x, edges, dim)
@@ -235,28 +347,30 @@ struct EdgeSets {
 
 impl EdgeSets {
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        if is_vector_shape(&tensor.shape) {
-            validate_edges(&tensor.data)?;
+        let shape = tensor.shape.clone();
+        let data = tensor::tensor_into_values_f64(tensor);
+        if is_vector_shape(&shape) {
+            validate_edges(&data)?;
             return Ok(Self {
-                rows: tensor.data.len(),
+                rows: data.len(),
                 cols: 1,
-                data: tensor.data,
-                vector_shape: Some(tensor.shape),
+                data,
+                vector_shape: Some(shape),
             });
         }
-        if tensor.shape.len() > 2 {
+        if shape.len() > 2 {
             return Err(invalid_argument(
                 "histc: matrix binranges must be two-dimensional",
             ));
         }
-        let rows = tensor.shape.first().copied().unwrap_or(tensor.data.len());
-        let cols = tensor.shape.get(1).copied().unwrap_or(1);
+        let rows = shape.first().copied().unwrap_or(data.len());
+        let cols = shape.get(1).copied().unwrap_or(1);
         for col in 0..cols {
             let start = col * rows;
-            validate_edges(&tensor.data[start..start + rows])?;
+            validate_edges(&data[start..start + rows])?;
         }
         Ok(Self {
-            data: tensor.data,
+            data,
             rows,
             cols,
             vector_shape: None,
@@ -281,6 +395,7 @@ fn histc_from_tensors(
     edges: EdgeSets,
     dim: Option<usize>,
 ) -> BuiltinResult<HistcResult> {
+    let x_values = tensor::tensor_values_f64(&x);
     let x_shape = canonical_shape(&x.shape);
     let vector_call = dim.is_none() && is_vector_shape(&x_shape);
     let dim_index = match dim {
@@ -314,7 +429,7 @@ fn histc_from_tensors(
     let mut indices = if empty_edges {
         Vec::new()
     } else {
-        vec![0.0; x.data.len()]
+        vec![0.0; x_values.len()]
     };
 
     let out_stride = if vector_call {
@@ -330,10 +445,10 @@ fn histc_from_tensors(
             let edge_slice = edges.edge_slice(slice);
             for pos in 0..dim_len {
                 let input_index = low + pos * stride + high * stride * dim_len;
-                if input_index >= x.data.len() {
+                if input_index >= x_values.len() {
                     continue;
                 }
-                if let Some(bin) = classify_bin(x.data[input_index], edge_slice) {
+                if let Some(bin) = classify_bin(x_values[input_index], edge_slice) {
                     if !empty_edges {
                         indices[input_index] = (bin + 1) as f64;
                     }
@@ -407,7 +522,21 @@ fn host_to_real_tensor(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn complex_real_tensor(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.into_iter().map(|(re, _)| re).collect();
+    if let Some(storage) = tensor.integer_storage() {
+        let data = storage
+            .real
+            .exact_values()
+            .into_iter()
+            .map(|value| value.to_f64())
+            .collect();
+        return Tensor::new(data, tensor.shape)
+            .map_err(|err| internal_error(format!("histc: {err}")));
+    }
+    let data = tensor
+        .materialize_f64()
+        .into_iter()
+        .map(|(re, _)| re)
+        .collect();
     Tensor::new(data, tensor.shape).map_err(|err| internal_error(format!("histc: {err}")))
 }
 
@@ -520,14 +649,20 @@ fn descriptor_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, ResolveContext};
+    use runmat_builtins::ResolveContext;
+    use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
     }
 
     fn values(value: Tensor) -> Vec<f64> {
-        value.data
+        value.materialize_f64()
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -611,6 +746,77 @@ mod tests {
     }
 
     #[test]
+    fn histc_reads_typed_integer_inputs_and_edges_exactly() {
+        let x = typed_tensor(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![1, 4]);
+        let edges = typed_tensor(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]);
+
+        let result = block_on(evaluate(x, edges, None)).expect("histc");
+
+        assert_eq!(result.counts.shape, vec![1, 3]);
+        assert_eq!(values(result.counts), vec![1.0, 2.0, 1.0]);
+        assert_eq!(values(result.indices), vec![1.0, 2.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn histc_wide_integer_inputs_are_strictly_extension_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let x = typed_tensor(IntegerStorage::U64(vec![0, 1]), vec![1, 2]);
+        let edges = typed_tensor(IntegerStorage::U64(vec![0, 1]), vec![1, 2]);
+        let error = block_on(evaluate(x, edges, None)).expect_err("wide integer gate");
+        assert_eq!(
+            error.identifier(),
+            HISTC_WIDE_INTEGER_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn histc_documented_integer_classes_do_not_require_extensions() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for storage in [
+            IntegerStorage::I8(vec![0, 1]),
+            IntegerStorage::I16(vec![0, 1]),
+            IntegerStorage::I32(vec![0, 1]),
+            IntegerStorage::U8(vec![0, 1]),
+            IntegerStorage::U16(vec![0, 1]),
+            IntegerStorage::U32(vec![0, 1]),
+        ] {
+            let x = typed_tensor(storage, vec![1, 2]);
+            let edges = tensor(vec![0.0, 1.0], vec![1, 2]);
+            block_on(evaluate(x, edges, None)).expect("documented integer class");
+        }
+    }
+
+    #[test]
+    fn histc_reads_typed_integer_matrix_edge_columns_exactly() {
+        let x = typed_tensor(IntegerStorage::I16(vec![0, 2, 10, 20]), vec![2, 2]);
+        let edges = typed_tensor(IntegerStorage::I16(vec![0, 1, 3, 0, 15, 30]), vec![3, 2]);
+
+        let result = block_on(evaluate(x, edges, None)).expect("histc");
+
+        assert_eq!(result.counts.shape, vec![3, 2]);
+        assert_eq!(values(result.counts), vec![1.0, 1.0, 0.0, 1.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn histc_reads_typed_complex_integer_real_storage_exactly() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I16(vec![0, 1, 2]),
+                IntegerStorage::I16(vec![99, 99, 99]),
+            )
+            .unwrap(),
+            vec![1, 3],
+        )
+        .unwrap();
+        let edges = typed_tensor(IntegerStorage::I16(vec![0, 1, 2]), vec![1, 3]);
+
+        let result = block_on(evaluate(Value::ComplexTensor(complex), edges, None)).expect("histc");
+
+        assert_eq!(values(result.counts), vec![1.0, 1.0, 1.0]);
+        assert_eq!(values(result.indices), vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
     fn histc_rejects_decreasing_or_nan_edges() {
         let x = tensor(vec![1.0], vec![1, 1]);
         let err = block_on(evaluate(
@@ -640,9 +846,9 @@ mod tests {
         let edges = tensor(Vec::new(), vec![1, 0]);
         let result = block_on(evaluate(x, edges, None)).expect("histc empty edges");
         assert_eq!(result.counts.shape, vec![1, 0]);
-        assert!(result.counts.data.is_empty());
+        assert!(result.counts.materialize_f64().is_empty());
         assert_eq!(result.indices.shape, vec![0, 0]);
-        assert!(result.indices.data.is_empty());
+        assert!(result.indices.materialize_f64().is_empty());
     }
 
     #[test]
@@ -746,6 +952,6 @@ mod tests {
         let Value::Tensor(counts) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(counts.data, vec![1.0, 1.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 1.0]);
     }
 }

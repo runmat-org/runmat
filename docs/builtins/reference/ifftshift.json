@@ -16,7 +16,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Uses provider circshift hooks when available; otherwise gathers, reorders on the host, and uploads again."
+    "notes": "Uses the input owner's validated `circshift` hook when available; only explicit unsupported-hook responses select exact host fallback and class-preserving restoration."
   },
   "fusion": {
     "elementwise": false,
@@ -32,7 +32,7 @@
   "description": "`ifftshift(X)` circularly shifts data so zero-frequency components move back to origin ordering. Default and dimension-specific shifting behavior follow MATLAB semantics.",
   "behaviors": [
     "When no dimensions are specified, every axis is shifted by `ceil(size(X, dim) / 2)`.",
-    "Passing a list of dimensions restricts shifting to those axes; zeros and ones are treated as no-ops.",
+    "A scalar dimension restricts shifting to one axis. RunMat additionally accepts a dimension vector or logical mask as a compatibility-gated extension.",
     "Odd-length dimensions shift by one additional element compared with `fftshift`, matching MATLAB's `ifftshift` parity rules.",
     "Works for real, complex, logical, and GPU-resident tensors.",
     "Empty arrays and scalars are returned unchanged."
@@ -123,7 +123,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/fft/ifftshift.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/fft/ifftshift.rs"
   },
-  "gpu_residency": "You can rely on RunMat's auto-offload to keep FFT data on the GPU. When a provider exposes `circshift`, `ifftshift` executes entirely on the device and the result remains GPU-resident. If no provider is registered—or it lacks `circshift`—RunMat gathers once, applies the host reorder, and uploads the result so the rest of the computation can still run accelerated. You can call `gpuArray` explicitly when you need MATLAB parity or to enforce a residency boundary.",
+  "gpu_residency": "When the input owner exposes a compatible `circshift`, `ifftshift` accepts only a fresh result with matching shape, class, storage, precision, device, and ownership. An explicit unsupported-hook response uses one exact internal download and class-preserving restoration; provider failures and malformed results are terminal.",
   "gpu_behavior": [
     "RunMat first attempts to execute the shift entirely on the GPU using the provider's `circshift` hook. If that is unavailable, RunMat gathers the data exactly once, performs the reorder on the host, and uploads the result so downstream computations can continue on the device. Scalars remain on their current device to avoid unnecessary transfers."
   ]

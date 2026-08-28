@@ -30,13 +30,16 @@
     "unit": "builtins::math::trigonometry::cosh::tests",
     "integration": "builtins::math::trigonometry::cosh::tests::cosh_gpu_provider_roundtrip"
   },
-  "description": "`Y = cosh(X)` computes the hyperbolic cosine of each element in `X`. Real and complex inputs are supported with element-wise semantics matching MATLAB and RunMat.",
+  "description": "`Y = cosh(X)` computes hyperbolic cosine element-wise. MATLAB documents single and double real or complex arrays; RunMat mode additionally admits typed integers, logicals, and characters through explicit compatibility gates.",
   "behaviors": [
     "Works on scalars, vectors, matrices, and N-D tensors with MATLAB broadcasting semantics for scalar expansion.",
-    "Logical inputs are converted to double precision (`true → 1.0`, `false → 0.0`) before applying `cosh`.",
+    "Single real and complex inputs preserve single output; double inputs preserve double output.",
+    "Typed integers are a RunMat-only extension. All eight real integer classes require exact binary64 representability before evaluation and produce double output; aligned values above `flintmax` are accepted when their significant bits fit binary64.",
+    "Logical and character inputs are separately gated RunMat-only extensions and produce double output.",
     "Complex inputs follow the analytic rule `cosh(a + bi) = cosh(a)cos(b) + i·sinh(a)sin(b)`, propagating `NaN`/`Inf` components independently.",
     "Character arrays are converted to their numeric code points prior to evaluation, with double-precision outputs that preserve the input shape.",
-    "Empty arrays return empty results that respect MATLAB’s shape semantics."
+    "Empty arrays return empty results that respect MATLAB’s shape semantics.",
+    "Table, timetable, tall, and distributed container inputs remain general RunMat container/runtime gaps rather than integer-storage gaps."
   ],
   "examples": [
     {
@@ -81,7 +84,7 @@
     },
     {
       "question": "What happens if the GPU provider lacks `unary_cosh`?",
-      "answer": "RunMat falls back to the host implementation. Tensors are gathered to the CPU, evaluated, and left on the host unless later operations request GPU residency (`'like'`, planner decisions, etc.)."
+      "answer": "RunMat gathers to the host implementation, evaluates with the original floating precision or the extension's double boundary, and restores the result to the owning provider."
     },
     {
       "question": "Can `cosh` participate in fusion?",
@@ -89,7 +92,7 @@
     },
     {
       "question": "Are integers preserved?",
-      "answer": "Inputs are promoted to double precision before evaluation, matching MATLAB behaviour. Cast back explicitly if you need integer outputs."
+      "answer": "Typed integers are a RunMat-only extension. They are accepted only when exactly representable as double, and the result is double."
     },
     {
       "question": "How does `cosh` handle NaN or Inf values?",
@@ -97,10 +100,14 @@
     },
     {
       "question": "Is there a warmup penalty on first GPU use?",
-      "answer": "Providers may compile elementwise pipelines during initialization. If `unary_cosh` is unavailable, the CPU fallback avoids the warmup altogether."
+      "answer": "Providers may compile elementwise pipelines during initialization. If `unary_cosh` is unavailable, RunMat evaluates on the host and uploads a new result handle to the input's owning provider."
     }
   ],
   "links": [
+    {
+      "label": "MATLAB cosh documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/double.cosh.html"
+    },
     {
       "label": "cos",
       "url": "./cos"
@@ -164,6 +171,6 @@
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. The fusion planner keeps tensors on the GPU whenever the active provider exposes the required kernels (such as `unary_cosh`). Manual `gpuArray` / `gather` calls remain available for MATLAB compatibility or when you must control residency before interoperating with external code.",
   "gpu_behavior": [
-    "When RunMat Accelerate is active, tensors that already reside on the GPU stay there. Providers implementing the optional `unary_cosh` hook execute the operation entirely on the device (and fused elementwise kernels can inline `cosh` alongside other operations). If the active provider lacks this hook, RunMat gathers the data back to the host, computes the reference result, and only re-uploads when downstream operations demand GPU residency."
+    "When RunMat Accelerate is active, tensors that already reside on the GPU stay there. Providers implementing the optional `unary_cosh` hook execute the operation entirely on the device (and fused elementwise kernels can inline `cosh` alongside other operations). If the owning provider lacks this hook or returns an invalid output handle, RunMat gathers the data to the host, computes the reference result, and immediately uploads the result back to the input handle's owning provider."
   ]
 }

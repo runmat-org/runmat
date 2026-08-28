@@ -1,11 +1,15 @@
 //! MATLAB-compatible `strings` builtin that preallocates string arrays filled with empty scalars.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, LogicalArray, NumericScalar, StringArray, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::random_args::{keyword_of, shape_from_value};
@@ -13,12 +17,12 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strings";
 const SIZE_INTEGER_ERR: &str = "size inputs must be integers";
-const SIZE_NONNEGATIVE_ERR: &str = "size inputs must be nonnegative integers";
 const SIZE_FINITE_ERR: &str = "size inputs must be finite";
 const SIZE_SCALAR_ERR: &str = "size inputs must be scalar";
 
@@ -174,6 +178,64 @@ pub const STRINGS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRINGS_ERRORS,
 };
 
+const STRINGS_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "strings-like-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "strings(..., 'like', prototype) is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StringsLikePrototypeExtension"),
+};
+
+const STRINGS_FILL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "strings-fill-mode",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "strings(..., 'empty'|'missing') fill selection is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StringsFillModeExtension"),
+};
+
+pub const STRINGS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [STRINGS_LIKE_EXTENSION, STRINGS_FILL_EXTENSION];
+
+const STRINGS_SIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "size",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar, separate, and vector size forms accept every built-in integer class. Negative values become zero, and dimensions are checked exactly against the host allocation domain.",
+    }];
+
+const STRINGS_LIKE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "prototype",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The RunMat-only like form inspects only prototype shape; integer class and payload are not converted or read.",
+    }];
+
+pub const STRINGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "str = strings(n | sz | sz1,...,szN)",
+        inputs: &STRINGS_SIZE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility target documents GPU-array size input but host execution. RunMat gathers through the owning provider, parses native integer storage exactly, and always returns a host string array.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "str = strings(..., 'like', prototype)",
+        inputs: &STRINGS_LIKE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The like form is a mode-gated RunMat extension and is not presented as part of the compatibility target's strings contract.",
+    },
+];
+
 fn strings_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strings_error_with_message(error.message, error)
 }
@@ -239,9 +301,12 @@ enum FillKind {
     accel = "array_construct",
     type_resolver(string_array_type),
     descriptor(crate::builtins::strings::core::strings::STRINGS_DESCRIPTOR),
+    extensions(crate::builtins::strings::core::strings::STRINGS_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::core::strings::STRINGS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::strings"
 )]
 async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    preflight_strings_extensions(&rest)?;
     let ParsedStrings { shape, fill } = parse_arguments(rest).await?;
     let total = shape.iter().try_fold(1usize, |acc, &dim| {
         acc.checked_mul(dim)
@@ -261,6 +326,26 @@ async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let array =
         StringArray::new(data, shape).map_err(|_| strings_error(&STRINGS_ERROR_INTERNAL))?;
     Ok(Value::StringArray(array))
+}
+
+fn preflight_strings_extensions(args: &[Value]) -> BuiltinResult<()> {
+    for value in args {
+        let Some(keyword) = keyword_of(value) else {
+            continue;
+        };
+        match keyword.as_str() {
+            "like" => crate::compatibility::ensure_builtin_extension_enabled(
+                &STRINGS_LIKE_EXTENSION,
+                FN_NAME,
+            )?,
+            "missing" | "empty" => crate::compatibility::ensure_builtin_extension_enabled(
+                &STRINGS_FILL_EXTENSION,
+                FN_NAME,
+            )?,
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
@@ -338,13 +423,6 @@ fn err_integer() -> RuntimeError {
     )
 }
 
-fn err_nonnegative() -> RuntimeError {
-    strings_error_with_message(
-        format!("{FN_NAME}: {SIZE_NONNEGATIVE_ERR}"),
-        &STRINGS_ERROR_INVALID_SIZE,
-    )
-}
-
 fn err_finite() -> RuntimeError {
     strings_error_with_message(
         format!("{FN_NAME}: {SIZE_FINITE_ERR}"),
@@ -368,7 +446,7 @@ fn parse_size_values(values: Vec<Value>) -> BuiltinResult<Option<Vec<usize>>> {
 
 fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Int(iv) => Ok(vec![validate_i64_dimension(iv.to_i64())?]),
+        Value::Int(iv) => parse_integer_dimension(&iv).map(|dimension| vec![dimension]),
         Value::Num(n) => Ok(vec![parse_numeric_dimension(n)?]),
         Value::Bool(b) => Ok(vec![if b { 1 } else { 0 }]),
         Value::Tensor(t) => parse_size_tensor(&t),
@@ -379,20 +457,20 @@ fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
 
 fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(iv) => {
-            let raw = iv.to_i64();
-            validate_i64_dimension(raw)
-        }
+        Value::Int(iv) => parse_integer_dimension(iv),
         Value::Num(n) => parse_numeric_dimension(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            if !tensor::is_scalar_tensor(t) {
                 return Err(strings_error_with_message(
                     format!("{FN_NAME}: {SIZE_SCALAR_ERR}"),
                     &STRINGS_ERROR_INVALID_SIZE,
                 ));
             }
-            parse_numeric_dimension(t.data[0])
+            match t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                Some(value) => parse_integer_dimension(&value),
+                None => parse_numeric_dimension(tensor::tensor_value_f64(t, 0)),
+            }
         }
         Value::LogicalArray(arr) => {
             if arr.data.len() != 1 {
@@ -408,7 +486,8 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    if tensor.data.is_empty() {
+    let len = tensor.len();
+    if len == 0 {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&tensor.shape) {
@@ -417,10 +496,21 @@ fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
             &STRINGS_ERROR_INVALID_SIZE,
         ));
     }
-    tensor
-        .data
-        .iter()
-        .map(|&value| parse_numeric_dimension(value))
+    (0..len)
+        .map(|index| {
+            let value = tensor
+                .numeric_value_at(index)
+                .expect("tensor storage length matches shape");
+            match value {
+                NumericScalar::F64(value) => parse_numeric_dimension(value),
+                NumericScalar::F32(value) => parse_numeric_dimension(f64::from(value)),
+                value => parse_integer_dimension(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                ),
+            }
+        })
         .collect()
 }
 
@@ -450,9 +540,9 @@ fn parse_numeric_dimension(value: f64) -> BuiltinResult<usize> {
         return Err(err_integer());
     }
     if rounded < 0.0 {
-        return Err(err_nonnegative());
+        return Ok(0);
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(strings_error_with_message(
             format!("{FN_NAME}: requested dimension exceeds platform limits"),
             &STRINGS_ERROR_SIZE_OVERFLOW,
@@ -461,14 +551,28 @@ fn parse_numeric_dimension(value: f64) -> BuiltinResult<usize> {
     Ok(rounded as usize)
 }
 
-fn normalize_dims(dims: Vec<usize>) -> Vec<usize> {
+fn parse_integer_dimension(value: &IntValue) -> BuiltinResult<usize> {
+    if value.try_to_i64().is_some_and(|value| value < 0) {
+        return Ok(0);
+    }
+    value
+        .try_to_usize()
+        .ok_or_else(|| strings_error(&STRINGS_ERROR_INVALID_SIZE))
+}
+
+fn normalize_dims(mut dims: Vec<usize>) -> Vec<usize> {
     match dims.len() {
         0 => vec![0, 0],
         1 => {
             let side = dims[0];
             vec![side, side]
         }
-        _ => dims,
+        _ => {
+            while dims.len() > 2 && dims.last() == Some(&1) {
+                dims.pop();
+            }
+            dims
+        }
     }
 }
 
@@ -480,19 +584,6 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     }
 }
 
-fn validate_i64_dimension(raw: i64) -> BuiltinResult<usize> {
-    if raw < 0 {
-        return Err(err_nonnegative());
-    }
-    if (raw as u128) > (usize::MAX as u128) {
-        return Err(strings_error_with_message(
-            format!("{FN_NAME}: requested dimension exceeds platform limits"),
-            &STRINGS_ERROR_SIZE_OVERFLOW,
-        ));
-    }
-    Ok(raw as usize)
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -500,8 +591,10 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, NumericStorage};
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         futures::executor::block_on(super::strings_builtin(rest))
     }
 
@@ -539,10 +632,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_rectangular_multiple_args() {
-        let args = vec![
-            Value::Int(runmat_builtins::IntValue::I32(2)),
-            Value::Num(3.0),
-        ];
+        let args = vec![Value::Int(runmat_value::IntValue::I32(2)), Value::Num(3.0)];
         let result = strings_builtin(args).expect("strings");
         match result {
             Value::StringArray(array) => {
@@ -560,26 +650,95 @@ pub(crate) mod tests {
         let result = strings_builtin(vec![Value::Tensor(dims)]).expect("strings");
         match result {
             Value::StringArray(array) => {
-                assert_eq!(array.shape, vec![2, 3, 1]);
+                assert_eq!(array.shape, vec![2, 3]);
                 assert_eq!(array.data.len(), 6);
             }
             other => panic!("expected string array, got {other:?}"),
         }
     }
 
+    #[test]
+    fn strings_native_single_size_vector_reads_authoritative_storage() {
+        let dims = Tensor::from_numeric_storage(NumericStorage::F32(vec![2.0, 3.0]), vec![1, 2])
+            .expect("single dimensions");
+        let result = strings_builtin(vec![Value::Tensor(dims)]).expect("strings");
+        match result {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![2, 3]);
+                assert_eq!(array.data.len(), 6);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn strings_typed_integer_size_vector_preserves_large_uint64_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let dims =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).expect("dims");
+        let result = strings_builtin(vec![Value::Tensor(dims)]).expect("strings");
+        match result {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![large as usize, 0]);
+                assert!(array.data.is_empty());
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn strings_typed_integer_scalar_tensor_parser_is_exact() {
+        let large = 9_007_199_254_740_993_u64;
+        let scalar =
+            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("scalar");
+        assert_eq!(
+            parse_size_scalar(&Value::Tensor(scalar)).expect("parse scalar"),
+            large as usize
+        );
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, 1]), vec![1, 2]).expect("vector");
+        assert_eq!(
+            parse_size_tensor(&vector).expect("parse vector"),
+            vec![large as usize, 1]
+        );
+    }
+
+    #[test]
+    fn strings_typed_integer_tensor_dimensions_treat_negative_values_as_zero() {
+        let scalar =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
+        assert_eq!(parse_size_scalar(&Value::Tensor(scalar)).unwrap(), 0);
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("vector");
+        assert_eq!(parse_size_tensor(&vector).unwrap(), vec![2, 0]);
+    }
+
+    #[test]
+    fn strings_numeric_dimensions_reject_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(parse_numeric_dimension(boundary).is_err());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn strings_preserves_trailing_singletons() {
+    fn strings_ignores_trailing_singletons_beyond_second_dimension() {
         let args = vec![
             Value::Num(3.0),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
             Value::Num(1.0),
             Value::Bool(true),
         ];
         let result = strings_builtin(args).expect("strings");
         match result {
             Value::StringArray(array) => {
-                assert_eq!(array.shape, vec![3, 1, 1, 1]);
+                assert_eq!(array.shape, vec![3, 1]);
                 assert_eq!(array.data.len(), 3);
             }
             other => panic!("expected string array, got {other:?}"),
@@ -607,7 +766,7 @@ pub(crate) mod tests {
         let result = strings_builtin(vec![Value::LogicalArray(logical)]).expect("strings");
         match result {
             Value::StringArray(array) => {
-                assert_eq!(array.shape, vec![1, 0, 1]);
+                assert_eq!(array.shape, vec![1, 0]);
                 assert!(array.data.is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
@@ -616,10 +775,15 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn strings_negative_dimension_errors() {
-        let err =
-            error_message(strings_builtin(vec![Value::Num(-5.0)]).expect_err("expected error"));
-        assert!(err.contains(super::SIZE_NONNEGATIVE_ERR));
+    fn strings_negative_dimension_is_treated_as_zero() {
+        let result = strings_builtin(vec![Value::Num(-5.0)]).expect("negative becomes zero");
+        match result {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![0, 0]);
+                assert!(array.data.is_empty());
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -719,7 +883,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, tensor.shape);
-                assert_eq!(array.data.len(), tensor.data.len());
+                assert_eq!(array.data.len(), tensor.materialize_f64().len());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -732,7 +896,7 @@ pub(crate) mod tests {
         let result = strings_builtin(vec![
             Value::String("like".into()),
             Value::Tensor(tensor),
-            Value::Int(runmat_builtins::IntValue::I32(3)),
+            Value::Int(runmat_value::IntValue::I32(3)),
         ])
         .expect("strings");
         match result {
@@ -773,7 +937,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let dims = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &dims.data,
+                data: &dims.materialize_f64(),
                 shape: &dims.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -794,7 +958,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -827,7 +991,7 @@ pub(crate) mod tests {
         );
         let dims = Tensor::new(vec![1.0, 4.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
-            data: &dims.data,
+            data: &dims.materialize_f64(),
             shape: &dims.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");

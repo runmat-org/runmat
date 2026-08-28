@@ -1,10 +1,3 @@
----
-title: "Figure State & Handles"
-category: "Plotting System"
-section: "8.1"
-last_updated: "May 28, 2026"
----
-
 # Figure State & Handles
 
 The figure registry gives MATLAB commands a current figure, a current axes, durable graphics objects, and numeric handles that later commands can use to inspect or mutate those objects.

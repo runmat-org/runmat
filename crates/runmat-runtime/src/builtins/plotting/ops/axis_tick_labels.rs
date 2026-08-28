@@ -1,4 +1,4 @@
-use runmat_builtins::{CellArray, CharArray, Value};
+use runmat_value::{CellArray, CharArray, Value};
 
 use super::axis_ticks::TickAxis;
 use super::op_common::axes_target::AxesTarget;
@@ -10,6 +10,7 @@ use super::state::{
     set_axis_tick_labels, set_axis_tick_labels_for_axes, set_axis_ticks, set_axis_ticks_for_axes,
 };
 use super::{plotting_error, plotting_error_with_source};
+use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -315,7 +316,7 @@ fn labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<
             }
             Ok(labels)
         }
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(Vec::new()),
+        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0 => Ok(Vec::new()),
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: tick labels must be a string array or cell array of text, got {other:?}"),
@@ -372,12 +373,23 @@ pub(crate) fn label_cell_texts(value: &Value) -> Vec<String> {
 
 #[cfg(test)]
 pub(crate) fn tensor(data: Vec<f64>) -> Value {
-    Value::Tensor(runmat_builtins::Tensor {
-        rows: 1,
-        cols: data.len(),
-        shape: vec![1, data.len()],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    let len = data.len();
+    Value::Tensor(runmat_value::Tensor::new(data, vec![1, len]).expect("tick label test row"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::{IntegerStorage, Tensor};
+
+    #[test]
+    fn tick_label_parser_accepts_empty_typed_integer_tensor_without_mirror() {
+        let empty =
+            Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0]).expect("empty");
+
+        assert_eq!(
+            labels_from_value(&Value::Tensor(empty), "xticklabels").expect("labels"),
+            Vec::<String>::new()
+        );
+    }
 }

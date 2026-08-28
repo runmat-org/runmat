@@ -3,11 +3,15 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ResolveContext, StringArray, Type, Value,
+    ResolveContext, Type,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, Value};
 
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+};
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     tokenized_document_language, transform_tokenized_document, DocumentTokenType,
@@ -80,6 +84,13 @@ pub const NORMALIZE_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+pub const NORMALIZE_WORDS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "normalizeWords accepts tokenizedDocument objects or host string, character, and cell text plus textual Language and Style values. Numeric, logical, symbolic, and provider-resident inputs reject before gather or provider access.",
+    };
+
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -100,9 +111,17 @@ fn normalize_error(message: impl Into<String>) -> crate::RuntimeError {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::normalize::NORMALIZE_WORDS_DESCRIPTOR),
+    integer_audit(
+        crate::builtins::strings::text_analytics::normalize::NORMALIZE_WORDS_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::normalize"
 )]
 async fn normalize_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(contains_numeric_or_resident_text_input) {
+        return Err(normalize_error(
+            "normalizeWords: inputs and option values must be text or tokenizedDocument objects",
+        ));
+    }
     let (words, options) = parse_args(args).await?;
     normalize_words_value(words, options)
 }
@@ -298,7 +317,7 @@ fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResu
 }
 
 fn normalize_tokenized_document(
-    object: &runmat_builtins::ObjectInstance,
+    object: &runmat_value::ObjectInstance,
     mut options: NormalizeOptions,
 ) -> BuiltinResult<Value> {
     if options.language_explicit {
@@ -712,7 +731,7 @@ fn cvc(word: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, ObjectInstance, Tensor};
+    use runmat_value::{CellArray, ObjectInstance, Tensor};
 
     use crate::builtins::strings::text_analytics::documents::documents_from_object;
 

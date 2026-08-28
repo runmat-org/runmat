@@ -32,8 +32,8 @@
   },
   "description": "`triu(A)` keeps elements on and above a selected diagonal and sets elements below that diagonal to zero. Optional `k` selects the diagonal boundary using MATLAB-compatible semantics.",
   "behaviors": [
-    "Works on numeric, logical, and complex arrays.",
-    "Operates on the first two dimensions; trailing dimensions act as independent pages.",
+    "Works on numeric, logical, character, and complex arrays while preserving the input class.",
+    "With RunMat language extensions enabled, trailing dimensions are treated as independent matrix pages.",
     "Preserves logical types and complex-valued elements.",
     "Scalars are treated as `1×1` matrices and honour diagonal offsets (for example `triu(5, 1)` returns `0`).",
     "gpuArray inputs stay on the device when an acceleration provider supplies a native `triu` hook; otherwise the runtime gathers, masks on the host, and uploads the result back to the GPU."
@@ -84,7 +84,7 @@
     },
     {
       "question": "Does `triu` change the class of character arrays?",
-      "answer": "Character arrays are converted to their numeric codes (double precision) before the triangular mask is applied, matching MATLAB behaviour."
+      "answer": "No. Character inputs remain character arrays, and masked elements become the null character."
     }
   ],
   "links": [

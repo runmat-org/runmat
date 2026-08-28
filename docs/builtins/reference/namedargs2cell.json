@@ -12,7 +12,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host metadata/text helper."
+    "notes": "Host scalar-structure transformation; top-level resident numeric values reject without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -22,13 +22,14 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::common::validation::tests",
-    "integration": "crates/runmat-vm/tests/functions.rs::argument_validation_helpers_are_callable_builtins"
+    "unit": "builtins::common::validation::tests::namedargs2cell_rejects_top_level_integers_and_preserves_integer_fields_exactly",
+    "integration": "crates/runmat-vm/tests/integer_datetime_metadata_and_nonzero_semantics.rs"
   },
   "description": "`namedargs2cell(S)` preserves scalar struct field order and returns `{name1, value1, name2, value2, ...}` for name-value forwarding patterns.",
   "behaviors": [
-    "Returns a normal value and does not mutate inputs.",
-    "Accepts MATLAB text/struct representations supported by RunMat."
+    "The input must be a scalar structure; top-level integer and resident numeric inputs reject without conversion or provider access.",
+    "Field names retain structure insertion order and field values are moved unchanged into alternating name/value cells.",
+    "All eight integer classes stored in fields retain their exact class and payload, including wide `int64` and `uint64` values."
   ],
   "examples": [
     {

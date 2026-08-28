@@ -1,12 +1,16 @@
 //! MATLAB-compatible `vecnorm` builtin.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -18,6 +22,83 @@ use crate::builtins::math::linalg::type_resolvers::vecnorm_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "vecnorm";
+
+pub const VECNORM_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "vecnorm-integer-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "vecnorm with typed-integer array data is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:VecnormIntegerInputExtension"),
+    };
+pub const VECNORM_INTEGER_ORDER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "vecnorm-integer-order",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "vecnorm with a typed-integer norm order is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:VecnormIntegerOrderExtension"),
+    };
+pub const VECNORM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    VECNORM_INTEGER_INPUT_EXTENSION,
+    VECNORM_INTEGER_ORDER_EXTENSION,
+];
+
+const VECNORM_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented data classes are single and double. RunMat mode accepts real integer arrays only when every value is exactly representable at the binary64 norm boundary.",
+    }];
+const VECNORM_INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "p",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed norm order is a RunMat extension and enters the floating exponent only after exact binary64 representability is proved.",
+    }];
+const VECNORM_INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented dimension accepts every integer class and is decoded exactly as a positive platform-sized structural value.",
+    }];
+
+pub const VECNORM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "N = vecnorm(integer_A, ___)",
+        inputs: &VECNORM_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The gated integer array crosses one checked binary64 norm boundary. Host results are double and automatic residency restores results to the owning provider when supported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "N = vecnorm(A, integer_p, dim?)",
+        inputs: &VECNORM_INTEGER_ORDER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The gated typed p is checked before conversion into the norm exponent; it does not select the output class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "N = vecnorm(A, p, integer_dim)",
+        inputs: &VECNORM_INTEGER_DIM_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Dimension selection remains exact and does not enter norm arithmetic; invalid or non-platform-sized values reject without floating conversion.",
+    },
+];
 
 const VECNORM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "N",
@@ -210,13 +291,38 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "reduction",
     type_resolver(vecnorm_type),
     descriptor(crate::builtins::math::linalg::solve::vecnorm::VECNORM_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::solve::vecnorm::VECNORM_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::linalg::solve::vecnorm::VECNORM_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::solve::vecnorm"
 )]
 async fn vecnorm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if !matches!(&value, Value::ComplexTensor(_)) {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            &value,
+            &VECNORM_INTEGER_INPUT_EXTENSION,
+            NAME,
+            "input",
+        )
+        .await?;
+    }
+    if let Some(order) = rest.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            order,
+            &VECNORM_INTEGER_ORDER_EXTENSION,
+            NAME,
+            "norm order",
+        )
+        .await?;
+    }
     let args = VecnormArgs::parse(&rest)?;
     match value {
         Value::GpuTensor(handle) => vecnorm_gpu(handle, args).await,
         Value::ComplexTensor(tensor) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(
+                &tensor, NAME,
+            )?;
             let result = vecnorm_complex_tensor(&tensor, args)?;
             Ok(tensor::tensor_into_value(result))
         }
@@ -262,39 +368,17 @@ impl VecnormArgs {
 }
 
 async fn vecnorm_gpu(handle: GpuTensorHandle, args: VecnormArgs) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider();
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(map_control_flow)?;
     let result = vecnorm_real_tensor(&tensor, args)?;
-
-    if let Some(provider) = provider {
-        let view = HostTensorView {
-            data: &result.data,
-            shape: &result.shape,
-        };
-        match provider.upload(&view) {
-            Ok(handle) => {
-                runmat_accelerate_api::mark_residency(&handle);
-                return Ok(Value::GpuTensor(handle));
-            }
-            Err(err) => {
-                let message = err.to_string();
-                if message == "interaction pending..." {
-                    return Err(build_runtime_error("interaction pending...")
-                        .with_builtin(NAME)
-                        .build());
-                }
-            }
-        }
-    }
-
-    Ok(tensor::tensor_into_value(result))
+    gpu_helpers::restore_class_preserving_value(&handle, tensor::tensor_into_value(result), NAME)
+        .map_err(map_control_flow)
 }
 
 fn vecnorm_real_tensor(tensor: &Tensor, args: VecnormArgs) -> BuiltinResult<Tensor> {
     let dim = resolve_dim(&tensor.shape, args.dim);
-    let dtype = if tensor.dtype == NumericDType::F32 {
+    let dtype = if tensor.numeric_dtype() == NumericDType::F32 {
         NumericDType::F32
     } else {
         NumericDType::F64
@@ -303,7 +387,9 @@ fn vecnorm_real_tensor(tensor: &Tensor, args: VecnormArgs) -> BuiltinResult<Tens
         &tensor.shape,
         dim,
         args.order,
-        |index| tensor.data[index].abs(),
+        // The compatibility gate proves that any accepted integer extension
+        // can enter this floating norm domain without rounding.
+        |index| tensor::tensor_value_f64(tensor, index).abs(),
         dtype,
     )?;
     Ok(result)
@@ -311,15 +397,18 @@ fn vecnorm_real_tensor(tensor: &Tensor, args: VecnormArgs) -> BuiltinResult<Tens
 
 fn vecnorm_complex_tensor(tensor: &ComplexTensor, args: VecnormArgs) -> BuiltinResult<Tensor> {
     let dim = resolve_dim(&tensor.shape, args.dim);
+    let dtype = if tensor.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
+    let values = tensor.materialize_f64();
     reduce_magnitudes(
         &tensor.shape,
         dim,
         args.order,
-        |index| {
-            let (re, im) = tensor.data[index];
-            re.hypot(im)
-        },
-        NumericDType::F64,
+        |index| values[index].0.hypot(values[index].1),
+        dtype,
     )
 }
 
@@ -457,10 +546,17 @@ fn unravel_index(mut linear: usize, shape: &[usize], out: &mut [usize]) {
 fn parse_order(value: &Value) -> BuiltinResult<NormOrder> {
     match value {
         Value::Num(value) => parse_numeric_order(*value),
-        Value::Int(value) => parse_numeric_order(value.to_f64()),
+        Value::Int(value) => parse_integer_order(value),
         Value::Tensor(tensor) => {
             if tensor::is_scalar_tensor(tensor) {
-                parse_numeric_order(tensor.data[0])
+                if let Some(integer) = tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                {
+                    parse_integer_order(&integer)
+                } else {
+                    parse_numeric_order(scalar_tensor_f64(tensor))
+                }
             } else {
                 Err(argument_error(format!(
                     "{NAME}: p must be a positive scalar or Inf."
@@ -508,11 +604,46 @@ fn parse_numeric_order(raw: f64) -> BuiltinResult<NormOrder> {
     Ok(NormOrder::P(raw))
 }
 
+fn parse_integer_order(value: &IntValue) -> BuiltinResult<NormOrder> {
+    let raw = exact_integer_as_f64(value).ok_or_else(|| {
+        argument_error(format!(
+            "{NAME}: p integer is outside the exact double range."
+        ))
+    })?;
+    parse_numeric_order(raw)
+}
+
+fn exact_integer_as_f64(value: &IntValue) -> Option<f64> {
+    const MAX_EXACT_INTEGER: u64 = 1 << 53;
+    match value {
+        IntValue::I8(v) => Some(*v as f64),
+        IntValue::I16(v) => Some(*v as f64),
+        IntValue::I32(v) => Some(*v as f64),
+        IntValue::I64(v) if v.unsigned_abs() <= MAX_EXACT_INTEGER => Some(*v as f64),
+        IntValue::U8(v) => Some(*v as f64),
+        IntValue::U16(v) => Some(*v as f64),
+        IntValue::U32(v) => Some(*v as f64),
+        IntValue::U64(v) if *v <= MAX_EXACT_INTEGER => Some(*v as f64),
+        _ => None,
+    }
+}
+
 fn parse_dim(value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .filter(|dim| *dim >= 1)
+            .ok_or_else(|| {
+                argument_error(format!(
+                    "{NAME}: dim must be a positive integer numeric scalar."
+                ))
+            });
+    }
     let raw = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::Bool(_) | Value::LogicalArray(_) => {
             return Err(argument_error(format!(
                 "{NAME}: dim must be a positive integer numeric scalar."
@@ -544,7 +675,22 @@ fn parse_dim(value: &Value) -> BuiltinResult<usize> {
             "{NAME}: dim must be a positive integer numeric scalar."
         )));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(argument_error(format!(
+            "{NAME}: dim must be a positive integer numeric scalar."
+        )));
+    }
     Ok(rounded as usize)
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    if let Some(integer) = tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(0))
+    {
+        return integer.to_f64();
+    }
+    tensor::tensor_value_f64(tensor, 0)
 }
 
 fn approx_eq(a: f64, b: f64) -> bool {
@@ -564,7 +710,10 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     fn assert_close(actual: f64, expected: f64) {
         if actual.is_nan() && expected.is_nan() {
@@ -636,9 +785,9 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_close(out.data[0], (4.0f64 + 1.0 + 9.0).sqrt());
-                assert_close(out.data[1], (0.0f64 + 1.0 + 9.0).sqrt());
-                assert_close(out.data[2], 1.0);
+                assert_close(out.materialize_f64()[0], (4.0f64 + 1.0 + 9.0).sqrt());
+                assert_close(out.materialize_f64()[1], (0.0f64 + 1.0 + 9.0).sqrt());
+                assert_close(out.materialize_f64()[2], 1.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -656,8 +805,8 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_close(out.data[0], 4.0);
-                assert_close(out.data[1], 6.0);
+                assert_close(out.materialize_f64()[0], 4.0);
+                assert_close(out.materialize_f64()[1], 6.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -741,6 +890,82 @@ mod tests {
         }
     }
 
+    #[test]
+    fn vecnorm_rejects_typed_complex_integer_inputs() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+        let err = call(Value::ComplexTensor(tensor), Vec::new())
+            .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
+    }
+
+    #[test]
+    fn vecnorm_reads_authoritative_integer_input_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, 0]), vec![2, 1])
+            .expect("typed integer tensor");
+
+        let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
+        match result {
+            Value::Num(value) => assert_eq!(value, (i64::MIN as f64).abs()),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vecnorm_gates_integer_data_and_order_and_rejects_lossy_input() {
+        let integer_data = || {
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I16(vec![3, 4]), vec![2, 1]).unwrap())
+        };
+        let floating_data = || Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap());
+
+        let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = call(integer_data(), Vec::new()).expect_err("integer A must be gated");
+        assert_eq!(
+            error.identifier(),
+            VECNORM_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let error = call(
+            floating_data(),
+            vec![Value::Int(runmat_value::IntValue::U8(1))],
+        )
+        .expect_err("integer p must be gated");
+        assert_eq!(
+            error.identifier(),
+            VECNORM_INTEGER_ORDER_EXTENSION.error_identifier
+        );
+        drop(compatibility);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        assert_eq!(call(integer_data(), Vec::new()).unwrap(), Value::Num(5.0));
+        let wide = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap(),
+        );
+        let error = call(wide, Vec::new()).expect_err("lossy integer A must reject");
+        assert!(error.message().contains("exactly representable as double"));
+        drop(extensions);
+    }
+
+    #[test]
+    fn vecnorm_preserves_complex_single_output_class() {
+        let tensor = ComplexTensor::from_f32(vec![(3.0, 4.0), (5.0, 12.0)], vec![2, 1])
+            .expect("complex single");
+        let result = call(Value::ComplexTensor(tensor), Vec::new()).expect("vecnorm");
+        let Value::Tensor(result) = result else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+        assert_eq!(result.materialize_f64(), vec![13.928_389_f32 as f64]);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn vecnorm_dim_beyond_rank_returns_abs_with_original_shape() {
@@ -753,7 +978,7 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -766,8 +991,8 @@ mod tests {
         let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert!(out.data[0].is_nan());
-                assert_close(out.data[1], 5.0);
+                assert!(out.materialize_f64()[0].is_nan());
+                assert_close(out.materialize_f64()[1], 5.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -781,7 +1006,7 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![0.0, 0.0, 0.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -821,6 +1046,109 @@ mod tests {
         assert!(err.message().contains("positive integer numeric scalar"));
     }
 
+    #[test]
+    fn vecnorm_order_reads_typed_integer_tensor_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
+        let order =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("typed order");
+
+        let result = call(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("vecnorm");
+        match result {
+            Value::Num(value) => assert_close(value, 7.0),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vecnorm_order_uses_all_integer_storage_classes_exactly() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let order = Tensor::new_integer(storage, vec![1, 1]).expect("order");
+            assert!(matches!(
+                parse_order(&Value::Tensor(order)),
+                Ok(NormOrder::One)
+            ));
+        }
+    }
+
+    #[test]
+    fn vecnorm_order_rejects_wide_integer_storage_instead_of_rounding() {
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("wide order");
+        assert!(parse_order(&Value::Tensor(wide)).is_err());
+    }
+
+    #[test]
+    fn vecnorm_dim_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let dim = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed dim");
+
+        let result = call(
+            Value::Tensor(tensor),
+            vec![Value::Num(2.0), Value::Tensor(dim)],
+        )
+        .expect("vecnorm");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 1]);
+                assert_close(out.materialize_f64()[0], 10.0f64.sqrt());
+                assert_close(out.materialize_f64()[1], 20.0f64.sqrt());
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
+        let wide = 9_007_199_254_740_993_u64;
+        let large_dim =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("large dim");
+        match usize::try_from(wide) {
+            Ok(expected) => assert_eq!(parse_dim(&Value::Tensor(large_dim)).unwrap(), expected),
+            Err(_) => assert!(parse_dim(&Value::Tensor(large_dim)).is_err()),
+        }
+    }
+
+    #[test]
+    fn vecnorm_rejects_negative_typed_integer_tensor_order_and_dim() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let order =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed order");
+        let err = call(Value::Tensor(tensor.clone()), vec![Value::Tensor(order)]).unwrap_err();
+        assert_eq!(err.identifier(), VECNORM_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(err.message().contains("positive numeric scalar"));
+
+        let dim =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed dim");
+        let err = call(
+            Value::Tensor(tensor),
+            vec![Value::Num(2.0), Value::Tensor(dim)],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), VECNORM_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(err.message().contains("positive integer numeric scalar"));
+    }
+
+    #[test]
+    fn vecnorm_dim_rejects_unrepresentable_double_boundary_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(parse_dim(&Value::Num(boundary)).is_err());
+        assert!(parse_dim(&Value::Num(1.5)).is_err());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn vecnorm_preserves_single_for_array_outputs() {
@@ -830,8 +1158,8 @@ mod tests {
         let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.dtype, NumericDType::F32);
-                assert_eq!(out.data, vec![5.0, 13.0]);
+                assert_eq!(out.numeric_dtype(), NumericDType::F32);
+                assert_eq!(out.materialize_f64(), vec![5.0, 13.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -842,16 +1170,23 @@ mod tests {
     fn vecnorm_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 4.0, 5.0, 12.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = call(Value::GpuTensor(handle), Vec::new()).expect("vecnorm");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 2]);
-            assert_close(gathered.data[0], 5.0);
-            assert_close(gathered.data[1], 13.0);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
+            assert_close(gathered.materialize_f64()[0], 5.0);
+            assert_close(gathered.materialize_f64()[1], 13.0);
+        });
+
+        test_support::with_f32_test_provider(|provider| {
+            let single = Tensor::from_f32(vec![3.0, 4.0, 5.0, 12.0], vec![2, 2]).expect("single");
+            let handle = gpu_helpers::upload_tensor(provider, &single).expect("upload single");
+            let result = call(Value::GpuTensor(handle), Vec::new()).expect("single vecnorm");
+            let gathered = test_support::gather(result).expect("gather single");
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.materialize_f64(), vec![5.0, 13.0]);
         });
     }
 
@@ -882,14 +1217,18 @@ mod tests {
             return;
         };
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let result = call(Value::GpuTensor(handle), Vec::new()).expect("vecnorm");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        for (actual, expected) in gathered.data.iter().zip(cpu.data.iter()) {
+        for (actual, expected) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu.materialize_f64().iter())
+        {
             assert_close(*actual, *expected);
         }
     }

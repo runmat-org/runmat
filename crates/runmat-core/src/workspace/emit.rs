@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use runmat_builtins::Value;
 use runmat_hir::{HirAssembly, HirExprKind, HirPlace, HirStmtKind};
+use runmat_value::Value;
 
 use crate::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
@@ -69,10 +69,17 @@ pub(crate) fn format_type_info(value: &Value) -> String {
             }
         }
         Value::CharArray(ca) => {
-            if ca.rows == 1 && ca.cols == 1 {
+            if ca.data.len() == 1 {
                 "char".to_string()
             } else {
-                format!("{}x{} char array", ca.rows, ca.cols)
+                format!(
+                    "{} char array",
+                    ca.shape
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join("x")
+                )
             }
         }
         Value::Tensor(m) => {
@@ -340,7 +347,7 @@ pub(crate) fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{SymbolicArray, SymbolicExpr};
+    use runmat_value::{SymbolicArray, SymbolicExpr};
 
     #[test]
     fn symbolic_nd_array_is_not_labeled_scalar() {

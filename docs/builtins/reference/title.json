@@ -8,19 +8,19 @@
     "label",
     "matlab title"
   ],
-  "summary": "Set title text for the current axes or a specified axes handle with MATLAB-compatible `title` forms.",
+  "summary": "Set the title of the current axes or specified axes.",
   "requires_feature": null,
   "tested": {
     "unit": "builtins::plotting::title::tests"
   },
-  "description": "`title` attaches text labels to individual axes and returns a text handle for property updates. It follows MATLAB-compatible axes-scoped behavior, distinct from figure-level title helpers like `sgtitle`/`suptitle`.",
+  "description": "`title` attaches text to individual axes and returns a text handle for later property updates. Use `sgtitle` when one heading should span an entire figure.",
   "behaviors": [
     "The returned value is a text handle that can be inspected or updated through `get` and `set`.",
     "With no explicit target, `title` attaches text to the current axes as returned by `gca`.",
     "Passing an axes handle as the first argument targets that specific axes, which is useful in subplot layouts.",
-    "String scalars, char arrays, string arrays, and cell arrays are all accepted. String arrays and cell arrays produce multiline titles, with elements joined by newlines.",
+    "String scalars, char arrays, string arrays, cell arrays, and finite numeric scalars are accepted. Native integer scalars are formatted directly from their exact decimal value, including full-width `int64` and `uint64` values. String arrays and cell arrays produce multiline titles.",
     "Text styling properties — `FontSize`, `FontWeight`, `FontAngle`, `Color`, `Interpreter`, and `Visible` — use the shared plotting text-property system.",
-    "Passing an unrecognized property name raises an error. Passing a non-numeric value for `FontSize` raises an error."
+    "`FontSize` accepts single, double, and all eight native integer classes, then validates that the size is positive, finite, and within the renderer's supported range."
   ],
   "examples": [
     {

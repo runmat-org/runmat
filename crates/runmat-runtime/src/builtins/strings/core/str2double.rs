@@ -1,13 +1,14 @@
 //! MATLAB-compatible `str2double` builtin with GPU-aware semantics for RunMat.
 
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use std::borrow::Cow;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -15,6 +16,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::type_resolvers::numeric_text_scalar_or_tensor_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -103,6 +105,13 @@ pub const STR2DOUBLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STR2DOUBLE_ERRORS,
 };
 
+pub const STR2DOUBLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "str2double parses string, character, or cellstr input and returns double. Integer, numeric, and provider-resident numeric inputs reject before provider access rather than being implicitly converted to text.",
+    };
+
 fn str2double_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     str2double_error_with_message(error.message, error)
 }
@@ -130,9 +139,13 @@ fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(numeric_text_scalar_or_tensor_type),
     descriptor(crate::builtins::strings::core::str2double::STR2DOUBLE_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::str2double::STR2DOUBLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
 async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&value) {
+        return Err(str2double_error(&STR2DOUBLE_ERROR_INVALID_INPUT));
+    }
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(remap_str2double_flow)?;
@@ -267,9 +280,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 1]);
-                assert_eq!(tensor.data[0], 1.0);
-                assert_eq!(tensor.data[1], 2.5);
-                assert!(tensor.data[2].is_nan());
+                assert_eq!(tensor.materialize_f64()[0], 1.0);
+                assert_eq!(tensor.materialize_f64()[1], 2.5);
+                assert!(tensor.materialize_f64()[2].is_nan());
             }
             Value::Num(_) => panic!("expected tensor"),
             other => panic!("unexpected result {other:?}"),
@@ -285,8 +298,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data[0], 42.0);
-                assert_eq!(tensor.data[1], 100.0);
+                assert_eq!(tensor.materialize_f64()[0], 42.0);
+                assert_eq!(tensor.materialize_f64()[1], 100.0);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -300,7 +313,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![0, 1]);
-                assert_eq!(tensor.data.len(), 0);
+                assert_eq!(tensor.materialize_f64().len(), 0);
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -327,9 +340,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data[0], 3.14);
-                assert!(tensor.data[1].is_nan());
-                assert_eq!(tensor.data[2], f64::NEG_INFINITY);
+                assert_eq!(tensor.materialize_f64()[0], 3.14);
+                assert!(tensor.materialize_f64()[1].is_nan());
+                assert_eq!(tensor.materialize_f64()[2], f64::NEG_INFINITY);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -367,9 +380,9 @@ pub(crate) mod tests {
         let result = str2double_builtin(Value::StringArray(array)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.data[0], f64::INFINITY);
-                assert_eq!(tensor.data[1], f64::NEG_INFINITY);
-                assert_eq!(tensor.data[2], f64::INFINITY);
+                assert_eq!(tensor.materialize_f64()[0], f64::INFINITY);
+                assert_eq!(tensor.materialize_f64()[1], f64::NEG_INFINITY);
+                assert_eq!(tensor.materialize_f64()[2], f64::INFINITY);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

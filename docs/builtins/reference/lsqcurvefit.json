@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "The iterative nonlinear least-squares solver runs on the host. Callback functions may still call GPU-aware builtins, but residuals and finite-difference Jacobians are gathered for the solve."
+    "notes": "The iterative nonlinear least-squares solver runs on the host. Automatic residency gathers transparently at host boundaries; explicit gpuArray host fallback is a gated RunMat extension. Exact xdata payloads are passed to callbacks unchanged."
   },
   "fusion": {
     "elementwise": false,
@@ -35,6 +35,8 @@
     "Bounded problems project trial points into `[lb, ub]` and estimate finite-difference Jacobians without stepping outside finite bounds.",
     "`lb` and `ub` may be empty, scalar, or arrays with the same number of elements as `x0`; scalar bounds are broadcast to every parameter.",
     "`optimset` and `optimoptions` option structs are accepted. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, and `Algorithm` are recognized.",
+    "The documented numeric solver domain is floating point. Native integer x0, xdata, ydata, bounds, numeric options, and callback results are independently gated RunMat extensions.",
+    "Integer x0, ydata, bounds, floating options, and callback results must be exactly representable at the double solver boundary. Integer xdata remains an exact callback payload and is not eagerly converted.",
     "`Algorithm` accepts `levenberg-marquardt` and `trust-region-reflective`; both currently use RunMat's projected Levenberg-Marquardt implementation.",
     "With requested outputs, RunMat supports `[x, resnorm, residual, exitflag, output, lambda, jacobian]`."
   ],
@@ -66,7 +68,7 @@
     },
     {
       "question": "Are nonlinear constraints supported?",
-      "answer": "No. The MATLAB-compatible curve-fitting forms with optional lower and upper parameter bounds are supported."
+      "answer": "RunMat currently supports the core curve-fitting forms with optional lower and upper parameter bounds. Linear-constraint, nonlinear-constraint, and problem-structure forms are not yet implemented."
     }
   ],
   "links": [

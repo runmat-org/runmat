@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Coefficient design runs on the host. The returned coefficients can be passed to GPU-aware filtering functions."
+    "notes": "The current implementation gathers resident numeric arguments and returns host double coefficients; restoring documented GPU output residency is a tracked compatibility gap."
   },
   "fusion": {
     "elementwise": false,
@@ -63,7 +63,7 @@
     },
     {
       "question": "Does `fir1` run on the GPU?",
-      "answer": "No. It generates a small coefficient vector on the host. GPU acceleration applies when those coefficients are used by filtering builtins with gpuArray signals."
+      "answer": "The current implementation gathers resident numeric arguments and returns host double coefficients. Returning the documented resident GPU result remains a tracked compatibility gap."
     }
   ],
   "links": [
@@ -85,7 +85,7 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/fir1.rs"
   },
   "gpu_behavior": [
-    "Host-side coefficient design only.",
-    "The resulting coefficient vector can be passed to `filter` or `filtfilt` with gpuArray signal data."
+    "Resident numeric arguments currently gather for host-side coefficient design.",
+    "The result is currently a host double row vector; documented GPU output residency is not yet restored."
   ]
 }

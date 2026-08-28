@@ -1,0 +1,48 @@
+{
+  "title": "createArray",
+  "category": "array/creation",
+  "keywords": ["createArray", "FillValue", "Like", "constant", "array"],
+  "summary": "Create an array of a specified class and value.",
+  "description": "`createArray` accepts dimensions first, followed by an optional class name and `Like` or `FillValue` name-value arguments. Integer dimensions are structural and exact. Integer FillValue and Like forms preserve authoritative class, complexity, and resident storage. The result is complex when either Like or FillValue is complex.",
+  "behaviors": [
+    "`createArray` returns scalar double zero.",
+    "`createArray(n)` creates an n-by-n array and `createArray(m,n,...)` creates the requested shape.",
+    "Negative dimensions are treated as zero.",
+    "A trailing class name selects the output class.",
+    "FillValue selects the repeated scalar value and preserves its class unless classname or Like requests assignment conversion. Without Like, a GPU-resident FillValue contributes residency and owning provider but does not override an explicit classname.",
+    "Like preserves numeric class and GPU residency; classname and Like cannot be combined.",
+    "If either Like or FillValue is complex, the output is complex. A real single Like therefore produces complex single for a complex FillValue, while a real double Like produces complex double."
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "none",
+    "notes": "Like and GPU FillValue forms use the source handle's owning provider for fill and fallback upload paths; native real and paired-complex integer storage remains exact and the output remains on that owner/device."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "uniform"
+  },
+  "requires_feature": null,
+  "tested": {"unit": "builtins::array::creation::fill::tests"},
+  "examples": [
+    {"description": "Integer array", "input": "A = createArray(2,3,'uint64',FillValue=uint64(7));", "output": "2-by-3 uint64 array of sevens"},
+    {"description": "Prototype", "input": "A = createArray(2,3,Like=uint16(1),FillValue=8);", "output": "2-by-3 uint16 array"},
+    {"description": "Complex FillValue with a real prototype", "input": "A = createArray(2,Like=single(0),FillValue=1+2i);", "output": "2-by-2 complex single array"}
+  ],
+  "faqs": [
+    {"question": "How is createArray different from fill?", "answer": "createArray constructs arrays; fill creates 2-D Patch graphics."}
+  ],
+  "links": [
+    {"label": "fill", "url": "./fill"},
+    {"label": "zeros", "url": "./zeros"},
+    {"label": "ones", "url": "./ones"}
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/fill.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/fill.rs"
+  }
+}

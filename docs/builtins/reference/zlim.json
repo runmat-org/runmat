@@ -1,0 +1,11 @@
+{
+  "title": "zlim",
+  "category": "plotting",
+  "keywords": ["zlim", "axis limits", "3-D plotting"],
+  "summary": "Query or set z-axis limits.",
+  "description": "`zlim([zmin zmax])` sets the z-axis limits, while `zlim()` returns the current limits as a double vector.",
+  "behaviors": ["The two-element limits vector may use single, double, or any native integer class.", "Native integer endpoints are ordered using their exact values before conversion to graphics coordinates.", "Endpoints must be finite, increasing, and remain distinct in the graphics coordinate domain.", "The supported text modes are `'auto'`, `'tight'`, and `'manual'`."],
+  "examples": [{"description": "Set integer limits", "input": "surf(peaks());\nzlim(int16([-10 10]))"}, {"description": "Query current limits", "input": "limits = zlim()"}],
+  "links": [{"label": "xlim", "url": "./xlim"}, {"label": "ylim", "url": "./ylim"}, {"label": "axis", "url": "./axis"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/plotting/ops/zlim.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/zlim.rs"}
+}

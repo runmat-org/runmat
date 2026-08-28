@@ -1,8 +1,8 @@
 use crate::{build_runtime_error, create_class_object, make_cell_with_shape, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
-use runmat_builtins::{
-    builtin_functions, ComplexTensor, LogicalArray, NumericDType, Tensor, Value,
-};
+use runmat_accelerate_api::GpuTensorHandle;
+use runmat_builtins::builtin_functions;
+
+use runmat_value::Value;
 use std::cell::RefCell;
 
 thread_local! {
@@ -19,24 +19,37 @@ fn ensure_wasm_builtins_registered() {}
 
 pub struct ClassAccessContextGuard {
     previous: Option<String>,
+    context: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for ClassAccessContextGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
-        CLASS_ACCESS_CONTEXT.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
+        if let Some(context) = &self.context {
+            context.call.borrow_mut().class_access = previous;
+        } else {
+            CLASS_ACCESS_CONTEXT.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
     }
 }
 
 pub fn push_class_access_context(class_name: Option<String>) -> ClassAccessContextGuard {
-    let previous =
-        CLASS_ACCESS_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), class_name));
-    ClassAccessContextGuard { previous }
+    let context =
+        crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()));
+    let previous = if let Some(context) = &context {
+        std::mem::replace(&mut context.call.borrow_mut().class_access, class_name)
+    } else {
+        CLASS_ACCESS_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), class_name))
+    };
+    ClassAccessContextGuard { previous, context }
 }
 
 fn current_class_access_context() -> Option<String> {
+    if let Some(context) = crate::context::legacy::active() {
+        return context.state().call.borrow().class_access.clone();
+    }
     CLASS_ACCESS_CONTEXT.with(|slot| slot.borrow().clone())
 }
 
@@ -68,87 +81,74 @@ pub async fn gather_if_needed_async(value: &Value) -> Result<Value, RuntimeError
     gather_if_needed_async_impl(value).await
 }
 
-pub async fn download_handle_async(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-) -> anyhow::Result<HostTensorOwned> {
-    provider.download(handle).await
-}
-
 fn gather_if_needed_async_impl<'a>(
     value: &'a Value,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>> {
     Box::pin(async move {
         match value {
             Value::GpuTensor(handle) => {
-                let provider =
-                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+                // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
+                #[cfg(all(test, feature = "wgpu"))]
+                {
+                    let active_owner = runmat_accelerate_api::provider()
+                        .is_some_and(|provider| provider.device_id() == handle.device_id);
+                    if handle.device_id != 0 && !active_owner {
+                        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                    );
+                    }
+                }
+                let provider = runmat_accelerate_api::provider_for_handle(handle)
+                    .filter(|provider| provider.device_id() == handle.device_id)
+                    .ok_or_else(|| {
                         build_runtime_error("gather: no acceleration provider registered")
                             .with_identifier("RunMat:gather:ProviderUnavailable")
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     })?;
-                let is_logical = runmat_accelerate_api::handle_is_logical(handle);
-                let host = download_handle_async(provider, handle)
-                    .await
-                    .map_err(|err| {
-                        build_runtime_error(format!("gather: {err}"))
-                            .with_identifier("RunMat:gather:DownloadFailed")
+                let expected_element =
+                    crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(
+                        handle,
+                    )
+                    .map_err(|error| {
+                        build_runtime_error(format!("gather: {error}"))
+                            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                             .build()
                     })?;
-                runmat_accelerate_api::clear_residency(handle);
-                let runmat_accelerate_api::HostTensorOwned {
-                    data,
-                    shape,
-                    storage,
-                } = host;
-                if is_logical {
-                    let bits: Vec<u8> =
-                        data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
-                    let logical = LogicalArray::new(bits, shape).map_err(|e| {
-                        build_runtime_error(format!("gather: {e}"))
-                            .with_identifier("RunMat:gather:LogicalShapeError")
-                            .build()
-                    })?;
-                    Ok(Value::LogicalArray(logical))
-                } else if storage == GpuTensorStorage::ComplexInterleaved {
-                    let mut data = data;
-                    let precision = runmat_accelerate_api::handle_precision(handle)
-                        .unwrap_or_else(|| provider.precision());
-                    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
-                        for value in &mut data {
-                            *value = (*value as f32) as f64;
-                        }
-                    }
-                    let mut complex = Vec::with_capacity(data.len() / 2);
-                    for chunk in data.chunks_exact(2) {
-                        complex.push((chunk[0], chunk[1]));
-                    }
-                    let tensor = ComplexTensor::new(complex, shape).map_err(|e| {
-                        build_runtime_error(format!("gather: {e}"))
-                            .with_identifier("RunMat:gather:TensorShapeError")
-                            .build()
-                    })?;
-                    Ok(Value::ComplexTensor(tensor))
-                } else {
-                    let mut data = data;
-                    let precision = runmat_accelerate_api::handle_precision(handle)
-                        .unwrap_or_else(|| provider.precision());
-                    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
-                        for value in &mut data {
-                            *value = (*value as f32) as f64;
-                        }
-                    }
-                    let dtype = match precision {
-                        runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-                        runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
-                    };
-                    let tensor = Tensor::new_with_dtype(data, shape, dtype).map_err(|e| {
-                        build_runtime_error(format!("gather: {e}"))
-                            .with_identifier("RunMat:gather:TensorShapeError")
-                            .build()
-                    })?;
-                    Ok(Value::Tensor(tensor))
+                let host = provider.download_numeric(handle).await.map_err(|err| {
+                    build_runtime_error(format!("gather: {err}"))
+                        .with_identifier("RunMat:gather:DownloadFailed")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build()
+                })?;
+                let expected_storage = runmat_accelerate_api::handle_storage(handle);
+                if host.shape != handle.shape
+                    || host.storage != expected_storage
+                    || host.data.element_type() != expected_element
+                {
+                    return Err(provider_payload_mismatch(
+                        handle,
+                        &host.shape,
+                        format!(
+                            "{:?} {:?}, expected {:?} {:?}",
+                            host.data.element_type(),
+                            host.storage,
+                            expected_element,
+                            expected_storage
+                        ),
+                    ));
                 }
+                crate::builtins::common::gpu_helpers::value_from_numeric_download(
+                    host,
+                    runmat_accelerate_api::handle_is_logical(handle),
+                )
+                .map_err(|error| {
+                    build_runtime_error(format!("gather: {error}"))
+                        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build()
+                })
             }
             Value::Cell(ca) => {
                 let mut gathered = Vec::with_capacity(ca.data.len());
@@ -195,6 +195,20 @@ fn gather_if_needed_async_impl<'a>(
     })
 }
 
+fn provider_payload_mismatch(
+    handle: &GpuTensorHandle,
+    actual_shape: &[usize],
+    detail: String,
+) -> RuntimeError {
+    build_runtime_error(format!(
+        "gather: provider payload mismatch ({detail}; shape {actual_shape:?}, expected {:?})",
+        handle.shape
+    ))
+    .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .build()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeError> {
     futures::executor::block_on(gather_if_needed_async(value))
@@ -225,25 +239,42 @@ async fn call_builtin_async_impl(
     ensure_wasm_builtins_registered();
 
     let _output_guard = crate::output_count::push_output_count(output_count);
+    let scoped_builtin_service = crate::context::legacy::active()
+        .and_then(|context| context.service_ports().builtin().cloned());
+    let matching_bindings = scoped_builtin_service.as_ref().map_or_else(
+        || crate::builtin::runtime_builtin_bindings_by_name(name),
+        |service| service.bindings_by_name(name),
+    );
     let mut matching_builtins = Vec::new();
 
     // Collect all builtins with the matching name
-    for b in builtin_functions() {
-        if b.name == name {
-            matching_builtins.push(b);
+    if scoped_builtin_service.is_none() {
+        for b in builtin_functions() {
+            if b.name == name {
+                matching_builtins.push(b);
+            }
         }
     }
 
-    if matching_builtins.is_empty() {
+    if !matching_bindings.is_empty() && !matching_builtins.is_empty() {
+        return Err(build_runtime_error(format!(
+            "builtin `{name}` has both canonical and legacy runtime bindings"
+        ))
+        .with_identifier("RunMat:Catalog:DuplicateBindingAuthority")
+        .build());
+    }
+
+    if matching_bindings.is_empty() && matching_builtins.is_empty() {
         if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
-            return Ok(result);
+            return compatibility_checked_builtin_result(name, args, result);
         }
         if let Some(result) = try_call_registered_static_method(name, args, output_count).await? {
-            return Ok(result);
+            return compatibility_checked_builtin_result(name, args, result);
         }
         // Fallback: treat as class constructor if class is registered.
-        if runmat_builtins::get_class(name).is_some() {
-            return call_registered_class_constructor(name, args, output_count).await;
+        if crate::class_registry::get_class(name).is_some() {
+            let result = call_registered_class_constructor(name, args, output_count).await?;
+            return compatibility_checked_builtin_result(name, args, result);
         }
         return Err(build_runtime_error(format!("Undefined function: {name}"))
             .with_identifier("RunMat:UndefinedFunction")
@@ -251,7 +282,7 @@ async fn call_builtin_async_impl(
     }
 
     if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
-        return Ok(result);
+        return compatibility_checked_builtin_result(name, args, result);
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -264,24 +295,33 @@ async fn call_builtin_async_impl(
             categorized.push(b);
         }
     }
-    let matching_count = no_category.len() + categorized.len();
+    let matching_count = matching_bindings.len() + no_category.len() + categorized.len();
+    let implementations = matching_bindings
+        .into_iter()
+        .rev()
+        .map(|binding| binding.implementation)
+        .chain(
+            no_category
+                .into_iter()
+                .rev()
+                .chain(categorized.into_iter().rev())
+                .map(|builtin| builtin.implementation),
+        );
 
     // Try each builtin until one succeeds. Within each group, prefer later-registered
     // implementations to allow overrides when names collide.
     let mut last_error = RuntimeError::new("unknown error");
-    for builtin in no_category
-        .into_iter()
-        .rev()
-        .chain(categorized.into_iter().rev())
-    {
-        let f = builtin.implementation;
+    for implementation in implementations {
+        let f = implementation;
         match (f)(args).await {
-            Ok(result) => return Ok(result),
+            Ok(result) => return compatibility_checked_builtin_result(name, args, result),
             Err(err) => {
                 if should_retry_with_gpu_gather(&err, args) {
                     match gather_args_for_retry_async(args).await {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
-                            Ok(result) => return Ok(result),
+                            Ok(result) => {
+                                return compatibility_checked_builtin_result(name, args, result);
+                            }
                             Err(retry_err) => last_error = retry_err,
                         },
                         Ok(None) => last_error = err,
@@ -317,6 +357,115 @@ async fn call_builtin_async_impl(
     Err(builder.build())
 }
 
+fn compatibility_checked_builtin_result(
+    name: &str,
+    args: &[Value],
+    mut result: Value,
+) -> Result<Value, RuntimeError> {
+    crate::compatibility::ensure_value_compatible(&result, name)?;
+    propagate_gpu_provenance(name, args, &mut result);
+    Ok(result)
+}
+
+fn propagate_gpu_provenance(name: &str, args: &[Value], result: &mut Value) {
+    let mut saw_gpu = false;
+    let mut explicit = false;
+    for arg in args {
+        visit_gpu_handles(arg, &mut |handle| {
+            saw_gpu = true;
+            explicit |= runmat_accelerate_api::handle_is_explicit(handle);
+        });
+    }
+    if !saw_gpu {
+        let explicit_constructor = matches!(
+            name,
+            "zeros"
+                | "ones"
+                | "inf"
+                | "nan"
+                | "rand"
+                | "randn"
+                | "randi"
+                | "eye"
+                | "true"
+                | "false"
+        ) && args.iter().any(|arg| {
+            crate::builtins::common::tensor::value_to_string(arg)
+                .is_some_and(|text| text.eq_ignore_ascii_case("gpuarray"))
+        });
+        visit_gpu_handles_mut(result, &mut |handle| {
+            if explicit_constructor {
+                handle.descriptor.provenance =
+                    Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            } else if runmat_accelerate_api::handle_provenance(handle).is_none() {
+                handle.descriptor.provenance =
+                    Some(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            }
+        });
+        return;
+    }
+    let provenance = if explicit {
+        runmat_accelerate_api::GpuHandleProvenance::Explicit
+    } else {
+        runmat_accelerate_api::GpuHandleProvenance::Automatic
+    };
+    visit_gpu_handles_mut(result, &mut |handle| {
+        handle.descriptor.provenance = Some(provenance);
+    });
+}
+
+fn visit_gpu_handles(value: &Value, visitor: &mut impl FnMut(&GpuTensorHandle)) {
+    match value {
+        Value::GpuTensor(handle) => visitor(handle),
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        Value::Object(value) => value
+            .properties
+            .values()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        Value::Closure(value) => value
+            .captures
+            .iter()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        Value::OutputList(values) => values
+            .iter()
+            .for_each(|value| visit_gpu_handles(value, visitor)),
+        _ => {}
+    }
+}
+
+fn visit_gpu_handles_mut(value: &mut Value, visitor: &mut impl FnMut(&mut GpuTensorHandle)) {
+    match value {
+        Value::GpuTensor(handle) => visitor(handle),
+        Value::Cell(cell) => cell
+            .data
+            .iter_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        Value::Struct(value) => value
+            .fields
+            .values_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        Value::Object(value) => value
+            .properties
+            .values_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        Value::Closure(value) => value
+            .captures
+            .iter_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        Value::OutputList(values) => values
+            .iter_mut()
+            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        _ => {}
+    }
+}
+
 pub(crate) async fn try_call_registered_instance_method(
     method_name: &str,
     args: &[Value],
@@ -330,7 +479,8 @@ pub(crate) async fn try_call_registered_instance_method(
         Value::HandleObject(handle) => handle.class_name.as_str(),
         _ => return Ok(None),
     };
-    let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) else {
+    let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name)
+    else {
         return Ok(None);
     };
     if method.is_static {
@@ -338,11 +488,11 @@ pub(crate) async fn try_call_registered_instance_method(
     }
     let caller_class = current_class_access_context();
     let access_allowed = match method.access {
-        runmat_builtins::Access::Public => true,
-        runmat_builtins::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
-        runmat_builtins::Access::Protected => caller_class
+        runmat_types::MemberAccess::Public => true,
+        runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_types::MemberAccess::Protected => caller_class
             .as_deref()
-            .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
+            .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
     };
     if !access_allowed {
         return Err(build_runtime_error(format!(
@@ -361,7 +511,7 @@ pub(crate) async fn try_call_registered_instance_method(
     {
         return finalize_instance_method_result(method_name, receiver, result).map(Some);
     }
-    if runmat_builtins::builtin_function_by_name(&method.function_name).is_some()
+    if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != method_name
     {
         let result = call_builtin_async_impl(&method.function_name, args, output_count).await;
@@ -378,7 +528,7 @@ pub(crate) async fn try_call_registered_instance_method(
         {
             return finalize_instance_method_result(method_name, receiver, result).map(Some);
         }
-        if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
+        if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != method_name
         {
             let result = call_builtin_async_impl(&owner_qualified, args, output_count).await;
@@ -420,13 +570,14 @@ async fn try_call_registered_static_method(
     if class_name.trim().is_empty() || method_name.trim().is_empty() {
         return Ok(None);
     }
-    if runmat_builtins::get_class(class_name).is_none() {
+    if crate::class_registry::get_class(class_name).is_none() {
         return Ok(None);
     }
-    let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) else {
+    let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name)
+    else {
         return Ok(None);
     };
-    if !method.is_static || method.access != runmat_builtins::Access::Public {
+    if !method.is_static || method.access != runmat_types::MemberAccess::Public {
         return Ok(None);
     }
     if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
@@ -438,7 +589,7 @@ async fn try_call_registered_static_method(
     {
         return result.map(Some);
     }
-    if runmat_builtins::builtin_function_by_name(&method.function_name).is_some()
+    if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != qualified_name
     {
         return call_builtin_async_impl(&method.function_name, args, output_count)
@@ -456,7 +607,7 @@ async fn try_call_registered_static_method(
         {
             return result.map(Some);
         }
-        if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
+        if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != qualified_name
         {
             return call_builtin_async_impl(&owner_qualified, args, output_count)
@@ -475,19 +626,20 @@ async fn call_registered_class_constructor(
     let requested_outputs = output_count.unwrap_or(1);
     let default_object = create_class_object(class_name.to_string()).await?;
     let constructor_method_name = class_name.rsplit('.').next().unwrap_or(class_name);
-    let Some((ctor, owner)) = runmat_builtins::lookup_method(class_name, constructor_method_name)
-        .or_else(|| runmat_builtins::lookup_method(class_name, class_name))
+    let Some((ctor, owner)) =
+        crate::class_registry::lookup_method(class_name, constructor_method_name)
+            .or_else(|| crate::class_registry::lookup_method(class_name, class_name))
     else {
         return Ok(default_object);
     };
     let owner_qualified = format!("{owner}.{constructor_method_name}");
     let caller_class = current_class_access_context();
     let ctor_access_allowed = match ctor.access {
-        runmat_builtins::Access::Public => true,
-        runmat_builtins::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
-        runmat_builtins::Access::Protected => caller_class
+        runmat_types::MemberAccess::Public => true,
+        runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_types::MemberAccess::Protected => caller_class
             .as_deref()
-            .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
+            .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
     };
     if !ctor_access_allowed {
         return Err(build_runtime_error(format!(
@@ -507,7 +659,7 @@ async fn call_registered_class_constructor(
         {
             return Ok::<Option<Value>, RuntimeError>(Some(result?));
         }
-        if runmat_builtins::builtin_function_by_name(&ctor.function_name).is_some()
+        if runmat_builtins::builtin_name_is_known(&ctor.function_name)
             && ctor.function_name != class_name
         {
             let result = call_builtin_async_impl(&ctor.function_name, args, output_count).await?;
@@ -522,8 +674,7 @@ async fn call_registered_class_constructor(
         {
             return Ok::<Option<Value>, RuntimeError>(Some(result?));
         }
-        if runmat_builtins::builtin_function_by_name(&owner_qualified).is_some()
-            && owner_qualified != class_name
+        if runmat_builtins::builtin_name_is_known(&owner_qualified) && owner_qualified != class_name
         {
             let result = call_builtin_async_impl(&owner_qualified, args, output_count).await?;
             return Ok::<Option<Value>, RuntimeError>(Some(result));
@@ -618,8 +769,59 @@ fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
     if !args.iter().any(value_contains_gpu) {
         return false;
     }
-    let lowered = err.message().to_ascii_lowercase();
-    lowered.contains("gpu")
+    if error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Never) {
+        return false;
+    }
+    if args.iter().any(value_contains_explicit_gpu) {
+        return false;
+    }
+    // Compatibility errors are policy decisions. Retain this source-chain
+    // defense for wrappers that have not yet propagated an explicit policy.
+    if error_chain_has_identifier_prefix(err, "RunMat:compatibility:") {
+        return false;
+    }
+    error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Requested)
+}
+
+fn value_contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),
+        _ => false,
+    }
+}
+
+fn error_chain_has_gpu_gather_retry(err: &RuntimeError, policy: crate::GpuGatherRetry) -> bool {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(error) = current {
+        if error
+            .downcast_ref::<RuntimeError>()
+            .is_some_and(|error| error.gpu_gather_retry() == policy)
+        {
+            return true;
+        }
+        current = error.source();
+    }
+    false
+}
+
+fn error_chain_has_identifier_prefix(err: &RuntimeError, prefix: &str) -> bool {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(error) = current {
+        if error
+            .downcast_ref::<RuntimeError>()
+            .and_then(RuntimeError::identifier)
+            .is_some_and(|identifier| identifier.starts_with(prefix))
+        {
+            return true;
+        }
+        current = error.source();
+    }
+    false
 }
 
 async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>>, RuntimeError> {
@@ -642,15 +844,277 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
 
 #[cfg(test)]
 mod tests {
-    use super::{call_builtin, gather_if_needed_async, value_contains_gpu};
-    use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
-    use runmat_builtins::{
-        register_class, Access, ClassDef, Closure, MethodDef, StructValue, Value,
+    use super::{
+        call_builtin, gather_if_needed_async, should_retry_with_gpu_gather, value_contains_gpu,
     };
+    use futures::executor::block_on;
+    use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
+    use runmat_types::MemberAccess;
+    use runmat_value::{Closure, StructValue, Value};
+    use runmat_value::{IntegerStorage, Tensor};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct EmptyBuiltinService;
+
+    impl crate::context::RuntimeBuiltinService for EmptyBuiltinService {
+        fn bindings_by_name(&self, _name: &str) -> Vec<crate::builtin::RuntimeBuiltinBinding> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn catalog_backed_builtin_dispatches_without_legacy_authority() {
+        assert!(runmat_builtins::builtin_function_by_name("full").is_none());
+        let input = Value::Num(7.0);
+        assert_eq!(
+            call_builtin("full", std::slice::from_ref(&input)).unwrap(),
+            input
+        );
+    }
+
+    #[test]
+    fn scoped_builtin_authority_does_not_fall_back_to_global_discovery() {
+        let ports = crate::context::RuntimeServicePorts::default()
+            .with_builtin(std::rc::Rc::new(EmptyBuiltinService));
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(ports);
+        let _scope = runtime.enter();
+        let error = call_builtin("full", &[Value::Num(7.0)]).expect_err("exact registry miss");
+        assert_eq!(error.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn operation_floating_projection_uses_native_download_and_rejects_integers() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).unwrap();
+            let single_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &single).unwrap();
+            let projected = block_on(
+                crate::builtins::common::gpu_helpers::download_floating_projection_async(
+                    provider,
+                    &single_handle,
+                ),
+            )
+            .unwrap();
+            assert_eq!(projected.data, vec![1.25, -2.5]);
+            assert_eq!(projected.shape, vec![1, 2]);
+
+            let integer =
+                Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
+                    .unwrap();
+            let integer_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &integer).unwrap();
+            let error = block_on(
+                crate::builtins::common::gpu_helpers::download_floating_projection_async(
+                    provider,
+                    &integer_handle,
+                ),
+            )
+            .expect_err("floating projection must reject native integer storage");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:gpu:IntegerFloatingProjection")
+            );
+
+            for handle in [&single_handle, &integer_handle] {
+                provider.free(handle).unwrap();
+                runmat_accelerate_api::clear_handle_metadata(handle);
+            }
+        });
+    }
+
+    #[test]
+    fn compatibility_errors_never_trigger_automatic_gpu_gather_retry() {
+        let gpu = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 1,
+            descriptor: Default::default(),
+        });
+        let compatibility_error =
+            crate::build_runtime_error("example gpuArray call form is a RunMat extension")
+                .with_identifier("RunMat:compatibility:ExampleExtension")
+                .build();
+        assert!(!should_retry_with_gpu_gather(
+            &compatibility_error,
+            std::slice::from_ref(&gpu)
+        ));
+
+        let wrapped_compatibility_error =
+            crate::build_runtime_error("GPU implementation failed while checking the call")
+                .with_identifier("RunMat:example:GpuFailure")
+                .with_source(compatibility_error)
+                .build();
+        assert!(!should_retry_with_gpu_gather(
+            &wrapped_compatibility_error,
+            std::slice::from_ref(&gpu)
+        ));
+        let requested_compatibility_error =
+            crate::build_runtime_error("host implementation requested")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Requested)
+                .with_source(
+                    crate::build_runtime_error("RunMat-only GPU form")
+                        .with_identifier("RunMat:compatibility:ExampleExtension")
+                        .build(),
+                )
+                .build();
+        assert!(!should_retry_with_gpu_gather(
+            &requested_compatibility_error,
+            std::slice::from_ref(&gpu)
+        ));
+
+        let automatic_gpu = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 5,
+            descriptor: Default::default(),
+        };
+        let automatic_gpu =
+            automatic_gpu.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let ordinary_gpu_error = crate::build_runtime_error("GPU input requires host fallback")
+            .with_identifier("RunMat:example:UnsupportedGpuPath")
+            .build();
+        assert!(!should_retry_with_gpu_gather(
+            &ordinary_gpu_error,
+            &[Value::GpuTensor(automatic_gpu.clone())]
+        ));
+        let automatic_gpu =
+            automatic_gpu.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        assert!(!should_retry_with_gpu_gather(
+            &ordinary_gpu_error,
+            &[Value::GpuTensor(automatic_gpu.clone())]
+        ));
+        runmat_accelerate_api::clear_handle_metadata(&automatic_gpu);
+
+        let terminal_gpu_error = crate::build_runtime_error("GPU input is semantically invalid")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build();
+        assert!(!should_retry_with_gpu_gather(
+            &terminal_gpu_error,
+            &[Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: 0,
+                buffer_id: 2,
+                descriptor: Default::default(),
+            })]
+        ));
+
+        let nested_terminal = crate::build_runtime_error("terminal provider decision")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build();
+        let wrapped_terminal = crate::build_runtime_error("GPU implementation failed")
+            .with_source(nested_terminal)
+            .build();
+        assert!(!should_retry_with_gpu_gather(
+            &wrapped_terminal,
+            &[Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: 0,
+                buffer_id: 3,
+                descriptor: Default::default(),
+            })]
+        ));
+
+        let nested_request = crate::build_runtime_error("host implementation is required")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Requested)
+            .build();
+        let wrapped_request = crate::build_runtime_error("provider path unavailable")
+            .with_source(nested_request)
+            .build();
+        let requested_handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 4,
+            descriptor: Default::default(),
+        };
+        assert!(should_retry_with_gpu_gather(
+            &wrapped_request,
+            &[Value::GpuTensor(requested_handle.clone())]
+        ));
+        let requested_handle =
+            requested_handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        assert!(!should_retry_with_gpu_gather(
+            &wrapped_request,
+            &[Value::GpuTensor(requested_handle.clone())]
+        ));
+        runmat_accelerate_api::clear_handle_metadata(&requested_handle);
+    }
+
+    #[test]
+    fn builtin_result_provenance_follows_gpu_input_intent() {
+        let explicit = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 91,
+            descriptor: Default::default(),
+        };
+        let automatic = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 92,
+            descriptor: Default::default(),
+        };
+        let explicit_result = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 93,
+            descriptor: Default::default(),
+        };
+        let automatic_result = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 94,
+            descriptor: Default::default(),
+        };
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let automatic =
+            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+
+        let mut explicit_value = Value::GpuTensor(explicit_result.clone());
+        super::propagate_gpu_provenance(
+            "plus",
+            &[Value::GpuTensor(explicit.clone())],
+            &mut explicit_value,
+        );
+        let mut automatic_value = Value::GpuTensor(automatic_result.clone());
+        super::propagate_gpu_provenance(
+            "plus",
+            &[Value::GpuTensor(automatic.clone())],
+            &mut automatic_value,
+        );
+
+        assert_eq!(
+            runmat_accelerate_api::handle_provenance(&explicit_result),
+            None
+        );
+        let Value::GpuTensor(explicit_value) = explicit_value else {
+            unreachable!()
+        };
+        assert_eq!(
+            explicit_value.descriptor.provenance,
+            Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_provenance(&automatic_result),
+            None
+        );
+        let Value::GpuTensor(automatic_value) = automatic_value else {
+            unreachable!()
+        };
+        assert_eq!(
+            automatic_value.descriptor.provenance,
+            Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        );
+        for handle in [&explicit, &automatic, &explicit_result, &automatic_result] {
+            runmat_accelerate_api::clear_handle_metadata(handle);
+        }
+    }
 
     fn unique_class_name(prefix: &str) -> String {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -666,6 +1130,7 @@ mod tests {
                 shape: vec![1],
                 device_id: 999,
                 buffer_id: 42,
+                descriptor: Default::default(),
             })],
         });
         assert!(value_contains_gpu(&value));
@@ -679,6 +1144,7 @@ mod tests {
                 shape: vec![1],
                 device_id: 998,
                 buffer_id: 43,
+                descriptor: Default::default(),
             }),
         ]);
         assert!(value_contains_gpu(&value));
@@ -693,6 +1159,7 @@ mod tests {
             // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
             device_id: 0,
             buffer_id: 44,
+            descriptor: Default::default(),
         })]);
         let err = futures::executor::block_on(gather_if_needed_async(&value))
             .expect_err("missing provider should fail nested output-list gather");
@@ -711,6 +1178,7 @@ mod tests {
                 // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
                 device_id: 0,
                 buffer_id: 45,
+                descriptor: Default::default(),
             })],
         });
         let err = futures::executor::block_on(gather_if_needed_async(&value))
@@ -741,23 +1209,23 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             child_name.clone(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: child_name.clone(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: ctor_fn_name_for_invoker,
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: parent_name.clone(),
             parent: None,
             properties: HashMap::new(),
             methods: parent_methods,
         });
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child_name.clone(),
             parent: Some(parent_name),
             properties: HashMap::new(),
@@ -779,17 +1247,17 @@ mod tests {
         let mut private_methods = HashMap::new();
         private_methods.insert(
             private_class_name.clone(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: private_class_name.clone(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Private,
+                access: MemberAccess::Private,
                 function_name: "Point.origin".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: private_class_name.clone(),
             parent: None,
             properties: HashMap::new(),
@@ -803,17 +1271,17 @@ mod tests {
         let mut public_methods = HashMap::new();
         public_methods.insert(
             public_class_name.clone(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: public_class_name.clone(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: unique_class_name("runtime_ctor_missing_body"),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: public_class_name.clone(),
             parent: None,
             properties: HashMap::new(),
@@ -832,7 +1300,7 @@ mod tests {
     fn dotted_static_method_name_dispatches_to_registered_class_method() {
         let class_name = unique_class_name("runtime_static_dispatch");
         let fn_name = unique_class_name("runtime_static_fn");
-        register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_name.clone(),
             parent: None,
             properties: HashMap::new(),
@@ -840,12 +1308,12 @@ mod tests {
                 let mut methods = HashMap::new();
                 methods.insert(
                     "zero".to_string(),
-                    MethodDef {
+                    crate::class_registry::RuntimeMethod {
                         name: "zero".to_string(),
                         is_static: true,
                         is_abstract: false,
                         is_sealed: false,
-                        access: Access::Public,
+                        access: MemberAccess::Public,
                         function_name: fn_name.clone(),
                         implicit_class_argument: None,
                     },

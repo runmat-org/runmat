@@ -2,17 +2,21 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::{
-    complex_tensor_into_value, extract_dims, keyword_of, shape_from_value,
+    complex_tensor_into_value, extract_constructor_dimensions, keyword_of,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -130,15 +134,7 @@ const RANDN_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const RANDN_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "prototype",
-    ty: BuiltinParamType::LikePrototype,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Prototype value when no numeric dimension arguments are provided.",
-}];
-
-const RANDN_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+const RANDN_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "A = randn()",
         inputs: &RANDN_SIG_EMPTY_INPUTS,
@@ -157,11 +153,6 @@ const RANDN_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     BuiltinSignatureDescriptor {
         label: "A = randn(m, n, ...)",
         inputs: &RANDN_SIG_DIMS_INPUTS,
-        outputs: &RANDN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "A = randn(prototype)",
-        inputs: &RANDN_SIG_PROTOTYPE_INPUTS,
         outputs: &RANDN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -210,6 +201,54 @@ pub const RANDN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RANDN_ERRORS,
 };
 
+const RANDN_COLUMN_SIZE_VECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randn-column-size-vector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "randn with a column size vector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandnColumnSizeVectorExtension"),
+};
+const RANDN_RESIDENT_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randn-resident-size-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "randn with a resident size control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandnResidentSizeControlExtension"),
+};
+pub const RANDN_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    RANDN_COLUMN_SIZE_VECTOR_EXTENSION,
+    RANDN_RESIDENT_SIZE_EXTENSION,
+];
+
+const RANDN_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n/sz1...szN/sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented structural sizes; signed negatives clamp to zero and trailing singleton dimensions normalize away.",
+    }];
+pub const RANDN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = randn(integer_n[,integer_sz2,...])",
+        inputs: &RANDN_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Counts are decoded from authoritative storage and select double or single host/GPU generation without numeric conversion.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = randn(integer_sz)",
+        inputs: &RANDN_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented size vector is a row vector; integer prototypes remain unsupported because randn like supports only single/double numeric class and complexity.",
+    },
+];
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randn")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randn",
@@ -229,6 +268,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     type_resolver(randn_type),
     descriptor(crate::builtins::array::creation::randn::RANDN_DESCRIPTOR),
+    extensions(crate::builtins::array::creation::randn::RANDN_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::randn::RANDN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::randn"
 )]
 async fn randn_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -252,9 +293,9 @@ impl ParsedRandn {
     async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
-        let mut shape_source: Option<Vec<usize>> = None;
         let mut template: Option<RandnTemplate> = None;
         let mut dtype: NumericDType = NumericDType::F64;
+        let mut saw_size_vector = false;
 
         let mut idx = 0;
         while idx < args.len() {
@@ -266,8 +307,7 @@ impl ParsedRandn {
                         let Some(proto) = args.get(idx + 1).cloned() else {
                             return Err(builtin_error("randn: expected prototype after 'like'"));
                         };
-                        template = Some(RandnTemplate::Like(proto.clone()));
-                        shape_source = Some(shape_from_value(&proto, "randn")?);
+                        template = Some(RandnTemplate::Like(proto));
                         idx += 2;
                         continue;
                     }
@@ -301,24 +341,47 @@ impl ParsedRandn {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg, "randn").await? {
+            if matches!(arg, Value::GpuTensor(_)) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &RANDN_RESIDENT_SIZE_EXTENSION,
+                    "randn",
+                )?;
+            }
+            if let Some(parsed_dims) = extract_constructor_dimensions(&arg, "randn")
+                .await
+                .map_err(builtin_error)?
+            {
+                if parsed_dims.is_column_vector {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &RANDN_COLUMN_SIZE_VECTOR_EXTENSION,
+                        "randn",
+                    )?;
+                }
+                if parsed_dims.values.len() > 1 {
+                    if saw_size_vector || saw_dims_arg {
+                        return Err(builtin_error(
+                            "randn: a size vector must be the only dimension argument",
+                        ));
+                    }
+                    saw_size_vector = true;
+                } else if saw_size_vector {
+                    return Err(builtin_error(
+                        "randn: a size vector must be the only dimension argument",
+                    ));
+                }
                 saw_dims_arg = true;
                 if dims.is_empty() {
-                    dims = parsed_dims;
+                    dims = parsed_dims.values;
                 } else {
-                    dims.extend(parsed_dims);
+                    dims.extend(parsed_dims.values);
                 }
                 idx += 1;
                 continue;
             }
 
-            if shape_source.is_none() {
-                shape_source = Some(shape_from_value(&arg, "randn")?);
-            }
-            if template.is_none() {
-                template = Some(RandnTemplate::Like(arg.clone()));
-            }
-            idx += 1;
+            return Err(builtin_error(format!(
+                "randn: unsupported dimension or option {arg:?}"
+            )));
         }
 
         let shape = if saw_dims_arg {
@@ -329,8 +392,6 @@ impl ParsedRandn {
             } else {
                 dims
             }
-        } else if let Some(shape) = shape_source {
-            shape
         } else {
             vec![1, 1]
         };
@@ -350,7 +411,14 @@ async fn build_output(parsed: ParsedRandn) -> crate::BuiltinResult<Value> {
         RandnTemplate::Double => match parsed.dtype {
             NumericDType::F64 => randn_double(&parsed.shape),
             NumericDType::F32 => randn_single(&parsed.shape),
-            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => randn_double(&parsed.shape),
+            NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64 => randn_double(&parsed.shape),
         },
         RandnTemplate::Like(proto) => randn_like(&proto, &parsed.shape).await,
     }
@@ -403,16 +471,28 @@ fn randn_single(shape: &[usize]) -> crate::BuiltinResult<Value> {
 async fn randn_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::GpuTensor(handle) => randn_like_gpu(handle, shape).await,
-        Value::ComplexTensor(_) | Value::Complex(_, _) => randn_complex(shape),
-        Value::Tensor(t) => match t.dtype {
+        Value::ComplexTensor(tensor) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(
+                tensor, "randn",
+            )?;
+            randn_complex(shape)
+        }
+        Value::Complex(_, _) => randn_complex(shape),
+        Value::Tensor(tensor) => match tensor.numeric_dtype() {
             NumericDType::F32 => randn_single(shape),
             NumericDType::F64 => randn_double(shape),
-            NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => randn_double(shape),
+            _ => Err(builtin_error(
+                "randn: 'like' prototype must be single or double",
+            )),
         },
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => {
-            randn_double(shape)
-        }
-        Value::CharArray(_) | Value::Cell(_) => randn_double(shape),
+        Value::Num(_) => randn_double(shape),
+        Value::Int(_)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::CharArray(_)
+        | Value::Cell(_) => Err(builtin_error(
+            "randn: 'like' prototype must be single or double",
+        )),
         other => Err(builtin_error(format!(
             "randn: unsupported prototype {other:?}"
         ))),
@@ -429,7 +509,16 @@ fn randn_complex(shape: &[usize]) -> crate::BuiltinResult<Value> {
 
 #[async_recursion::async_recursion(?Send)]
 async fn randn_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+    {
+        return Err(builtin_error(
+            "randn: 'like' prototype must have single or double underlying type",
+        ));
+    }
+    if let Some(provider) =
+        runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
+    {
         let attempt = if handle.shape == shape {
             provider.random_normal_like(handle)
         } else {
@@ -445,7 +534,9 @@ async fn randn_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Bui
         let tensor =
             Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randn: {e}")))?;
         let view = HostTensorView {
-            data: &tensor.data,
+            data: tensor
+                .as_f64_slice()
+                .expect("randn fallback constructs double storage"),
             shape: &tensor.shape,
         };
         if let Ok(gpu) = provider.upload(&view) {
@@ -464,6 +555,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
     use futures::executor::block_on;
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn reset_rng_clean() -> impl Drop {
         let guard = random::test_guard();
@@ -511,7 +603,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 let expected = random::expected_normal_sequence(4);
-                for (observed, exp) in t.data.iter().zip(expected.iter()) {
+                for (observed, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*observed - *exp).abs() < 1e-12);
                 }
             }
@@ -530,13 +622,58 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3, 4]);
                 let expected = random::expected_normal_sequence(24);
-                assert_eq!(t.data.len(), expected.len());
-                for (observed, exp) in t.data.iter().zip(expected.iter()) {
+                assert_eq!(t.materialize_f64().len(), expected.len());
+                for (observed, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*observed - *exp).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn randn_column_and_resident_size_controls_follow_compatibility_mode() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset_rng_clean();
+        let column = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U8(vec![2, 3]), vec![2, 1])
+                    .expect("column size vector"),
+            )
+        };
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::Tensor(output) =
+            block_on(randn_builtin(vec![column()])).expect("RunMat column size")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![2, 3]);
+        drop(_runmat);
+
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(randn_builtin(vec![column()])).expect_err("strict column size");
+        assert_eq!(
+            error.identifier(),
+            RANDN_COLUMN_SIZE_VECTOR_EXTENSION.error_identifier
+        );
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX - 18,
+            buffer_id: 1,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U8,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
+        let error = block_on(randn_builtin(vec![Value::GpuTensor(handle.clone())]))
+            .expect_err("strict resident size");
+        assert_eq!(
+            error.identifier(),
+            RANDN_RESIDENT_SIZE_EXTENSION.error_identifier
+        );
+        runmat_accelerate_api::clear_handle_metadata(&handle);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -548,7 +685,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -562,7 +699,7 @@ pub(crate) mod tests {
         let result = block_on(randn_builtin(vec![Value::from("single")])).expect("randn single");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.dtype, NumericDType::F32);
+                assert_eq!(t.numeric_dtype(), NumericDType::F32);
                 assert_eq!(t.shape, vec![1, 1]);
             }
             Value::Num(_) => {
@@ -574,27 +711,75 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn randn_like_tensor_infers_shape() {
+    fn randn_like_without_dims_is_scalar_and_implicit_prototype_is_rejected() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let args = vec![Value::Tensor(tensor)];
+        let args = vec![Value::from("like"), Value::Tensor(tensor.clone())];
         let result = block_on(randn_builtin(args)).expect("randn");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                let expected = random::expected_normal_sequence(4);
-                for (observed, exp) in t.data.iter().zip(expected.iter()) {
-                    assert!((*observed - *exp).abs() < 1e-12);
-                }
-            }
-            Value::GpuTensor(handle) => {
-                let gathered =
-                    test_support::gather(Value::GpuTensor(handle)).expect("gather randn output");
-                assert_eq!(gathered.shape, vec![2, 2]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
+        assert!(matches!(result, Value::Num(value) if value.is_finite()));
+
+        let error = block_on(randn_builtin(vec![Value::Tensor(tensor)])).unwrap_err();
+        assert!(error.message().contains("unsupported dimension or option"));
+    }
+
+    #[test]
+    fn randn_like_rejects_every_integer_class_and_nonfloating_prototypes() {
+        let _guard = random::test_guard();
+        let storages = vec![
+            IntegerStorage::I8(vec![i8::MIN]),
+            IntegerStorage::I16(vec![i16::MIN]),
+            IntegerStorage::I32(vec![i32::MIN]),
+            IntegerStorage::I64(vec![i64::MIN]),
+            IntegerStorage::U8(vec![u8::MAX]),
+            IntegerStorage::U16(vec![u16::MAX]),
+            IntegerStorage::U32(vec![u32::MAX]),
+            IntegerStorage::U64(vec![u64::MAX]),
+        ];
+
+        for storage in storages {
+            let prototype = Tensor::new_integer(storage, vec![1, 1]).expect("prototype");
+            let error = block_on(randn_builtin(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ]))
+            .unwrap_err();
+            assert!(error.message().contains("must be single or double"));
         }
+
+        let scalar = block_on(randn_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::Int(IntValue::I64(i64::MAX)),
+        ]))
+        .unwrap_err();
+        assert!(scalar.message().contains("must be single or double"));
+
+        let logical = block_on(randn_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::Bool(true),
+        ]))
+        .unwrap_err();
+        assert!(logical.message().contains("must be single or double"));
+
+        let complex_integer = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![2]))
+                .unwrap(),
+            vec![1, 1],
+        )
+        .unwrap();
+        let complex_integer = block_on(randn_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::ComplexTensor(complex_integer),
+        ]))
+        .unwrap_err();
+        assert!(complex_integer
+            .message()
+            .contains("complex numbers with integer types"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -613,7 +798,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
                 let expected = random::expected_complex_normal_sequence(2);
-                for ((re, im), (eref, eim)) in t.data.iter().zip(expected.iter()) {
+                for ((re, im), (eref, eim)) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*re - *eref).abs() < 1e-12);
                     assert!((*im - *eim).abs() < 1e-12);
                 }
@@ -632,8 +817,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 4]);
-                assert_eq!(t.dtype, NumericDType::F64);
-                for &v in &t.data {
+                assert_eq!(t.numeric_dtype(), NumericDType::F64);
+                for &v in &t.materialize_f64() {
                     assert!(v.is_finite());
                 }
             }
@@ -652,23 +837,51 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let args = vec![Value::from("like"), Value::GpuTensor(handle)];
+            let args = vec![
+                Value::Num(2.0),
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(handle),
+            ];
             let result = block_on(randn_builtin(args)).expect("randn");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape, vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                     assert_eq!(gathered.shape, vec![2, 2]);
-                    for value in gathered.data {
+                    for value in gathered.materialize_f64() {
                         assert!(value.is_finite());
                     }
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn randn_rejects_integer_gpu_like_prototype() {
+        let _guard = random::test_guard();
+        test_support::with_test_provider(|provider| {
+            let values = [i64::MIN, 9_007_199_254_740_993];
+            let shape = [1usize, 2usize];
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::I64(&values),
+                    shape: &shape,
+                })
+                .expect("upload integer gpu prototype");
+            let error = block_on(randn_builtin(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(handle),
+            ]))
+            .unwrap_err();
+            assert!(error.message().contains("single or double underlying type"));
         });
     }
 
@@ -681,7 +894,7 @@ pub(crate) mod tests {
         );
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().unwrap();
@@ -692,7 +905,7 @@ pub(crate) mod tests {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather to host");
                 assert_eq!(gathered.shape, vec![2, 2]);
-                for v in gathered.data {
+                for v in gathered.materialize_f64() {
                     assert!(v.is_finite());
                 }
             }
@@ -716,7 +929,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.shape, vec![4, 4]);
         assert!(
             gathered
-                .data
+                .materialize_f64()
                 .iter()
                 .any(|value| value.is_finite() && value.abs() > 1.0e-6),
             "expected at least one non-trivial normal sample"

@@ -1,4 +1,6 @@
 use super::*;
+use crate::builtins::common::tensor as tensor_utils;
+use runmat_value::NumericScalar;
 
 pub(in crate::builtins::table) fn parse_row_selector(
     selector: Option<&Value>,
@@ -21,12 +23,20 @@ pub(in crate::builtins::table) fn parse_row_selector(
     }
     match selector {
         Value::Num(n) => Ok(vec![one_based_to_zero(*n, height, "row")?]),
-        Value::Int(i) => Ok(vec![one_based_to_zero(i.to_f64(), height, "row")?]),
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|value| one_based_to_zero(*value, height, "row"))
-            .collect(),
+        Value::Int(i) => Ok(vec![one_based_integer_to_zero(i, height, "row")?]),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| one_based_integer_to_zero(value, height, "row"))
+                    .collect();
+            }
+            tensor_utils::tensor_values_f64_cow(tensor)
+                .iter()
+                .map(|value| one_based_to_zero(*value, height, "row"))
+                .collect()
+        }
         Value::LogicalArray(array) => {
             if array.data.len() != height {
                 return Err(invalid_index(
@@ -171,12 +181,20 @@ pub(in crate::builtins::table) fn parse_variable_selector(
             Ok(selected)
         }
         Value::Num(n) => Ok(vec![name_at_index(names, *n)?]),
-        Value::Int(i) => Ok(vec![name_at_index(names, i.to_f64())?]),
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|value| name_at_index(names, *value))
-            .collect(),
+        Value::Int(i) => Ok(vec![name_at_integer_index(names, i)?]),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .exact_values()
+                    .iter()
+                    .map(|value| name_at_integer_index(names, value))
+                    .collect();
+            }
+            tensor_utils::tensor_values_f64_cow(tensor)
+                .iter()
+                .map(|value| name_at_index(names, *value))
+                .collect()
+        }
         Value::LogicalArray(array) => {
             if array.data.len() != names.len() {
                 return Err(invalid_index(
@@ -268,23 +286,23 @@ pub(in crate::builtins::table) fn parse_timerange_selector(
     }
     let row_times = timetable_row_times(object)?
         .ok_or_else(|| invalid_index("timerange selector requires timetable RowTimes"))?;
-    let serials = selector_numeric_values(&row_times)?;
+    let serials = timerange_numeric_values(&row_times)?;
     let start = selector
         .properties
         .get("Start")
-        .map(selector_bound_value)
+        .map(timerange_bound_value)
         .transpose()?;
     let end = selector
         .properties
         .get("End")
-        .map(selector_bound_value)
+        .map(timerange_bound_value)
         .transpose()?;
     let inclusivity = selector
         .properties
         .get("Inclusivity")
         .map(|value| scalar_text(value, "timerange inclusivity"))
         .transpose()?
-        .unwrap_or_else(|| "closed".to_string())
+        .unwrap_or_else(|| "openright".to_string())
         .to_ascii_lowercase();
     let (include_start, include_end) = match inclusivity.as_str() {
         "closed" => (true, true),
@@ -303,25 +321,56 @@ pub(in crate::builtins::table) fn parse_timerange_selector(
         .filter_map(|(idx, value)| {
             let after_start = start
                 .map(|start| {
-                    if include_start {
-                        *value >= start
-                    } else {
-                        *value > start
-                    }
+                    let order = crate::builtins::logical::rel::integer_comparison::compare_numeric_scalars_exact(*value, start);
+                    order.is_some_and(|order| if include_start { order != Ordering::Less } else { order == Ordering::Greater })
                 })
                 .unwrap_or(true);
             let before_end = end
                 .map(|end| {
-                    if include_end {
-                        *value <= end
-                    } else {
-                        *value < end
-                    }
+                    let order = crate::builtins::logical::rel::integer_comparison::compare_numeric_scalars_exact(*value, end);
+                    order.is_some_and(|order| if include_end { order != Ordering::Greater } else { order == Ordering::Less })
                 })
                 .unwrap_or(true);
             (after_start && before_end).then_some(idx)
         })
         .collect())
+}
+
+fn timerange_numeric_values(value: &Value) -> BuiltinResult<Vec<NumericScalar>> {
+    match value {
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|index| {
+                tensor
+                    .numeric_value_at(index)
+                    .ok_or_else(|| invalid_argument("timerange: missing numeric row-time value"))
+            })
+            .collect(),
+        Value::Num(value) => Ok(vec![NumericScalar::F64(*value)]),
+        Value::Int(value) => Ok(vec![NumericScalar::from(value.clone())]),
+        Value::Object(obj) if obj.is_class("datetime") => Ok(tensor_utils::tensor_into_values_f64(
+            crate::builtins::datetime::serials_from_datetime_value(value)?,
+        )
+        .into_iter()
+        .map(NumericScalar::F64)
+        .collect()),
+        Value::Object(obj) if obj.is_class("duration") => Ok(tensor_utils::tensor_into_values_f64(
+            crate::builtins::duration::duration_tensor_from_duration_value(value)?,
+        )
+        .into_iter()
+        .map(NumericScalar::F64)
+        .collect()),
+        other => Err(invalid_argument(format!(
+            "timerange: expected numeric, datetime, or duration row times, got {other:?}"
+        ))),
+    }
+}
+
+fn timerange_bound_value(value: &Value) -> BuiltinResult<NumericScalar> {
+    let values = timerange_numeric_values(value)?;
+    if values.len() != 1 {
+        return Err(invalid_argument("timerange: boundary must be scalar"));
+    }
+    Ok(values[0])
 }
 
 pub(in crate::builtins::table) fn parse_rowfilter_selector(
@@ -409,19 +458,28 @@ pub(in crate::builtins::table) fn evaluate_named_rowfilter(
         let keep = match normalized.as_str() {
             "gt0" | ">0" | "positive" => selected_values
                 .iter()
-                .map(|value| numeric_cell(value, row).map(|v| v > 0.0))
+                .map(|value| {
+                    numeric_cell_order_to_zero(value, row)
+                        .map(|order| order == Some(Ordering::Greater))
+                })
                 .collect::<BuiltinResult<Vec<_>>>()?
                 .into_iter()
                 .all(|flag| flag),
             "ge0" | ">=0" | "nonnegative" => selected_values
                 .iter()
-                .map(|value| numeric_cell(value, row).map(|v| v >= 0.0))
+                .map(|value| {
+                    numeric_cell_order_to_zero(value, row)
+                        .map(|order| order.is_some_and(|order| order != Ordering::Less))
+                })
                 .collect::<BuiltinResult<Vec<_>>>()?
                 .into_iter()
                 .all(|flag| flag),
             "lt0" | "<0" | "negative" => selected_values
                 .iter()
-                .map(|value| numeric_cell(value, row).map(|v| v < 0.0))
+                .map(|value| {
+                    numeric_cell_order_to_zero(value, row)
+                        .map(|order| order == Some(Ordering::Less))
+                })
                 .collect::<BuiltinResult<Vec<_>>>()?
                 .into_iter()
                 .all(|flag| flag),
@@ -447,33 +505,74 @@ pub(in crate::builtins::table) fn selector_numeric_values(
     value: &Value,
 ) -> BuiltinResult<Vec<f64>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|index| {
+                tensor
+                    .numeric_value_at(index)
+                    .ok_or_else(|| invalid_argument("timerange: missing numeric value"))
+                    .and_then(selector_scalar_to_f64)
+            })
+            .collect(),
         Value::Num(value) => Ok(vec![*value]),
-        Value::Int(value) => Ok(vec![value.to_f64()]),
-        Value::Object(obj) if obj.is_class("datetime") => {
-            Ok(crate::builtins::datetime::serials_from_datetime_value(value)?.data)
-        }
-        Value::Object(obj) if obj.is_class("duration") => {
-            Ok(crate::builtins::duration::duration_tensor_from_duration_value(value)?.data)
-        }
+        Value::Int(value) => Ok(vec![selector_scalar_to_f64(NumericScalar::from(
+            value.clone(),
+        ))?]),
+        Value::Object(obj) if obj.is_class("datetime") => Ok(tensor_utils::tensor_into_values_f64(
+            crate::builtins::datetime::serials_from_datetime_value(value)?,
+        )),
+        Value::Object(obj) if obj.is_class("duration") => Ok(tensor_utils::tensor_into_values_f64(
+            crate::builtins::duration::duration_tensor_from_duration_value(value)?,
+        )),
         other => Err(invalid_argument(format!(
             "timerange: expected numeric, datetime, or duration row times, got {other:?}"
         ))),
     }
 }
 
-pub(in crate::builtins::table) fn selector_bound_value(value: &Value) -> BuiltinResult<f64> {
-    selector_numeric_values(value)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| invalid_argument("timerange: boundary must not be empty"))
+fn selector_scalar_to_f64(value: NumericScalar) -> BuiltinResult<f64> {
+    match value {
+        NumericScalar::F64(value) => Ok(value),
+        NumericScalar::F32(value) => Ok(f64::from(value)),
+        integer => {
+            let integer = integer.into_int_value().expect("integer scalar");
+            let exact = match integer {
+                runmat_value::IntValue::I8(value) => i128::from(value),
+                runmat_value::IntValue::I16(value) => i128::from(value),
+                runmat_value::IntValue::I32(value) => i128::from(value),
+                runmat_value::IntValue::I64(value) => i128::from(value),
+                runmat_value::IntValue::U8(value) => i128::from(value),
+                runmat_value::IntValue::U16(value) => i128::from(value),
+                runmat_value::IntValue::U32(value) => i128::from(value),
+                runmat_value::IntValue::U64(value) => i128::from(value),
+            };
+            if !(-(1_i128 << 53)..=(1_i128 << 53)).contains(&exact) {
+                return Err(invalid_argument(
+                    "timerange: integer time values must be exactly representable as double",
+                ));
+            }
+            Ok(exact as f64)
+        }
+    }
 }
 
-pub(in crate::builtins::table) fn numeric_cell(value: &Value, row: usize) -> BuiltinResult<f64> {
+pub(in crate::builtins::table) fn numeric_cell_order_to_zero(
+    value: &Value,
+    row: usize,
+) -> BuiltinResult<Option<Ordering>> {
     match row_value(value, row)? {
-        Value::Num(value) => Ok(value),
-        Value::Int(value) => Ok(value.to_f64()),
-        Value::Bool(value) => Ok(if value { 1.0 } else { 0.0 }),
+        Value::Num(value) => Ok(value.partial_cmp(&0.0)),
+        Value::Int(value) => Ok(Some(
+            crate::builtins::logical::rel::integer_comparison::compare_numeric_scalars_exact(
+                NumericScalar::from(value),
+                NumericScalar::F64(0.0),
+            )
+            .expect("integer comparison with zero is ordered"),
+        )),
+        Value::Bool(value) => Ok(Some(if value {
+            Ordering::Greater
+        } else {
+            Ordering::Equal
+        })),
         other => Err(invalid_argument(format!(
             "rowfilter: expected numeric predicate variable, got {other:?}"
         ))),
@@ -490,22 +589,31 @@ pub(in crate::builtins::table) fn value_is_missing_scalar(value: &Value) -> bool
             .map(|text| text.is_empty())
             .unwrap_or(true),
         Value::CharArray(array) => array.data.iter().all(|ch| ch.is_whitespace()),
-        Value::Tensor(tensor) => tensor
-            .data
-            .first()
-            .map(|value| value.is_nan())
-            .unwrap_or(true),
+        Value::Tensor(tensor) => {
+            if tensor.integer_storage().is_some() {
+                tensor.is_empty()
+            } else {
+                tensor_utils::tensor_values_f64_cow(tensor)
+                    .first()
+                    .map(|value| value.is_nan())
+                    .unwrap_or(true)
+            }
+        }
         Value::Object(obj) if obj.is_class("datetime") => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
-                .and_then(|tensor| tensor.data.first().copied())
+                .and_then(|tensor| {
+                    (!tensor.is_empty()).then(|| tensor_utils::tensor_value_f64(&tensor, 0))
+                })
                 .map(|serial| serial.is_nan())
                 .unwrap_or(false)
         }
         Value::Object(obj) if obj.is_class("duration") => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .ok()
-                .and_then(|tensor| tensor.data.first().copied())
+                .and_then(|tensor| {
+                    (!tensor.is_empty()).then(|| tensor_utils::tensor_value_f64(&tensor, 0))
+                })
                 .map(|days| days.is_nan())
                 .unwrap_or(false)
         }
@@ -533,6 +641,35 @@ pub(in crate::builtins::table) fn name_at_index(
     Ok(names[idx].clone())
 }
 
+fn name_at_integer_index(
+    names: &[String],
+    value: &runmat_value::IntValue,
+) -> BuiltinResult<String> {
+    let idx = one_based_integer_to_zero(value, names.len(), "variable")?;
+    Ok(names[idx].clone())
+}
+
+fn one_based_integer_to_zero(
+    value: &runmat_value::IntValue,
+    len: usize,
+    context: &str,
+) -> BuiltinResult<usize> {
+    let idx = value
+        .try_to_usize()
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| {
+            invalid_index(format!(
+                "table: {context} indices must be positive finite integers"
+            ))
+        })?;
+    if idx >= len {
+        return Err(invalid_index(format!(
+            "table: {context} index exceeds bounds"
+        )));
+    }
+    Ok(idx)
+}
+
 pub(in crate::builtins::table) fn one_based_to_zero(
     value: f64,
     len: usize,
@@ -550,4 +687,82 @@ pub(in crate::builtins::table) fn one_based_to_zero(
         )));
     }
     Ok(idx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::{IntegerStorage, Tensor};
+
+    fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(values.iter().map(|&value| value as i8).collect()),
+            IntegerStorage::I16(values.iter().map(|&value| value as i16).collect()),
+            IntegerStorage::I32(values.iter().map(|&value| value as i32).collect()),
+            IntegerStorage::I64(values.iter().map(|&value| value as i64).collect()),
+            IntegerStorage::U8(values.iter().map(|&value| value as u8).collect()),
+            IntegerStorage::U16(values.iter().map(|&value| value as u16).collect()),
+            IntegerStorage::U32(values.iter().map(|&value| value as u32).collect()),
+            IntegerStorage::U64(values.to_vec()),
+        ]
+    }
+
+    #[test]
+    fn typed_row_and_variable_selectors_do_not_round_uint64() {
+        let rows = parse_row_selector(
+            Some(&Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![1, 2]).unwrap(),
+            )),
+            2,
+        )
+        .unwrap();
+        assert_eq!(rows, vec![0, 1]);
+
+        let names = vec!["left".to_string(), "right".to_string()];
+        let variables =
+            parse_variable_selector(Some(&Value::Int(runmat_value::IntValue::U64(2))), &names)
+                .unwrap();
+        assert_eq!(variables, vec!["right"]);
+
+        let err = parse_row_selector(Some(&Value::Int(runmat_value::IntValue::U64(u64::MAX))), 2)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("exceeds bounds"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn table_index_selectors_read_every_native_integer_class() {
+        let names = vec!["left".to_string(), "right".to_string()];
+        for storage in integer_storages(&[1, 2]) {
+            let selector = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            assert_eq!(
+                parse_row_selector(Some(&Value::Tensor(selector.clone())), 2).unwrap(),
+                vec![0, 1]
+            );
+            assert_eq!(
+                parse_variable_selector(Some(&Value::Tensor(selector)), &names).unwrap(),
+                names
+            );
+        }
+    }
+
+    #[test]
+    fn selector_numeric_values_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![7, 9]), vec![1, 2]).unwrap();
+
+        assert_eq!(
+            selector_numeric_values(&Value::Tensor(tensor)).unwrap(),
+            vec![7.0, 9.0]
+        );
+    }
+
+    #[test]
+    fn value_is_missing_scalar_reads_typed_integer_storage() {
+        let tensor = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+
+        assert!(!value_is_missing_scalar(&Value::Tensor(tensor)));
+
+        let empty = Tensor::new_integer(IntegerStorage::I32(Vec::new()), vec![0, 1]).unwrap();
+        assert!(value_is_missing_scalar(&Value::Tensor(empty)));
+    }
 }

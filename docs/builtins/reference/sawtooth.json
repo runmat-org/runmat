@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "elementwise",
-    "notes": "GPU inputs are gathered to the host so the reference implementation can guarantee MATLAB-compatible piecewise-linear evaluation at the period boundary."
+    "notes": "The compatibility target does not document interactive GPU Array support for `sawtooth`. In `runmat` compatibility mode, gpuArray arguments are accepted as a RunMat extension and gathered so the reference implementation can guarantee piecewise-linear evaluation at the period boundary."
   },
   "fusion": {
     "elementwise": false,
@@ -38,7 +38,7 @@
     "Returns `-1` at the start of each period and approaches `+1` just before the period boundary wraps when `xmax = 1`.",
     "Returns a piecewise-linear triangle wave when `xmax = 0.5`, peaking at `1` at the centre of each period.",
     "Returns a pure falling ramp when `xmax = 0` and a pure rising ramp when `xmax = 1`.",
-    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "MATLAB-compatible calls use double inputs for `t` and `xmax`. In `runmat` compatibility mode, supported single, integer, and logical arguments are accepted as a RunMat extension and promoted to double precision before evaluation.",
     "Non-finite sample times (`NaN`, `+Inf`, `-Inf`) propagate as `NaN` element-wise, matching MATLAB.",
     "Complex and text inputs are rejected with a builtin-scoped error.",
     "Rejects `xmax` values outside `[0, 1]` and non-scalar `xmax` arguments."

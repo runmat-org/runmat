@@ -36,9 +36,10 @@
     "Inputs must be square matrices (scalars count as `1 × 1`). Non-square inputs trigger the MATLAB error `\"rcond: input must be a square matrix.\"`",
     "For the empty matrix (`0 × 0`) the reciprocal condition number is `Inf`.",
     "`rcond(0)` returns `0`. Non-zero scalars return `1`.",
-    "Logical and integer arrays are promoted to double precision before analysis.",
+    "Public MATLAB matrix classes are single and double. RunMat mode separately admits logical matrices and all eight real integer classes through named extensions; integer values cross only after exact binary64 representability checks.",
     "Complex matrices are supported; the singular values are computed in complex arithmetic.",
-    "The implementation runs an SVD and computes `min(s) / max(s)`, honouring MATLAB's tolerance logic."
+    "The implementation runs an SVD and computes `min(s) / max(s)`, honouring MATLAB's tolerance logic.",
+    "Resident integer input bypasses floating provider condition-estimation kernels, gathers through its exact owner, and restores the double result to that owner when supported."
   ],
   "examples": [
     {

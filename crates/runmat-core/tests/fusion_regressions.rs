@@ -1,8 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use runmat_builtins::Value;
 use runmat_core::RunMatSession;
 use runmat_gc::gc_test_context;
+use runmat_value::Value;
 use std::sync::Once;
 
 static INIT_ACCEL_REPROS: Once = Once::new();
@@ -20,7 +20,7 @@ fn read_scalar(engine: &mut RunMatSession, expr: &str) -> f64 {
         .expect("evaluate scalar expression");
     match result.value.expect("scalar value should be available") {
         Value::Num(value) => value,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor.materialize_f64()[0],
         other => panic!("expected scalar numeric value, got {other:?}"),
     }
 }
@@ -110,7 +110,7 @@ fn mod_and_rem_real_session_parity_end_to_end() {
         result.error
     );
 
-    let expected_mod = [0.5, 0.75, 1.5, f64::NAN, f64::NAN, 5.0, f64::NAN, f64::NAN];
+    let expected_mod = [0.5, 0.75, 1.5, 6.0, f64::NAN, 5.0, f64::NAN, 4.0];
     let expected_rem = [
         -1.5,
         -1.25,

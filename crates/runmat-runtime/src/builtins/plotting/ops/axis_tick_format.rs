@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 use super::axis_ticks::TickAxis;
 use super::properties::{resolve_plot_handle, PlotHandle};
@@ -7,6 +7,7 @@ use super::state::{
     set_axis_tick_formats, set_axis_tick_formats_for_axes,
 };
 use super::{plotting_error, plotting_error_with_source};
+use crate::builtins::common::tensor;
 use crate::builtins::plotting::style::value_as_string;
 use crate::BuiltinResult;
 
@@ -65,11 +66,12 @@ fn axes_array_targets(value: &Value) -> Option<Vec<(super::state::FigureHandle, 
     let Value::Tensor(tensor) = value else {
         return None;
     };
-    if tensor.data.is_empty() {
+    let data = tensor::tensor_values_f64(tensor);
+    if data.is_empty() {
         return None;
     }
-    let mut targets = Vec::with_capacity(tensor.data.len());
-    for scalar in &tensor.data {
+    let mut targets = Vec::with_capacity(data.len());
+    for scalar in &data {
         let Ok((handle, axes_index)) = decode_axes_handle(*scalar) else {
             return None;
         };

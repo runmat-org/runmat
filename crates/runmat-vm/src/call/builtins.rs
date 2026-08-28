@@ -7,13 +7,15 @@ use crate::runtime::workspace::{
     replace_workspace_target_vars_and_state, workspace_assign_target, workspace_target_snapshot,
     WorkspaceTarget, WorkspaceValueSnapshot,
 };
-use runmat_builtins::Value;
 use runmat_hir::{CallableIdentity, FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
+use runmat_runtime::builtins::common::tensor::{
+    is_scalar_tensor, scalar_integer_value, tensor_value_f64,
+};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_thread_local::runmat_thread_local;
+use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
 
 #[cfg(feature = "native-accel")]
 fn map_prepare_builtin_args_error(err: impl std::fmt::Display) -> RuntimeError {
@@ -38,7 +40,6 @@ enum VmDynamicWorkspaceBuiltin {
     Evalin,
     Assignin,
     Run,
-    RunTests,
 }
 
 impl VmDynamicWorkspaceBuiltin {
@@ -49,7 +50,6 @@ impl VmDynamicWorkspaceBuiltin {
             runmat_hir::EVALIN_BUILTIN_NAME => Some(Self::Evalin),
             runmat_hir::ASSIGNIN_BUILTIN_NAME => Some(Self::Assignin),
             runmat_hir::RUN_BUILTIN_NAME => Some(Self::Run),
-            runmat_hir::RUNTESTS_BUILTIN_NAME => Some(Self::RunTests),
             _ => None,
         }
     }
@@ -61,7 +61,6 @@ impl VmDynamicWorkspaceBuiltin {
             Self::Evalin => runmat_hir::EVALIN_BUILTIN_NAME,
             Self::Assignin => runmat_hir::ASSIGNIN_BUILTIN_NAME,
             Self::Run => runmat_hir::RUN_BUILTIN_NAME,
-            Self::RunTests => runmat_hir::RUNTESTS_BUILTIN_NAME,
         }
     }
 }
@@ -78,7 +77,7 @@ impl Default for DynamicEvalOptions {
     fn default() -> Self {
         Self {
             compat_mode: CompatMode::Matlab,
-            runmat_extensions_enabled: true,
+            runmat_extensions_enabled: false,
             top_level_await_enabled: true,
             dynamic_eval_enabled: true,
         }
@@ -96,6 +95,17 @@ pub fn set_dynamic_eval_options(
     top_level_await_enabled: bool,
     dynamic_eval_enabled: bool,
 ) {
+    if let Some(runtime) = runmat_runtime::context::legacy::active() {
+        runtime.set_language_mode(match compat_mode {
+            CompatMode::Matlab => runmat_runtime::context::RuntimeLanguageMode::Matlab,
+            CompatMode::RunMat => runmat_runtime::context::RuntimeLanguageMode::RunMat,
+            CompatMode::Strict => runmat_runtime::context::RuntimeLanguageMode::Strict,
+        });
+        runtime.set_runmat_extensions_enabled(runmat_extensions_enabled);
+        runtime.set_top_level_await_enabled(top_level_await_enabled);
+        runtime.set_dynamic_eval_enabled(dynamic_eval_enabled);
+    }
+    runmat_runtime::compatibility::set_runmat_extensions_enabled(runmat_extensions_enabled);
     DYNAMIC_EVAL_OPTIONS.with(|slot| {
         *slot.borrow_mut() = DynamicEvalOptions {
             compat_mode,
@@ -114,9 +124,12 @@ pub struct DynamicEvalOptionsGuard {
 impl Drop for DynamicEvalOptionsGuard {
     fn drop(&mut self) {
         let previous = self.previous;
-        DYNAMIC_EVAL_OPTIONS.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
+        set_dynamic_eval_options(
+            previous.compat_mode,
+            previous.runmat_extensions_enabled,
+            previous.top_level_await_enabled,
+            previous.dynamic_eval_enabled,
+        );
     }
 }
 
@@ -137,6 +150,19 @@ pub fn push_dynamic_eval_options(
 }
 
 fn current_dynamic_eval_options() -> DynamicEvalOptions {
+    if let Some(runtime) = runmat_runtime::context::legacy::active() {
+        let compat_mode = match runtime.language_mode() {
+            runmat_runtime::context::RuntimeLanguageMode::Matlab => CompatMode::Matlab,
+            runmat_runtime::context::RuntimeLanguageMode::RunMat => CompatMode::RunMat,
+            runmat_runtime::context::RuntimeLanguageMode::Strict => CompatMode::Strict,
+        };
+        return DynamicEvalOptions {
+            compat_mode,
+            runmat_extensions_enabled: runtime.runmat_extensions_enabled(),
+            top_level_await_enabled: runtime.top_level_await_enabled(),
+            dynamic_eval_enabled: runtime.dynamic_eval_enabled(),
+        };
+    }
     DYNAMIC_EVAL_OPTIONS.with(|slot| *slot.borrow())
 }
 
@@ -222,10 +248,18 @@ fn parse_finite_arity_bound(
     builtin: &str,
     name: &str,
 ) -> Result<usize, RuntimeError> {
+    if let Some(integer) = scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            mex(
+                &format!("{builtin}ArgumentInvalid"),
+                &format!("{builtin}: {name} exceeds the platform argument-count range"),
+            )
+        });
+    }
+
     let number = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => tensor_value_f64(tensor, 0),
         other => {
             return Err(mex(
                 &format!("{builtin}ArgumentInvalid"),
@@ -255,9 +289,9 @@ fn parse_max_arity_bound(value: &Value, builtin: &str) -> Result<ArityBound, Run
             Ok(ArityBound::Unbounded)
         }
         Value::Tensor(tensor)
-            if tensor.data.len() == 1
-                && tensor.data[0].is_infinite()
-                && tensor.data[0].is_sign_positive() =>
+            if is_scalar_tensor(tensor)
+                && tensor_value_f64(tensor, 0).is_infinite()
+                && tensor_value_f64(tensor, 0).is_sign_positive() =>
         {
             Ok(ArityBound::Unbounded)
         }
@@ -370,6 +404,11 @@ pub fn vm_intrinsic_builtin(
             Ok(Value::Num(0.0))
         }
         VmIntrinsicBuiltin::Nargoutchk => {
+            if matches!(args.len(), 3 | 4) {
+                return runmat_runtime::builtins::introspection::arity_check::dispatch_nargoutchk(
+                    args,
+                );
+            }
             validate_intrinsic_arg_count(intrinsic.name(), args.len(), 2)?;
             let (_, nout) = call_counts.last().cloned().unwrap_or((0, 0));
             validate_nargoutchk(&args, nout)?;
@@ -384,7 +423,7 @@ pub async fn vm_dynamic_workspace_builtin(
     arg_count: usize,
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
-    source_id: Option<runmat_hir::SourceId>,
+    _source_id: Option<runmat_hir::SourceId>,
 ) -> Result<Value, RuntimeError> {
     let Some(builtin) = VmDynamicWorkspaceBuiltin::classify(name) else {
         return Err(mex(
@@ -469,9 +508,14 @@ pub async fn vm_dynamic_workspace_builtin(
         }
         VmDynamicWorkspaceBuiltin::Assignin => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 3)?;
+            if requested_outputs > 0 {
+                return Err(
+                    runmat_runtime::builtins::introspection::dynamic_workspace::assignin_too_many_outputs_error(),
+                );
+            }
             let target = workspace_target_arg(builtin.name(), &args[0])?;
             let name = workspace_text_arg(builtin.name(), &args[1])?;
-            if !is_valid_workspace_identifier(&name) {
+            if !runmat_runtime::builtins::common::identifiers::is_valid_varname(&name) {
                 return Err(mex(
                     "DynamicWorkspaceName",
                     &format!(
@@ -519,111 +563,7 @@ pub async fn vm_dynamic_workspace_builtin(
             )
             .await
         }
-        VmDynamicWorkspaceBuiltin::RunTests => {
-            if requested_outputs > 1 {
-                return Err(mex(
-                    "RunTestsTooManyOutputs",
-                    "runtests: too many output arguments",
-                ));
-            }
-            let plan = runmat_runtime::builtins::diagnostics::runtests::resolve_runtests_plan(args)
-                .await?;
-            let mut outcomes = Vec::with_capacity(plan.cases.len());
-            for case in plan.cases {
-                outcomes.push(execute_runtests_case(case, function_registry, source_id).await?);
-            }
-            let result =
-                runmat_runtime::builtins::diagnostics::runtests::runtests_result_value(outcomes)?;
-            if requested_outputs == 0 {
-                Ok(Value::OutputList(Vec::new()))
-            } else {
-                Ok(result)
-            }
-        }
     }
-}
-
-async fn execute_runtests_case(
-    case: runmat_runtime::builtins::diagnostics::runtests::RunTestCase,
-    function_registry: &FunctionRegistry,
-    _source_id: Option<runmat_hir::SourceId>,
-) -> Result<runmat_runtime::builtins::diagnostics::runtests::RunTestOutcome, RuntimeError> {
-    let started = Instant::now();
-    let snapshot = workspace_target_snapshot(WorkspaceTarget::Current).map_err(|err| {
-        runmat_runtime::builtins::diagnostics::runtests::workspace_state_error(format!(
-            "workspace unavailable: {err}"
-        ))
-    })?;
-    let original_vars = unsafe { (*snapshot.vars_ptr).clone() };
-    let original_names = snapshot.names.clone();
-    let original_assigned = snapshot.assigned.clone();
-    replace_workspace_target_vars_and_state(
-        WorkspaceTarget::Current,
-        Vec::new(),
-        HashMap::new(),
-        HashSet::new(),
-    )
-    .map_err(|err| {
-        runmat_runtime::builtins::diagnostics::runtests::workspace_state_error(format!(
-            "workspace isolation failed: {err}"
-        ))
-    })?;
-
-    let dynamic_source_id = next_dynamic_source_id();
-    let source_context = DynamicSourceContext {
-        source_id: dynamic_source_id,
-        name: case.display_name.clone(),
-        fullpath_name: None,
-        text: case.source.clone(),
-    };
-    let eval_result = eval_workspace_source(
-        WorkspaceEvalRequest {
-            builtin: runmat_hir::RUNTESTS_BUILTIN_NAME,
-            target: WorkspaceTarget::Current,
-            source: case.source,
-            source_label: case.display_name,
-            requested_outputs: 0,
-            source_id: Some(source_context.source_id),
-            source_context: Some(source_context),
-            commit_workspace_on_error: false,
-            capture_display_output: false,
-            empty_value_when_no_result: false,
-        },
-        function_registry,
-    )
-    .await;
-
-    let restore_result = replace_workspace_target_vars_and_state(
-        WorkspaceTarget::Current,
-        original_vars,
-        original_names,
-        original_assigned,
-    );
-    let duration_seconds = started.elapsed().as_secs_f64();
-    if let Err(err) = restore_result {
-        return Err(
-            runmat_runtime::builtins::diagnostics::runtests::workspace_state_error(format!(
-                "workspace restore failed: {err}"
-            )),
-        );
-    }
-
-    Ok(match eval_result {
-        Ok(_) => runmat_runtime::builtins::diagnostics::runtests::RunTestOutcome {
-            name: case.name,
-            source_path: case.source_path,
-            passed: true,
-            duration_seconds,
-            details: String::new(),
-        },
-        Err(err) => runmat_runtime::builtins::diagnostics::runtests::RunTestOutcome {
-            name: case.name,
-            source_path: case.source_path,
-            passed: false,
-            duration_seconds,
-            details: err.message().to_string(),
-        },
-    })
 }
 
 fn evalc_output_value(
@@ -685,15 +625,6 @@ fn workspace_target_arg(builtin: &str, value: &Value) -> Result<WorkspaceTarget,
             &format!("{builtin}: workspace selector must be 'base' or 'caller'"),
         )),
     }
-}
-
-fn is_valid_workspace_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 struct WorkspaceEvalRequest {
@@ -1066,35 +997,38 @@ fn remap_emit_label(label: &mut crate::bytecode::EmitLabel, slot_remap: &HashMap
     }
 }
 
-fn remap_end_expr_slots(expr: &mut crate::bytecode::EndExpr, slot_remap: &HashMap<usize, usize>) {
+fn remap_end_expr_slots(
+    expr: &mut runmat_runtime::indexing::EndExpr,
+    slot_remap: &HashMap<usize, usize>,
+) {
     match expr {
-        crate::bytecode::EndExpr::Var(slot) => remap_slot(slot, slot_remap),
-        crate::bytecode::EndExpr::ResolvedCall { args, .. } => {
+        runmat_runtime::indexing::EndExpr::Var(slot) => remap_slot(slot, slot_remap),
+        runmat_runtime::indexing::EndExpr::ResolvedCall { args, .. } => {
             for arg in args {
                 remap_end_expr_slots(arg, slot_remap);
             }
         }
-        crate::bytecode::EndExpr::Add(left, right)
-        | crate::bytecode::EndExpr::Sub(left, right)
-        | crate::bytecode::EndExpr::Mul(left, right)
-        | crate::bytecode::EndExpr::Div(left, right)
-        | crate::bytecode::EndExpr::LeftDiv(left, right)
-        | crate::bytecode::EndExpr::Pow(left, right) => {
+        runmat_runtime::indexing::EndExpr::Add(left, right)
+        | runmat_runtime::indexing::EndExpr::Sub(left, right)
+        | runmat_runtime::indexing::EndExpr::Mul(left, right)
+        | runmat_runtime::indexing::EndExpr::Div(left, right)
+        | runmat_runtime::indexing::EndExpr::LeftDiv(left, right)
+        | runmat_runtime::indexing::EndExpr::Pow(left, right) => {
             remap_end_expr_slots(left, slot_remap);
             remap_end_expr_slots(right, slot_remap);
         }
-        crate::bytecode::EndExpr::Neg(inner)
-        | crate::bytecode::EndExpr::Pos(inner)
-        | crate::bytecode::EndExpr::Floor(inner)
-        | crate::bytecode::EndExpr::Ceil(inner)
-        | crate::bytecode::EndExpr::Round(inner)
-        | crate::bytecode::EndExpr::Fix(inner) => remap_end_expr_slots(inner, slot_remap),
-        crate::bytecode::EndExpr::End | crate::bytecode::EndExpr::Const(_) => {}
+        runmat_runtime::indexing::EndExpr::Neg(inner)
+        | runmat_runtime::indexing::EndExpr::Pos(inner)
+        | runmat_runtime::indexing::EndExpr::Floor(inner)
+        | runmat_runtime::indexing::EndExpr::Ceil(inner)
+        | runmat_runtime::indexing::EndExpr::Round(inner)
+        | runmat_runtime::indexing::EndExpr::Fix(inner) => remap_end_expr_slots(inner, slot_remap),
+        runmat_runtime::indexing::EndExpr::End | runmat_runtime::indexing::EndExpr::Const(_) => {}
     }
 }
 
 fn remap_optional_end_expr_slots(
-    exprs: &mut [Option<crate::bytecode::EndExpr>],
+    exprs: &mut [Option<runmat_runtime::indexing::EndExpr>],
     slot_remap: &HashMap<usize, usize>,
 ) {
     for expr in exprs.iter_mut().flatten() {
@@ -1103,7 +1037,7 @@ fn remap_optional_end_expr_slots(
 }
 
 fn remap_indexed_end_expr_slots(
-    exprs: &mut [(usize, crate::bytecode::EndExpr)],
+    exprs: &mut [(usize, runmat_runtime::indexing::EndExpr)],
     slot_remap: &HashMap<usize, usize>,
 ) {
     for (_, expr) in exprs {
@@ -1112,7 +1046,7 @@ fn remap_indexed_end_expr_slots(
 }
 
 fn remap_end_expr_vec_slots(
-    exprs: &mut [crate::bytecode::EndExpr],
+    exprs: &mut [runmat_runtime::indexing::EndExpr],
     slot_remap: &HashMap<usize, usize>,
 ) {
     for expr in exprs {
@@ -1339,34 +1273,34 @@ fn remap_eval_local_callable_identity(
 }
 
 fn remap_eval_local_end_expr(
-    expr: &mut crate::bytecode::EndExpr,
+    expr: &mut runmat_runtime::indexing::EndExpr,
     remap: &HashMap<FunctionId, FunctionId>,
 ) {
     match expr {
-        crate::bytecode::EndExpr::ResolvedCall { identity, args, .. } => {
+        runmat_runtime::indexing::EndExpr::ResolvedCall { identity, args, .. } => {
             remap_eval_local_callable_identity(identity, remap);
             for arg in args {
                 remap_eval_local_end_expr(arg, remap);
             }
         }
-        crate::bytecode::EndExpr::Add(lhs, rhs)
-        | crate::bytecode::EndExpr::Sub(lhs, rhs)
-        | crate::bytecode::EndExpr::Mul(lhs, rhs)
-        | crate::bytecode::EndExpr::Div(lhs, rhs)
-        | crate::bytecode::EndExpr::LeftDiv(lhs, rhs)
-        | crate::bytecode::EndExpr::Pow(lhs, rhs) => {
+        runmat_runtime::indexing::EndExpr::Add(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::Sub(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::Mul(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::Div(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::LeftDiv(lhs, rhs)
+        | runmat_runtime::indexing::EndExpr::Pow(lhs, rhs) => {
             remap_eval_local_end_expr(lhs, remap);
             remap_eval_local_end_expr(rhs, remap);
         }
-        crate::bytecode::EndExpr::Neg(inner)
-        | crate::bytecode::EndExpr::Pos(inner)
-        | crate::bytecode::EndExpr::Floor(inner)
-        | crate::bytecode::EndExpr::Ceil(inner)
-        | crate::bytecode::EndExpr::Round(inner)
-        | crate::bytecode::EndExpr::Fix(inner) => remap_eval_local_end_expr(inner, remap),
-        crate::bytecode::EndExpr::End
-        | crate::bytecode::EndExpr::Const(_)
-        | crate::bytecode::EndExpr::Var(_) => {}
+        runmat_runtime::indexing::EndExpr::Neg(inner)
+        | runmat_runtime::indexing::EndExpr::Pos(inner)
+        | runmat_runtime::indexing::EndExpr::Floor(inner)
+        | runmat_runtime::indexing::EndExpr::Ceil(inner)
+        | runmat_runtime::indexing::EndExpr::Round(inner)
+        | runmat_runtime::indexing::EndExpr::Fix(inner) => remap_eval_local_end_expr(inner, remap),
+        runmat_runtime::indexing::EndExpr::End
+        | runmat_runtime::indexing::EndExpr::Const(_)
+        | runmat_runtime::indexing::EndExpr::Var(_) => {}
     }
 }
 
@@ -1490,8 +1424,56 @@ pub fn rethrow_without_explicit_exception(
 #[cfg(test)]
 mod tests {
     use super::{
-        dynamic_source_context, imported_builtin_qualified_name, rethrow_without_explicit_exception,
+        current_dynamic_eval_options, dynamic_source_context, imported_builtin_qualified_name,
+        parse_finite_arity_bound, push_dynamic_eval_options, rethrow_without_explicit_exception,
     };
+    use runmat_parser::CompatMode;
+    use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
+
+    #[test]
+    fn dynamic_eval_guard_restores_runtime_extension_policy() {
+        let original = current_dynamic_eval_options();
+        let original_runtime = runmat_runtime::compatibility::runmat_extensions_enabled();
+        {
+            let _guard = push_dynamic_eval_options(CompatMode::RunMat, true, false, false);
+            assert!(current_dynamic_eval_options().runmat_extensions_enabled);
+            assert!(runmat_runtime::compatibility::runmat_extensions_enabled());
+        }
+        assert_eq!(
+            current_dynamic_eval_options().runmat_extensions_enabled,
+            original.runmat_extensions_enabled
+        );
+        assert_eq!(
+            runmat_runtime::compatibility::runmat_extensions_enabled(),
+            original_runtime
+        );
+    }
+
+    #[test]
+    fn dynamic_eval_guard_updates_and_restores_active_runtime_policy() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        runtime.set_language_mode(runmat_runtime::context::RuntimeLanguageMode::Strict);
+        runtime.set_runmat_extensions_enabled(false);
+        runtime.set_top_level_await_enabled(true);
+        runtime.set_dynamic_eval_enabled(true);
+        futures::executor::block_on(runtime.scope(async {
+            {
+                let _guard = push_dynamic_eval_options(CompatMode::RunMat, true, false, false);
+                let current = current_dynamic_eval_options();
+                assert_eq!(current.compat_mode, CompatMode::RunMat);
+                assert!(current.runmat_extensions_enabled);
+                assert!(!current.top_level_await_enabled);
+                assert!(!current.dynamic_eval_enabled);
+            }
+            let restored = current_dynamic_eval_options();
+            assert_eq!(restored.compat_mode, CompatMode::Strict);
+            assert!(!restored.runmat_extensions_enabled);
+            assert!(restored.top_level_await_enabled);
+            assert!(restored.dynamic_eval_enabled);
+        }));
+    }
 
     #[test]
     fn imported_builtin_qualified_name_uses_typed_segments() {
@@ -1546,6 +1528,35 @@ mod tests {
         );
         assert_eq!(dynamic.text, "mfilename()");
         assert_ne!(dynamic.source_id, source_id);
+    }
+
+    #[test]
+    fn arity_bound_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("arity tensor");
+        assert_eq!(
+            parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs").unwrap(),
+            7
+        );
+    }
+
+    #[test]
+    fn arity_bound_rejects_wide_integer_scalars_and_poisoned_tensor_mirrors() {
+        let scalar = Value::Int(IntValue::U64(u64::MAX));
+        if usize::BITS == 64 {
+            assert_eq!(
+                parse_finite_arity_bound(&scalar, "narginchk", "minArgs").unwrap(),
+                usize::MAX
+            );
+        } else {
+            assert!(parse_finite_arity_bound(&scalar, "narginchk", "minArgs").is_err());
+        }
+
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("arity tensor");
+        // The f64 mirror is intentionally plausible but must never decide an
+        // integer-only argument bound.
+        assert!(parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs",).is_err());
     }
 
     #[cfg(feature = "native-accel")]

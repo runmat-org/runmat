@@ -3,16 +3,21 @@
 use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ObjectInstance, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::control::type_resolvers::step_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -157,6 +162,33 @@ pub const STEP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STEP_ERRORS,
 };
 
+const STEP_INTEGER_TIME_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "step-integer-time",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "step with a native typed-integer time input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StepIntegerTimeExtension"),
+};
+pub const STEP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [STEP_INTEGER_TIME_EXTENSION];
+const STEP_INTEGER_TIME_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "t or tFinal",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents positive scalar, two-element, and vector time forms without publishing native integer storage classes. RunMat conservatively gates typed integers and requires exact binary64 representation.",
+    }];
+pub const STEP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[y,tOut] = step(sys, integer_t_or_tFinal)",
+        inputs: &STEP_INTEGER_TIME_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Compatibility admission and exactness checks occur before provider access. Automatic residency may gather through the exact owner; the host simulator and time/output arrays use the model's binary64 computation domain.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::step")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "step",
@@ -211,9 +243,20 @@ fn step_error_with_message(
     suppress_auto_output = true,
     type_resolver(step_type),
     descriptor(crate::builtins::control::step::STEP_DESCRIPTOR),
+    extensions(crate::builtins::control::step::STEP_EXTENSIONS),
+    integer_capabilities(crate::builtins::control::step::STEP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::step"
 )]
 async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    for value in &rest {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            value,
+            &STEP_INTEGER_TIME_EXTENSION,
+            BUILTIN_NAME,
+            "time",
+        )
+        .await?;
+    }
     if is_statement_form_call() {
         plot_multiple_step_responses(sys, rest).await?;
         return Ok(Value::OutputList(Vec::new()));
@@ -429,7 +472,7 @@ fn property_coefficients(object: &ObjectInstance, name: &str) -> BuiltinResult<V
         )
     })?;
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64(tensor)),
         Value::ComplexTensor(tensor) => real_complex_coefficients(tensor, name),
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
@@ -441,17 +484,18 @@ fn property_coefficients(object: &ObjectInstance, name: &str) -> BuiltinResult<V
 }
 
 fn real_complex_coefficients(tensor: &ComplexTensor, name: &str) -> BuiltinResult<Vec<f64>> {
-    let mut out = Vec::with_capacity(tensor.data.len());
-    for &(re, im) in &tensor.data {
-        if im.abs() > EPS {
-            return Err(step_error_with_detail(
-                &STEP_ERROR_UNSUPPORTED_MODEL,
-                format!("complex tf {name} coefficients are not supported yet"),
-            ));
-        }
-        out.push(re);
-    }
-    Ok(out)
+    tensor::complex_tensor_values_complex64(tensor)
+        .into_iter()
+        .map(|value| {
+            if value.im.abs() > EPS {
+                return Err(step_error_with_detail(
+                    &STEP_ERROR_UNSUPPORTED_MODEL,
+                    format!("complex tf {name} coefficients are not supported yet"),
+                ));
+            }
+            Ok(value.re)
+        })
+        .collect()
 }
 
 fn property_scalar(object: &ObjectInstance, name: &str) -> BuiltinResult<f64> {
@@ -464,6 +508,9 @@ fn property_scalar(object: &ObjectInstance, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         other => Err(step_error_with_detail(
             &STEP_ERROR_INVALID_MODEL,
             format!("tf {name} property must be a scalar, got {other:?}"),
@@ -488,10 +535,11 @@ impl TimeSpec {
             Value::Int(i) => Self::final_time(i.to_f64()),
             Value::Tensor(tensor) => {
                 ensure_time_vector_shape(&tensor.shape)?;
-                if tensor.data.len() == 1 {
-                    return Self::final_time(tensor.data[0]);
+                let data = tensor::tensor_values_f64(tensor);
+                if tensor::is_scalar_tensor(tensor) {
+                    return Self::final_time(tensor::tensor_value_f64(tensor, 0));
                 }
-                Self::vector(tensor.data.clone(), sample_time)
+                Self::vector(data, sample_time)
             }
             other => Err(step_error_with_detail(
                 &STEP_ERROR_INVALID_TIME,
@@ -894,7 +942,7 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ObjectInstance};
+    use runmat_value::{CharArray, IntegerComplexStorage, IntegerStorage, ObjectInstance};
 
     fn tf_object(num: Vec<f64>, den: Vec<f64>, sample_time: f64) -> Value {
         let mut object = ObjectInstance::new("tf".to_string());
@@ -926,9 +974,23 @@ mod tests {
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
+    fn poisoned_complex_integer_tensor(
+        real: IntegerStorage,
+        imag: IntegerStorage,
+        shape: Vec<usize>,
+    ) -> ComplexTensor {
+        let storage = IntegerComplexStorage::new(real, imag).expect("complex integer storage");
+
+        ComplexTensor::new_integer(storage, shape).expect("complex integer tensor")
     }
 
     #[test]
@@ -1010,6 +1072,122 @@ mod tests {
         let time = Value::Tensor(Tensor::new(vec![0.0, 0.1, 0.2], vec![1, 3]).unwrap());
         let y = tensor_data(run_step(sys, vec![time]).expect("step"));
         assert_eq!(y, vec![0.0, 1.0, 1.5]);
+    }
+
+    #[test]
+    fn step_typed_integer_time_inputs_cross_double_boundary_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result = run_step(
+            sys,
+            vec![integer_tensor(
+                IntegerStorage::U64(vec![0, 1, 2]),
+                vec![1, 3],
+            )],
+        )
+        .expect("step");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        assert_eq!(tensor_data(outputs[1].clone()), vec![0.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn step_scalar_final_time_reads_typed_integer_storage_length_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let final_time =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("final time");
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result = run_step(sys, vec![Value::Tensor(final_time)]).expect("step");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        let time = tensor_data(outputs[1].clone());
+        assert_eq!(time.first().copied(), Some(0.0));
+        assert_eq!(time.last().copied(), Some(2.0));
+    }
+
+    #[test]
+    fn step_typed_integer_time_is_mode_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let error = run_step(
+            sys,
+            vec![integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1])],
+        )
+        .expect_err("MATLAB-compatible mode must reject typed integer time");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:StepIntegerTimeExtension")
+        );
+    }
+
+    #[test]
+    fn step_rejects_wide_integer_time_before_binary64_rounding() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let error = run_step(
+            sys,
+            vec![integer_tensor(
+                IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                vec![1, 1],
+            )],
+        )
+        .expect_err("inexact binary64 conversion must fail");
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn step_sample_time_parser_ignores_poisoned_integer_mirrors_for_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+
+        for storage in storages {
+            let sample_time = Tensor::new_integer(storage, vec![1, 1]).expect("sample time");
+            let mut object = ObjectInstance::new("tf".to_string());
+            object
+                .properties
+                .insert("Ts".to_string(), Value::Tensor(sample_time));
+
+            assert_eq!(property_scalar(&object, "Ts").expect("sample time"), 1.0);
+        }
+    }
+
+    #[test]
+    fn step_tf_coefficients_read_complex_typed_integer_storage_exactly() {
+        let tensor = poisoned_complex_integer_tensor(
+            IntegerStorage::I16(vec![2, 4]),
+            IntegerStorage::I16(vec![0, 0]),
+            vec![1, 2],
+        );
+
+        assert_eq!(
+            real_complex_coefficients(&tensor, "Numerator").expect("coefficients"),
+            vec![2.0, 4.0]
+        );
+    }
+
+    #[test]
+    fn step_rejects_exact_nonreal_complex_typed_integer_coefficients() {
+        let tensor = poisoned_complex_integer_tensor(
+            IntegerStorage::I16(vec![2, 4]),
+            IntegerStorage::I16(vec![0, 1]),
+            vec![1, 2],
+        );
+
+        let err = real_complex_coefficients(&tensor, "Numerator").expect_err("nonreal coeff");
+        assert_eq!(err.identifier(), STEP_ERROR_UNSUPPORTED_MODEL.identifier);
+        assert!(err.message().contains("complex tf Numerator coefficients"));
     }
 
     #[test]

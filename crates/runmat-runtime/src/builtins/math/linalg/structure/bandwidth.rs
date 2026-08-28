@@ -3,11 +3,15 @@
 use log::debug;
 use runmat_accelerate_api::{self, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -19,13 +23,22 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "bandwidth";
 
-const BANDWIDTH_OUTPUT_BW: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bw",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Two-element row vector [lower upper] bandwidth.",
-}];
+const BANDWIDTH_OUTPUT_BW: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "lower",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower bandwidth scalar.",
+    },
+    BuiltinParamDescriptor {
+        name: "upper",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Upper bandwidth scalar.",
+    },
+];
 
 const BANDWIDTH_OUTPUT_SCALAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "b",
@@ -62,7 +75,7 @@ const BANDWIDTH_INPUTS_SELECTOR: [BuiltinParamDescriptor; 2] = [
 
 const BANDWIDTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "bw = bandwidth(A)",
+        label: "[lower, upper] = bandwidth(A)",
         inputs: &BANDWIDTH_INPUTS,
         outputs: &BANDWIDTH_OUTPUT_BW,
     },
@@ -107,6 +120,43 @@ pub const BANDWIDTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &BANDWIDTH_ERRORS,
 };
 
+const BANDWIDTH_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bandwidth-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bandwidth with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BandwidthIntegerInputExtension"),
+};
+const BANDWIDTH_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bandwidth-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bandwidth with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BandwidthLogicalInputExtension"),
+};
+const BANDWIDTH_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    BANDWIDTH_INTEGER_INPUT_EXTENSION,
+    BANDWIDTH_LOGICAL_INPUT_EXTENSION,
+];
+
+const BANDWIDTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented matrix domain is single/double; RunMat mode additionally accepts every real integer class and paired complex-integer storage.",
+    }];
+pub const BANDWIDTH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[lower, upper] = bandwidth(integer_A, ...)",
+        inputs: &BANDWIDTH_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Host integer storage is scanned exactly for nonzero structure. Resident integer input is gated before provider dispatch, gathered exactly, and returns host double scalar metadata.",
+    }];
+
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
@@ -136,7 +186,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Structure query that returns a small host tensor; fusion treats it as a metadata operation.",
+    notes: "Structure query that returns host double scalar metadata; fusion treats it as a metadata operation.",
 };
 
 fn bandwidth_error_with_message(
@@ -172,20 +222,76 @@ enum BandSelector {
     accel = "structure",
     type_resolver(bandwidth_type),
     descriptor(crate::builtins::math::linalg::structure::bandwidth::BANDWIDTH_DESCRIPTOR),
+    extensions(BANDWIDTH_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::linalg::structure::bandwidth::BANDWIDTH_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
 async fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    ensure_input_extensions(&matrix)?;
     let selector = parse_selector(&rest)?;
     let data = MatrixData::from_value(matrix)?;
     let (lower, upper) = data.bandwidth().await?;
     match selector {
-        BandSelector::Both => {
-            let tensor = Tensor::new(vec![lower as f64, upper as f64], vec![1, 2])
-                .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e))?;
-            Ok(Value::Tensor(tensor))
-        }
-        BandSelector::Lower => Ok(Value::Num(lower as f64)),
-        BandSelector::Upper => Ok(Value::Num(upper as f64)),
+        BandSelector::Both => bandwidth_outputs(lower, upper),
+        BandSelector::Lower => one_bandwidth_output(lower),
+        BandSelector::Upper => one_bandwidth_output(upper),
+    }
+}
+
+fn ensure_input_extensions(value: &Value) -> BuiltinResult<()> {
+    let integer = matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        );
+    if integer {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BANDWIDTH_INTEGER_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    let logical = matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(
+            value,
+            Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle)
+        );
+    if logical {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BANDWIDTH_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn bandwidth_outputs(lower: usize, upper: usize) -> BuiltinResult<Value> {
+    match crate::output_count::current_output_count().unwrap_or(1) {
+        0 => Ok(Value::OutputList(Vec::new())),
+        1 => Ok(Value::Num(lower as f64)),
+        2 => Ok(Value::OutputList(vec![
+            Value::Num(lower as f64),
+            Value::Num(upper as f64),
+        ])),
+        _ => Err(bandwidth_error_with_detail(
+            &BANDWIDTH_ERROR_INVALID_ARGUMENT,
+            "too many output arguments",
+        )),
+    }
+}
+
+fn one_bandwidth_output(value: usize) -> BuiltinResult<Value> {
+    match crate::output_count::current_output_count().unwrap_or(1) {
+        0 => Ok(Value::OutputList(Vec::new())),
+        1 => Ok(Value::Num(value as f64)),
+        _ => Err(bandwidth_error_with_detail(
+            &BANDWIDTH_ERROR_INVALID_ARGUMENT,
+            "too many output arguments",
+        )),
     }
 }
 
@@ -223,7 +329,7 @@ fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
         Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
             .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e)),
-        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
+        Value::Int(i) => Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
             .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e)),
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
             .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e)),
@@ -284,7 +390,13 @@ async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)
     if rows == 0 || cols == 0 {
         return Ok((0, 0));
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+    {
+        let tensor = gpu_helpers::gather_tensor_async(handle).await?;
+        return bandwidth_host_real_tensor(&tensor);
+    }
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
         match provider.bandwidth(handle) {
             Ok(result) => {
                 let lower = result.lower as usize;
@@ -331,11 +443,20 @@ pub fn bandwidth_host_complex_data(
 }
 
 pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> BuiltinResult<(usize, usize)> {
-    bandwidth_host_real_data(&tensor.shape, &tensor.data)
+    if let Some(storage) = tensor.integer_storage() {
+        let (rows, cols) = ensure_matrix_shape(&tensor.shape)?;
+        return Ok(compute_integer_bandwidth(rows, cols, storage));
+    }
+    let values = tensor::tensor_values_f64_cow(tensor);
+    bandwidth_host_real_data(&tensor.shape, &values)
 }
 
 pub fn bandwidth_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<(usize, usize)> {
-    bandwidth_host_complex_data(&tensor.shape, &tensor.data)
+    if tensor.integer_storage().is_some() {
+        let (rows, cols) = ensure_matrix_shape(&tensor.shape)?;
+        return Ok(compute_complex_integer_bandwidth(rows, cols, tensor));
+    }
+    bandwidth_host_complex_data(&tensor.shape, &tensor.materialize_f64())
 }
 
 fn compute_real_bandwidth(rows: usize, cols: usize, data: &[f64]) -> (usize, usize) {
@@ -353,6 +474,34 @@ fn compute_real_bandwidth(rows: usize, cols: usize, data: &[f64]) -> (usize, usi
             }
             let value = data[idx];
             if value != 0.0 || value.is_nan() {
+                if row >= col {
+                    lower = lower.max(row - col);
+                } else {
+                    upper = upper.max(col - row);
+                }
+            }
+        }
+    }
+    (lower, upper)
+}
+
+fn compute_integer_bandwidth(
+    rows: usize,
+    cols: usize,
+    storage: &runmat_value::IntegerStorage,
+) -> (usize, usize) {
+    if rows == 0 || cols == 0 {
+        return (0, 0);
+    }
+    let mut lower = 0usize;
+    let mut upper = 0usize;
+    for col in 0..cols {
+        for row in 0..rows {
+            let idx = row + col * rows;
+            let Some(value) = storage.value_at(idx) else {
+                break;
+            };
+            if !value.is_zero() {
                 if row >= col {
                     lower = lower.max(row - col);
                 } else {
@@ -390,12 +539,45 @@ fn compute_complex_bandwidth(rows: usize, cols: usize, data: &[(f64, f64)]) -> (
     (lower, upper)
 }
 
+fn compute_complex_integer_bandwidth(
+    rows: usize,
+    cols: usize,
+    tensor: &ComplexTensor,
+) -> (usize, usize) {
+    if rows == 0 || cols == 0 {
+        return (0, 0);
+    }
+    let mut lower = 0usize;
+    let mut upper = 0usize;
+    for col in 0..cols {
+        for row in 0..rows {
+            let idx = row + col * rows;
+            let Some((real, imag)) = tensor.numeric_value_at(idx) else {
+                break;
+            };
+            let real = real.into_int_value().expect("integer complex real part");
+            let imag = imag
+                .into_int_value()
+                .expect("integer complex imaginary part");
+            if !real.is_zero() || !imag.is_zero() {
+                if row >= col {
+                    lower = lower.max(row - col);
+                } else {
+                    upper = upper.max(col - row);
+                }
+            }
+        }
+    }
+    (lower, upper)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -404,28 +586,30 @@ pub(crate) mod tests {
         let value = Value::Tensor(tensor);
         let result = bandwidth_builtin(value, Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![0.0, 0.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
+            Value::Num(value) => assert_eq!(value, 0.0),
+            other => panic!("expected scalar result, got {other:?}"),
         }
     }
 
     #[test]
-    fn bandwidth_type_defaults_to_two_element_tensor() {
+    fn bandwidth_returns_public_two_output_contract() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 0.0], vec![2, 2]).unwrap();
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        assert_eq!(
+            bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth"),
+            Value::OutputList(vec![Value::Num(1.0), Value::Num(1.0)])
+        );
+    }
+
+    #[test]
+    fn bandwidth_type_defaults_to_first_scalar_output() {
         let out = bandwidth_type(
             &[Type::Tensor {
                 shape: Some(vec![Some(3), Some(3)]),
             }],
             &ResolveContext::new(Vec::new()),
         );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(2)])
-            }
-        );
+        assert_eq!(out, Type::Num);
     }
 
     #[test]
@@ -435,7 +619,7 @@ pub(crate) mod tests {
             .iter()
             .map(|signature| signature.label)
             .collect();
-        assert!(labels.contains(&"bw = bandwidth(A)"));
+        assert!(labels.contains(&"[lower, upper] = bandwidth(A)"));
         assert!(labels.contains(&"b = bandwidth(A, selector)"));
     }
 
@@ -491,10 +675,8 @@ pub(crate) mod tests {
         let result =
             bandwidth_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 1.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
+            Value::Num(value) => assert_eq!(value, 1.0),
+            other => panic!("expected scalar result, got {other:?}"),
         }
     }
 
@@ -508,8 +690,8 @@ pub(crate) mod tests {
         .unwrap();
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0]),
-            other => panic!("expected tensor result, got {other:?}"),
+            Value::Num(value) => assert_eq!(value, 1.0),
+            other => panic!("expected scalar result, got {other:?}"),
         }
     }
 
@@ -519,8 +701,8 @@ pub(crate) mod tests {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![0.0, 0.0]),
-            other => panic!("expected tensor result, got {other:?}"),
+            Value::Num(value) => assert_eq!(value, 0.0),
+            other => panic!("expected scalar result, got {other:?}"),
         }
     }
 
@@ -531,20 +713,125 @@ pub(crate) mod tests {
             Tensor::new(vec![0.0, f64::NAN, 0.0, 0.0], vec![2, 2]).expect("tensor construction");
         let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 0.0]),
-            other => panic!("expected tensor result, got {other:?}"),
+            Value::Num(value) => assert_eq!(value, 1.0),
+            other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn bandwidth_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I16(vec![1, 0, 7, 0, 2, 0, 0, 5, 3]),
+            vec![3, 3],
+        )
+        .expect("integer matrix");
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
+        match result {
+            Value::Num(value) => assert_eq!(value, 2.0),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bandwidth_reads_wide_integer_storage_without_the_float_mirror() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, 0, u64::MAX, 1_u64 << 63, 1, 0, 0, 0, 1]),
+            vec![3, 3],
+        )
+        .expect("integer matrix");
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth");
+        match result {
+            Value::Num(value) => assert_eq!(value, 2.0),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bandwidth_accepts_all_integer_classes_in_runmat_mode() {
+        let cases = all_integer_bandwidth_storages();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in cases {
+            let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer matrix");
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            assert_eq!(
+                bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth"),
+                Value::OutputList(vec![Value::Num(0.0), Value::Num(1.0)])
+            );
+        }
+    }
+
+    fn all_integer_bandwidth_storages() -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![1, 0, 7, 0]),
+            IntegerStorage::I16(vec![1, 0, 7, 0]),
+            IntegerStorage::I32(vec![1, 0, 7, 0]),
+            IntegerStorage::I64(vec![1, 0, 7, 0]),
+            IntegerStorage::U8(vec![1, 0, 7, 0]),
+            IntegerStorage::U16(vec![1, 0, 7, 0]),
+            IntegerStorage::U32(vec![1, 0, 7, 0]),
+            IntegerStorage::U64(vec![1, 0, u64::MAX, 0]),
+        ]
+    }
+
+    #[test]
+    fn bandwidth_integer_and_logical_inputs_are_mode_gated() {
+        let integer =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer matrix");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = bandwidth_builtin(Value::Tensor(integer), Vec::new())
+            .expect_err("integer extension must reject");
+        assert_eq!(
+            error.identifier(),
+            BANDWIDTH_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let error = bandwidth_builtin(Value::Bool(true), Vec::new())
+            .expect_err("logical extension must reject");
+        assert_eq!(
+            error.identifier(),
+            BANDWIDTH_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn bandwidth_reads_complex_integer_structure_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![1, 0, 0, 0]),
+            IntegerStorage::U64(vec![0, 0, u64::MAX, 0]),
+        )
+        .expect("complex integer storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex matrix");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        assert_eq!(
+            bandwidth_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("bandwidth"),
+            Value::OutputList(vec![Value::Num(0.0), Value::Num(1.0)])
+        );
+    }
+
+    #[test]
+    fn bandwidth_integer_capability_covers_all_classes() {
+        assert_eq!(BANDWIDTH_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            BANDWIDTH_INTEGER_CAPABILITIES[0].inputs[0].classes,
+            crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_logical_input_supported() {
         let logical = LogicalArray::new(vec![1, 1, 1, 0], vec![2, 2]).expect("logical array");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result =
             bandwidth_builtin(Value::LogicalArray(logical), Vec::new()).expect("bandwidth");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 1.0]),
-            other => panic!("expected tensor result, got {other:?}"),
+            Value::Num(value) => assert_eq!(value, 1.0),
+            other => panic!("expected scalar result, got {other:?}"),
         }
     }
 
@@ -583,15 +870,47 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 2.0, 0.0, 0.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 bandwidth_builtin(Value::GpuTensor(handle), Vec::new()).expect("bandwidth");
-            let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.data, vec![1.0, 0.0]);
+            assert_eq!(result, Value::Num(1.0));
+        });
+    }
+
+    #[test]
+    fn bandwidth_gathers_all_resident_integer_classes_exactly() {
+        test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            for storage in all_integer_bandwidth_storages() {
+                let tensor =
+                    Tensor::new_integer(storage, vec![2, 2]).expect("resident integer matrix");
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+                let _outputs = crate::output_count::push_output_count(Some(2));
+                assert_eq!(
+                    bandwidth_builtin(Value::GpuTensor(handle), Vec::new()).expect("bandwidth"),
+                    Value::OutputList(vec![Value::Num(0.0), Value::Num(1.0)])
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn bandwidth_resident_integer_gate_precedes_provider_dispatch() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, 0, u64::MAX, 0]), vec![2, 2])
+                    .expect("resident integer matrix");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = bandwidth_builtin(Value::GpuTensor(handle), Vec::new())
+                .expect_err("resident integer extension must reject");
+            assert_eq!(
+                error.identifier(),
+                BANDWIDTH_INTEGER_INPUT_EXTENSION.error_identifier
+            );
         });
     }
 
@@ -612,7 +931,7 @@ pub(crate) mod tests {
         .unwrap();
         let cpu = super::bandwidth_host_real_tensor(&tensor).expect("cpu bandwidth");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -622,10 +941,30 @@ pub(crate) mod tests {
 
         let result =
             bandwidth_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("bandwidth");
-        let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 2]);
-        assert_eq!(gathered.data, vec![cpu.0 as f64, cpu.1 as f64]);
+        assert_eq!(result, Value::Num(cpu.0 as f64));
         let _ = provider.free(&handle);
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn bandwidth_wgpu_gathers_all_resident_integer_classes_exactly() {
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_integer_bandwidth_storages() {
+            let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("resident integer matrix");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            assert_eq!(
+                bandwidth_builtin(Value::GpuTensor(handle), Vec::new()).expect("bandwidth"),
+                Value::OutputList(vec![Value::Num(0.0), Value::Num(1.0)])
+            );
+        }
     }
 
     fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`doc2sequence` consumes host tokenizedDocument plus wordEmbedding or wordEncoding objects and returns host cell/tensor outputs; it does not use provider kernels."
+    "notes": "`doc2sequence` consumes host compatibility objects and returns host cell/tensor outputs. No GPU-array capability is documented; top-level and recursively nested resident arguments are rejected before gather/provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -36,10 +36,11 @@
     "For encoding input, each output cell contains a 1-by-S numeric vector of 1-based word encoding indices.",
     "Unknown words are discarded by default. Set `UnknownWord` to `\"nan\"` to include NaN vector columns for embedding inputs or NaN index elements for encoding inputs.",
     "`PaddingDirection` accepts `\"left\"`, `\"right\"`, and `\"none\"`. The default is left padding.",
-    "`PaddingValue` accepts a numeric scalar and defaults to 0. MATLAB warns against NaN padding for deep learning workflows, but RunMat accepts numeric NaN for compatibility.",
-    "`Length` accepts `\"longest\"`, `\"shortest\"`, or a positive integer. Positive integer lengths truncate sequences on the right.",
+    "`PaddingValue` accepts single, double, or any of the eight integer scalar classes and defaults to 0. Typed storage crosses explicitly to the floating output class. MATLAB warns against NaN padding for deep learning workflows, but RunMat accepts numeric NaN for compatibility.",
+    "`Length` accepts `\"longest\"`, `\"shortest\"`, or a positive integer in single, double, or any of the eight integer classes. Typed integer scalars are validated exactly; positive fixed lengths truncate sequences on the right.",
     "When `PaddingDirection` is `\"none\"`, output cells keep per-document sequence lengths, except that fixed or shortest `Length` values still truncate longer documents.",
-    "Very large padded dense outputs are rejected with a controlled error to avoid accidental memory explosions."
+    "Very large padded dense outputs are rejected with a controlled error to avoid accidental memory explosions.",
+    "Resident tensors are rejected recursively before provider access, including tensors nested inside compatibility objects such as the `__Vectors` storage of a `wordEmbedding`."
   ],
   "examples": [
     {
@@ -74,7 +75,7 @@
     },
     {
       "question": "Does `doc2sequence` execute on the GPU?",
-      "answer": "No. It maps host text/object metadata to host cell and tensor outputs."
+      "answer": "No. The current public documentation does not list a GPU-array capability. RunMat recursively rejects top-level or object-nested resident inputs before provider access and maps host text/object metadata to host cell and tensor outputs."
     }
   ],
   "links": [
@@ -120,5 +121,5 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
   },
-  "gpu_residency": "`doc2sequence` performs host text/object sequence construction and has no provider kernel."
+  "gpu_residency": "`doc2sequence` performs host text/object sequence construction and has no provider kernel. Top-level and recursively nested resident arguments are rejected before any gather or provider access."
 }

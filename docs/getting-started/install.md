@@ -1,10 +1,3 @@
----
-title: "Installation"
-category: "Getting Started"
-section: "1.1"
-last_updated: "May 28, 2026"
----
-
 # Installation
 
 The quickest way to get started with RunMat is to use RunMat Desktop: [Download RunMat Desktop](/download/latest)

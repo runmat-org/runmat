@@ -36,9 +36,9 @@
   ],
   "behaviors": [
     "`xtickangle()` returns the current X tick label rotation, defaulting to `0`.",
-    "`xtickangle(angle)` sets the current axes X tick label rotation in degrees.",
+    "`xtickangle(angle)` sets the current axes X tick label rotation in degrees. Integer scalars from any native integer class are accepted.",
     "`xtickangle(ax)` queries a scalar axes handle without changing the current axes.",
-    "`xtickangle(ax, angle)` accepts a scalar axes handle or numeric array of axes handles and sets each target.",
+    "`xtickangle(ax, angle)` accepts a scalar axes handle or numeric array of axes handles and sets each target. RunMat mode additionally accepts typed-integer aliases for encoded axes handles.",
     "The function shares state with `XTickLabelRotation` on axes and `TickLabelRotation` on the X-axis ruler returned by `get(ax, 'XAxis')`."
   ],
   "examples": [

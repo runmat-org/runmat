@@ -1,4 +1,4 @@
-use runmat_builtins::{StringArray, Value};
+use runmat_value::{StringArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -44,4 +44,28 @@ fn text_analytics_surface_executes_from_scripts() {
     assert!(has_object_class(&vars, "wordEncoding"));
     assert!(has_num(&vars, 2.0));
     assert!(has_text(&vars, "Hello RunMat"));
+}
+
+#[test]
+fn bag_of_ngrams_accepts_all_integer_count_and_length_classes() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "ngrams = [\"a\" \"b\"; \"b\" \"c\"]; bag = bagOfNgrams(ngrams, {constructor}([2 3]), \"NgramLengths\", {constructor}(2)); counts = bag.Counts; lengths = bag.NgramLengths; if counts(1) ~= 2 || counts(2) ~= 3; error('integer bagOfNgrams counts mismatch'); end; if lengths(1) ~= 2; error('integer bagOfNgrams lengths mismatch'); end;"
+        );
+        execute_source(&source).expect("execute integer bagOfNgrams script");
+    }
+}
+
+#[test]
+fn bag_of_words_accepts_all_integer_count_classes() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "bag = bagOfWords([\"alpha\" \"beta\"], {constructor}([2 3])); counts = bag.Counts; if counts(1) ~= 2 || counts(2) ~= 3; error('integer bagOfWords counts mismatch'); end;"
+        );
+        execute_source(&source).expect("execute integer bagOfWords script");
+    }
 }

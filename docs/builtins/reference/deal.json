@@ -1,0 +1,80 @@
+{
+  "title": "deal",
+  "category": "common",
+  "keywords": [
+    "deal",
+    "multiple outputs",
+    "comma-separated list",
+    "assignment"
+  ],
+  "summary": "Distribute input values to requested outputs.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`deal` performs no numeric computation. RunMat can pass resident values through without gather behind an explicit compatibility gate."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`deal` is output-list construction and is not fused."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::common::deal::tests",
+    "integration": "crates/runmat-vm/tests/integer_builtin_compatibility_datetime_to_dcgain.rs"
+  },
+  "description": "`[B1,...,Bn] = deal(A1,...,An)` copies matching inputs positionally. `[B1,...,Bn] = deal(A)` copies one input to every requested output.",
+  "behaviors": [
+    "With multiple inputs, the number of requested outputs must equal the number of inputs.",
+    "With one input, any requested output count receives the same value.",
+    "Values pass through structurally without numeric conversion, preserving integer class, shape, exact values, and handle identity.",
+    "Resident pass-through is a RunMat-only extension because the current public page documents GPU code generation but not interactive GPU Arrays. The gate runs without gather or provider access.",
+    "RunMat does not retain the former one-output cell-packing behavior; use a cell-array literal when a packed cell row is intended."
+  ],
+  "examples": [
+    {
+      "description": "Distribute matching values",
+      "input": "[a,b] = deal(int64(7), uint64(9))",
+      "output": "a is int64(7) and b is uint64(9)."
+    },
+    {
+      "description": "Replicate one value",
+      "input": "u = uint64(9007199254740992) + uint64(1); [a,b,c] = deal(u)",
+      "output": "All three outputs preserve the exact uint64 value."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `deal` convert integer inputs to double?",
+      "answer": "No. It copies values without arithmetic or class conversion."
+    }
+  ],
+  "links": [],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/common/deal.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/common/deal.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "[B1,...,Bn] = deal(A1,...,An)\n[B1,...,Bn] = deal(A)",
+      "output": "Outputs preserve their corresponding input values."
+    },
+    "points": [
+      "Multiple inputs require the same number of outputs.",
+      "One input is replicated to every requested output."
+    ]
+  },
+  "validation": {
+    "summary": "Focused tests cover matching distribution, single-input replication, count errors, all eight exact integer storage classes, zero-output behavior, and pre-access resident gating.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/common/deal.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/common/deal.rs"
+    }
+  },
+  "gpu_residency": "When its RunMat-only extension is enabled, `deal` preserves a resident handle and its owner without gather, upload, allocation, or provider dispatch."
+}

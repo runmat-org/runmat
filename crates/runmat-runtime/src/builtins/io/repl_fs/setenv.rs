@@ -7,9 +7,9 @@ use std::panic;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -345,7 +345,7 @@ fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
-    use runmat_builtins::{CharArray, StringArray, Value};
+    use runmat_value::{CharArray, StringArray, Value};
 
     fn setenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::setenv_builtin(args))

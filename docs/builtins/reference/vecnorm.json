@@ -8,7 +8,7 @@
     "euclidean",
     "gpu"
   ],
-  "summary": "Compute vector-wise array norms in MATLAB and RunMat.",
+  "summary": "Compute vector-wise array norms.",
   "gpu_support": {
     "elementwise": false,
     "reduction": true,
@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "RunMat gathers GPU tensors, computes vector-wise norms on the host, and uploads the result when an acceleration provider is active."
+    "notes": "When a provider does not supply a native kernel, RunMat gathers through the value's owning provider, computes the norm on the host, and restores the result to that provider when it can preserve the output's single or double precision."
   },
   "fusion": {
     "elementwise": false,
@@ -35,6 +35,9 @@
   "behaviors": [
     "The output has the same shape as `A` except the operated dimension has length 1.",
     "`p` may be any positive real scalar or `Inf`.",
+    "The documented input array classes are single and double. Native integer `A` is a RunMat language extension that requires exact conversion to double and returns double output.",
+    "Native integer storage for `p` is a separate RunMat language extension and must be exactly representable as double. Native integer `dim` is part of the compatibility surface and is decoded exactly as a structural dimension.",
+    "Single and complex-single inputs return single output; double, complex-double, and native integer extension inputs return double output.",
     "Complex inputs are reduced using element magnitudes and return real non-negative values.",
     "NaN values propagate within the vector being reduced.",
     "When `dim` is greater than `ndims(A)`, or `size(A,dim)` is 1, the result is `abs(A)` with the original shape."
@@ -66,7 +69,7 @@
       "output": "N is size 2x2x1"
     },
     {
-      "description": "Keeping GPU workflows compatible",
+      "description": "Computing Vector Norms On GPU Data",
       "input": "G = gpuArray([3 5; 4 12]);\nN = vecnorm(G)",
       "output": "N = [5 13]"
     }
@@ -86,11 +89,11 @@
     },
     {
       "question": "Can `p` be less than 1?",
-      "answer": "Yes. MATLAB documents `p` as a positive scalar or `Inf`, and RunMat accepts positive fractional values."
+      "answer": "Yes. The compatibility target documents `p` as a positive scalar or `Inf`, and RunMat accepts positive fractional values."
     },
     {
       "question": "What happens for `dim` beyond the rank of the input?",
-      "answer": "RunMat matches MATLAB by returning `abs(A)` with the original shape."
+      "answer": "RunMat follows the compatibility target by returning `abs(A)` with the original shape."
     },
     {
       "question": "Will GPU inputs stay on the GPU?",
@@ -121,6 +124,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "MATLAB Language Extensions",
+      "url": "/docs/runtime/getting-started/language-extensions"
     }
   ],
   "source": {
@@ -129,7 +136,7 @@
   },
   "gpu_residency": "```matlab:runnable\nG = gpuArray([3 5; 4 12]);\nN = vecnorm(G)\n```\nExpected output:\n```matlab\nN = [5 13]\n```",
   "gpu_behavior": [
-    "RunMat currently implements `vecnorm` as a GPU-aware host reduction: GPU inputs are gathered, vector-wise norms are computed with the same CPU logic as host arrays, and the result is uploaded back to the active provider when possible.",
-    "The fallback includes NaNs and preserves MATLAB shape semantics. If upload fails, RunMat returns the host tensor result rather than changing the numeric answer."
+    "When no provider kernel is available, GPU inputs are gathered through their owning provider, vector-wise norms are computed with the same CPU logic as host arrays, and the result is restored to that provider when its physical precision matches the output class.",
+    "The fallback includes NaNs and preserves compatibility-target shape semantics. If the provider cannot preserve the result class or restoration fails, RunMat returns the correctly typed host result rather than relabelling or changing the numeric answer."
   ]
 }

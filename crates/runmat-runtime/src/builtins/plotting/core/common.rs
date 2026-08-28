@@ -1,13 +1,14 @@
 use futures::executor::block_on;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
-use runmat_plot::plots::Figure;
+use runmat_plot::plots::{Figure, NumericPlotData};
+use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::map_control_flow_with_builtin;
+use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::BuiltinResult;
 
 use super::plotting_error;
 
+#[cfg(test)]
 type NumericTriplet = (Vec<f64>, Vec<f64>, Vec<f64>);
 
 /// Default error message when no plotting backend is available.
@@ -16,7 +17,7 @@ pub const ERR_PLOTTING_UNAVAILABLE: &str =
     "Plotting is unavailable in this build (enable the `gui` or `plot-web` feature).";
 
 pub fn numeric_vector(tensor: Tensor) -> Vec<f64> {
-    tensor.data
+    tensor::tensor_values_f64(&tensor)
 }
 
 pub fn numeric_pair(
@@ -35,6 +36,54 @@ pub fn numeric_pair(
     Ok((x_vec, y_vec))
 }
 
+pub fn numeric_plot_data(tensor: Tensor) -> BuiltinResult<NumericPlotData> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| plotting_error("plotting", err))?;
+    NumericPlotData::new(storage, shape).map_err(|err| plotting_error("plotting", err))
+}
+
+pub fn numeric_plot_data_value(data: &NumericPlotData, name: &'static str) -> BuiltinResult<Value> {
+    Tensor::from_numeric_storage(data.storage().clone(), data.shape().to_vec())
+        .map(Value::Tensor)
+        .map_err(|err| plotting_error(name, err))
+}
+
+pub fn numeric_plot_data_pair(
+    x: Tensor,
+    y: Tensor,
+    name: &'static str,
+) -> BuiltinResult<(NumericPlotData, NumericPlotData)> {
+    if x.len() != y.len() {
+        return Err(plotting_error(
+            name,
+            format!("{name}: X and Y inputs must have the same number of elements"),
+        ));
+    }
+    Ok((numeric_plot_data(x)?, numeric_plot_data(y)?))
+}
+
+pub fn numeric_plot_data_triplet(
+    x: Tensor,
+    y: Tensor,
+    z: Tensor,
+    name: &'static str,
+) -> BuiltinResult<(NumericPlotData, NumericPlotData, NumericPlotData)> {
+    if x.len() != y.len() || x.len() != z.len() {
+        return Err(plotting_error(
+            name,
+            format!("{name}: X, Y, and Z inputs must have the same number of elements"),
+        ));
+    }
+    Ok((
+        numeric_plot_data(x)?,
+        numeric_plot_data(y)?,
+        numeric_plot_data(z)?,
+    ))
+}
+
+#[cfg(test)]
 pub fn numeric_triplet(
     x: Tensor,
     y: Tensor,
@@ -55,6 +104,7 @@ pub fn numeric_triplet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn numeric_pair_accepts_matching_numel_vectors_with_different_shapes() {
@@ -66,6 +116,21 @@ mod tests {
         assert_eq!(x, vec![1.0, 2.0, 3.0, 4.0]);
         assert_eq!(y, vec![10.0, 20.0, 30.0, 40.0]);
     }
+
+    #[test]
+    fn numeric_triplet_reads_typed_integer_storage_at_plot_boundary() {
+        let large = 9_007_199_254_740_993_u64;
+        let x = Tensor::new_integer(IntegerStorage::U64(vec![large, large + 1]), vec![1, 2])
+            .expect("x");
+        let y = Tensor::new_integer(IntegerStorage::I64(vec![-3, 4]), vec![1, 2]).expect("y");
+        let z = Tensor::new_integer(IntegerStorage::U16(vec![5, 6]), vec![1, 2]).expect("z");
+
+        let (x, y, z) = numeric_triplet(x, y, z, "plot3").expect("triplet");
+
+        assert_eq!(x, vec![large as f64, (large + 1) as f64]);
+        assert_eq!(y, vec![-3.0, 4.0]);
+        assert_eq!(z, vec![5.0, 6.0]);
+    }
 }
 
 pub fn value_as_f64(value: &Value) -> Option<f64> {
@@ -73,7 +138,7 @@ pub fn value_as_f64(value: &Value) -> Option<f64> {
         Value::Num(v) => Some(*v),
         Value::Int(int_val) => Some(int_val.to_f64()),
         Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) => tensor.data.first().copied(),
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor).first().copied(),
         Value::CharArray(chars) => {
             // Treat character arrays as numeric strings when possible.
             let text: String = chars.data.iter().collect();
@@ -96,7 +161,7 @@ impl SurfaceDataInput {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other)
+                let tensor = tensor::value_into_tensor_for(context, other)
                     .map_err(|e| plotting_error(context, format!("{context}: {e}")))?;
                 Ok(Self::Host(tensor))
             }
@@ -162,7 +227,8 @@ pub async fn gather_tensor_from_gpu_async(
     let gathered = crate::gather_if_needed_async(&value)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
-    Tensor::try_from(&gathered).map_err(|e| plotting_error(context, format!("{context}: {e}")))
+    tensor::value_into_tensor_for(context, gathered)
+        .map_err(|e| plotting_error(context, format!("{context}: {e}")))
 }
 
 pub fn gather_tensor_from_gpu(
@@ -183,7 +249,8 @@ pub fn tensor_to_surface_grid_matlab_xy(
     let expected_len = rows
         .checked_mul(cols)
         .ok_or_else(|| plotting_error(context, format!("{context}: grid dimensions overflowed")))?;
-    if z.rows != rows || z.cols != cols || z.data.len() != expected_len {
+    let z_data = tensor::tensor_values_f64(&z);
+    if z.rows != rows || z.cols != cols || z_data.len() != expected_len {
         return Err(plotting_error(
             context,
             format!("{context}: Z must have shape {rows}x{cols} to match X({cols}) and Y({rows})"),
@@ -194,7 +261,7 @@ pub fn tensor_to_surface_grid_matlab_xy(
     for (x_col, x_col_values) in grid.iter_mut().enumerate() {
         for (y_row, cell) in x_col_values.iter_mut().enumerate() {
             let idx = y_row + rows * x_col;
-            *cell = z.data[idx];
+            *cell = z_data[idx];
         }
     }
     Ok(grid)

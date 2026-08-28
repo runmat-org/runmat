@@ -1,4 +1,6 @@
-use runmat_builtins::{BuiltinDoc, BuiltinFunction, BuiltinParamType, BuiltinSignatureDescriptor};
+use runmat_builtins::{
+    BuiltinCatalogEntry, BuiltinDoc, BuiltinFunction, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use std::fmt::Write as _;
 
 use crate::core::builtins_json;
@@ -329,6 +331,36 @@ pub fn build_builtin_hover(func: &BuiltinFunction) -> String {
     out
 }
 
+/// Build hover text from the executor-neutral catalog. Catalog-backed builtins
+/// must remain fully discoverable without linking their runtime implementation.
+pub fn build_catalog_hover(entry: &BuiltinCatalogEntry) -> String {
+    let mut out = String::new();
+    let labels = catalog_signature_labels(entry)
+        .unwrap_or_else(|| vec![format!("{}(...)", entry.identity.name)]);
+    let _ = writeln!(out, "```runmat\n{}\n```", labels.join("\n"));
+    if !entry.documentation.summary.is_empty() {
+        let _ = writeln!(out, "{}\n", entry.documentation.summary);
+    }
+    if !entry.category.is_empty() {
+        let _ = writeln!(out, "**Category:** {}", entry.category);
+    }
+    if let Some(status) = entry.documentation.status {
+        let _ = writeln!(out, "**Status:** {status}");
+    }
+    if let Some(introduced) = entry.documentation.introduced {
+        let _ = writeln!(out, "**Since:** {introduced}");
+    }
+    if !entry.documentation.related.is_empty() {
+        let _ = writeln!(
+            out,
+            "**Related:** {}",
+            entry.documentation.related.join(", ")
+        );
+    }
+    let _ = writeln!(out, "\nDocs: {}", builtin_doc_url(entry.identity.name));
+    out
+}
+
 pub fn completion_signature_label(func: &BuiltinFunction) -> Option<String> {
     let signature = first_signature(func)?;
     let inputs = signature
@@ -355,6 +387,10 @@ pub fn completion_signature_label(func: &BuiltinFunction) -> Option<String> {
     }
 }
 
+pub fn catalog_completion_signature_label(entry: &BuiltinCatalogEntry) -> Option<String> {
+    completion_signature_label_for(entry.identity.name, entry.descriptor.signatures.first()?)
+}
+
 pub fn signature_labels(func: &BuiltinFunction) -> Option<Vec<String>> {
     let descriptor = func.descriptor?;
     let labels = descriptor
@@ -366,6 +402,38 @@ pub fn signature_labels(func: &BuiltinFunction) -> Option<Vec<String>> {
         None
     } else {
         Some(labels)
+    }
+}
+
+pub fn catalog_signature_labels(entry: &BuiltinCatalogEntry) -> Option<Vec<String>> {
+    let labels = entry
+        .descriptor
+        .signatures
+        .iter()
+        .map(|signature| signature.label.to_string())
+        .collect::<Vec<_>>();
+    (!labels.is_empty()).then_some(labels)
+}
+
+fn completion_signature_label_for(
+    name: &str,
+    signature: &BuiltinSignatureDescriptor,
+) -> Option<String> {
+    let inputs = signature
+        .inputs
+        .iter()
+        .map(format_param_for_completion)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let outputs = signature
+        .outputs
+        .iter()
+        .map(|param| param.name.to_string())
+        .collect::<Vec<_>>();
+    match outputs.as_slice() {
+        [] => Some(format!("{name}({inputs})")),
+        [output] => Some(format!("{output} = {name}({inputs})")),
+        _ => Some(format!("[{}] = {name}({inputs})", outputs.join(", "))),
     }
 }
 

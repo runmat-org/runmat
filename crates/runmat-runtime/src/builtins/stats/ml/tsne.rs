@@ -4,11 +4,16 @@ use std::cmp::Ordering;
 
 use nalgebra::{DMatrix, SymmetricEigen};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::{random, random_args::keyword_of, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -20,6 +25,69 @@ const MAX_EMBEDDING_DIMS: usize = 128;
 const MAX_ITERATIONS: usize = 100_000;
 const MAX_NUM_PRINT: usize = 1_000_000;
 const MIN_PROB: f64 = 1.0e-12;
+
+const TSNE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tsne-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tsne with native-class integer observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TsneIntegerDataExtension"),
+};
+const TSNE_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tsne-integer-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tsne with native-class integer numeric option values is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TsneIntegerOptionExtension"),
+};
+const TSNE_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tsne-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "tsne host fallback for explicit gpuArray inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TsneResidentInputExtension"),
+};
+pub const TSNE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    TSNE_INTEGER_DATA_EXTENSION,
+    TSNE_INTEGER_OPTION_EXTENSION,
+    TSNE_RESIDENT_INPUT_EXTENSION,
+];
+
+const TSNE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Native integer observations are gated before gather and must be exactly representable at the binary64 optimization boundary.",
+    }];
+const TSNE_INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "numeric option value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Native integer InitialY and numeric controls are independently gated and checked before conversion.",
+    }];
+pub const TSNE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = tsne(integer_X, ___)",
+        inputs: &TSNE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The embedding and loss remain floating-point results; lossy integer observation conversion rejects.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = tsne(X, Name, integer_Value)",
+        inputs: &TSNE_INTEGER_OPTION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer-valued structural controls are decoded exactly; numeric optimization values cross one checked binary64 boundary.",
+    },
+];
 
 const OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -217,11 +285,16 @@ struct EmbeddingResult {
     keywords = "tsne,t-SNE,dimensionality reduction,embedding,statistics,machine learning",
     type_resolver(tsne_type),
     descriptor(crate::builtins::stats::ml::tsne::TSNE_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::tsne::TSNE_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::tsne::TSNE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::tsne"
 )]
 pub(crate) async fn tsne_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_tsne_extensions(&x, &rest)?;
     let x = gather(x).await?;
     let rest = gather_all(rest).await?;
+    ensure_exact_tsne_integer_value(&x, "observation data")?;
+    ensure_exact_tsne_floating_options(&rest)?;
     let options = parse_options(rest)?;
     let tensor =
         tensor::value_into_tensor_for(NAME, x).map_err(|err| invalid(format!("tsne: {err}")))?;
@@ -235,6 +308,118 @@ pub(crate) async fn tsne_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Va
         )),
         None => Ok(Value::Tensor(result.embedding)),
     }
+}
+
+fn tsne_value_contains_typed_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        Value::Cell(cell) => cell.data.iter().any(tsne_value_contains_typed_integer),
+        Value::Struct(value) => value.fields.values().any(tsne_value_contains_typed_integer),
+        Value::OutputList(values) => values.iter().any(tsne_value_contains_typed_integer),
+        _ => false,
+    }
+}
+
+fn tsne_value_contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(tsne_value_contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(tsne_value_contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(tsne_value_contains_explicit_gpu),
+        _ => false,
+    }
+}
+
+fn ensure_tsne_extensions(x: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if tsne_value_contains_typed_integer(x) {
+        crate::compatibility::ensure_builtin_extension_enabled(&TSNE_INTEGER_DATA_EXTENSION, NAME)?;
+    }
+    if rest
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .any(tsne_value_contains_typed_integer)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TSNE_INTEGER_OPTION_EXTENSION,
+            NAME,
+        )?;
+    }
+    if tsne_value_contains_explicit_gpu(x) || rest.iter().any(tsne_value_contains_explicit_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TSNE_RESIDENT_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_exact_tsne_integer_value(value: &Value, role: &str) -> BuiltinResult<()> {
+    let exact = |integer: &runmat_value::IntValue| {
+        if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(integer) {
+            Ok(())
+        } else {
+            Err(invalid(format!(
+                "tsne: integer {role} values must be exactly representable as double"
+            )))
+        }
+    };
+    match value {
+        Value::Int(integer) => exact(integer),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                for integer in storage.exact_values() {
+                    exact(&integer)?;
+                }
+            }
+            Ok(())
+        }
+        Value::Cell(cell) => {
+            for value in &cell.data {
+                ensure_exact_tsne_integer_value(value, role)?;
+            }
+            Ok(())
+        }
+        Value::Struct(value) => {
+            for value in value.fields.values() {
+                ensure_exact_tsne_integer_value(value, role)?;
+            }
+            Ok(())
+        }
+        Value::OutputList(values) => {
+            for value in values {
+                ensure_exact_tsne_integer_value(value, role)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn ensure_exact_tsne_floating_options(rest: &[Value]) -> BuiltinResult<()> {
+    for pair in rest.chunks_exact(2) {
+        let Some(name) = keyword_of(&pair[0]).map(|name| name.to_ascii_lowercase()) else {
+            continue;
+        };
+        match name.as_str() {
+            "cachesize" | "exaggeration" | "initialy" | "learnrate" | "perplexity" | "theta" => {
+                ensure_exact_tsne_integer_value(&pair[1], &name)?
+            }
+            "options" => {
+                if let Value::Struct(options) = &pair[1] {
+                    for (field_name, value) in &options.fields {
+                        if field_name.eq_ignore_ascii_case("TolFun") {
+                            ensure_exact_tsne_integer_value(value, "Options.TolFun")?;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
@@ -397,7 +582,7 @@ fn apply_options_struct(options: &mut Options, value: &Value) -> BuiltinResult<(
 
 fn is_empty_option_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::StringArray(array) => array.data.is_empty(),
@@ -495,13 +680,14 @@ fn single_row_embedding(rows: usize, dims: usize) -> BuiltinResult<EmbeddingResu
 }
 
 fn prepare_data(x: &Tensor) -> BuiltinResult<PreparedData> {
+    let values = tensor::tensor_values_f64_cow(x);
     let mut rows = Vec::new();
     let mut good_rows = Vec::new();
     for row in 0..x.rows {
         let mut out = Vec::with_capacity(x.cols);
         let mut complete = true;
         for col in 0..x.cols {
-            let value = x_value(x, row, col);
+            let value = matrix_value(values.as_ref(), x.rows, row, col);
             if value.is_infinite() {
                 return Err(invalid("tsne: X must not contain Inf values"));
             }
@@ -743,6 +929,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
     let rows = prepared.rows.len();
     let dims = options.num_dimensions;
     if let Some(initial) = &options.initial_y {
+        let values = tensor::tensor_values_f64_cow(initial);
         if initial.shape.len() > 2 || initial.cols != dims {
             return Err(invalid(format!(
                 "tsne: InitialY must have {} columns",
@@ -753,7 +940,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
         if initial.rows == prepared.original_rows {
             for col in 0..dims {
                 for &row in &prepared.good_rows {
-                    let value = x_value(initial, row, col);
+                    let value = matrix_value(values.as_ref(), initial.rows, row, col);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
@@ -763,7 +950,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
         } else if initial.rows == rows {
             for col in 0..dims {
                 for row in 0..rows {
-                    let value = x_value(initial, row, col);
+                    let value = matrix_value(values.as_ref(), initial.rows, row, col);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
@@ -1014,8 +1201,8 @@ fn tied_ranks(values: &[f64]) -> Vec<f64> {
     ranks
 }
 
-fn x_value(x: &Tensor, row: usize, col: usize) -> f64 {
-    x.data[row + col * x.rows]
+fn matrix_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
+    values[row + col * rows]
 }
 
 fn integer_sqrt(value: usize) -> Option<usize> {
@@ -1058,6 +1245,29 @@ fn bounded_nonnegative_integer(value: &Value, name: &str, max: usize) -> Builtin
 }
 
 fn integer_in_range(value: &Value, name: &str, min: usize, max: usize) -> BuiltinResult<usize> {
+    let integer = match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    };
+    if let Some(value) = integer {
+        if let Some(value) = value
+            .try_to_usize()
+            .filter(|value| *value >= min && *value <= max)
+        {
+            return Ok(value);
+        }
+        let kind = if min == 0 {
+            "a nonnegative integer"
+        } else {
+            "a positive integer"
+        };
+        return Err(invalid(format!(
+            "tsne: {name} must be {kind} no greater than {max}"
+        )));
+    }
     let value = numeric_scalar(value, name)?;
     if !value.is_finite() || value.fract() != 0.0 || value < min as f64 || value > max as f64 {
         let kind = if min == 0 {
@@ -1081,7 +1291,9 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => Err(invalid(format!("tsne: {name} must be a numeric scalar"))),
     }
 }
@@ -1090,27 +1302,40 @@ fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(tensor.data[0] != 0.0)
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let raw = tensor::tensor_value_f64(tensor, 0);
+            if raw == 0.0 || raw == 1.0 {
+                Ok(raw != 0.0)
+            } else {
+                Err(invalid(format!("tsne: {name} must be logical scalar")))
+            }
         }
         _ => Err(invalid(format!("tsne: {name} must be logical scalar"))),
     }
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::builtins::common::random;
-    use runmat_builtins::StructValue;
+    use runmat_value::{IntegerStorage, StructValue};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn reset_rng() -> impl Drop {
@@ -1145,7 +1370,7 @@ mod tests {
                 match &outputs[0] {
                     Value::Tensor(y) => {
                         assert_eq!(y.shape, vec![4, 2]);
-                        assert!(y.data.iter().all(|value| value.is_finite()));
+                        assert!(y.materialize_f64().iter().all(|value| value.is_finite()));
                     }
                     other => panic!("expected tensor, got {other:?}"),
                 }
@@ -1225,6 +1450,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tsne_reads_typed_integer_data_initial_y_and_options_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _guard = reset_rng();
+        let value = tsne_builtin(
+            poisoned_int_tensor(
+                IntegerStorage::I16(vec![0, 1, 5, 6, 0, 1, 5, 6]),
+                vec![4, 2],
+            ),
+            vec![
+                Value::String("NumDimensions".into()),
+                cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                Value::String("NumPCAComponents".into()),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                Value::String("Perplexity".into()),
+                cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                Value::String("Standardize".into()),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                Value::String("InitialY".into()),
+                poisoned_int_tensor(IntegerStorage::I16(vec![0; 8]), vec![4, 2]),
+                Value::String("Options".into()),
+                {
+                    let mut options = StructValue::new();
+                    options.insert(
+                        "MaxIter",
+                        cleared_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                    );
+                    Value::Struct(options)
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        match value {
+            Value::Tensor(y) => assert_eq!(y.shape, vec![4, 2]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tsne_gates_integer_roles_and_explicit_residency_before_gather() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]);
+        let error = ensure_tsne_extensions(&integer, &[]).expect_err("integer data must gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:TsneIntegerDataExtension")
+        );
+        let error =
+            ensure_tsne_extensions(&Value::Num(1.0), &[Value::from("NumDimensions"), integer])
+                .expect_err("integer option must gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:TsneIntegerOptionExtension")
+        );
+        let explicit = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        };
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error = ensure_tsne_extensions(&Value::GpuTensor(explicit), &[])
+            .expect_err("explicit residency must gate before provider access");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:TsneResidentInputExtension")
+        );
+    }
+
+    #[test]
+    fn tsne_rejects_lossy_integer_floating_boundaries() {
+        let wide = poisoned_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]);
+        let error = ensure_exact_tsne_integer_value(&wide, "observation data")
+            .expect_err("lossy integer must reject");
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[tokio::test]
     async fn tsne_rejects_bad_initial_y_shape() {
         let err = tsne_builtin(
             tensor(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]),
@@ -1236,6 +1540,15 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.message.contains("InitialY"));
+    }
+
+    #[test]
+    fn tsne_empty_option_helpers_use_typed_integer_storage_len() {
+        let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+        let empty = Value::Tensor(empty);
+
+        assert!(is_empty_numeric(&empty));
+        assert!(is_empty_option_value(&empty));
     }
 
     #[tokio::test]

@@ -1,16 +1,21 @@
 //! MATLAB-compatible `integral` builtin for finite scalar numerical integration.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::type_resolvers::numerical_integral_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -166,6 +171,78 @@ pub const INTEGRAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &INTEGRAL_ERRORS,
 };
 
+const INTEGRAL_INTEGER_BOUND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "integral-integer-bound",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integral with typed-integer bounds is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IntegralIntegerBoundExtension"),
+};
+const INTEGRAL_LOGICAL_BOUND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "integral-logical-bound",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integral with logical bounds is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IntegralLogicalBoundExtension"),
+};
+const INTEGRAL_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "integral-integer-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integral with typed-integer numeric options is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IntegralIntegerOptionExtension"),
+};
+const INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "integral-logical-numeric-option",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "integral with logical tolerance or evaluation-count options is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IntegralLogicalNumericOptionExtension"),
+    };
+pub const INTEGRAL_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    INTEGRAL_INTEGER_BOUND_EXTENSION,
+    INTEGRAL_LOGICAL_BOUND_EXTENSION,
+    INTEGRAL_INTEGER_OPTION_EXTENSION,
+    INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION,
+];
+
+const INTEGRAL_INTEGER_BOUND_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "xmin or xmax",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A typed-integer bound is accepted only when exactly representable at the binary64 quadrature boundary.",
+    }];
+const INTEGRAL_INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "AbsTol, RelTol, MaxFunEvals, or MaxIntervalCount value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer tolerance values cross a checked binary64 boundary; count controls remain exact through usize validation.",
+    }];
+pub const INTEGRAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "q = integral(fun, integer_xmin, integer_xmax, ...)",
+        inputs: &INTEGRAL_INTEGER_BOUND_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "RunMat-only integer bounds are classified before resident access and converted only after exactness validation; MATLAB-compatible modes retain documented single/double bounds.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "q = integral(fun, xmin, xmax, integer_option)",
+        inputs: &INTEGRAL_INTEGER_OPTION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "RunMat-only typed-integer controls are independently gated from bounds and retain exact count parsing.",
+    },
+];
+
 fn integral_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -229,6 +306,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(numerical_integral_type),
     descriptor(crate::builtins::math::optim::integral::INTEGRAL_DESCRIPTOR),
+    extensions(crate::builtins::math::optim::integral::INTEGRAL_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::optim::integral::INTEGRAL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::optim::integral"
 )]
 async fn integral_builtin(
@@ -237,7 +316,12 @@ async fn integral_builtin(
     b: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let options = IntegralOptions::parse(rest)
+    preflight_integral_inputs(&a, &b, &rest)?;
+    let mut gathered_rest = Vec::with_capacity(rest.len());
+    for value in rest {
+        gathered_rest.push(crate::dispatcher::gather_if_needed_async(&value).await?);
+    }
+    let options = IntegralOptions::parse(gathered_rest)
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_ARGUMENT))?;
     let a = scalar_bound("lower bound", a)
         .await
@@ -256,6 +340,54 @@ async fn integral_builtin(
         .await
         .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
     Ok(Value::Num(sign * result))
+}
+
+fn preflight_integral_inputs(a: &Value, b: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        value_has_logical_class, value_has_native_integer_class,
+    };
+    for bound in [a, b] {
+        if value_has_native_integer_class(bound) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGRAL_INTEGER_BOUND_EXTENSION,
+                NAME,
+            )?;
+        }
+        if value_has_logical_class(bound) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGRAL_LOGICAL_BOUND_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    for (name, value) in integral_option_values(rest) {
+        if value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGRAL_INTEGER_OPTION_EXTENSION,
+                NAME,
+            )?;
+        }
+        if !name.eq_ignore_ascii_case("ArrayValued") && value_has_logical_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGRAL_LOGICAL_NUMERIC_OPTION_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn integral_option_values(rest: &[Value]) -> Vec<(String, &Value)> {
+    if let [Value::Struct(fields)] = rest {
+        return fields
+            .fields
+            .iter()
+            .map(|(name, value)| (name.clone(), value))
+            .collect();
+    }
+    rest.chunks_exact(2)
+        .filter_map(|pair| option_name(&pair[0]).ok().map(|name| (name, &pair[1])))
+        .collect()
 }
 
 #[derive(Clone, Copy)]
@@ -377,6 +509,12 @@ fn option_name(value: &Value) -> BuiltinResult<String> {
 
 async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
     let value = crate::dispatcher::gather_if_needed_async(&value).await?;
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(&value) {
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            format!("{label} must be exactly representable as double"),
+        ));
+    }
     let parsed = match value {
         Value::Num(n) => n,
         Value::Int(i) => i.to_f64(),
@@ -387,7 +525,13 @@ async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => scalar_tensor_value(&tensor)
+            .ok_or_else(|| {
+                integral_error_with_detail(
+                    &INTEGRAL_ERROR_INVALID_INPUT,
+                    format!("{label} must be a finite real scalar"),
+                )
+            })?,
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] != 0 {
                 1.0
@@ -413,6 +557,12 @@ async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
 }
 
 fn numeric_option(name: &str, value: &Value) -> BuiltinResult<f64> {
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_ARGUMENT,
+            format!("option {name} must be exactly representable as double"),
+        ));
+    }
     let parsed = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
@@ -423,7 +573,9 @@ fn numeric_option(name: &str, value: &Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] != 0 {
                 1.0
@@ -449,6 +601,14 @@ fn numeric_option(name: &str, value: &Value) -> BuiltinResult<f64> {
 }
 
 fn integer_option(name: &str, value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                format!("option {name} must be nonnegative"),
+            )
+        });
+    }
     let parsed = numeric_option(name, value)?;
     if parsed < 0.0 {
         return Err(integral_error_with_detail(
@@ -460,6 +620,12 @@ fn integer_option(name: &str, value: &Value) -> BuiltinResult<usize> {
         return Err(integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_ARGUMENT,
             format!("option {name} must be an integer scalar"),
+        ));
+    }
+    if parsed > usize::MAX as f64 || (usize::BITS == 64 && parsed == usize::MAX as f64) {
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_ARGUMENT,
+            format!("option {name} exceeds maximum supported size"),
         ));
     }
     Ok(parsed as usize)
@@ -600,6 +766,10 @@ async fn adaptive_simpson(
     Ok(left_value + right_value)
 }
 
+fn scalar_tensor_value(tensor: &Tensor) -> Option<f64> {
+    tensor::tensor_values_f64(tensor).into_iter().next()
+}
+
 fn simpson(a: f64, b: f64, fa: f64, fm: f64, fb: f64) -> f64 {
     (b - a) * (fa + 4.0 * fm + fb) / 6.0
 }
@@ -611,8 +781,13 @@ async fn call_integrand(function: &Value, x: f64) -> BuiltinResult<f64> {
         Value::Num(n) if n.is_finite() => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 && tensor.data[0].is_finite() => {
-            Ok(tensor.data[0])
+        Value::Tensor(tensor)
+            if tensor::is_scalar_tensor(&tensor)
+                && scalar_tensor_value(&tensor)
+                    .map(|value| value.is_finite())
+                    .unwrap_or(false) =>
+        {
+            Ok(scalar_tensor_value(&tensor).expect("finite scalar tensor value"))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
@@ -632,6 +807,7 @@ async fn call_integrand(function: &Value, x: f64) -> BuiltinResult<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     const INTEGRAL_HELPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
         name: "fx",
@@ -698,6 +874,17 @@ mod tests {
         Ok(Value::Num(f64::NAN))
     }
 
+    #[runtime_builtin(
+        name = "__integral_integer_tensor",
+        type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
+        builtin_path = "crate::builtins::math::optim::integral::tests"
+    )]
+    async fn integer_tensor_helper(_x: Value) -> crate::BuiltinResult<Value> {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("tensor");
+        Ok(Value::Tensor(tensor))
+    }
+
     fn run(function: Value, a: f64, b: f64) -> crate::BuiltinResult<Value> {
         block_on(integral_builtin(
             function,
@@ -713,6 +900,58 @@ mod tests {
             INTEGRAL_TEST_HELPER_DESCRIPTOR.signatures[0].label,
             "fx = __integral_helper(x)"
         );
+    }
+
+    #[test]
+    fn integral_bounds_read_typed_integer_storage_exactly() {
+        let bounds = || {
+            (
+                Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).expect("lower"),
+                Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("upper"),
+            )
+        };
+        let (lower, upper) = bounds();
+        let error = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_square".to_string()),
+            Value::Tensor(lower),
+            Value::Tensor(upper),
+            Vec::new(),
+        ))
+        .expect_err("compatible mode rejects integer bounds");
+        assert_eq!(
+            error.identifier(),
+            INTEGRAL_INTEGER_BOUND_EXTENSION.error_identifier
+        );
+
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        let (lower, upper) = bounds();
+        let result = block_on(integral_builtin(
+            Value::FunctionHandle("__integral_square".to_string()),
+            Value::Tensor(lower),
+            Value::Tensor(upper),
+            Vec::new(),
+        ))
+        .expect("integral");
+
+        match result {
+            Value::Num(value) => assert!((value - (26.0 / 3.0)).abs() < 1.0e-6),
+            other => panic!("expected numeric result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn integral_integrand_reads_typed_integer_scalar_storage_exactly() {
+        let result = run(
+            Value::FunctionHandle("__integral_integer_tensor".to_string()),
+            0.0,
+            2.0,
+        )
+        .expect("integral");
+
+        match result {
+            Value::Num(value) => assert!((value - 6.0).abs() < 1.0e-9),
+            other => panic!("expected numeric result, got {other:?}"),
+        }
     }
 
     #[test]
@@ -814,6 +1053,97 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message().contains("integer scalar"));
+    }
+
+    #[test]
+    fn max_fun_evals_option_reads_typed_integer_storage_exactly() {
+        let option = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![50]), vec![1, 1])
+                    .expect("MaxFunEvals"),
+            )
+        };
+
+        let error = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), option()],
+        ))
+        .expect_err("compatible mode rejects typed integer options");
+        assert_eq!(
+            error.identifier(),
+            INTEGRAL_INTEGER_OPTION_EXTENSION.error_identifier
+        );
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), option()],
+        ))
+        .expect("RunMat integer option");
+        assert!(matches!(result, Value::Num(_)));
+    }
+
+    #[test]
+    fn resident_integer_tolerance_option_gathers_after_compatibility_admission() {
+        use crate::builtins::common::test_support;
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let value = [1_u64];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&value),
+                    shape: &[1, 1],
+                })
+                .expect("upload resident tolerance");
+            let result = block_on(integral_builtin(
+                Value::FunctionHandle("sin".into()),
+                Value::Num(0.0),
+                Value::Num(1.0),
+                vec![Value::from("AbsTol"), Value::GpuTensor(handle.clone())],
+            ))
+            .expect("resident integer tolerance");
+            assert!(matches!(result, Value::Num(_)));
+            provider.free(&handle).expect("free resident tolerance");
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+        });
+    }
+
+    #[test]
+    fn max_fun_evals_option_rejects_negative_typed_integer_storage_exactly() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
+        let max_fun_evals =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxFunEvals");
+
+        let err = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), Value::Tensor(max_fun_evals)],
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("MaxFunEvals"));
+    }
+
+    #[test]
+    fn max_fun_evals_option_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), Value::Num(boundary)],
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("MaxFunEvals"));
     }
 
     #[test]

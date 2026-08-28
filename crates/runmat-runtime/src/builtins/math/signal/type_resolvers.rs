@@ -458,15 +458,11 @@ fn deconv_binary_type(numerator: &Type, denominator: &Type) -> Type {
     if is_numeric_scalar(numerator) && is_numeric_scalar(denominator) {
         return Type::Num;
     }
-    let num_len = vector_len(numerator);
-    let den_len = vector_len(denominator);
     let hint = orientation_hint(numerator);
-    let out_len = match (num_len, den_len) {
-        (Some(a), Some(b)) if a >= b => Some(a - b + 1),
-        (Some(_), Some(_)) => Some(0),
-        _ => None,
-    };
-    vector_output_type(out_len, orientation_from_hint(hint))
+    // Shape types do not encode coefficient values. Exact leading zeros in either
+    // polynomial can change the effective degrees, so advertising a fixed quotient
+    // length from container lengths alone is unsound.
+    vector_output_type(None, orientation_from_hint(hint))
 }
 
 fn vector_output_type(len: Option<usize>, orientation: Orientation) -> Type {

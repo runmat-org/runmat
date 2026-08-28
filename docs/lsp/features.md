@@ -1,10 +1,3 @@
----
-title: "Editor Features"
-category: "Language Server Protocol (LSP)"
-section: "10.2"
-last_updated: "May 28, 2026"
----
-
 # Editor Features
 
 The LSP exposes document analysis through editor operations: hover, completion, signature help, navigation, symbols, and formatting.

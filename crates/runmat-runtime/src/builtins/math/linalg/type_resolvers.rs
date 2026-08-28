@@ -75,6 +75,20 @@ pub fn matrix_unary_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
+pub fn matrix_transpose_type(args: &[Type], context: &ResolveContext) -> Type {
+    match args.first() {
+        Some(Type::Tensor { shape: Some(shape) }) | Some(Type::Logical { shape: Some(shape) })
+            if shape
+                .iter()
+                .skip(2)
+                .any(|extent| !matches!(extent, Some(1))) =>
+        {
+            Type::Unknown
+        }
+        _ => transpose_type(args, context),
+    }
+}
+
 pub fn transpose_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
@@ -314,12 +328,8 @@ pub fn symrcm_type(args: &[Type], _context: &ResolveContext) -> Type {
 }
 
 pub fn bandwidth_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.len() > 1 {
-        return Type::Num;
-    }
-    Type::Tensor {
-        shape: Some(vec![Some(1), Some(2)]),
-    }
+    let _ = args;
+    Type::Num
 }
 
 pub fn numeric_tensor_from_shape(shape: Vec<Option<usize>>) -> Type {

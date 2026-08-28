@@ -18,7 +18,8 @@
     "The returned value is a text handle that can be inspected or updated through `get` and `set`.",
     "Unlike `title`, `sgtitle` is figure-scoped and is drawn once above all subplot panels.",
     "String scalars, char arrays, string arrays, and cell arrays can all be used to create multiline super titles.",
-    "Text styling properties such as `FontSize`, `FontWeight`, `FontAngle`, `Color`, `Interpreter`, and `Visible` use the shared plotting text-property system."
+    "Text styling properties such as `FontSize`, `FontWeight`, `FontAngle`, `Color`, `Interpreter`, and `Visible` use the shared plotting text-property system.",
+    "A scalar value from any integer class can be used as title text; RunMat formats the exact signed or unsigned value directly, including `uint64` values above the exact double range. Integer `FontSize` values are accepted as numeric style controls."
   ],
   "examples": [
     {

@@ -1,919 +1,12 @@
-use crate::bytecode::ArgSpec;
-use crate::bytecode::EndExpr;
-use runmat_builtins::Value;
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, QualifiedName, SymbolName};
-use runmat_runtime::{build_runtime_error, RuntimeError};
-use std::future::Future;
+use runmat_runtime::call::arguments::{ArgumentSpec, MaterializedArgument};
+use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
-const OBJECT_PROTOCOL_SUBSREF: &str = runmat_runtime::OBJECT_SUBSREF_METHOD;
-const OBJECT_PROTOCOL_SUBSASGN: &str = runmat_runtime::OBJECT_SUBSASGN_METHOD;
-const OBJECT_PROTOCOL_KIND_PAREN: &str = runmat_runtime::OBJECT_INDEX_PAREN;
-const OBJECT_PROTOCOL_KIND_BRACE: &str = runmat_runtime::OBJECT_INDEX_BRACE;
-const OBJECT_PROTOCOL_KIND_MEMBER: &str = runmat_runtime::OBJECT_INDEX_MEMBER;
-const OBJECT_SELECTOR_COLON: &str = ":";
-const OBJECT_SELECTOR_END: &str = "end";
-const OBJECT_END_RANGE_TAG: &str = "end_expr";
-
-pub fn expand_cell_indices(
-    cell: &runmat_builtins::CellArray,
-    indices: &[Value],
-) -> Result<Vec<Value>, RuntimeError> {
-    crate::ops::cells::expand_cell_indices(cell, indices)
-}
-
-pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, RuntimeError> {
-    crate::ops::cells::expand_all_cell_values(cell)
-}
-
-pub(crate) fn external_qualified_identity(base: &str, member: &str) -> CallableIdentity {
-    let base_segments = {
-        let split = base.split('.').collect::<Vec<_>>();
-        if !split.is_empty() && split.iter().all(|segment| !segment.is_empty()) {
-            split
-                .into_iter()
-                .map(|segment| SymbolName(segment.to_string()))
-                .collect::<Vec<_>>()
-        } else {
-            vec![SymbolName(base.to_string())]
-        }
-    };
-    let mut segments = base_segments;
-    segments.push(SymbolName(member.to_string()));
-    CallableIdentity::ExternalName(QualifiedName(segments))
-}
-
-pub(crate) fn external_qualified_display_name(base: &str, member: &str) -> String {
-    strict_callable_display_name(&external_qualified_identity(base, member))
-        .expect("external qualified identity should always have a display name")
-}
-
-pub(crate) fn strict_callable_display_name(identity: &CallableIdentity) -> Option<String> {
-    match identity {
-        CallableIdentity::BoundFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
-        CallableIdentity::ExternalFunction { display_name, .. } => {
-            (!display_name.is_empty()).then_some(display_name.clone())
-        }
-        CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
-        CallableIdentity::Imported(path) => path.module.display_name(),
-        CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
-        CallableIdentity::DynamicName(name) => (!name.0.is_empty()).then_some(name.0.clone()),
-        CallableIdentity::ExternalName(QualifiedName(segments)) => {
-            if segments.is_empty() || segments.iter().any(|segment| segment.0.is_empty()) {
-                return None;
-            }
-
-            Some(
-                segments
-                    .iter()
-                    .map(|segment| segment.0.as_str())
-                    .collect::<Vec<_>>()
-                    .join("."),
-            )
-        }
-    }
-}
-
-pub(crate) fn object_property_getter_name(field: &str) -> String {
-    runmat_runtime::object_property_getter_name(field)
-}
-
-pub(crate) fn object_property_setter_name(field: &str) -> String {
-    runmat_runtime::object_property_setter_name(field)
-}
-
-pub(crate) async fn expand_brace_values(
-    base: Value,
-    raw_indices: &[Value],
-    pad_to_outputs: Option<usize>,
-) -> Result<Vec<Value>, RuntimeError> {
-    async fn expand_object_brace_values(
-        base: Value,
-        raw_indices: &[Value],
-        pad_to_outputs: Option<usize>,
-    ) -> Result<Vec<Value>, RuntimeError> {
-        let value = call_object_index_descriptor_method_with_outputs(
-            ObjectIndexDescriptor::subsref_brace(
-                base,
-                ObjectIndexSelector::IndexValues {
-                    values: raw_indices.to_vec(),
-                },
-            ),
-            pad_to_outputs.unwrap_or(1),
-        )
-        .await?;
-        Ok(match value {
-            Value::OutputList(values) => values,
-            other => vec![other],
-        })
-    }
-
-    let mut values = match base {
-        Value::Cell(ca) => {
-            if raw_indices.is_empty() {
-                if let Some(out_count) = pad_to_outputs {
-                    crate::ops::cells::expand_cell_values(&ca, &[], out_count)?
-                } else {
-                    expand_all_cell(&ca)?
-                }
-            } else {
-                expand_cell_indices(&ca, raw_indices)?
-            }
-        }
-        Value::Object(obj) => {
-            expand_object_brace_values(Value::Object(obj), raw_indices, pad_to_outputs).await?
-        }
-        Value::HandleObject(handle) => {
-            expand_object_brace_values(Value::HandleObject(handle), raw_indices, pad_to_outputs)
-                .await?
-        }
-        _ => {
-            return Err(crate::interpreter::errors::mex(
-                "CellExpansionOnNonCell",
-                "Cell expansion on non-cell",
-            ))
-        }
-    };
-    if let Some(out_count) = pad_to_outputs {
-        if values.len() > out_count {
-            values.truncate(out_count);
-        } else {
-            values.resize(out_count, Value::Num(0.0));
-        }
-    }
-    Ok(values)
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum ObjectIndexOp {
-    Subsref,
-    Subsasgn,
-}
-
-impl ObjectIndexOp {
-    pub(crate) fn protocol_name(self) -> &'static str {
-        match self {
-            Self::Subsref => OBJECT_PROTOCOL_SUBSREF,
-            Self::Subsasgn => OBJECT_PROTOCOL_SUBSASGN,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum ObjectIndexKind {
-    Paren,
-    Brace,
-    Member,
-}
-
-impl ObjectIndexKind {
-    pub(crate) fn protocol_name(self) -> &'static str {
-        match self {
-            Self::Paren => OBJECT_PROTOCOL_KIND_PAREN,
-            Self::Brace => OBJECT_PROTOCOL_KIND_BRACE,
-            Self::Member => OBJECT_PROTOCOL_KIND_MEMBER,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) enum ObjectIndexSelector {
-    ScalarIndices { indices: Vec<usize> },
-    IndexValues { values: Vec<Value> },
-    Member(String),
-}
-
-#[derive(Clone)]
-pub(crate) struct ObjectIndexDescriptor {
-    base: Value,
-    op: ObjectIndexOp,
-    kind: ObjectIndexKind,
-    selector: ObjectIndexSelector,
-    rhs: Option<Value>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ObjectParenExprSelectorSpec<'a> {
-    pub dims: usize,
-    pub colon_mask: u32,
-    pub end_mask: u32,
-    pub range_dims: &'a [usize],
-    pub range_params: &'a [(f64, f64)],
-    pub range_start_exprs: &'a [Option<EndExpr>],
-    pub range_step_exprs: &'a [Option<EndExpr>],
-    pub range_end_exprs: &'a [EndExpr],
-    pub end_numeric_exprs: &'a [(usize, EndExpr)],
-    pub numeric: &'a [Value],
-}
-
-impl ObjectIndexDescriptor {
-    pub(crate) fn subsref_paren(base: Value, selector: ObjectIndexSelector) -> Self {
-        Self {
-            base,
-            op: ObjectIndexOp::Subsref,
-            kind: ObjectIndexKind::Paren,
-            selector,
-            rhs: None,
-        }
-    }
-
-    pub(crate) fn subsref_brace(base: Value, selector: ObjectIndexSelector) -> Self {
-        Self {
-            base,
-            op: ObjectIndexOp::Subsref,
-            kind: ObjectIndexKind::Brace,
-            selector,
-            rhs: None,
-        }
-    }
-
-    pub(crate) fn subsasgn_paren(base: Value, selector: ObjectIndexSelector, rhs: Value) -> Self {
-        Self {
-            base,
-            op: ObjectIndexOp::Subsasgn,
-            kind: ObjectIndexKind::Paren,
-            selector,
-            rhs: Some(rhs),
-        }
-    }
-
-    pub(crate) fn subsasgn_brace(base: Value, selector: ObjectIndexSelector, rhs: Value) -> Self {
-        Self {
-            base,
-            op: ObjectIndexOp::Subsasgn,
-            kind: ObjectIndexKind::Brace,
-            selector,
-            rhs: Some(rhs),
-        }
-    }
-
-    pub(crate) fn subsref_paren_from_slice(
-        base: Value,
-        dims: usize,
-        colon_mask: u32,
-        end_mask: u32,
-        numeric: &[Value],
-    ) -> Result<Self, RuntimeError> {
-        let values = build_object_paren_selector_values(dims, colon_mask, end_mask, numeric)?;
-        Ok(Self::subsref_paren(
-            base,
-            ObjectIndexSelector::IndexValues { values },
-        ))
-    }
-
-    pub(crate) fn subsasgn_paren_from_slice(
-        base: Value,
-        dims: usize,
-        colon_mask: u32,
-        end_mask: u32,
-        numeric: &[Value],
-        rhs: Value,
-    ) -> Result<Self, RuntimeError> {
-        let values = build_object_paren_selector_values(dims, colon_mask, end_mask, numeric)?;
-        Ok(Self::subsasgn_paren(
-            base,
-            ObjectIndexSelector::IndexValues { values },
-            rhs,
-        ))
-    }
-
-    pub(crate) fn subsasgn_paren_from_expr_slice(
-        base: Value,
-        spec: ObjectParenExprSelectorSpec<'_>,
-        rhs: Value,
-    ) -> Result<Self, RuntimeError> {
-        let values = build_object_paren_expr_selector_values(spec)?;
-        Ok(Self::subsasgn_paren(
-            base,
-            ObjectIndexSelector::IndexValues { values },
-            rhs,
-        ))
-    }
-
-    pub(crate) fn subsref_paren_from_expr_slice(
-        base: Value,
-        spec: ObjectParenExprSelectorSpec<'_>,
-    ) -> Result<Self, RuntimeError> {
-        let values = build_object_paren_expr_selector_values(spec)?;
-        Ok(Self::subsref_paren(
-            base,
-            ObjectIndexSelector::IndexValues { values },
-        ))
-    }
-
-    pub(crate) fn member(
-        base: Value,
-        op: ObjectIndexOp,
-        field: String,
-        rhs: Option<Value>,
-    ) -> Self {
-        Self {
-            base,
-            op,
-            kind: ObjectIndexKind::Member,
-            selector: ObjectIndexSelector::Member(field),
-            rhs,
-        }
-    }
-
-    fn into_method_invocation(self) -> Result<(Value, String, Vec<Value>), RuntimeError> {
-        let selector = match self.selector {
-            ObjectIndexSelector::ScalarIndices { indices } => {
-                let values = indices
-                    .into_iter()
-                    .map(|index| Value::Num(index as f64))
-                    .collect();
-                build_protocol_index_cell(values)?
-            }
-            ObjectIndexSelector::IndexValues { values } => build_protocol_index_cell(values)?,
-            ObjectIndexSelector::Member(field) => Value::String(field),
-        };
-        let mut args = vec![
-            Value::String(self.kind.protocol_name().to_string()),
-            selector,
-        ];
-        if let Some(rhs) = self.rhs {
-            args.push(rhs);
-        }
-        Ok((self.base, self.op.protocol_name().to_string(), args))
-    }
-}
-
-fn build_protocol_index_cell(values: Vec<Value>) -> Result<Value, RuntimeError> {
-    let cols = values.len();
-    let cell = build_cell_array_with_shape(values, 1, cols, "object index descriptor build")?;
-    Ok(Value::Cell(cell))
-}
-
-fn matlab_index_type(kind: ObjectIndexKind) -> &'static str {
-    match kind {
-        ObjectIndexKind::Paren => "()",
-        ObjectIndexKind::Brace => "{}",
-        ObjectIndexKind::Member => ".",
-    }
-}
-
-fn class_name_from_base(base: &Value) -> Option<&str> {
-    match base {
-        Value::Object(obj) => Some(obj.class_name.as_str()),
-        Value::HandleObject(handle) => Some(handle.class_name.as_str()),
-        _ => None,
-    }
-}
-
-fn build_matlab_substruct_arg(descriptor: &ObjectIndexDescriptor) -> Result<Value, RuntimeError> {
-    let subs_value = match &descriptor.selector {
-        ObjectIndexSelector::ScalarIndices { indices } => {
-            let values = indices
-                .iter()
-                .map(|index| Value::Num(*index as f64))
-                .collect();
-            build_protocol_index_cell(values)?
-        }
-        ObjectIndexSelector::IndexValues { values } => build_protocol_index_cell(values.clone())?,
-        ObjectIndexSelector::Member(field) => Value::String(field.clone()),
-    };
-    let mut value = runmat_builtins::StructValue::new();
-    value.fields.insert(
-        "type".to_string(),
-        Value::String(matlab_index_type(descriptor.kind).to_string()),
-    );
-    value.fields.insert("subs".to_string(), subs_value);
-    Ok(Value::Struct(value))
-}
-
-pub(crate) async fn call_getfield_with_indices(
-    base: Value,
-    field: String,
-    indices: Vec<Value>,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    let mut getfield_args = Vec::with_capacity(3);
-    getfield_args.push(base);
-    getfield_args.push(Value::String(field));
-    if !indices.is_empty() {
-        let idx_count = indices.len();
-        let idx_cell = build_cell_array_with_shape(indices, 1, idx_count, "getfield idx build")?;
-        getfield_args.push(Value::Cell(idx_cell));
-    }
-    runmat_runtime::call_builtin_async_with_outputs("getfield", &getfield_args, requested_outputs)
-        .await
-}
-
-pub(crate) async fn call_object_operator_method(
-    base: Value,
-    method: &str,
-    arg: Value,
-) -> Result<Value, RuntimeError> {
-    crate::call::closures::call_method_or_member_index_with_outputs(
-        base,
-        CallableIdentity::Method(MethodId(method.to_string())),
-        vec![arg],
-        1,
-        None,
-        CallableFallbackPolicy::ObjectDispatch,
-    )
-    .await
-}
-
-pub(crate) async fn call_rhs_object_operator_method_ordered(
-    lhs: Value,
-    rhs: Value,
-    method: &str,
-) -> Result<Value, RuntimeError> {
-    crate::call::closures::call_rhs_operator_method_ordered_with_outputs(
-        lhs,
-        rhs,
-        method.to_string(),
-        1,
-        None,
-    )
-    .await
-}
-
-pub(crate) async fn call_object_named_method_with_outputs(
-    base: Value,
-    method: String,
-    args: Vec<Value>,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    crate::call::closures::call_method_or_member_index_with_outputs(
-        base,
-        CallableIdentity::Method(MethodId(method.clone())),
-        args,
-        requested_outputs,
-        None,
-        CallableFallbackPolicy::ObjectDispatch,
-    )
-    .await
-}
-
-pub(crate) async fn call_object_property_getter_with_outputs(
-    base: Value,
-    field: &str,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    call_object_named_method_with_outputs(
-        base,
-        object_property_getter_name(field),
-        vec![],
-        requested_outputs,
-    )
-    .await
-}
-
-pub(crate) async fn call_object_property_setter_with_outputs(
-    base: Value,
-    field: &str,
-    value: Value,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    call_object_named_method_with_outputs(
-        base,
-        object_property_setter_name(field),
-        vec![value],
-        requested_outputs,
-    )
-    .await
-}
-
-async fn call_object_member_method(
-    base: Value,
-    op: ObjectIndexOp,
-    field: String,
-    rhs: Option<Value>,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::member(base, op, field, rhs)).await
-}
-
-pub(crate) async fn call_object_member_subsref(
-    base: Value,
-    field: String,
-) -> Result<Value, RuntimeError> {
-    call_object_member_method(base, ObjectIndexOp::Subsref, field, None).await
-}
-
-pub(crate) async fn call_object_member_subsasgn(
-    base: Value,
-    field: String,
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    call_object_member_method(base, ObjectIndexOp::Subsasgn, field, Some(rhs)).await
-}
-
-pub(crate) fn class_defines_member_subsref(class: &runmat_builtins::ClassDef) -> bool {
-    runmat_builtins::lookup_method(&class.name, ObjectIndexOp::Subsref.protocol_name()).is_some()
-}
-
-pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -> bool {
-    runmat_builtins::lookup_method(&class.name, ObjectIndexOp::Subsasgn.protocol_name()).is_some()
-}
-
-pub(crate) async fn call_object_index_descriptor_method(
-    descriptor: ObjectIndexDescriptor,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method_with_outputs(descriptor, 1).await
-}
-
-pub(crate) async fn call_object_index_descriptor_method_with_outputs(
-    descriptor: ObjectIndexDescriptor,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    if let Some(class_name) = class_name_from_base(&descriptor.base) {
-        if let Some((method, owner)) =
-            runmat_builtins::lookup_method(class_name, descriptor.op.protocol_name())
-        {
-            let mut semantic_args = vec![
-                descriptor.base.clone(),
-                build_matlab_substruct_arg(&descriptor)?,
-            ];
-            if let Some(rhs) = descriptor.rhs.clone() {
-                semantic_args.push(rhs);
-            }
-            if let Some(result) =
-                runmat_runtime::user_functions::try_call_semantic_function_by_name(
-                    &method.function_name,
-                    &semantic_args,
-                    requested_outputs,
-                )
-                .await
-            {
-                return result;
-            }
-            let owner_qualified = format!("{}.{}", owner, descriptor.op.protocol_name());
-            if owner_qualified != method.function_name {
-                if let Some(result) =
-                    runmat_runtime::user_functions::try_call_semantic_function_by_name(
-                        &owner_qualified,
-                        &semantic_args,
-                        requested_outputs,
-                    )
-                    .await
-                {
-                    return result;
-                }
-            }
-        }
-    }
-    let (base, method, args) = descriptor.into_method_invocation()?;
-    crate::call::closures::call_method_or_member_index_with_outputs(
-        base,
-        CallableIdentity::Method(MethodId(method.clone())),
-        args,
-        requested_outputs,
-        None,
-        CallableFallbackPolicy::ObjectDispatch,
-    )
-    .await
-}
-
-fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
-    fn mk_cell(items: Vec<Value>) -> Result<Value, RuntimeError> {
-        let cols = items.len();
-        let cell = build_cell_array_with_shape(items, 1, cols, "end expression encoding")?;
-        Ok(Value::Cell(cell))
-    }
-
-    match expr {
-        EndExpr::End => Ok(Value::String("end".to_string())),
-        EndExpr::Const(v) => Ok(Value::Num(*v)),
-        EndExpr::Var(i) => Ok(Value::String(format!("var:{i}"))),
-        EndExpr::ResolvedCall { identity, args, .. } => {
-            let name = strict_callable_display_name(identity).ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "UndefinedFunction",
-                    "end expression call missing callable name",
-                )
-            })?;
-            let mut items = vec![Value::String("call".to_string()), Value::String(name)];
-            for a in args {
-                items.push(encode_end_expr_value(a)?);
-            }
-            mk_cell(items)
-        }
-        EndExpr::Add(a, b) => mk_cell(vec![
-            Value::String("+".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Sub(a, b) => mk_cell(vec![
-            Value::String("-".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Mul(a, b) => mk_cell(vec![
-            Value::String("*".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Div(a, b) => mk_cell(vec![
-            Value::String("/".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::LeftDiv(a, b) => mk_cell(vec![
-            Value::String("\\".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Pow(a, b) => mk_cell(vec![
-            Value::String("^".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Neg(a) => mk_cell(vec![
-            Value::String("neg".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Pos(a) => mk_cell(vec![
-            Value::String("pos".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Floor(a) => mk_cell(vec![
-            Value::String("floor".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Ceil(a) => mk_cell(vec![
-            Value::String("ceil".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Round(a) => mk_cell(vec![
-            Value::String("round".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Fix(a) => mk_cell(vec![
-            Value::String("fix".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-    }
-}
-
-fn build_end_range_descriptor(
-    start: Value,
-    step: Value,
-    end_expr: &EndExpr,
-) -> Result<Value, RuntimeError> {
-    let encoded_end = encode_end_expr_value(end_expr)?;
-    let cell = build_cell_array_with_shape(
-        vec![
-            start,
-            step,
-            Value::String(OBJECT_END_RANGE_TAG.to_string()),
-            encoded_end,
-        ],
-        1,
-        4,
-        "obj range",
-    )?;
-    Ok(Value::Cell(cell))
-}
-
-fn normalize_object_numeric_selector(selector: &Value) -> Result<Value, RuntimeError> {
-    match selector {
-        Value::Num(n) => Ok(Value::Num(*n)),
-        Value::Int(i) => Ok(Value::Num(i.to_f64())),
-        Value::Tensor(t) => Ok(Value::Tensor(t.clone())),
-        Value::Bool(value) => Ok(Value::Bool(*value)),
-        Value::LogicalArray(array) => Ok(Value::LogicalArray(array.clone())),
-        Value::String(value) => Ok(Value::String(value.clone())),
-        Value::StringArray(array) => Ok(Value::StringArray(array.clone())),
-        Value::CharArray(array) => Ok(Value::CharArray(array.clone())),
-        Value::Cell(cell) => Ok(Value::Cell(cell.clone())),
-        _ => Err(crate::interpreter::errors::mex(
-            "ObjectSelectorTypeUnsupported",
-            "unsupported index type for object selector",
-        )),
-    }
-}
-
-fn validate_object_range_selector_plan(
-    dims: usize,
-    range_dims: &[usize],
-    range_params: &[(f64, f64)],
-    range_start_exprs: &[Option<EndExpr>],
-    range_step_exprs: &[Option<EndExpr>],
-    range_end_exprs: &[EndExpr],
-) -> Result<Vec<Option<usize>>, RuntimeError> {
-    let count = range_dims.len();
-    if range_params.len() != count
-        || range_start_exprs.len() != count
-        || range_step_exprs.len() != count
-        || range_end_exprs.len() != count
-    {
-        return Err(crate::interpreter::errors::mex(
-            "InvalidRangeSelectorPlan",
-            "inconsistent object range selector metadata",
-        ));
-    }
-
-    let mut range_pos_by_dim = vec![None; dims];
-    for (pos, &dim) in range_dims.iter().enumerate() {
-        if dim >= dims {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidRangeSelectorDim",
-                "object range selector dimension is out of bounds",
-            ));
-        }
-        if range_pos_by_dim[dim].replace(pos).is_some() {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidRangeSelectorPlan",
-                "object range selector dimension appears more than once",
-            ));
-        }
-    }
-    Ok(range_pos_by_dim)
-}
-
-fn validate_object_end_numeric_selector_plan(
-    slot_count: usize,
-    end_numeric_exprs: &[(usize, EndExpr)],
-) -> Result<Vec<Option<&EndExpr>>, RuntimeError> {
-    let mut end_expr_by_slot = vec![None; slot_count];
-    for (position, expr) in end_numeric_exprs {
-        if *position >= slot_count {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidEndSelectorPlan",
-                "object end-selector position is out of bounds",
-            ));
-        }
-        if end_expr_by_slot[*position].is_some() {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidEndSelectorPlan",
-                "object end-selector position appears more than once",
-            ));
-        }
-        end_expr_by_slot[*position] = Some(expr);
-    }
-    Ok(end_expr_by_slot)
-}
-
-fn validate_object_selector_masks(
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-) -> Result<(), RuntimeError> {
-    if (colon_mask & end_mask) != 0 {
-        return Err(crate::interpreter::errors::mex(
-            "InvalidSelectorMaskPlan",
-            "object selector masks overlap on the same dimension",
-        ));
-    }
-
-    if dims < u32::BITS as usize {
-        let allowed_mask = if dims == 0 { 0 } else { (1u32 << dims) - 1 };
-        if ((colon_mask | end_mask) & !allowed_mask) != 0 {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidSelectorMaskPlan",
-                "object selector mask dimension is out of bounds",
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn object_selector_mask_has_dim(mask: u32, dim: usize) -> bool {
-    dim < u32::BITS as usize && (mask & (1u32 << dim)) != 0
-}
-
-pub(crate) fn build_object_paren_selector_values(
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    numeric: &[Value],
-) -> Result<Vec<Value>, RuntimeError> {
-    validate_object_selector_masks(dims, colon_mask, end_mask)?;
-    let mut values = Vec::with_capacity(dims);
-    let mut numeric_iter = 0usize;
-    for d in 0..dims {
-        let is_colon = object_selector_mask_has_dim(colon_mask, d);
-        let is_end = object_selector_mask_has_dim(end_mask, d);
-        if is_colon {
-            values.push(Value::String(OBJECT_SELECTOR_COLON.to_string()));
-            continue;
-        }
-        if is_end {
-            values.push(Value::String(OBJECT_SELECTOR_END.to_string()));
-            continue;
-        }
-        let selector = numeric
-            .get(numeric_iter)
-            .ok_or(crate::interpreter::errors::mex(
-                "MissingNumericIndex",
-                "missing numeric index",
-            ))?;
-        values.push(normalize_object_numeric_selector(selector)?);
-        numeric_iter += 1;
-    }
-    if numeric_iter != numeric.len() {
-        return Err(crate::interpreter::errors::mex(
-            "UnexpectedNumericIndex",
-            "unexpected extra numeric index values",
-        ));
-    }
-    Ok(values)
-}
-
-pub(crate) fn build_object_paren_expr_selector_values(
-    spec: ObjectParenExprSelectorSpec<'_>,
-) -> Result<Vec<Value>, RuntimeError> {
-    validate_object_selector_masks(spec.dims, spec.colon_mask, spec.end_mask)?;
-    let range_pos_by_dim = validate_object_range_selector_plan(
-        spec.dims,
-        spec.range_dims,
-        spec.range_params,
-        spec.range_start_exprs,
-        spec.range_step_exprs,
-        spec.range_end_exprs,
-    )?;
-    for (d, range_pos) in range_pos_by_dim.iter().enumerate().take(spec.dims) {
-        if range_pos.is_some() {
-            let is_colon = object_selector_mask_has_dim(spec.colon_mask, d);
-            let is_end = object_selector_mask_has_dim(spec.end_mask, d);
-            if is_colon || is_end {
-                return Err(crate::interpreter::errors::mex(
-                    "InvalidRangeSelectorPlan",
-                    "object range selector conflicts with colon/end selector masks",
-                ));
-            }
-        }
-    }
-    let slot_count = (0..spec.dims)
-        .filter(|&d| {
-            let is_colon = object_selector_mask_has_dim(spec.colon_mask, d);
-            let is_end = object_selector_mask_has_dim(spec.end_mask, d);
-            !is_colon && !is_end && range_pos_by_dim[d].is_none()
-        })
-        .count();
-    let end_expr_by_slot =
-        validate_object_end_numeric_selector_plan(slot_count, spec.end_numeric_exprs)?;
-    let mut values = Vec::with_capacity(spec.dims);
-    let mut num_iter = 0usize;
-    for (d, range_pos) in range_pos_by_dim.iter().enumerate().take(spec.dims) {
-        let is_colon = object_selector_mask_has_dim(spec.colon_mask, d);
-        let is_end = object_selector_mask_has_dim(spec.end_mask, d);
-        if is_colon {
-            values.push(Value::String(OBJECT_SELECTOR_COLON.to_string()));
-            continue;
-        }
-        if is_end {
-            values.push(Value::String(OBJECT_SELECTOR_END.to_string()));
-            continue;
-        }
-        if let Some(pos) = *range_pos {
-            let (raw_st, raw_sp) = spec.range_params[pos];
-            let st = if let Some(expr) = &spec.range_start_exprs[pos] {
-                encode_end_expr_value(expr)?
-            } else {
-                Value::Num(raw_st)
-            };
-            let sp = if let Some(expr) = &spec.range_step_exprs[pos] {
-                encode_end_expr_value(expr)?
-            } else {
-                Value::Num(raw_sp)
-            };
-            let off = &spec.range_end_exprs[pos];
-            values.push(build_end_range_descriptor(st, sp, off)?);
-            continue;
-        }
-        if let Some(expr) = end_expr_by_slot[num_iter] {
-            values.push(encode_end_expr_value(expr)?);
-            num_iter += 1;
-            continue;
-        }
-        let selector = spec
-            .numeric
-            .get(num_iter)
-            .ok_or(crate::interpreter::errors::mex(
-                "MissingNumericIndex",
-                "missing numeric index",
-            ))?;
-        num_iter += 1;
-        values.push(normalize_object_numeric_selector(selector)?);
-    }
-    if num_iter != spec.numeric.len() {
-        return Err(crate::interpreter::errors::mex(
-            "UnexpectedNumericIndex",
-            "unexpected extra numeric index values",
-        ));
-    }
-    Ok(values)
-}
-
-pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
+pub async fn build_expanded_args_from_specs(
     stack: &mut Vec<Value>,
-    specs: &[ArgSpec],
-    invalid_expand_all_msg: &str,
-    invalid_expand_msg: &str,
-    mut expand_object_all: ExpandObjectAll,
-    mut expand_object_indices: ExpandObjectIndices,
-) -> Result<Vec<Value>, RuntimeError>
-where
-    ExpandObjectAll: FnMut(Value) -> FutAll,
-    ExpandObjectIndices: FnMut(Value, Vec<Value>) -> FutIdx,
-    FutAll: Future<Output = Result<Vec<Value>, RuntimeError>>,
-    FutIdx: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let mut temp: Vec<Value> = Vec::new();
+    specs: &[ArgumentSpec],
+) -> Result<Vec<Value>, RuntimeError> {
+    let mut arguments = Vec::with_capacity(specs.len());
     for spec in specs.iter().rev() {
         if spec.is_expand {
             let mut indices = Vec::with_capacity(spec.num_indices);
@@ -926,86 +19,56 @@ where
             let base = stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
             })?;
-
-            let expanded = if spec.expand_all {
-                match base {
-                    Value::OutputList(outputs) => outputs,
-                    Value::Cell(ca) => expand_all_cell(&ca)?,
-                    other @ Value::Object(_) | other @ Value::HandleObject(_) => {
-                        expand_object_all(other).await?
-                    }
-                    _ => {
-                        return Err(crate::interpreter::errors::mex(
-                            "InvalidExpandAllTarget",
-                            invalid_expand_all_msg,
-                        ))
-                    }
-                }
-            } else {
-                match (base, indices.len()) {
-                    (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
-                        expand_cell_indices(&ca, &indices)?
-                    }
-                    (Value::OutputList(outputs), 1) | (Value::OutputList(outputs), 2) => {
-                        let cols = outputs.len();
-                        let cell =
-                            build_cell_array_with_shape(outputs, 1, cols, "output-list expansion")?;
-                        expand_cell_indices(&cell, &indices)?
-                    }
-                    (other @ Value::Object(_), _) | (other @ Value::HandleObject(_), _) => {
-                        expand_object_indices(other, indices).await?
-                    }
-                    _ => {
-                        return Err(crate::interpreter::errors::mex(
-                            "InvalidExpandTarget",
-                            invalid_expand_msg,
-                        ))
-                    }
-                }
-            };
-            temp.extend(expanded.into_iter().rev());
+            arguments.push(MaterializedArgument::Expansion {
+                base,
+                indices,
+                expand_all: spec.expand_all,
+            });
         } else {
-            temp.push(stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
-            })?);
+            arguments.push(MaterializedArgument::Single(stack.pop().ok_or_else(
+                || crate::interpreter::errors::mex("StackUnderflow", "stack underflow"),
+            )?));
         }
     }
-    temp.reverse();
-    Ok(temp)
-}
-
-fn build_cell_array_with_shape(
-    values: Vec<Value>,
-    rows: usize,
-    cols: usize,
-    context: &str,
-) -> Result<runmat_builtins::CellArray, RuntimeError> {
-    runmat_builtins::CellArray::new(values, rows, cols).map_err(|e| {
-        build_runtime_error(format!("{context}: {e}"))
-            .with_identifier("RunMat:ShapeMismatch")
-            .build()
-    })
+    arguments.reverse();
+    runmat_runtime::call::arguments::expand_arguments(arguments).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_expanded_args_from_specs, build_object_paren_expr_selector_values,
-        build_object_paren_selector_values, ObjectIndexDescriptor, ObjectIndexOp,
-        ObjectIndexSelector, ObjectParenExprSelectorSpec, OBJECT_END_RANGE_TAG,
-        OBJECT_PROTOCOL_KIND_BRACE, OBJECT_PROTOCOL_KIND_MEMBER, OBJECT_PROTOCOL_SUBSASGN,
-        OBJECT_PROTOCOL_SUBSREF, OBJECT_SELECTOR_COLON, OBJECT_SELECTOR_END,
-    };
-    use crate::bytecode::ArgSpec;
-    use crate::bytecode::EndExpr;
+    use super::build_expanded_args_from_specs;
     use futures::executor::block_on;
-    use runmat_builtins::{register_class, Access, ClassDef, HandleRef, MethodDef, Value};
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
     use runmat_hir::{QualifiedName, SymbolName};
+    use runmat_runtime::call::arguments::ArgumentSpec;
+    use runmat_runtime::call::identity::{
+        external_qualified_display_name, external_qualified_identity,
+    };
+    use runmat_runtime::indexing::EndExpr;
+    use runmat_runtime::object::dispatch::{
+        class_defines_member_subsasgn, class_defines_member_subsref,
+    };
+    use runmat_runtime::object::indexing::{
+        build_object_paren_expr_selector_values, build_object_paren_selector_values,
+        ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector, ObjectParenExprSelectorSpec,
+        OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE, OBJECT_PROTOCOL_KIND_MEMBER,
+        OBJECT_PROTOCOL_SUBSASGN, OBJECT_PROTOCOL_SUBSREF, OBJECT_SELECTOR_COLON,
+        OBJECT_SELECTOR_END,
+    };
+    use runmat_types::MemberAccess;
+    use runmat_value::{IntValue, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn object_selector_preserves_exact_integer_scalar_class() {
+        let selector = Value::Int(IntValue::U64(u64::MAX));
+        let values = build_object_paren_selector_values(1, 0, 0, std::slice::from_ref(&selector))
+            .expect("object selector");
+        assert_eq!(values, vec![selector]);
+    }
 
     macro_rules! build_object_paren_expr_selector_values_from_parts {
         (
@@ -1089,7 +152,7 @@ mod tests {
 
     #[test]
     fn external_qualified_identity_preserves_malformed_base_segment() {
-        let identity = super::external_qualified_identity("pkg..Point", "origin");
+        let identity = external_qualified_identity("pkg..Point", "origin");
         let CallableIdentity::ExternalName(QualifiedName(segments)) = identity else {
             panic!("expected external qualified identity");
         };
@@ -1104,7 +167,7 @@ mod tests {
 
     #[test]
     fn external_qualified_identity_splits_well_formed_base_segments() {
-        let identity = super::external_qualified_identity("pkg.Point", "origin");
+        let identity = external_qualified_identity("pkg.Point", "origin");
         let CallableIdentity::ExternalName(QualifiedName(segments)) = identity else {
             panic!("expected external qualified identity");
         };
@@ -1119,16 +182,9 @@ mod tests {
     }
 
     #[test]
-    fn cell_builder_maps_shape_errors_to_identifier() {
-        let err = super::build_cell_array_with_shape(vec![Value::Num(1.0)], 2, 2, "test")
-            .expect_err("expected shape mismatch");
-        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
-    }
-
-    #[test]
     fn external_qualified_display_name_preserves_malformed_base_shape() {
         assert_eq!(
-            super::external_qualified_display_name("pkg..Point", "origin"),
+            external_qualified_display_name("pkg..Point", "origin"),
             "pkg..Point.origin"
         );
     }
@@ -1136,7 +192,7 @@ mod tests {
     #[test]
     fn external_qualified_display_name_renders_well_formed_qualified_name() {
         assert_eq!(
-            super::external_qualified_display_name("pkg.Point", "origin"),
+            external_qualified_display_name("pkg.Point", "origin"),
             "pkg.Point.origin"
         );
     }
@@ -1148,36 +204,40 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             OBJECT_PROTOCOL_SUBSREF.to_string(),
-            MethodDef {
+            runmat_runtime::class_registry::RuntimeMethod {
                 name: OBJECT_PROTOCOL_SUBSREF.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "subsref_impl".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
-            name: parent_name.clone(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: parent_methods,
-        });
-        register_class(ClassDef {
-            name: child_name.clone(),
-            parent: Some(parent_name),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: parent_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods: parent_methods,
+            },
+        );
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: child_name.clone(),
+                parent: Some(parent_name),
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
 
-        let child = ClassDef {
+        let child = runmat_runtime::class_registry::RuntimeClass {
             name: child_name,
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
-        assert!(super::class_defines_member_subsref(&child));
+        assert!(class_defines_member_subsref(&child));
     }
 
     #[test]
@@ -1187,36 +247,40 @@ mod tests {
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
             OBJECT_PROTOCOL_SUBSASGN.to_string(),
-            MethodDef {
+            runmat_runtime::class_registry::RuntimeMethod {
                 name: OBJECT_PROTOCOL_SUBSASGN.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: "subsasgn_impl".to_string(),
                 implicit_class_argument: None,
             },
         );
-        register_class(ClassDef {
-            name: parent_name.clone(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: parent_methods,
-        });
-        register_class(ClassDef {
-            name: child_name.clone(),
-            parent: Some(parent_name),
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: parent_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods: parent_methods,
+            },
+        );
+        runmat_runtime::class_registry::register_class(
+            runmat_runtime::class_registry::RuntimeClass {
+                name: child_name.clone(),
+                parent: Some(parent_name),
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+        );
 
-        let child = ClassDef {
+        let child = runmat_runtime::class_registry::RuntimeClass {
             name: child_name,
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
-        assert!(super::class_defines_member_subsasgn(&child));
+        assert!(class_defines_member_subsasgn(&child));
     }
 
     #[test]
@@ -1258,7 +322,7 @@ mod tests {
             1,
             0,
             0,
-            &[Value::Struct(runmat_builtins::StructValue::new())],
+            &[Value::Struct(runmat_value::StructValue::new())],
         )
         .expect_err("unsupported selector should fail");
         assert_eq!(
@@ -1546,7 +610,7 @@ mod tests {
             &[],
             &[],
             &[],
-            &[Value::Struct(runmat_builtins::StructValue::new())],
+            &[Value::Struct(runmat_value::StructValue::new())],
         )
         .expect_err("unsupported object selector type should fail");
         assert_eq!(
@@ -1576,7 +640,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan() {
-        let key_cell = runmat_builtins::CellArray::new(vec![Value::String("k".to_string())], 1, 1)
+        let key_cell = runmat_value::CellArray::new(vec![Value::String("k".to_string())], 1, 1)
             .expect("key cell");
         let selectors = build_object_paren_expr_selector_values_from_parts!(
             2,
@@ -1671,71 +735,26 @@ mod tests {
     }
 
     #[test]
-    fn build_expanded_args_from_specs_accepts_handle_object_expansion() {
-        let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("handle target");
-        let handle = HandleRef {
-            class_name: "HandleThing".to_string(),
-            target,
-            valid: true,
-        };
-        let mut stack = vec![Value::HandleObject(handle)];
-        let specs = vec![ArgSpec {
-            is_expand: true,
-            num_indices: 0,
-            expand_all: true,
-        }];
-        let expanded = block_on(build_expanded_args_from_specs(
-            &mut stack,
-            &specs,
-            "expand-all failed",
-            "expand-indices failed",
-            |base| async move {
-                match base {
-                    Value::HandleObject(_) => Ok(vec![Value::Num(42.0)]),
-                    other => panic!("expected handle object expansion path, got {other:?}"),
-                }
-            },
-            |_base, _indices| async move { Ok(vec![]) },
-        ))
-        .expect("expanded args");
-        assert_eq!(expanded, vec![Value::Num(42.0)]);
-    }
-
-    #[test]
     fn build_expanded_args_from_specs_supports_output_list_index_expansion() {
         let mut stack = vec![
             Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
             Value::Num(1.0),
         ];
-        let specs = vec![ArgSpec {
+        let specs = vec![ArgumentSpec {
             is_expand: true,
             num_indices: 1,
             expand_all: false,
         }];
-        let expanded = block_on(build_expanded_args_from_specs(
-            &mut stack,
-            &specs,
-            "expand-all failed",
-            "expand-indices failed",
-            |_base| async move { panic!("unexpected object expand-all path") },
-            |_base, _indices| async move { panic!("unexpected object expand-indices path") },
-        ))
-        .expect("expanded args");
+        let expanded =
+            block_on(build_expanded_args_from_specs(&mut stack, &specs)).expect("expanded args");
         assert_eq!(expanded, vec![Value::Num(9.0)]);
 
         let mut stack = vec![
             Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
-            Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         ];
-        let expanded = block_on(build_expanded_args_from_specs(
-            &mut stack,
-            &specs,
-            "expand-all failed",
-            "expand-indices failed",
-            |_base| async move { panic!("unexpected object expand-all path") },
-            |_base, _indices| async move { panic!("unexpected object expand-indices path") },
-        ))
-        .expect("expanded args");
+        let expanded =
+            block_on(build_expanded_args_from_specs(&mut stack, &specs)).expect("expanded args");
         assert_eq!(expanded, vec![Value::Num(9.0), Value::Num(2.0)]);
     }
 }

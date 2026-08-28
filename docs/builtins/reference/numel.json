@@ -30,11 +30,11 @@
   "description": "`numel(A)` returns the number of elements contained in `A`. Supported value classes and return-type behavior follow MATLAB semantics.",
   "behaviors": [
     "`numel(A)` counts every stored element; for matrices this is `prod(size(A))`.",
-    "`numel(A, dim1, dim2, ...)` multiplies the extents of the requested dimensions. Each dimension argument must be a positive integer. Dimensions beyond the array rank contribute a factor of `1`.",
-    "Passing a numeric vector of dimensions (for example `numel(A, [1 3])`) is equivalent to listing them separately.",
+    "MATLAB's public syntax is `numel(A)` only. RunMat's additional `numel(A, dim1, dim2, ...)` and dimension-vector forms are one named RunMat extension and reject in MATLAB-compatible modes.",
+    "When the RunMat dimension extension is enabled, all eight typed integer dimension classes parse exactly as positive structural selectors; dimensions beyond the array rank contribute a factor of `1`.",
     "Scalars return `1`, character arrays report `rows × cols`, and cell arrays count the number of cells.",
     "Empty arrays return `0` when any dimension is zero.",
-    "GPU-resident arrays use metadata stored on the device handle; when unavailable, RunMat gathers the data to maintain correctness."
+    "GPU-resident arrays use coherent shape metadata stored on the device handle; payload elements are not gathered for the documented form. The exact structural count is returned as a host double only when representable without rounding."
   ],
   "examples": [
     {
@@ -70,7 +70,7 @@
     },
     {
       "question": "What happens when I specify dimensions?",
-      "answer": "`numel(A, dim1, dim2, ...)` multiplies the lengths of the listed dimensions. Missing dimensions (for example, requesting the fourth dimension of a matrix) contribute a factor of `1`, matching MATLAB."
+      "answer": "MATLAB documents only `numel(A)`. RunMat can multiply selected extents with `numel(A, dim1, dim2, ...)` when RunMat extensions are enabled; missing dimensions contribute a factor of `1`."
     },
     {
       "question": "Does `numel` gather GPU data?",
@@ -90,7 +90,7 @@
     },
     {
       "question": "Does `numel` accept non-integer dimensions?",
-      "answer": "No. Dimension arguments must be positive integers. Fractional, negative, or non-numeric values raise an error that mirrors MATLAB."
+      "answer": "Dimension arguments belong to a RunMat-only syntax. When extensions are enabled they must be positive integers; fractional, negative, or non-numeric values raise an error."
     },
     {
       "question": "What does numel do in MATLAB?",
@@ -165,7 +165,7 @@
     },
     "points": [
       "`A` is the input array. Any class is accepted: numeric, logical, char, string, cell, struct, or table.",
-      "`dim1, dim2, ...` are optional positive-integer subscripts. When supplied, `numel` returns the number of elements of the selected submatrix, equivalent to `numel(A(index1, index2, ...))`. This form is rarely used and is included for MathWorks parity.",
+      "`dim1, dim2, ...` are optional positive-integer structural selectors in a compatibility-gated RunMat extension; they are not part of the current public MATLAB `numel` syntax.",
       "Returns `n`, a double-precision scalar giving the total element count (or the element count of the requested subregion)."
     ]
   }

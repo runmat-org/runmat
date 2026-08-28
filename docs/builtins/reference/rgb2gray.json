@@ -30,7 +30,7 @@
   "behaviors": [
     "Accepts MxNx3 truecolor images.",
     "Uses weights 0.2989, 0.5870, and 0.1140 for red, green, and blue.",
-    "Preserves uint8, uint16, single, and double image class metadata on host tensors."
+    "Preserves native uint8, uint16, single, and double output storage. Integer conversion uses nearest rounding with ties away from zero and saturation; unsupported signed, uint32, and uint64 image classes reject before resident download."
   ],
   "examples": [
     {

@@ -187,33 +187,29 @@ impl AccelTelemetry {
     }
 }
 
-fn saturating_duration_ns(duration: std::time::Duration) -> u64 {
-    duration.as_nanos().min(u64::MAX as u128) as u64
-}
-
 impl AccelTelemetry {
     pub fn record_fused_elementwise_duration(&self, duration: std::time::Duration) {
-        self.record_fused_elementwise(saturating_duration_ns(duration));
+        self.record_fused_elementwise(runmat_time::duration_ns_saturating(duration));
     }
 
     pub fn record_fused_reduction_duration(&self, duration: std::time::Duration) {
-        self.record_fused_reduction(saturating_duration_ns(duration));
+        self.record_fused_reduction(runmat_time::duration_ns_saturating(duration));
     }
 
     pub fn record_matmul_duration(&self, duration: std::time::Duration) {
-        self.record_matmul(saturating_duration_ns(duration));
+        self.record_matmul(runmat_time::duration_ns_saturating(duration));
     }
 
     pub fn record_linsolve_duration(&self, duration: std::time::Duration) {
-        self.record_linsolve(saturating_duration_ns(duration));
+        self.record_linsolve(runmat_time::duration_ns_saturating(duration));
     }
 
     pub fn record_mldivide_duration(&self, duration: std::time::Duration) {
-        self.record_mldivide(saturating_duration_ns(duration));
+        self.record_mldivide(runmat_time::duration_ns_saturating(duration));
     }
 
     pub fn record_mrdivide_duration(&self, duration: std::time::Duration) {
-        self.record_mrdivide(saturating_duration_ns(duration));
+        self.record_mrdivide(runmat_time::duration_ns_saturating(duration));
     }
 
     pub fn record_kernel_launch(

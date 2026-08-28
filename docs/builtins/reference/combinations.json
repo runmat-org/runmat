@@ -3,10 +3,10 @@
   "category": "array/grouping",
   "keywords": ["combinations", "cartesian", "table", "combinatorics"],
   "summary": "Generate all element combinations of arrays.",
-  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Combination materialization runs on the host."},
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "The table result is host-resident. Gathering resident inputs is a gated RunMat extension."},
   "tested": {"unit": "builtins::array::grouping::tests"},
-  "description": "`T = combinations(A,B,...)` returns a table whose rows contain the Cartesian product of the input vector elements.",
-  "behaviors": ["Supports numeric, logical, string, character, and cell inputs.", "Supports the `VariableNames` name-value option."],
+  "description": "`T = combinations(A1,...,An)` returns a host table whose rows contain the Cartesian product of the input elements. Each input is linearized in column-major order.",
+  "behaviors": ["Supports numeric, logical, string, character, and cell inputs. Text such as `VariableNames` is ordinary input data, not an option name.", "All eight integer classes are public inputs. Each corresponding table variable preserves the exact native integer class and values.", "Row, column, matrix, and multidimensional inputs are linearized columnwise; output variables are columns and empty integer inputs retain their class.", "The result is a host table. Resident inputs use a gated RunMat gather extension rather than a public compatibility path."],
   "examples": [{"description": "Generate pairs", "input": "T = combinations([1 2],[\"x\" \"y\"])", "output": "T = 4x2 table"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/array/grouping.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/grouping.rs"}
 }

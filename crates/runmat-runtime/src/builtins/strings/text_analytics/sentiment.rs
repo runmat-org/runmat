@@ -1,15 +1,23 @@
 //! Sentiment scoring helpers for Text Analytics compatibility objects.
 
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
+use runmat_value::NumericScalar;
 use std::collections::{HashMap, HashSet};
 
 use once_cell::sync::Lazy;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ObjectInstance, StringArray, Tensor, Value};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type, documents_from_object, text_analytics_error, tokenized_document_language,
@@ -120,6 +128,27 @@ pub const VADER_SENTIMENT_SCORES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescript
     errors: &ERRORS,
 };
 
+const VADER_INTEGER_SCORE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "SentimentLexicon.SentimentScore",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented numeric scalar scores may use any integer class. Their required [-4, 4] range is validated on authoritative storage before exact conversion into the VADER floating computation.",
+    }];
+
+pub const VADER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "scores = vaderSentimentScores(documents, SentimentLexicon=table(integer_scores))",
+        inputs: &VADER_INTEGER_SCORE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Every valid integer lexicon score is exactly representable as binary64 because the public domain is [-4, 4]. Automatic residency may gather the enclosing table through its owner; outputs are host double score vectors.",
+    }];
+
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -133,6 +162,9 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     type_resolver(any_type),
     descriptor(
         crate::builtins::strings::text_analytics::sentiment::VADER_SENTIMENT_SCORES_DESCRIPTOR
+    ),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::sentiment::VADER_INTEGER_CAPABILITIES
     ),
     builtin_path = "crate::builtins::strings::text_analytics::sentiment"
 )]
@@ -579,8 +611,18 @@ fn sentiment_lexicon_from_table(value: &Value) -> BuiltinResult<HashMap<String, 
 fn numeric_vector(value: &Value, column_name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
-        Value::Int(value) => Ok(vec![int_value_to_f64(value)]),
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Int(value) => numeric_scalar_value(NumericScalar::from(value.clone()), column_name)
+            .map(|value| vec![value]),
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|index| {
+                numeric_scalar_value(
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("numeric tensor index remains in bounds"),
+                    column_name,
+                )
+            })
+            .collect(),
         Value::Cell(cell) => cell
             .data
             .iter()
@@ -595,12 +637,38 @@ fn numeric_vector(value: &Value, column_name: &str) -> BuiltinResult<Vec<f64>> {
 fn numeric_scalar(value: &Value, column_name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Int(value) => Ok(int_value_to_f64(value)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Int(value) => numeric_scalar_value(NumericScalar::from(value.clone()), column_name),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => numeric_scalar_value(
+            tensor
+                .numeric_value_at(0)
+                .expect("scalar numeric tensor contains one value"),
+            column_name,
+        ),
         other => Err(sentiment_error(format!(
             "vaderSentimentScores: {column_name} entries must be numeric scalars, got {other:?}"
         ))),
     }
+}
+
+fn numeric_scalar_value(value: NumericScalar, column_name: &str) -> BuiltinResult<f64> {
+    let integer = match value {
+        NumericScalar::F64(value) => return Ok(value),
+        NumericScalar::F32(value) => return Ok(f64::from(value)),
+        NumericScalar::I8(value) => i128::from(value),
+        NumericScalar::I16(value) => i128::from(value),
+        NumericScalar::I32(value) => i128::from(value),
+        NumericScalar::I64(value) => i128::from(value),
+        NumericScalar::U8(value) => i128::from(value),
+        NumericScalar::U16(value) => i128::from(value),
+        NumericScalar::U32(value) => i128::from(value),
+        NumericScalar::U64(value) => i128::from(value),
+    };
+    if !(-4..=4).contains(&integer) {
+        return Err(sentiment_error(format!(
+            "vaderSentimentScores: {column_name} integer values must be in [-4, 4]"
+        )));
+    }
+    Ok(integer as f64)
 }
 
 fn modifier_ngrams_from_value(value: &Value, option_name: &str) -> BuiltinResult<Vec<Vec<String>>> {
@@ -668,19 +736,6 @@ fn tensor_value(data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
 
 fn sentiment_error(message: impl Into<String>) -> crate::RuntimeError {
     text_analytics_error("vaderSentimentScores", message)
-}
-
-fn int_value_to_f64(value: &runmat_builtins::IntValue) -> f64 {
-    match value {
-        runmat_builtins::IntValue::I8(value) => *value as f64,
-        runmat_builtins::IntValue::I16(value) => *value as f64,
-        runmat_builtins::IntValue::I32(value) => *value as f64,
-        runmat_builtins::IntValue::I64(value) => *value as f64,
-        runmat_builtins::IntValue::U8(value) => *value as f64,
-        runmat_builtins::IntValue::U16(value) => *value as f64,
-        runmat_builtins::IntValue::U32(value) => *value as f64,
-        runmat_builtins::IntValue::U64(value) => *value as f64,
-    }
 }
 
 static DEFAULT_LEXICON: Lazy<HashMap<String, f64>> = Lazy::new(|| {
@@ -783,10 +838,63 @@ static DEFAULT_NEGATIONS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, StructValue};
+    use runmat_value::{CellArray, IntegerStorage, StructValue};
+
+    fn integer_scalar(storage: IntegerStorage) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(vader_sentiment_scores_builtin(args))
+    }
+
+    #[test]
+    fn numeric_scalar_reads_typed_integer_storage_exactly() {
+        assert_eq!(
+            numeric_scalar(&integer_scalar(IntegerStorage::I16(vec![-3])), "Positive")
+                .expect("numeric"),
+            -3.0
+        );
+    }
+
+    #[test]
+    fn numeric_vector_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 4]), vec![1, 2])
+            .expect("integer tensor");
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(tensor), "SentimentScore").expect("numeric"),
+            vec![2.0, 4.0]
+        );
+    }
+
+    #[test]
+    fn sentiment_scores_accept_all_documented_integer_classes_exactly() {
+        let storages = [
+            IntegerStorage::I8(vec![-4]),
+            IntegerStorage::I16(vec![-3]),
+            IntegerStorage::I32(vec![-2]),
+            IntegerStorage::I64(vec![-1]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![4]),
+        ];
+        for storage in storages {
+            assert!(numeric_vector(
+                &Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap()),
+                "SentimentScore"
+            )
+            .is_ok());
+        }
+        assert!(numeric_vector(
+            &Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap()
+            ),
+            "SentimentScore"
+        )
+        .is_err());
     }
 
     fn documents(docs: Vec<Vec<&str>>) -> Value {
@@ -824,7 +932,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        tensor.data
+        tensor.materialize_f64()
     }
 
     fn outputs(value: Value) -> Vec<Value> {

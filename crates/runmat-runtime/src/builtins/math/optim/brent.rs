@@ -11,9 +11,11 @@
 //! so RunMat's function-handle dispatch path (closures, anonymous functions,
 //! named handles) flows through a single helper.
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 
-use crate::builtins::math::optim::common::{call_scalar_function, optim_error};
+use crate::builtins::math::optim::common::{
+    call_scalar_function, call_scalar_function_with_precision, optim_error,
+};
 use crate::BuiltinResult;
 
 /// Result of a successful (or terminated) bounded scalar minimization.
@@ -92,6 +94,7 @@ pub(crate) async fn brent_zero(
     function: &Value,
     bracket: BrentZeroBracket,
     params: BrentParams,
+    single: bool,
     mut observer: Option<&mut dyn BrentZeroObserver>,
 ) -> BuiltinResult<BrentZeroResult> {
     if bracket.fa == 0.0 {
@@ -211,7 +214,7 @@ pub(crate) async fn brent_zero(
         } else {
             -tol
         };
-        fb = call_scalar_function(name, function, b).await?;
+        fb = call_scalar_function_with_precision(name, function, b, single).await?;
         evals += 1;
 
         if let Some(observer) = observer.as_deref_mut() {
@@ -449,6 +452,7 @@ mod tests {
                 max_iter: 10,
                 max_fun_evals: 10,
             },
+            false,
             None,
         ))
         .unwrap_err();

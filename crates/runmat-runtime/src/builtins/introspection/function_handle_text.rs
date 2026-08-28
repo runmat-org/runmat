@@ -1,7 +1,9 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_value::Value;
 
 const STR2FUNC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "fh",
@@ -31,6 +33,13 @@ pub const STR2FUNC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &STR2FUNC_ERRORS,
 };
+
+pub const STR2FUNC_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "str2func accepts scalar function-name text only. Integer, numeric, and provider-resident values reject before provider access, and the builtin has no integer output surface.",
+    };
 
 const STR2FUNC_ERROR_NAME_SHAPE_INVALID: runmat_builtins::BuiltinErrorDescriptor =
     runmat_builtins::BuiltinErrorDescriptor {
@@ -112,6 +121,7 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(
     name = "str2func",
     descriptor(self::STR2FUNC_DESCRIPTOR),
+    integer_audit(self::STR2FUNC_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::function_handle_text"
 )]
 pub fn str2func_builtin_registered(value: Value) -> crate::BuiltinResult<Value> {
@@ -147,6 +157,13 @@ pub const FUNC2STR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &FUNC2STR_ERRORS,
 };
 
+pub const FUNC2STR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "func2str accepts only function-handle values and returns handle text; integer, numeric, and provider-resident values reject before provider access.",
+    };
+
 const FUNC2STR_ERROR_HANDLE_TYPE_INVALID: runmat_builtins::BuiltinErrorDescriptor =
     runmat_builtins::BuiltinErrorDescriptor {
         code: "RM.FUNC2STR.HANDLE_TYPE_INVALID",
@@ -176,8 +193,85 @@ pub(crate) fn dispatch_func2str(value: Value) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(
     name = "func2str",
     descriptor(self::FUNC2STR_DESCRIPTOR),
+    integer_audit(self::FUNC2STR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::function_handle_text"
 )]
 pub fn func2str_builtin_registered(value: Value) -> crate::BuiltinResult<Value> {
     dispatch_func2str(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
+
+    fn unowned_resident_value() -> Value {
+        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        })
+    }
+
+    #[test]
+    fn str2func_integer_audit_is_inapplicable() {
+        assert_eq!(
+            STR2FUNC_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(STR2FUNC_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
+    #[test]
+    fn str2func_rejects_integer_and_resident_values_before_provider_access() {
+        for value in [
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                    .expect("integer tensor"),
+            ),
+            unowned_resident_value(),
+        ] {
+            let error = dispatch_str2func(value).expect_err("non-text must reject");
+            assert_eq!(error.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
+        }
+    }
+
+    #[test]
+    fn func2str_integer_audit_is_inapplicable() {
+        assert_eq!(
+            FUNC2STR_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(FUNC2STR_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
+    #[test]
+    fn func2str_rejects_integer_and_resident_values_before_provider_access() {
+        let integers = [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ];
+        for value in integers.into_iter().map(Value::Int).chain([
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                    .expect("integer tensor"),
+            ),
+            unowned_resident_value(),
+        ]) {
+            let error = dispatch_func2str(value).expect_err("non-handle rejection");
+            assert_eq!(
+                error.identifier(),
+                FUNC2STR_ERROR_HANDLE_TYPE_INVALID.identifier
+            );
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
+    }
 }

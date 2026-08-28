@@ -11,10 +11,10 @@
   "description": "`yticks` returns or updates the tick mark locations for the Y axis of the current or specified axes.",
   "behaviors": [
     "`yticks()` returns the current Y-axis tick values as a row vector.",
-    "`yticks(ticks)` sets manual Y-axis tick values. `ticks` must be an increasing numeric vector; `[]` removes Y-axis tick marks.",
+    "`yticks(ticks)` sets manual Y-axis tick values. All native integer classes are accepted and ordered exactly before conversion; adjacent values must remain distinct in graphics coordinates. `[]` removes Y-axis tick marks.",
     "`yticks('auto')` returns the Y tick mode to automatic tick generation. `yticks('manual')` freezes the current tick values.",
     "`yticks('mode')` returns `'auto'` or `'manual'`.",
-    "`yticks(ax, ...)` applies the same forms to the specified axes handle.",
+    "`yticks(ax, ...)` applies the same forms to the specified axes handle. RunMat mode additionally accepts a typed-integer alias for an encoded axes handle.",
     "`get(ax, 'YTick')`, `set(ax, 'YTick', ticks)`, `get(ax, 'YTickMode')`, and `set(ax, 'YTickMode', mode)` share the same axes metadata."
   ],
   "examples": [

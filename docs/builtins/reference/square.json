@@ -14,10 +14,11 @@
     "elementwise": true,
     "reduction": false,
     "precisions": [
+      "f32",
       "f64"
     ],
     "broadcasting": "elementwise",
-    "notes": "GPU inputs are gathered to the host so the reference implementation can guarantee MATLAB-compatible half-open duty-cycle semantics at the period boundary."
+    "notes": "The compatibility target does not document interactive GPU Array support for `square`. In `runmat` compatibility mode, gpuArray arguments are accepted as a RunMat extension and gathered so the reference implementation can guarantee half-open duty-cycle semantics at the period boundary."
   },
   "fusion": {
     "elementwise": false,
@@ -37,7 +38,7 @@
     "Reduces input modulo `2*pi` so the waveform is periodic across negative and positive sample times.",
     "Uses half-open interval semantics: `+1` for `phi/(2*pi) < duty/100`, `-1` otherwise.",
     "`duty = 0` produces a constant `-1` waveform; `duty = 100` produces a constant `+1` waveform.",
-    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "MATLAB-compatible calls use single or double inputs for `t` and `duty`. In `runmat` compatibility mode, supported integer and logical arguments are accepted as a RunMat extension and promoted to double precision before evaluation.",
     "Non-finite sample times (`NaN`, `+Inf`, `-Inf`) propagate as `NaN` element-wise, matching MATLAB.",
     "Complex and text inputs are rejected with a builtin-scoped error.",
     "Rejects `duty` values outside `[0, 100]` and non-scalar `duty` arguments."

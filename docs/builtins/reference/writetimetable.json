@@ -3,13 +3,13 @@
   "category": "io/tabular",
   "keywords": ["writetimetable", "timetable", "csv", "RowTimes"],
   "summary": "Write a timetable to a delimited text file.",
-  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Timetable data is serialized on the host."},
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Timetable data is serialized on the host. Automatically resident values gather transparently; explicit gpuArray input requires RunMat mode."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests"},
   "description": "`writetimetable(TT, filename)` writes timetable row times and variables to a delimited text file.",
-  "behaviors": ["Row times are emitted as a leading `Time` field.", "`\"Delimiter\"` and `\"WriteVariableNames\"` are supported."],
-  "examples": [{"description": "Write timetable", "input": "bytes = writetimetable(TT, 'out.csv')", "output": "bytes = number of bytes written"}],
-  "links": [{"label": "writetable", "url": "./writetable"}, {"label": "readtimetable", "url": "./readtimetable"}],
+  "behaviors": ["Row times are emitted as a leading `Time` field.", "`\"Delimiter\"` and `\"WriteVariableNames\"` are supported.", "Variables from all eight native integer classes are serialized with their exact decimal values.", "A typed-integer `WriteVariableNames` value, explicit `gpuArray` input, and the bytes-written output are available in RunMat mode."],
+  "examples": [{"description": "Write timetable", "input": "writetimetable(TT, 'out.csv')"}],
+  "links": [{"label": "MATLAB language extensions", "url": "/docs/runtime/getting-started/language-extensions"}, {"label": "writetable", "url": "./writetable"}, {"label": "readtimetable", "url": "./readtimetable"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
 }

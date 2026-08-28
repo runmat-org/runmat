@@ -413,6 +413,21 @@ impl Parser {
                     let span = self.span_from(info.position, info.end);
                     Ok(Expr::Number(info.lexeme, span))
                 }
+                Token::RadixInteger => {
+                    let span = self.span_from(info.position, info.end);
+                    let literal =
+                        crate::IntegerLiteral::parse(&info.lexeme).map_err(|message| {
+                            SyntaxError {
+                                message,
+                                position: info.position,
+                                found_token: Some(info.lexeme.clone()),
+                                expected: Some(
+                                    "a valid hexadecimal or binary integer literal".into(),
+                                ),
+                            }
+                        })?;
+                    Ok(Expr::IntegerLiteral(literal, span))
+                }
                 Token::Str => {
                     let span = self.span_from(info.position, info.end);
                     Ok(Expr::String(info.lexeme, span))
@@ -590,6 +605,7 @@ impl Parser {
                     Some(
                         Token::Ident
                         | Token::Integer
+                        | Token::RadixInteger
                         | Token::Float
                         | Token::Str
                         | Token::LParen

@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. The multinomial logistic solver runs on CPU."
+    "notes": "The multinomial logistic solver runs on CPU. Automatic internal residency gathers transparently; explicit gpuArray input is a mode-gated RunMat host-fallback extension."
   },
   "fusion": {
     "elementwise": false,
@@ -27,17 +27,20 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::ml::mnrfit::tests",
-    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+    "integration": "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs"
   },
   "description": "`mnrfit(X,Y)` fits nominal multinomial logistic regression coefficients for predictor matrix `X` and response `Y`. Rows of `X` are observations, columns are predictors, and columns of `B` correspond to all response classes except the final sorted reference class.",
   "behaviors": [
     "`X` must be a finite real numeric matrix with observations in rows and predictors in columns.",
+    "Current MATLAB documents single or double X. Typed-integer X, typed-integer Y, and logical X are independently gated RunMat extensions; logical Y remains documented.",
+    "Admitted integer predictor, response, weight, and tolerance values must be exactly representable at the binary64 host-solver boundary.",
     "`Y` may be a numeric, logical, string, character, cellstr, or categorical class vector with one response per row of `X`. Classes are sorted, and the final class is used as the reference category.",
     "`Y` may also be an `N`-by-K numeric grouped-counts matrix. Columns are treated as response categories, and row totals become multinomial observation weights.",
     "`B = mnrfit(...)` returns a coefficient matrix with one row per model term and one column per non-reference class. A constant term is included by default.",
     "`[B,dev,stats] = mnrfit(...)` returns model deviance and a stats structure containing `beta`, `se`, `t`, `p`, `covb`, `coeffcorr`, `dfe`, `s`, `estdisp`, and `classNames`.",
-    "`Model` currently supports `\"nominal\"`; `Link` supports `\"logit\"`; `Constant` accepts logical values or `\"on\"`/`\"off\"`; `Interactions` accepts `\"off\"`.",
-    "`Weights` accepts a nonnegative finite observation-weight vector with positive total weight. `IterationLimit` and `Tolerance` control Newton solver convergence and may also be supplied through a `statset`-style `Options` struct. `MaxIter` and `TolX` are accepted as compatibility aliases.",
+    "`Model` currently supports `\"nominal\"`; `Link` supports `\"logit\"`; and `Interactions` accepts `\"off\"`.",
+    "`Weights` accepts a nonnegative finite observation-weight vector with positive total weight. `IterationLimit` and `Tolerance` control Newton solver convergence.",
+    "`Constant`, `MaxIter`, `TolX`, `Options`, and `Display` are retained as explicitly gated RunMat option extensions rather than being presented as current MATLAB-compatible spellings.",
     "Rows with `NaN` in `X`, numeric `Y`, or grouped counts are omitted before fitting.",
     "`Display` is accepted for compatibility. Overdispersion estimation is not implemented, so `EstDisp` must be `\"off\"`."
   ],

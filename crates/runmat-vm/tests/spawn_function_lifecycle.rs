@@ -6,10 +6,10 @@ mod tests {
     use once_cell::sync::Lazy;
     use runmat_accelerate::{fusion_residency, simple_provider::InProcessProvider};
     use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
-    use runmat_builtins::Value;
     use runmat_hir::{lower, LoweringContext};
     use runmat_mir::lowering::lower_assembly;
     use runmat_runtime::RuntimeError;
+    use runmat_value::Value;
     use runmat_vm::{compile_semantic_function_registry, Bytecode};
 
     static TEST_PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
@@ -130,8 +130,12 @@ mod tests {
         fusion_residency::mark(&handle);
 
         let source = r#"
+            async function y = pass(v)
+                y = v;
+            end
+
             function y = spawn_drop_unaliased(x)
-                task = spawn(x);
+                task = spawn(pass(x));
                 x = 0;
                 task = 0;
                 y = 0;
@@ -168,9 +172,13 @@ mod tests {
         fusion_residency::mark(&handle);
 
         let source = r#"
+            async function y = pass(v)
+                y = v;
+            end
+
             function y = spawn_drop_with_alias(x)
                 alias = x;
-                task = spawn(x);
+                task = spawn(pass(x));
                 x = 0;
                 task = 0;
                 y = alias;
@@ -256,9 +264,13 @@ mod tests {
         fusion_residency::mark(&handle);
 
         let source = r#"
+            async function y = pass(v)
+                y = v;
+            end
+
             async function y = spawn_await_drop_with_alias(x)
                 alias = x;
-                task = spawn(x);
+                task = spawn(pass(x));
                 tmp = await(task);
                 task = 0;
                 x = 0;

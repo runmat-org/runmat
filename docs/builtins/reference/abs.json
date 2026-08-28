@@ -30,13 +30,16 @@
     "unit": "builtins::math::elementwise::abs::tests",
     "integration": "builtins::math::elementwise::abs::tests::abs_gpu_provider_roundtrip"
   },
-  "description": "`y = abs(x)` returns absolute values for real inputs and magnitudes for complex inputs. For arrays, `abs` is applied element-wise and preserves the input shape.",
+  "description": "`y = abs(x)` returns absolute values for real inputs and magnitudes for floating complex inputs. For arrays, `abs` is applied element-wise and preserves the input shape. All eight integer classes preserve their input class and use saturating arithmetic at the signed minimum.",
   "behaviors": [
     "Real scalars, vectors, matrices, and N-D tensors are mapped to their element-wise absolute values.",
-    "Complex inputs return the magnitude `sqrt(real(x).^2 + imag(x).^2)`, matching MATLAB semantics.",
-    "Logical inputs are promoted to doubles (`true → 1.0`, `false → 0.0`) before taking the absolute value.",
-    "Character arrays are converted to double arrays of code point magnitudes, just like MATLAB.",
-    "String arrays are not supported and raise an error (`abs` only accepts numeric, logical, or char inputs).",
+    "Complex single and double inputs return the magnitude `sqrt(real(x).^2 + imag(x).^2)` in the corresponding real floating class; typed complex integer inputs are rejected.",
+    "Integer scalars and full arrays preserve exact class and shape. Unsigned values are unchanged, signed values are negated, and `abs(intmin(class))` saturates to `intmax(class)`.",
+    "Sparse single and double inputs retain their CSC structure and native class. Exact sparse integer storage is available only in RunMat compatibility mode.",
+    "Logical inputs are a declared RunMat-only extension and are promoted to doubles (`true → 1.0`, `false → 0.0`).",
+    "Character arrays are a declared RunMat-only extension and are converted to double code-point magnitudes.",
+    "String arrays are not supported and raise an error.",
+    "RunMat does not yet implement the documented duration, table, or timetable overloads.",
     "NaN values remain NaN; the function does not change IEEE NaN propagation rules."
   ],
   "examples": [
@@ -56,16 +59,16 @@
       "output": "magnitudes = [5 1.4142]"
     },
     {
-      "description": "Working with matrices on the GPU",
+      "description": "Working with matrices on an accelerator",
       "input": "G = randn(2048, 2048, \"gpuArray\");\npositive = abs(G)"
     },
     {
-      "description": "Using `abs` with logical arrays",
+      "description": "Computing magnitudes of logical values",
       "input": "mask = logical([0 1 0; 1 0 1]);\nnumeric = abs(mask)",
       "output": "numeric = [0 1 0; 1 0 1]"
     },
     {
-      "description": "Converting characters to numeric codes",
+      "description": "Computing magnitudes of character codes",
       "input": "c = 'ABC';\ncodes = abs(c)",
       "output": "codes = [65 66 67]"
     },
@@ -85,11 +88,11 @@
     },
     {
       "question": "Can I call `abs` on string arrays?",
-      "answer": "No. Like MATLAB, `abs` only accepts numeric, logical, or character inputs. Use `double(string)` if you need code points."
+      "answer": "No. `abs` accepts supported numeric inputs; RunMat compatibility mode additionally enables logical and character extensions."
     },
     {
       "question": "Does `abs` work with sparse arrays?",
-      "answer": "Sparse support is planned but not yet implemented; inputs are densified today."
+      "answer": "Yes for real sparse single and double inputs, which retain sparse CSC storage. RunMat compatibility mode also preserves exact typed sparse integers."
     },
     {
       "question": "Is GPU execution exact?",
@@ -105,7 +108,7 @@
     },
     {
       "question": "Can I use `abs` with logical masks?",
-      "answer": "Yes. Logical inputs are promoted to doubles (0 or 1) before applying `abs`, just like MATLAB."
+      "answer": "Only in RunMat compatibility mode. The extension promotes logical values to double 0 or 1 before applying `abs`."
     }
   ],
   "links": [
@@ -229,6 +232,6 @@
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer track residency automatically, keeping tensors on the GPU whenever device execution is beneficial. Explicit `gpuArray`/`gather` calls remain available for MATLAB compatibility or when you need deterministic residency control (e.g., integrating with third-party GPU kernels).",
   "gpu_behavior": [
     "**Hook available:** The absolute value is computed directly on the device with no host transfers.",
-    "**Hook missing or unsupported dtype:** RunMat gathers the tensor to host memory, performs the CPU absolute value logic (including complex magnitudes), and optionally re-uploads downstream.\n\nWhen a provider supports complex-interleaved storage, `abs` computes magnitudes on the device and returns a real GPU tensor with the original shape."
+    "**Hook missing or unsupported dtype:** RunMat gathers through authoritative native storage, performs the CPU absolute value logic, and restores the result to the input handle's owning provider. Integer fallback preserves exact class, including 64-bit values.\n\nWhen a provider supports complex-interleaved storage, `abs` computes magnitudes on the device and returns a real GPU tensor with the original shape."
   ]
 }

@@ -32,11 +32,12 @@
   },
   "description": "`Q = unwrap(P)` adjusts phase angles in radians by adding integer multiples of `2*pi` whenever adjacent samples jump by more than the tolerance.",
   "behaviors": [
-    "Accepts real numeric, logical, integer, vector, matrix, and N-D tensor inputs.",
+    "The compatibility surface accepts real single or double phase data. Logical and native typed-integer phase data are separately gated RunMat extensions.",
     "Operates along the first non-singleton dimension by default.",
     "`unwrap(P, tol)` uses `max(tol, pi)` as the discontinuity threshold, matching MATLAB behavior for tolerances below `pi`.",
-    "`unwrap(P, [], dim)` keeps the default tolerance and unwraps along `dim`.",
-    "Preserves the input shape and numeric dtype metadata.",
+    "`unwrap(P, [], dim)` keeps the default tolerance and unwraps along `dim`; the documented dimension accepts all eight integer classes and is decoded exactly as a structural index.",
+    "A native typed-integer tolerance is a RunMat extension and must be exactly representable before entering the floating comparison boundary.",
+    "Single phase data returns single and double phase data returns double. The integer and logical phase extensions return double so fractional phase corrections are never coerced into a nonfloating class.",
     "Complex inputs are rejected because `unwrap` expects real phase angles."
   ],
   "examples": [

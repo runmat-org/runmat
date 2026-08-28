@@ -7,13 +7,13 @@
     "array",
     "mask"
   ],
-  "summary": "Create logical arrays filled with false values in MATLAB and RunMat.",
+  "summary": "Create logical arrays filled with false values.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Always constructs a host logical array; gpuArray inputs are used only for sizing."
+    "notes": "A resident `'like'` prototype creates a logical result on that handle's owning provider. Numeric size arguments remain structural controls and do not independently request GPU output."
   },
   "fusion": {
     "elementwise": false,
@@ -26,15 +26,15 @@
     "unit": "builtins::array::creation::true_false::tests",
     "integration": null
   },
-  "description": "`false` creates logical arrays filled with false values. Scalar, vector, matrix, and N-D sizing forms follow MATLAB semantics.",
+  "description": "`false` creates logical arrays filled with false values. MATLAB-compatible mode accepts scalar dimensions, multiple scalar dimensions, a row size vector, and `'like'`. Integer dimensions are read exactly, negative dimensions become zero, and trailing singleton dimensions are normalized according to MATLAB array-shape rules.",
   "behaviors": [
     "`false()` returns the scalar logical `false`.",
     "`false(n)` returns an n x n logical array of false values.",
     "`false(m, n, ...)` returns a logical array with the requested dimensions.",
-    "`false(sz)` accepts a size vector (row or column) and returns an array with prod(sz) elements arranged using MATLAB column-major ordering.",
-    "`false(A)` returns a logical array of false with the same size as `A`.",
-    "`false(___, 'like', prototype)` uses the prototype only for sizing; the result is still a host logical array.",
-    "`false(___, 'logical')` is accepted for MATLAB compatibility and has no effect."
+    "`false(sz)` accepts one row size vector. A column vector or multiple vector size inputs are rejected.",
+    "All eight integer classes are exact size controls. Negative signed dimensions become zero; noninteger, nonfinite, or platform-unrepresentable dimensions reject before allocation.",
+    "`false(___, 'like', prototype)` preserves applicable sparsity or owning-provider residency while the result remains logical. The prototype never supplies output shape, so `false('like', prototype)` is 1 × 1.",
+    "`false(A)`, the `'logical'` class option, single-precision size controls, and resident size controls are independently gated RunMat extensions rather than MATLAB-compatible syntax. An admitted resident size control is gathered structurally and still produces host logical output unless residency is requested explicitly with `'like'`."
   ],
   "examples": [
     {
@@ -48,8 +48,8 @@
       "output": "mask =\n  1x4x2 logical array\n     0     0     0     0\n     0     0     0     0"
     },
     {
-      "description": "Creating a false mask with the same size as an existing array",
-      "input": "A = rand(2, 2);\nmask = false(A)",
+      "description": "Creating a false mask with the same size and residency as an existing array",
+      "input": "A = rand(2, 2);\nmask = false(size(A), 'like', A)",
       "output": "mask =\n  2x2 logical array\n     0     0\n     0     0"
     }
   ],
@@ -64,15 +64,15 @@
     },
     {
       "question": "How does `false(sz)` interpret a size vector?",
-      "answer": "A row or column vector is treated as the full set of dimensions, so `false([2 3 4])` yields a 2x3x4 logical array."
+      "answer": "A row vector is treated as the full set of dimensions, so `false([2 3 4])` yields a 2x3x4 logical array. Column vectors and multiple vector inputs are rejected."
     },
     {
       "question": "Does `false` keep results on the GPU?",
-      "answer": "No. The builtin always returns a host logical array. gpuArray inputs are only used to infer the output size."
+      "answer": "Yes, when residency is requested explicitly with `'like'`. RunMat constructs the logical result through the prototype handle's owning provider; a GPU value supplied as an ordinary size control does not implicitly determine shape and residency at once."
     },
     {
       "question": "Is the `'logical'` option required?",
-      "answer": "No. `false` always returns logical values; the `'logical'` option is accepted only for MATLAB compatibility."
+      "answer": "No. `false` always returns logical values. RunMat retains the redundant `'logical'` spelling only in extension mode."
     }
   ],
   "links": [

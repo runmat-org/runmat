@@ -1,10 +1,3 @@
----
-title: "Variable Inspection"
-category: "Session Engine"
-section: "7.3"
-last_updated: "May 28, 2026"
----
-
 # Variable Inspection
 
 Hosts should not read `workspace_values` directly. The session exposes workspace metadata and bounded materialization APIs so UI panes can show useful previews without forcing large CPU or GPU transfers.

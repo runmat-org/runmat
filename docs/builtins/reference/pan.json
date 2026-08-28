@@ -53,7 +53,8 @@
   ],
   "notes": [
     "Statement-form `pan()` toggles pan mode. Output-form `p = pan()` returns a pan handle object.",
-    "The pan object supports `Enable`, `Motion`, `UIContextMenu`, `ButtonDownFilter`, `ActionPreCallback`, `ActionPostCallback`, and `FigureHandle` properties."
+    "The pan object supports `Enable`, `Motion`, `UIContextMenu`, `ButtonDownFilter`, `ActionPreCallback`, `ActionPostCallback`, and `FigureHandle` properties.",
+    "`Enable` accepts exact numeric or logical scalar 0 and 1, including all native integer classes. Typed-integer numeric aliases for figure or axes objects are a separately gated RunMat graphics-handle extension."
   ],
   "gpu_residency": "`pan` mutates plotting interaction metadata only. It does not gather or copy GPU-resident plot data.",
   "related": [

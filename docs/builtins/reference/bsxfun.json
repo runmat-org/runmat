@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "Arbitrary callbacks execute on the host. gpuArray inputs are gathered before callback execution; use direct element-wise operators for provider-native GPU execution."
+    "notes": "Public gpuArray bsxfun evaluates supported callbacks on the GPU and returns a gpuArray. RunMat currently gathers resident inputs, executes callbacks on the host, and returns a host value; this is a known backend compatibility gap. Use direct element-wise operators for provider-native GPU execution."
   },
   "fusion": {
     "elementwise": false,
@@ -29,13 +29,15 @@
   },
   "description": "`C = bsxfun(fun,A,B)` applies binary function `fun` element-wise to `A` and `B` after expanding singleton dimensions to a common compatible size.",
   "behaviors": [
-    "`fun` can be a function handle, closure, bound function handle, or callable text accepted by `feval`.",
+    "`fun` can be a function handle, closure, or bound function handle. Callable text is an explicitly gated RunMat-only extension.",
     "`A` and `B` can be numeric, logical, complex, or character scalars or arrays.",
+    "All eight integer classes are passed to the callback exactly. The callback controls mixed-class admission, saturation or other overflow behavior, and output class.",
+    "Native single inputs remain single callback scalars, and homogeneous numeric callback results retain their native single or exact integer storage.",
     "Dimensions must either match or have length one. A singleton dimension can expand to a zero-length dimension, producing an empty output.",
     "The callback is invoked once per output element with scalar values from the expanded inputs.",
-    "Callback outputs must be scalar numeric, logical, complex, or character values. Mixed logical/numeric/character outputs promote to numeric; complex outputs promote the entire result to complex.",
+    "Callback outputs must be scalar numeric, logical, complex, or character values and must have one consistent class across the result.",
     "The result shape is the MATLAB implicit-expansion shape of `A` and `B`.",
-    "gpuArray inputs are gathered and callbacks run on the host because arbitrary function handles cannot be fused safely."
+    "RunMat currently gathers gpuArray inputs, runs callbacks on the host, and returns a host value. Public gpuArray bsxfun instead evaluates supported callbacks on the GPU and returns a gpuArray, so this fallback remains a tracked compatibility gap rather than a RunMat extension."
   ],
   "examples": [
     {
@@ -65,7 +67,7 @@
     },
     {
       "question": "Does `bsxfun` keep gpuArray inputs on the GPU?",
-      "answer": "No. RunMat gathers gpuArray inputs for `bsxfun` because the callback can be arbitrary MATLAB code. Direct element-wise builtins such as `plus`, `minus`, and `times` are the provider-native path."
+      "answer": "Not currently in RunMat. Public gpuArray bsxfun evaluates supported callbacks on the GPU and returns a gpuArray, while RunMat currently gathers to the host and returns a host value. Direct element-wise builtins such as `plus`, `minus`, and `times` are the provider-native RunMat path."
     }
   ],
   "links": [
@@ -100,7 +102,7 @@
       "input": "C = bsxfun(fun,A,B)"
     },
     "points": [
-      "`fun` is a binary function handle or callable text.",
+      "`fun` is a binary function handle. Callable text is available only when RunMat extensions are enabled.",
       "`A` and `B` are scalar or array inputs whose sizes are compatible by singleton expansion."
     ]
   }

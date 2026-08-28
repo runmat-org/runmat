@@ -20,7 +20,7 @@
       "bool"
     ],
     "broadcasting": "none",
-    "notes": "Attempts to flip tensors directly on the device when providers expose a flip hook; otherwise gathers once, flips on the host, and re-uploads to keep results gpu-resident."
+    "notes": "Attempts to flip floating and logical tensors directly when providers expose a flip hook. All eight integer classes use an exact gather, reorder, and owner-provider upload fallback so class, value, and residency are preserved."
   },
   "fusion": {
     "elementwise": false,
@@ -33,14 +33,15 @@
     "unit": "builtins::array::shape::flip::tests",
     "integration": "builtins::array::shape::flip::tests::flip_gpu_roundtrip"
   },
-  "description": "`flip(A)` reverses the order of elements in `A` along one or more dimensions. With no dimension argument, RunMat (like MATLAB) flips along the first dimension whose extent is greater than one. Positive integer dimensions or dimension vectors allow you to mirror data along any axis, and direction keywords such as `'horizontal'` or `'vertical'` provide a readable alternative to numeric indices.",
+  "description": "`flip(A)` reverses the order of elements in `A` along the first nonsingleton dimension, while `flip(A, dim)` reverses one positive integer-valued scalar dimension. Numeric dimension vectors, typed-integer or logical dimensions, and direction keywords are separately gated RunMat-only extensions.",
   "behaviors": [
-    "Works for numeric arrays, logical masks, complex arrays, and string or character arrays.",
+    "Implemented inputs are numeric arrays, logical masks, complex arrays, and string or character arrays. Cell, struct, table, timetable, categorical, datetime, duration, and calendar-duration parity remains pending.",
     "`flip(A)` locates the first non-singleton dimension and reverses that axis.",
     "`flip(A, dim)` flips along the dimension `dim` (1-based, MATLAB-compatible).",
-    "`flip(A, dims)` accepts a vector of dimensions, flipping each axis in order.",
-    "Dimension vectors must be numeric row or column vectors of positive integers.",
-    "`flip(A, 'horizontal')` and `flip(A, 'vertical')` map to dimensions 2 and 1 respectively. `'both'` flips along the first two dimensions.",
+    "RunMat extension: `flip(A, dims)` accepts a nonempty row or column vector of unique positive dimensions.",
+    "RunMat extension: typed-integer and logical dimensions are exact structural controls; strict compatibility mode rejects them before parsing.",
+    "RunMat extension: `flip(A, 'horizontal')` and `flip(A, 'vertical')` map to dimensions 2 and 1, while `'both'` flips the first two dimensions.",
+    "All eight integer data classes preserve their exact storage and output class.",
     "Dimensions larger than `ndims(A)` are allowed. RunMat pads trailing singleton axes so the request becomes a no-op, matching MATLAB semantics.",
     "Reversing an empty dimension (extent zero) is a no-op.",
     "gpuArray inputs stay on the device: the runtime calls provider flip hooks when available and otherwise gathers, flips, and re-uploads the data."

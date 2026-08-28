@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Prefers a provider-side dot hook; the WGPU backend currently handles 2-D tensors along dimensions 1 or 2 and falls back to the host otherwise. When no hook is available RunMat gathers operands, evaluates the MATLAB reference path, and re-uploads real results when possible."
+    "notes": "Uses a provider-side hook only for proven-same-owner, same-device real floating inputs and validates a fresh output allocation's owner, device, shape, storage, and operand-requested precision. A malformed native result triggers the host fallback. Integer/logical extensions gather through the owning provider and bypass floating-native hooks."
   },
   "fusion": {
     "elementwise": false,
@@ -32,12 +32,15 @@
   },
   "description": "`dot(A, B)` evaluates inner products between matching slices of `A` and `B`, optionally along a selected dimension. Complex inputs use conjugate-on-first-argument semantics consistent with MATLAB and RunMat.",
   "behaviors": [
-    "Treats vectors, matrices, and N-D tensors identically as long as `A` and `B` share the same size.",
+    "Vectors need the same number of elements and may use different row/column orientations. Matrices and N-D arrays must have identical sizes.",
     "When no dimension is supplied, the function reduces along the first non-singleton dimension (`dim = 1` when all dimensions are singleton).",
     "`dot(A, B, dim)` collapses dimension `dim` (1-based) while leaving every other dimension untouched.",
     "Complex inputs conjugate the first argument before multiplication; real inputs use a straight element-wise product.",
+    "Single inputs produce single results, including on the host/fallback path; otherwise the floating result is double.",
     "Empty reductions yield zeros of the appropriate shape; length mismatches raise `A and B must be the same size`.",
-    "Logical and integer inputs are promoted to double precision automatically so the result is always floating point (or complex when any input is complex)."
+    "Public MATLAB data inputs are single or double. RunMat additionally accepts logical and all eight typed-integer classes only in RunMat extension mode.",
+    "When both extension operands are typed integers, each product is formed from authoritative integer storage before crossing to the floating reduction/output domain, avoiding pre-product loss above flintmax.",
+    "Typed-integer `dim` is a documented control input, is available in compatibility modes, and is decoded exactly in every supported integer class."
   ],
   "examples": [
     {
@@ -93,7 +96,7 @@
     },
     {
       "question": "Does `dot` accept logical or integer inputs?",
-      "answer": "Yes. Inputs are promoted to double precision before evaluation so you never lose MATLAB's semantics."
+      "answer": "Only as explicit RunMat extensions. Current public MATLAB documentation lists single and double data inputs. RunMat mode accepts logical and all eight integer classes; compatibility modes reject those data forms. Typed-integer `dim` remains documented and available."
     },
     {
       "question": "Can I request conjugation of the second argument instead?",
@@ -142,8 +145,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/dot.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/dot.rs"
   },
-  "gpu_residency": "You rarely need to call `gpuArray` explicitly for `dot`. If the provider lacks a dedicated dot kernel, RunMat will gather the operands, compute the host result, and—when the output is real—upload it back to the provider automatically. Complex outputs remain on the host until GPU complex datatypes are implemented; in mixed pipelines consider reintroducing `gpuArray` explicitly after the call if residency is critical.",
+  "gpu_residency": "Same-owner, same-device real floating inputs can use the owning provider's native dot hook. Other supported resident forms gather through the originating owner and restore real results there when its precision can represent the output. Complex outputs remain host-side until provider complex dot support is available.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps GPU-resident tensors on the device whenever the active provider exposes a `dot` hook. When the hook is missing, RunMat gathers both operands to the host, evaluates the reference path, and—when the result is real—uploads it back to the provider so downstream GPU code continues without manual transfers. Complex outputs remain on the host until provider support lands."
+    "Native dispatch never sends integer or logical storage to a floating dot hook. It requires proven common ownership/device and accepts a fresh result only after owner, device, shape, real noninteger storage, and operand-requested precision validation; malformed native results trigger the host fallback. Global-provider fallback for an unknown device is not accepted as ownership. Outputs that alias either input or the fallback residency anchor are rejected and never freed as provider-owned results. Other rejected allocations are freed only through a proven actual owner. Fallback gathers through each handle owner and restores real output to the first resident owner only after applying the same owner, device, shape, storage, class-metadata, freshness, and requested-precision checks."
   ]
 }

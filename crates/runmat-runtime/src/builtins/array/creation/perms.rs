@@ -3,10 +3,17 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    ResolveContext, Type,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexTensor, LogicalArray, NumericStorage, StringArray, Tensor, Value,
+};
 
 use crate::builtins::common::{
     gpu_helpers,
@@ -114,6 +121,26 @@ pub const PERMS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PERMS_ERRORS,
 };
 
+const PERMS_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "v",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly documents every integer class and shows an int16 example. Values are rearranged without arithmetic or conversion.",
+    }];
+pub const PERMS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "P = perms(integer_v)",
+        inputs: &PERMS_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Every output element is copied from authoritative native storage in reverse lexicographic index order. Documented gpuArray inputs gather through their owner and the same-class result is restored to that owner.",
+    }];
+
 #[runtime_builtin(
     name = "perms",
     category = "array/creation",
@@ -122,6 +149,7 @@ pub const PERMS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "array_construct",
     type_resolver(perms_type),
     descriptor(crate::builtins::array::creation::perms::PERMS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::creation::perms::PERMS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::perms"
 )]
 async fn perms_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -136,10 +164,21 @@ async fn perms_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 async fn evaluate(value: Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(handle) = value {
-        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
             .await
             .map_err(|e| perms_error_with(&ERROR_INTERNAL, format!("perms: {e}")))?;
-        return evaluate_host(gathered);
+        let output = evaluate_host(gathered)?;
+        let restored = gpu_helpers::restore_class_preserving_value(&handle, output, BUILTIN_NAME)
+            .map_err(|e| perms_error_with(&ERROR_INTERNAL, format!("perms: {e}")))?;
+        if runmat_accelerate_api::handle_is_explicit(&handle)
+            && !matches!(restored, Value::GpuTensor(_))
+        {
+            return Err(perms_error_with(
+                &ERROR_INTERNAL,
+                "perms: provider cannot preserve explicit gpuArray output residency",
+            ));
+        }
+        return Ok(restored);
     }
     evaluate_host(value)
 }
@@ -161,6 +200,7 @@ fn evaluate_host(value: Value) -> BuiltinResult<Value> {
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -172,6 +212,11 @@ fn evaluate_host(value: Value) -> BuiltinResult<Value> {
         | Value::GpuTensor(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(perms_error(&ERROR_INVALID_INPUT)),
     }
 }
@@ -179,16 +224,53 @@ fn evaluate_host(value: Value) -> BuiltinResult<Value> {
 fn perms_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let elements = vector_len(&tensor.shape)?;
     let rows = checked_output_rows(elements)?;
-    let data = permuted_columns(&tensor.data, rows, elements)?;
-    Tensor::new_with_dtype(data, vec![rows, elements], tensor.dtype)
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")))?;
+    let storage = permute_numeric_storage(storage, rows, elements)?;
+    Tensor::from_numeric_storage(storage, vec![rows, elements])
         .map(Value::Tensor)
         .map_err(|e| perms_error_with(&ERROR_INTERNAL, format!("perms: {e}")))
+}
+
+fn permute_numeric_storage(
+    storage: NumericStorage,
+    rows: usize,
+    elements: usize,
+) -> BuiltinResult<NumericStorage> {
+    macro_rules! permute {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(permuted_columns(&$values, rows, elements)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => permute!(values, F64),
+        NumericStorage::F32(values) => permute!(values, F32),
+        NumericStorage::I8(values) => permute!(values, I8),
+        NumericStorage::I16(values) => permute!(values, I16),
+        NumericStorage::I32(values) => permute!(values, I32),
+        NumericStorage::I64(values) => permute!(values, I64),
+        NumericStorage::U8(values) => permute!(values, U8),
+        NumericStorage::U16(values) => permute!(values, U16),
+        NumericStorage::U32(values) => permute!(values, U32),
+        NumericStorage::U64(values) => permute!(values, U64),
+    })
 }
 
 fn perms_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let elements = vector_len(&tensor.shape)?;
     let rows = checked_output_rows(elements)?;
-    let data = permuted_columns(&tensor.data, rows, elements)?;
+    if let Some(storage) = tensor.integer_storage() {
+        let storage = storage
+            .reorder(|values| {
+                permuted_columns(values, rows, elements).map_err(|error| error.to_string())
+            })
+            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")))?;
+        return ComplexTensor::new_integer(storage, vec![rows, elements])
+            .map(Value::ComplexTensor)
+            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")));
+    }
+    let data = permuted_columns(&tensor.materialize_f64(), rows, elements)?;
     ComplexTensor::new(data, vec![rows, elements])
         .map(Value::ComplexTensor)
         .map_err(|e| perms_error_with(&ERROR_INTERNAL, format!("perms: {e}")))
@@ -361,7 +443,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, NumericDType};
+    use runmat_value::{IntValue, IntegerStorage, NumericDType};
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(super::perms_builtin(value, Vec::new()))
@@ -371,7 +453,7 @@ mod tests {
         (0..tensor.rows)
             .map(|row| {
                 (0..tensor.cols)
-                    .map(|col| tensor.data[col * tensor.rows + row])
+                    .map(|col| tensor.materialize_f64()[col * tensor.rows + row])
                     .collect()
             })
             .collect()
@@ -381,7 +463,7 @@ mod tests {
         (0..tensor.rows)
             .map(|row| {
                 (0..tensor.cols)
-                    .map(|col| tensor.data[col * tensor.rows + row])
+                    .map(|col| tensor.materialize_f64()[col * tensor.rows + row])
                     .collect()
             })
             .collect()
@@ -419,7 +501,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![6, 3]);
-        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert_eq!(
             tensor_rows(&out),
             vec![
@@ -473,13 +555,138 @@ mod tests {
     }
 
     #[test]
-    fn numeric_dtype_is_preserved_for_tensors() {
-        let tensor = Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], NumericDType::U32).unwrap();
+    fn native_single_storage_is_preserved_for_tensors() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let Value::Tensor(out) = call(Value::Tensor(tensor)).expect("perms") else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::U32);
-        assert_eq!(tensor_rows(&out), vec![vec![2.0, 1.0], vec![1.0, 2.0]]);
+        assert_eq!(
+            out.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![2.0, 1.0, 1.0, 2.0])
+        );
+    }
+
+    #[test]
+    fn exact_integer_tensor_classes_and_values_are_preserved() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7]),
+            IntegerStorage::I16(vec![-300, 400]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let expected = storage
+                .from_exact_values_like(vec![
+                    values[1].clone(),
+                    values[0].clone(),
+                    values[0].clone(),
+                    values[1].clone(),
+                ])
+                .expect("expected storage");
+            let input = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            let Value::Tensor(output) = call(Value::Tensor(input)).expect("perms") else {
+                panic!("expected exact integer tensor");
+            };
+            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn resident_integer_perms_restores_exact_class_and_explicit_residency() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+                vec![1, 2],
+            )
+            .expect("integer input");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let output = call(Value::GpuTensor(handle)).expect("resident perms");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(output_handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(output).expect("gather output");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    9_007_199_254_740_994,
+                    9_007_199_254_740_993,
+                    9_007_199_254_740_993,
+                    9_007_199_254_740_994,
+                ]))
+            );
+        });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn integer_perms_wgpu_fallback_preserves_every_class_and_explicit_residency() {
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let cases = [
+            (
+                IntegerStorage::I8(vec![1, 2]),
+                IntegerStorage::I8(vec![2, 1, 1, 2]),
+            ),
+            (
+                IntegerStorage::I16(vec![1, 2]),
+                IntegerStorage::I16(vec![2, 1, 1, 2]),
+            ),
+            (
+                IntegerStorage::I32(vec![1, 2]),
+                IntegerStorage::I32(vec![2, 1, 1, 2]),
+            ),
+            (
+                IntegerStorage::I64(vec![1, 2]),
+                IntegerStorage::I64(vec![2, 1, 1, 2]),
+            ),
+            (
+                IntegerStorage::U8(vec![1, 2]),
+                IntegerStorage::U8(vec![2, 1, 1, 2]),
+            ),
+            (
+                IntegerStorage::U16(vec![1, 2]),
+                IntegerStorage::U16(vec![2, 1, 1, 2]),
+            ),
+            (
+                IntegerStorage::U32(vec![1, 2]),
+                IntegerStorage::U32(vec![2, 1, 1, 2]),
+            ),
+            (
+                IntegerStorage::U64(vec![1, 2]),
+                IntegerStorage::U64(vec![2, 1, 1, 2]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let tensor = Tensor::new_integer(input, vec![1, 2]).expect("integer input");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let output = call(Value::GpuTensor(handle)).expect("resident integer perms");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident output");
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
+            let gathered = test_support::gather(output).expect("gather output");
+            assert_eq!(gathered.integer_storage(), Some(&expected));
+        }
     }
 
     #[test]
@@ -569,14 +776,14 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 0]);
-        assert!(out.data.is_empty());
+        assert!(out.materialize_f64().is_empty());
 
         let empty_literal = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
         let Value::Tensor(out) = call(Value::Tensor(empty_literal)).expect("perms []") else {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 0]);
-        assert!(out.data.is_empty());
+        assert!(out.materialize_f64().is_empty());
     }
 
     #[test]
@@ -585,14 +792,7 @@ mod tests {
         let err = call(Value::Tensor(matrix)).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:perms:InvalidInput"));
 
-        let sparse = Value::SparseTensor(runmat_builtins::SparseTensor {
-            rows: 1,
-            cols: 1,
-            col_ptrs: vec![0, 0],
-            row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
-        });
+        let sparse = Value::SparseTensor(runmat_value::SparseTensor::zeros(1, 1));
         let err = call(sparse).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:perms:InvalidInput"));
     }
@@ -605,34 +805,39 @@ mod tests {
     }
 
     #[test]
-    fn gpu_inputs_gather_to_host_before_permuting() {
+    fn gpu_inputs_restore_permutations_to_the_owning_provider() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload");
-            let Value::Tensor(out) = call(Value::GpuTensor(handle)).expect("gpu perms") else {
-                panic!("expected tensor");
-            };
+            let output = call(Value::GpuTensor(handle)).expect("gpu perms");
+            assert!(matches!(output, Value::GpuTensor(_)));
+            let out = test_support::gather(output).expect("gather output");
             assert_eq!(tensor_rows(&out)[0], vec![3.0, 2.0, 1.0]);
         });
     }
 
     #[test]
-    fn gpu_logical_and_complex_inputs_preserve_host_output_class() {
+    fn gpu_logical_and_complex_inputs_restore_output_class_and_residency() {
         test_support::with_test_provider(|provider| {
             let logical_tensor = Tensor::new(vec![0.0, 1.0, 1.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &logical_tensor.data,
+                    data: &logical_tensor.materialize_f64(),
                     shape: &logical_tensor.shape,
                 })
                 .expect("upload logical");
+            let output = call(gpu_helpers::logical_gpu_value(handle)).expect("logical gpu perms");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident logical output");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(output_handle));
             let Value::LogicalArray(out) =
-                call(gpu_helpers::logical_gpu_value(handle)).expect("logical gpu perms")
+                block_on(gpu_helpers::gather_value_async(&output)).expect("gather logical output")
             else {
                 panic!("expected logical array");
             };
@@ -647,8 +852,16 @@ mod tests {
             let complex =
                 ComplexTensor::new(vec![(1.0, 1.0), (2.0, -2.0), (3.0, 0.5)], vec![1, 3]).unwrap();
             let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
+            let output = call(gpu_helpers::complex_gpu_value(handle)).expect("complex gpu perms");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident complex output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(output_handle),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
             let Value::ComplexTensor(out) =
-                call(gpu_helpers::complex_gpu_value(handle)).expect("complex gpu perms")
+                block_on(gpu_helpers::gather_value_async(&output)).expect("gather complex output")
             else {
                 panic!("expected complex tensor");
             };

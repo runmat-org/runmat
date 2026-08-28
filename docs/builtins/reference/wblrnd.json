@@ -6,9 +6,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "matlab",
-    "notes": "RunMat currently generates samples on the host RNG path."
+    "notes": "Sampling uses the host RNG path. Floating resident parameters gather automatically and the result returns to the selected owning provider with its documented precision."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 4, "constants": "inline" },
   "requires_feature": null,
@@ -19,8 +19,10 @@
   "description": "`wblrnd(a,b)` generates Weibull random samples with scale parameter `a` and shape parameter `b`. Size-vector and dimension-list forms are supported.",
   "behaviors": [
     "`a` and `b` support scalar expansion and matching array shapes.",
+    "The documented parameter and size classes are single and double. Typed-integer parameter and size forms are independently gated RunMat extensions; integer parameters must be exactly representable at the sampling boundary, while integer sizes are parsed structurally.",
     "Without explicit size arguments, the output shape is the scalar-expanded parameter shape.",
     "With explicit size arguments, nonscalar parameters must match the requested shape.",
+    "Output is single when either documented parameter is single and double otherwise.",
     "`a` and `b` must be positive."
   ],
   "examples": [

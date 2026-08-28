@@ -19,7 +19,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`bar` uses the modern bar/surface-style rendering path, including GPU-backed paths for supported input combinations."
+    "notes": "`bar` keeps floating gpuArray Y data on the shared WGPU geometry path where supported. Integer gpuArray Y data gathers exactly on the client before the deliberate floating graphics conversion."
   },
   "fusion": {
     "elementwise": false,
@@ -32,11 +32,13 @@
     "unit": "builtins::plotting::bar::tests",
     "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`bar` creates vertical bar charts from vector or matrix-style inputs. It returns a bar handle and supports grouped/stacked forms through the shared MATLAB/RunMat plotting handle-property system.",
+  "description": "`bar` creates vertical bar charts from scalar, vector, or matrix Y data, optionally at explicit X positions. It returns one bar handle per plotted series and supports grouped and stacked forms through the shared plotting handle-property system.",
   "behaviors": [
     "Vector inputs create a single bar series with implicit category positions.",
     "Matrix inputs support grouped and stacked bar-style rendering workflows.",
-    "The returned value is a bar handle that can be queried and updated through `get` and `set`.",
+    "Matrix Y returns a row vector containing one opaque bar handle per series; scalar and vector Y return one handle.",
+    "X and Y accept all eight integer classes. Exact integer X labels and uniqueness are preserved before conversion into client graphics coordinates.",
+    "The positional bar width defaults to 0.8 and, like the `LineWidth` property, accepts real numeric scalars including every integer class.",
     "Display names, bar width, and face color participate in the shared plotting object/property model.",
     "RunMat prefers GPU-backed rendering when supported input/layout combinations are present, while preserving the same bar semantics on fallback paths."
   ],
@@ -115,8 +117,9 @@
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/bar.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/bar.rs"
   },
-  "gpu_residency": "`bar` preserves GPU residency where the bar geometry pipeline can consume exported buffers directly. Fallback rendering gathers once and preserves the same grouping/stacking semantics.",
+  "gpu_residency": "`bar` preserves floating GPU residency where the bar geometry pipeline can consume exported buffers directly. Integer GPU data gathers once through its owning provider so native integer buffers are never reinterpreted by the floating vertex shader.",
   "gpu_behavior": [
-    "Bar rendering shares the same plotting architecture as the rest of the plotting stack."
+    "Floating single and double Y data can use the shared WGPU vertex-packing path.",
+    "All eight resident integer classes use exact client gather before the explicit floating graphics boundary."
   ]
 }

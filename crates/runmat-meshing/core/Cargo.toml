@@ -1,6 +1,6 @@
 [package]
 name = "runmat-meshing-core"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -9,10 +9,14 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
+minicbor = { workspace = true }
+runmat-canonical-codec = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 runmat-geometry-core = { workspace = true }
 runmat-meshing-size = { workspace = true }
+robust = "1.2"
 
 [dev-dependencies]
 

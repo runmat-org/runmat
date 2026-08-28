@@ -8,9 +8,9 @@ use std::path::Path;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -130,7 +130,7 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::BuiltinResult;
-    use runmat_builtins::CharArray;
+    use runmat_value::CharArray;
     use std::convert::TryFrom;
     use std::path::PathBuf;
     use tempfile::tempdir;

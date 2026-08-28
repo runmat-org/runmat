@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`imshow` is a plotting sink and does not advertise precision-specialized GPU kernels. Grayscale gpuArray inputs may use the image/surface rendering path; filename decoding and truecolor normalization run on the host."
+    "notes": "The compatibility target documents GPU Array input for `imshow`. RunMat treats `imshow` as a plotting sink rather than a precision-specialized compute kernel; grayscale gpuArray inputs may use the image/surface rendering path, while filename decoding and truecolor normalization run on the host."
   },
   "fusion": {
     "elementwise": false,
@@ -32,7 +32,7 @@
     "`imshow(I)` displays 2-D numeric data with grayscale limits `[0, 1]`, matching MATLAB double-image defaults.",
     "`imshow(BW)` displays logical image data as black and white using `[0, 1]` limits.",
     "`imshow(RGB)` displays MxNx3 truecolor data directly.",
-    "`imshow(RGBA)` displays MxNx4 truecolor data with alpha.",
+    "In `runmat` compatibility mode, `imshow(RGBA)` accepts supported numeric MxNx4 data as a RunMat extension and displays its fourth channel as alpha.",
     "`imshow(I, [low high])` displays grayscale image data using an explicit display range.",
     "`imshow(I, [])` auto-scales grayscale image data from finite minimum to finite maximum.",
     "`imshow(filename)` reads and decodes an image file, then displays it as truecolor data."
@@ -62,7 +62,7 @@
     },
     {
       "question": "Does imshow support uint8 and uint16 image defaults?",
-      "answer": "File-backed images decode with byte pixel semantics. User-created integer image arrays currently depend on RunMat's broader numeric-class metadata model, so exact MATLAB class-dependent defaults for dense uint8/uint16 tensors are tracked separately."
+      "answer": "Yes. Grayscale `uint8` data uses `[0, 255]`, grayscale `uint16` data uses `[0, 65535]`, and truecolor data of either class is normalized by the corresponding full-scale value."
     },
     {
       "question": "How is imshow different from imagesc?",

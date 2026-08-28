@@ -241,7 +241,15 @@ async fn read_scene_array_payload_async(
                     ),
                 ));
             }
-            let mut values = Vec::new();
+            let dtype = data_ref.dtype.clone().unwrap_or_else(|| "f64".to_string());
+            let mut values = crate::data::DataArrayValues::zeros(&dtype, 0).map_err(|error| {
+                replay_error(
+                    ReplayErrorKind::ImportRejected,
+                    format!("invalid scene data dtype '{dtype}': {error}"),
+                )
+            })?;
+            let mut imaginary_values: Option<crate::data::DataArrayValues> = None;
+            let mut complex_chunks = None;
             let chunk_payloads = read_scene_chunks_bytes_async(&data_ref.chunks, data_ref)
                 .await
                 .map_err(|err| {
@@ -266,12 +274,56 @@ async fn read_scene_array_payload_async(
                             ),
                         )
                     })?;
-                values.extend(payload.values.to_f64_vec());
+                let payload = payload.normalize_for_dtype(&dtype).map_err(|error| {
+                    replay_error(
+                        ReplayErrorKind::ImportRejected,
+                        format!("scene data chunk has incompatible dtype: {error}"),
+                    )
+                })?;
+                let payload_is_complex = payload.imaginary_values.is_some();
+                if complex_chunks
+                    .replace(payload_is_complex)
+                    .is_some_and(|previous| previous != payload_is_complex)
+                {
+                    return Err(replay_error(
+                        ReplayErrorKind::ImportRejected,
+                        "scene data chunks cannot mix real and complex payloads",
+                    ));
+                }
+                if payload_is_complex && imaginary_values.is_none() {
+                    imaginary_values = Some(
+                        crate::data::DataArrayValues::zeros(&dtype, 0).map_err(|error| {
+                            replay_error(
+                                ReplayErrorKind::ImportRejected,
+                                format!("invalid scene data dtype '{dtype}': {error}"),
+                            )
+                        })?,
+                    );
+                }
+                for index in 0..payload.values.len() {
+                    values.push(payload.values.get(index)?).map_err(|error| {
+                        replay_error(
+                            ReplayErrorKind::ImportRejected,
+                            format!("scene data chunk has incompatible values: {error}"),
+                        )
+                    })?;
+                    if let (Some(source), Some(target)) =
+                        (&payload.imaginary_values, &mut imaginary_values)
+                    {
+                        target.push(source.get(index)?).map_err(|error| {
+                            replay_error(
+                                ReplayErrorKind::ImportRejected,
+                                format!("scene data chunk has incompatible values: {error}"),
+                            )
+                        })?;
+                    }
+                }
             }
             Ok(crate::data::DataArrayPayload {
-                dtype: data_ref.dtype.clone().unwrap_or_else(|| "f64".to_string()),
+                dtype,
                 shape: vec![values.len()],
-                values: crate::data::DataArrayValues::F64(values),
+                values,
+                imaginary_values,
             })
         }
     }
@@ -638,6 +690,7 @@ mod tests {
                 dtype: "f64".to_string(),
                 shape: vec![values.len()],
                 values: crate::data::DataArrayValues::F64(values.clone()),
+                imaginary_values: None,
             };
             let chunk = vec![std::cmp::max(1usize, values.len())];
             let (payload_path, chunk_index_path) = futures::executor::block_on(

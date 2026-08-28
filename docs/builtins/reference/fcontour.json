@@ -32,12 +32,27 @@
     "`fcontour(f)` samples `f(x,y)` on the default `[-5 5 -5 5]` domain.",
     "`fcontour(f, [xmin xmax ymin ymax])` uses an explicit rectangular domain; a two-element vector applies the same limits to both axes.",
     "`fcontour(ax, ___)` renders into the requested axes and returns a function-contour graphics handle.",
-    "Function-handle outputs must be scalar real numeric values at every sampled point; non-finite samples are preserved as contour discontinuities."
+    "Function-handle outputs must be scalar real numeric values at every sampled point; non-finite samples are preserved as contour discontinuities.",
+    "Typed integer domain vectors, property scalars, and documented level vectors are accepted for all eight integer classes."
   ],
   "options": [
-    "`'MeshDensity'` controls the number of samples along each domain dimension. RunMat accepts integer values from 2 through 400.",
-    "`'LevelList'`, `'Levels'`, `'LevelStep'`, `'LevelListMode'`, `'LineColor'`, `'Color'`, and `'LineWidth'` use the same parsing path as `contour`.",
+    "`'MeshDensity'` controls the number of samples along each domain dimension. RunMat accepts exact integer counts from 3 through the resource ceiling of 400.",
+    "`'LevelList'` accepts a nonempty real numeric row or column vector. An integer scalar selects one explicit level, and descending level order is accepted.",
+    "`'LevelStep'` accepts a nonnegative finite real numeric scalar. Zero selects automatic levels and a positive integer crosses one checked contour-geometry conversion boundary.",
+    "`'LineWidth'` accepts a positive finite real numeric scalar and crosses one checked renderer-property conversion boundary.",
+    "`'Fill'` accepts logical values or the exact numeric scalar values zero and one. One adds filled contour bands beneath the contour lines.",
+    "`'LineColor'` accepts the documented text forms. Typed-integer RGB is a separately gated RunMat extension; the undocumented `'Color'` alias is not accepted by `fcontour`.",
     "`'DisplayName'` sets the function-contour graphics handle display name."
+  ],
+  "integer_semantics": [
+    "`xyinterval` must be a two- or four-element row or column vector. Bounds are validated before the deliberate binary64 graphics-domain conversion.",
+    "All eight built-in integer classes are accepted for `xyinterval`, `MeshDensity`, `LevelList`, `LevelStep`, `LineWidth`, and numeric `Fill`.",
+    "Typed-integer `LineColor` and contour-style positional integer level specifications are RunMat extensions and are rejected unless RunMat extension mode is enabled.",
+    "Resident numeric arguments are also a RunMat extension; the compatibility gate runs before provider gathering."
+  ],
+  "compatibility_notes": [
+    "RunMat currently invokes the callback once per sampled point. First-class function-contour object fidelity, matrix callback evaluation, symbolic expressions, and adaptive sampling remain deferred broader compatibility work.",
+    "The RunMat-only positional level shorthand is not part of the documented `fcontour` compatibility surface. Use `LevelList` or `LevelStep` for portable code."
   ],
   "examples": [
     {

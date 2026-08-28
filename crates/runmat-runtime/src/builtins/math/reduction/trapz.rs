@@ -1,11 +1,17 @@
 //! MATLAB-compatible `trapz` builtin for discrete trapezoidal integration.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::NumericDType;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -15,8 +21,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::math::reduction::integration_common::{
     canonical_shape_complex, canonical_shape_tensor, default_dimension_from_shape, dim_product,
     gather_host_value, interval_width, is_dimension_candidate, is_scalar_like, pad_shape_for_dim,
-    parse_optional_dim, promote_real_value_to_gpu, spacing_from_gpu_or_host_value,
-    spacing_from_value, value_has_gpu_tensor, value_into_complex_tensor, SpacingSpec,
+    parse_optional_dim, promote_real_value_to_gpu, real_tensor_values,
+    spacing_from_gpu_or_host_value, spacing_from_value, value_has_gpu_tensor,
+    value_into_complex_tensor, SpacingSpec,
 };
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -154,6 +161,79 @@ pub const TRAPZ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &TRAPZ_ERRORS,
 };
 
+const TRAPZ_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "trapz-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "trapz with native typed-integer sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TrapzIntegerDataExtension"),
+};
+const TRAPZ_INTEGER_SPACING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "trapz-integer-spacing",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "trapz with native typed-integer point spacing is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TrapzIntegerSpacingExtension"),
+};
+pub const TRAPZ_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    TRAPZ_INTEGER_DATA_EXTENSION,
+    TRAPZ_INTEGER_SPACING_EXTENSION,
+];
+const TRAPZ_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented sample-data domain is single or double. RunMat mode admits exact typed integers at a checked binary64 integration boundary.",
+    }];
+const TRAPZ_INTEGER_SPACING_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented spacing domain is single or double. RunMat mode admits exact typed integer scalar or vector spacing at a checked binary64 boundary.",
+    }];
+const TRAPZ_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented positive integer scalar dimension is decoded exactly from native integer storage and must fit the runtime index range.",
+    }];
+pub const TRAPZ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Q = trapz(integer_Y)",
+        inputs: &TRAPZ_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Compatibility admission and exactness validation precede provider dispatch. The trapezoidal sum and result use binary64.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Q = trapz(integer_X, Y)",
+        inputs: &TRAPZ_INTEGER_SPACING_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer coordinates remain exact until checked binary64 conversion; result shape and floating class follow the sampled-data path.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Q = trapz(..., integer_dim)",
+        inputs: &TRAPZ_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The dimension selects a reduction axis without entering floating arithmetic.",
+    },
+];
+
 fn trapz_type(args: &[Type], ctx: &ResolveContext) -> Type {
     reduce_numeric_type(args, ctx)
 }
@@ -219,10 +299,34 @@ fn trapz_internal_error(detail: impl AsRef<str>) -> RuntimeError {
     accel = "none",
     type_resolver(trapz_type),
     descriptor(crate::builtins::math::reduction::trapz::TRAPZ_DESCRIPTOR),
+    extensions(crate::builtins::math::reduction::trapz::TRAPZ_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::reduction::trapz::TRAPZ_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::trapz"
 )]
 async fn trapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(first, rest)?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &parsed.y,
+        &TRAPZ_INTEGER_DATA_EXTENSION,
+        NAME,
+        "sample data",
+    )
+    .await?;
+    if let Some(spacing) = &parsed.spacing {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            spacing,
+            &TRAPZ_INTEGER_SPACING_EXTENSION,
+            NAME,
+            "point spacing",
+        )
+        .await?;
+    }
+    if crate::builtins::common::validation::is_typed_complex_integer(&parsed.y) {
+        return Err(trapz_error_with_detail(
+            &TRAPZ_ERROR_INVALID_INPUT,
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     if let Value::GpuTensor(handle) = &parsed.y {
         if let Some(provider) = runmat_accelerate_api::provider() {
             let shape = if handle.shape.is_empty() {
@@ -366,6 +470,7 @@ pub(crate) fn trapz_tensor(
     let stride_after = dim_product(&shape[dim..]);
     let block = stride_before * len_dim;
     let mut output = vec![0.0f64; stride_before * stride_after];
+    let values = real_tensor_values(tensor);
 
     if len_dim > 1 {
         for after in 0..stride_after {
@@ -376,7 +481,7 @@ pub(crate) fn trapz_tensor(
                     let idx0 = base + before + k * stride_before;
                     let idx1 = idx0 + stride_before;
                     let width = interval_width(spacing, idx0, idx1, k);
-                    acc += 0.5 * width * (tensor.data[idx0] + tensor.data[idx1]);
+                    acc += 0.5 * width * (values[idx0] + values[idx1]);
                 }
                 output[after * stride_before + before] = acc;
             }
@@ -385,7 +490,15 @@ pub(crate) fn trapz_tensor(
 
     let mut out_shape = shape;
     out_shape[dim_index] = 1;
-    Tensor::new(output, out_shape).map_err(|err| trapz_internal_error(&err))
+    if tensor.numeric_dtype() == NumericDType::F32 {
+        Tensor::from_f32(
+            output.into_iter().map(|value| value as f32).collect(),
+            out_shape,
+        )
+        .map_err(|err| trapz_internal_error(&err))
+    } else {
+        Tensor::new(output, out_shape).map_err(|err| trapz_internal_error(&err))
+    }
 }
 
 fn trapz_complex_tensor(
@@ -417,8 +530,8 @@ fn trapz_complex_tensor(
                     let idx0 = base + before + k * stride_before;
                     let idx1 = idx0 + stride_before;
                     let width = interval_width(spacing, idx0, idx1, k);
-                    let (re0, im0) = tensor.data[idx0];
-                    let (re1, im1) = tensor.data[idx1];
+                    let (re0, im0) = tensor.materialize_f64()[idx0];
+                    let (re1, im1) = tensor.materialize_f64()[idx1];
                     acc.0 += 0.5 * width * (re0 + re1);
                     acc.1 += 0.5 * width * (im0 + im1);
                 }
@@ -429,7 +542,18 @@ fn trapz_complex_tensor(
 
     let mut out_shape = shape;
     out_shape[dim_index] = 1;
-    ComplexTensor::new(output, out_shape).map_err(|err| trapz_internal_error(&err))
+    if tensor.numeric_dtype() == NumericDType::F32 {
+        ComplexTensor::from_f32(
+            output
+                .into_iter()
+                .map(|(real, imaginary)| (real as f32, imaginary as f32))
+                .collect(),
+            out_shape,
+        )
+        .map_err(|err| trapz_internal_error(&err))
+    } else {
+        ComplexTensor::new(output, out_shape).map_err(|err| trapz_internal_error(&err))
+    }
 }
 
 #[cfg(test)]
@@ -440,7 +564,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LiteralValue};
+    use runmat_builtins::LiteralValue;
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn run_trapz(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::trapz_builtin(first, rest))
@@ -484,6 +609,69 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn trapz_reads_typed_integer_values_and_spacing_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).expect("x");
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![1, 3]).expect("y");
+
+        let value = run_trapz(Value::Tensor(x), vec![Value::Tensor(y)]).expect("trapz");
+
+        assert_eq!(value, Value::Num(3.5));
+    }
+
+    #[test]
+    fn trapz_preserves_documented_single_output_class() {
+        let y = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).expect("single input");
+        let value = run_trapz(Value::Tensor(y), Vec::new()).expect("trapz");
+        let Value::Tensor(output) = value else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.into_numeric_storage().expect("single output"),
+            runmat_value::NumericStorage::F32(vec![4.0])
+        );
+    }
+
+    #[test]
+    fn trapz_integer_data_and_spacing_are_independently_compatibility_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3])
+            .expect("integer samples");
+        let data_error =
+            run_trapz(Value::Tensor(y), Vec::new()).expect_err("typed sample data is an extension");
+        assert_eq!(
+            data_error.identifier(),
+            TRAPZ_INTEGER_DATA_EXTENSION.error_identifier
+        );
+
+        let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3])
+            .expect("integer spacing");
+        let y = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).expect("double samples");
+        let spacing_error = run_trapz(Value::Tensor(x), vec![Value::Tensor(y)])
+            .expect_err("typed spacing is an extension");
+        assert_eq!(
+            spacing_error.identifier(),
+            TRAPZ_INTEGER_SPACING_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn trapz_rejects_inexact_wide_integer_before_floating_integration() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let y = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+            vec![1, 2],
+        )
+        .expect("wide samples");
+        let error = run_trapz(Value::Tensor(y), Vec::new())
+            .expect_err("inexact binary64 conversion must reject");
+        assert!(error
+            .message
+            .contains("must be exactly representable as double"));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    }
+
+    #[test]
     fn trapz_matrix_dimension_two() {
         let y = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let value = run_trapz(Value::Tensor(y), vec![Value::Int(IntValue::I32(2))]).expect("trapz");
@@ -491,7 +679,7 @@ pub(crate) mod tests {
             panic!("expected tensor result");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![4.0, 10.0]);
+        assert_eq!(out.materialize_f64(), vec![4.0, 10.0]);
     }
 
     #[test]
@@ -574,7 +762,7 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload");
@@ -584,7 +772,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data, vec![4.0]);
+            assert_eq!(gathered.materialize_f64(), vec![4.0]);
         });
     }
 
@@ -627,7 +815,7 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
@@ -638,7 +826,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data, vec![3.5]);
+            assert_eq!(gathered.materialize_f64(), vec![3.5]);
         });
     }
 
@@ -649,13 +837,13 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
             let y_handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
             let x_handle = provider
                 .upload(&HostTensorView {
-                    data: &x.data,
+                    data: &x.materialize_f64(),
                     shape: &x.shape,
                 })
                 .expect("upload x");
@@ -669,7 +857,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            assert_eq!(gathered.data, vec![6.5, 15.5]);
+            assert_eq!(gathered.materialize_f64(), vec![6.5, 15.5]);
         });
     }
 
@@ -688,7 +876,7 @@ pub(crate) mod tests {
         let cpu = run_trapz(Value::Tensor(x.clone()), vec![Value::Tensor(y.clone())]).unwrap();
         let y_handle = provider
             .upload(&HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             })
             .unwrap();
@@ -703,6 +891,6 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
         assert_eq!(gathered.shape, vec![1, 1]);
-        assert!((gathered.data[0] - expected).abs() < tol);
+        assert!((gathered.materialize_f64()[0] - expected).abs() < tol);
     }
 }

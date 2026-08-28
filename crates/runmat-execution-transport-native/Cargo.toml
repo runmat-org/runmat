@@ -1,0 +1,28 @@
+[package]
+name = "runmat-execution-transport-native"
+version = "0.6.2"
+edition = "2021"
+license-file = "../../LICENSE.md"
+
+[dependencies]
+async-trait = "0.1"
+base64 = "0.22"
+chrono = { workspace = true }
+futures-util = "0.3"
+minicbor = { workspace = true }
+serde = { workspace = true }
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-server-client = { workspace = true }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+quinn = "0.11"
+rustls = "0.23"
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+
+[dev-dependencies]
+rcgen = "0.14"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

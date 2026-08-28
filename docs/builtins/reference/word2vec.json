@@ -26,13 +26,14 @@
     "unit": "builtins::strings::text_analytics::embeddings::tests",
     "integration": null
   },
-  "description": "`word2vec(emb, words)` returns one embedding-vector row per requested word from a RunMat `wordEmbedding` object.",
+  "description": "`word2vec(emb, words)` returns one embedding-vector row per requested word from a `wordEmbedding` object.",
   "behaviors": [
-    "`emb` must be a RunMat `wordEmbedding` compatibility object, normally created by `readWordEmbedding`.",
+    "`emb` must be a `wordEmbedding` object, normally created by `readWordEmbedding`.",
     "`words` may be a string scalar, string array, character vector, character matrix, or cell array of scalar text.",
     "The output is an `n`-by-`emb.Dimension` numeric matrix, where `n` is the number of requested words after flattening the input text container.",
     "Words missing from the vocabulary return `NaN` rows.",
-    "`word2vec(___, 'IgnoreCase', true)` performs case-insensitive vocabulary lookup and uses the first matching vocabulary entry."
+    "`word2vec(___, 'IgnoreCase', true)` performs case-insensitive vocabulary lookup and uses the first matching vocabulary entry.",
+    "Words and option names must be host text, and `IgnoreCase` must be logical. Native integer and resident numeric inputs are rejected rather than converted to text."
   ],
   "examples": [
     {
@@ -81,5 +82,5 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/embeddings.rs"
   },
-  "gpu_residency": "`word2vec` reads host model metadata and returns a CPU numeric matrix."
+  "gpu_residency": "`word2vec` reads host model metadata and returns a CPU double matrix. Numeric resident word inputs are rejected before provider access."
 }

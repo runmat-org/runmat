@@ -36,6 +36,7 @@
     "Complex inputs return `x ./ abs(x)`; zero-valued elements remain exactly `0 + 0i`.",
     "Logical inputs are promoted to doubles before applying the sign function.",
     "Character arrays are treated as their numeric code points and return doubles of the same shape.",
+    "All eight integer input classes return the same integer class and shape, with each element mapped exactly to `-1`, `0`, or `1` without overflow.",
     "NaN inputs propagate (`sign(NaN)` is `NaN`), matching MATLAB semantics.",
     "`Inf` and `-Inf` map to `1` and `-1` respectively; complex numbers with infinite parts normalise accordingly."
   ],

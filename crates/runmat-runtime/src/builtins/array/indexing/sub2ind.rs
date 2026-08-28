@@ -6,11 +6,19 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Tensor, Value};
 
-use super::common::{build_strides, dims_from_tokens, materialize_value, parse_dims};
+use super::common::{
+    build_strides, dims_from_tokens, fits_positive_platform_index, materialize_value, parse_dims,
+};
 use crate::builtins::array::type_resolvers::is_scalar_type;
 use crate::builtins::common::arg_tokens::tokens_from_context;
 use crate::builtins::common::spec::{
@@ -74,6 +82,34 @@ fn sub2ind_type(args: &[Type], ctx: &ResolveContext) -> Type {
 }
 
 const BUILTIN_NAME: &str = "sub2ind";
+
+const SUB2IND_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The size vector accepts every native integer class and is parsed directly as positive platform dimensions.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "I1...In",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every subscript role accepts all eight integer classes, including scalar expansion and full-width exact bounds checks.",
+    },
+];
+pub const SUB2IND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ind = sub2ind(integer_sz, integer_I1, integer_In...)",
+        inputs: &SUB2IND_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Dimensions and subscripts are read from authoritative integer storage, combined with checked column-major index arithmetic, and returned as documented double indices. Resident integer inputs use exact gather fallback and return resident double output when the owner supports upload.",
+    }];
 
 const SUB2IND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ind",
@@ -190,6 +226,7 @@ fn sub2ind_internal_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     type_resolver(sub2ind_type),
     descriptor(crate::builtins::array::indexing::sub2ind::SUB2IND_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::indexing::sub2ind::SUB2IND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -262,6 +299,11 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Optio
             .iter()
             .all(|value| matches!(value, Value::GpuTensor(_)))
         {
+            return Ok(None);
+        }
+        if subs.iter().any(
+            |value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some()),
+        ) {
             return Ok(None);
         }
         if dims.is_empty() {
@@ -342,7 +384,8 @@ fn compute_indices(
     let mut has_non_scalar = false;
 
     for tensor in subscripts {
-        if tensor.data.len() != 1 {
+        let len = tensor_element_len(tensor);
+        if len != 1 {
             has_non_scalar = true;
             if let Some(shape) = &target_shape {
                 if &tensor.shape != shape {
@@ -350,7 +393,7 @@ fn compute_indices(
                 }
             } else {
                 target_shape = Some(tensor.shape.clone());
-                result_len = tensor.data.len();
+                result_len = len;
             }
         }
     }
@@ -372,7 +415,7 @@ fn compute_indices(
         let mut offset: usize = 0;
         for (dim_index, (&dim, tensor)) in dims.iter().zip(subscripts.iter()).enumerate() {
             let raw = subscript_value(tensor, idx);
-            let coerced = coerce_subscript(raw, dim_index + 1, dim)?;
+            let coerced = coerce_subscript_value(raw, dim_index + 1, dim)?;
             let term = coerced
                 .checked_sub(1)
                 .and_then(|v| v.checked_mul(strides[dim_index]))
@@ -387,12 +430,61 @@ fn compute_indices(
     Ok((output, target_shape))
 }
 
-fn subscript_value(tensor: &Tensor, idx: usize) -> f64 {
-    if tensor.data.len() == 1 {
-        tensor.data[0]
-    } else {
-        tensor.data[idx]
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor.len()
+}
+
+enum SubscriptValue {
+    Float(f64),
+    Integer(IntValue),
+}
+
+fn subscript_value(tensor: &Tensor, idx: usize) -> SubscriptValue {
+    if let Some(storage) = tensor.integer_storage() {
+        let index = if storage.len() == 1 { 0 } else { idx };
+        return SubscriptValue::Integer(
+            storage
+                .value_at(index)
+                .expect("subscript index is within integer storage bounds"),
+        );
     }
+    if tensor::is_scalar_tensor(tensor) {
+        SubscriptValue::Float(tensor::tensor_value_f64(tensor, 0))
+    } else {
+        SubscriptValue::Float(tensor::tensor_value_f64(tensor, idx))
+    }
+}
+
+fn coerce_subscript_value(
+    value: SubscriptValue,
+    dim_number: usize,
+    dim_size: usize,
+) -> crate::BuiltinResult<usize> {
+    match value {
+        SubscriptValue::Float(value) => coerce_subscript(value, dim_number, dim_size),
+        SubscriptValue::Integer(value) => coerce_integer_subscript(&value, dim_number, dim_size),
+    }
+}
+
+fn coerce_integer_subscript(
+    value: &IntValue,
+    dim_number: usize,
+    dim_size: usize,
+) -> crate::BuiltinResult<usize> {
+    let Some(index) = value.try_to_usize() else {
+        return Err(sub2ind_error(
+            "Subscript indices must either be real positive integers or logicals.",
+        ));
+    };
+    if index < 1 {
+        return Err(sub2ind_error(
+            "Subscript indices must either be real positive integers or logicals.",
+        ));
+    }
+    if index > dim_size {
+        return Err(dimension_bounds_error(dim_number));
+    }
+    Ok(index)
 }
 
 fn coerce_subscript(value: f64, dim_number: usize, dim_size: usize) -> crate::BuiltinResult<usize> {
@@ -410,6 +502,11 @@ fn coerce_subscript(value: f64, dim_number: usize, dim_size: usize) -> crate::Bu
     if rounded < 1.0 {
         return Err(sub2ind_error(
             "Subscript indices must either be real positive integers or logicals.",
+        ));
+    }
+    if !fits_positive_platform_index(rounded) {
+        return Err(sub2ind_error(
+            "Subscript indices exceed the maximum supported index range.",
         ));
     }
     if rounded > dim_size as f64 {
@@ -449,7 +546,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor, Type, Value};
+    use runmat_builtins::Type;
+    use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
     fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::sub2ind_builtin(dims_val, rest))
@@ -504,7 +602,28 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
-                assert_eq!(t.data, vec![10.0, 11.0, 12.0]);
+                assert_eq!(t.materialize_f64(), vec![10.0, 11.0, 12.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sub2ind_typed_integer_subscripts_read_exact_storage() {
+        let dims = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let rows = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
+        let cols = Tensor::new_integer(IntegerStorage::I16(vec![4]), vec![1, 1]).unwrap();
+
+        let result = sub2ind_builtin(
+            Value::Tensor(dims),
+            vec![Value::Tensor(rows), Value::Tensor(cols)],
+        )
+        .unwrap();
+
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![3, 1]);
+                assert_eq!(tensor.materialize_f64(), vec![10.0, 11.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -525,7 +644,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![3.0, 11.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 11.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -545,6 +664,48 @@ pub(crate) mod tests {
             err.identifier(),
             super::SUB2IND_ERROR_INDEX_BOUNDS.identifier
         );
+    }
+
+    #[test]
+    fn sub2ind_accepts_every_integer_class_and_returns_double() {
+        for prototype in [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ] {
+            let typed = |values: &[i8], shape| {
+                let values = values
+                    .iter()
+                    .map(|value| prototype.cast_exact_assignment(&IntValue::I8(*value)))
+                    .collect();
+                Tensor::new_integer(
+                    prototype
+                        .from_same_class_values(values)
+                        .expect("same-class values"),
+                    shape,
+                )
+                .expect("typed tensor")
+            };
+            let result = sub2ind_builtin(
+                Value::Tensor(typed(&[2, 3], vec![1, 2])),
+                vec![
+                    Value::Tensor(typed(&[1, 2], vec![1, 2])),
+                    Value::Tensor(typed(&[3], vec![1, 1])),
+                ],
+            )
+            .expect("sub2ind");
+            let Value::Tensor(result) = result else {
+                panic!("expected double tensor output");
+            };
+            assert_eq!(result.shape, vec![1, 2]);
+            assert_eq!(result.materialize_f64(), vec![5.0, 6.0]);
+            assert!(result.integer_storage().is_none());
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -584,6 +745,25 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn rejects_oversized_float_subscripts_before_casting() {
+        let dims = Value::Int(IntValue::U64(usize::MAX.saturating_sub(1) as u64));
+
+        let err = sub2ind_builtin(dims.clone(), vec![Value::Num(1.0e300)])
+            .expect_err("huge float subscript must reject");
+        assert_eq!(
+            err.identifier(),
+            super::SUB2IND_ERROR_INVALID_INPUT.identifier
+        );
+
+        let err = sub2ind_builtin(dims, vec![Value::Num(usize::MAX as f64)])
+            .expect_err("platform boundary float subscript must reject");
+        assert_eq!(
+            err.identifier(),
+            super::SUB2IND_ERROR_INVALID_INPUT.identifier
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn accepts_integer_value_variants() {
@@ -602,19 +782,19 @@ pub(crate) mod tests {
 
             let dims_handle = provider
                 .upload(&HostTensorView {
-                    data: &dims.data,
+                    data: &dims.materialize_f64(),
                     shape: &dims.shape,
                 })
                 .expect("upload dims");
             let rows_handle = provider
                 .upload(&HostTensorView {
-                    data: &rows.data,
+                    data: &rows.materialize_f64(),
                     shape: &rows.shape,
                 })
                 .expect("upload rows");
             let cols_handle = provider
                 .upload(&HostTensorView {
-                    data: &cols.data,
+                    data: &cols.materialize_f64(),
                     shape: &cols.shape,
                 })
                 .expect("upload cols");
@@ -629,10 +809,43 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).unwrap();
                     assert_eq!(gathered.shape, vec![3, 1]);
-                    assert_eq!(gathered.data, vec![10.0, 11.0, 12.0]);
+                    assert_eq!(gathered.materialize_f64(), vec![10.0, 11.0, 12.0]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn sub2ind_integer_gpu_inputs_fall_back_exactly_to_resident_double() {
+        test_support::with_test_provider(|provider| {
+            let dims =
+                Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2]).expect("dims");
+            let rows = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[1, 2]),
+                    shape: &[1, 2],
+                })
+                .expect("rows");
+            let cols = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[3]),
+                    shape: &[1, 1],
+                })
+                .expect("cols");
+            let result = sub2ind_builtin(
+                Value::Tensor(dims),
+                vec![Value::GpuTensor(rows), Value::GpuTensor(cols)],
+            )
+            .expect("sub2ind");
+            let Value::GpuTensor(handle) = &result else {
+                panic!("expected resident double output");
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(handle), None);
+            let result = test_support::gather(result).expect("gather result");
+            assert_eq!(result.shape, vec![1, 2]);
+            assert_eq!(result.materialize_f64(), vec![5.0, 6.0]);
+            assert!(result.integer_storage().is_none());
         });
     }
 
@@ -659,13 +872,13 @@ pub(crate) mod tests {
 
         let rows_handle = provider
             .upload(&HostTensorView {
-                data: &rows.data,
+                data: &rows.materialize_f64(),
                 shape: &rows.shape,
             })
             .expect("upload rows");
         let cols_handle = provider
             .upload(&HostTensorView {
-                data: &cols.data,
+                data: &cols.materialize_f64(),
                 shape: &cols.shape,
             })
             .expect("upload cols");
@@ -683,6 +896,6 @@ pub(crate) mod tests {
             other => panic!("unexpected cpu result {other:?}"),
         };
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

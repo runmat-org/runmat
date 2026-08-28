@@ -17,7 +17,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`heatmap` is a plotting sink. Inputs are gathered to build labeled chart state, then rendered through the scaled-image surface path."
+    "notes": "`heatmap` is a host plotting sink. GPU-resident CData is a gated RunMat extension and is downloaded non-destructively only after compatibility admission."
   },
   "fusion": {
     "elementwise": false,
@@ -29,12 +29,13 @@
   "tested": {
     "unit": "builtins::plotting::heatmap::tests"
   },
-  "description": "`heatmap` creates heatmap charts from numeric matrix data. Supported call forms, returned handle behavior, and chart properties follow MATLAB semantics.",
+  "description": "`heatmap` creates heatmap charts from numeric matrix data. All eight integer classes remain exact in chart `ColorData`; a separate normalized renderer representation preserves distinctions between adjacent wide integers.",
   "behaviors": [
-    "`heatmap(CData)` displays matrix values using default row and column labels.",
+    "`heatmap(CData)` and `heatmap(CData, Name, Value, ...)` display matrix values using default row and column labels.",
     "`heatmap(XValues, YValues, CData)` uses text, string-array, cell-array, or numeric labels for the displayed columns and rows.",
     "The returned heatmap handle participates in RunMat's plotting property system.",
-    "Color rendering uses the shared scaled-image and colormap path."
+    "Integer ColorData is retained authoritatively on the chart while exact range-relative normalization supplies the floating renderer boundary.",
+    "ColorLimits, FontSize, ColorbarVisible, and GridVisible accept documented integer values with exact structural validation; ColorLimits remain public in the source data domain."
   ],
   "examples": [
     {

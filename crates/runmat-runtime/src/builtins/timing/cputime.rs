@@ -4,11 +4,12 @@
 use once_cell::sync::Lazy;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 #[cfg(target_arch = "wasm32")]
 use runmat_time::Instant;
+use runmat_value::Value;
 #[cfg(windows)]
 use std::ffi::c_void;
 

@@ -28,20 +28,21 @@
   "tested": {
     "unit": "builtins::plotting::wordcloud::tests"
   },
-  "description": "`wordcloud` creates a `WordCloudChart` compatibility handle. RunMat supports the common MATLAB forms for raw text, `tokenizedDocument`, `bagOfWords`, `bagOfNgrams`, `categorical`, `words` with `sizeData`, and table word/size variables.",
+  "description": "`wordcloud` creates a `WordCloudChart` handle from raw text, tokenized documents, bag models, categorical arrays, explicit word sizes, or table variables.",
   "behaviors": [
     "`wordcloud(str)` tokenizes string, character, string-array, or cellstr input, removes common English stop words, counts words, and renders the most frequent words.",
-    "`wordcloud(documents)` accepts RunMat `tokenizedDocument` compatibility objects and counts tokens from their `Documents` property.",
-    "`wordcloud(bag)` accepts RunMat `bagOfWords` and `bagOfNgrams` compatibility objects and sums each column of `Counts`; n-gram labels are joined with spaces.",
-    "`wordcloud(words,sizeData)` accepts a word vector and a numeric vector with the same element count. Duplicate words are aggregated and zero-sized entries are omitted.",
-    "`wordcloud(tbl,wordVar,sizeVar)` accepts RunMat table/timetable compatibility objects where `wordVar` and `sizeVar` are variable names or scalar variable indices.",
-    "`wordcloud(C)` accepts RunMat categorical compatibility objects and uses category counts as word sizes.",
-    "`wordcloud(parent,...)` accepts a leading RunMat figure parent and uses that figure's active axes for rendering. Encoded axes handles are also accepted as a RunMat plotting compatibility extension.",
+    "`wordcloud(documents)` accepts `tokenizedDocument` objects and counts tokens from their `Documents` property.",
+    "`wordcloud(bag)` accepts `bagOfWords` and `bagOfNgrams` objects and sums each column of `Counts`; n-gram labels are joined with spaces.",
+    "`wordcloud(words,sizeData)` accepts a word vector and a numeric vector with the same element count. The compatibility target documents all eight native integer classes for `sizeData`; RunMat reads them from native storage before entering the chart's floating size domain. Duplicate words are aggregated and zero-sized entries are omitted.",
+    "`wordcloud(tbl,wordVar,sizeVar)` accepts table and timetable objects where `wordVar` and `sizeVar` are variable names or scalar variable indices. Numeric selectors may use any native integer class and are decoded exactly as one-based structural indices.",
+    "`wordcloud(C)` accepts categorical objects and uses category counts as word sizes.",
+    "A leading encoded numeric figure or axes handle is a RunMat language extension available in `runmat` mode. The selected figure's active axes receives the chart.",
     "Supported name-value options are `MaxDisplayWords`, `Color`, `HighlightColor`, `Shape` (`oval` or `rectangle`), `LayoutNum`, `SizePower`, `Title`, `TitleFontName`, `Visible`, `FontName`, `Box`, `Units`, `Position`, `HandleVisibility`, `DisplayName`, and `Tag`.",
-    "`MaxDisplayWords` is capped at 1000 rendered annotation slots in RunMat to keep chart creation bounded.",
+    "Native integer storage for numeric chart properties such as `MaxDisplayWords` and `LayoutNum` is a RunMat language extension available in `runmat` mode. Ordinary integer-valued doubles remain available in MATLAB-compatible modes.",
+    "`MaxDisplayWords` is capped at 1000 rendered annotation slots to keep chart creation bounded.",
     "`get` supports `Type`, `Parent`, `Children`, `WordData`, `SizeData`, `WordVariable`, `SizeVariable`, `SourceTable`, `MaxDisplayWords`, `Color`, `HighlightColor`, `Shape`, `LayoutNum`, `SizePower`, `Title`, `TitleFontName`, `FontName`, `Visible`, `Box`, `Units`, `Position`, `HandleVisibility`, `DisplayName`, and `Tag`.",
     "`set` supports `WordData`, `SizeData`, `MaxDisplayWords`, `Color`, `HighlightColor`, `Shape`, `LayoutNum`, `SizePower`, `Title`, `TitleFontName`, `FontName`, `Visible`, `Box`, `Units`, `Position`, `HandleVisibility`, `DisplayName`, and `Tag`; `WordData` and `SizeData` assignments must preserve matching lengths.",
-    "RunMat uses a deterministic annotation layout rather than MATLAB's exact proprietary word-placement algorithm. `FontName`, `TitleFontName`, `Units`, `Position`, and `HandleVisibility` are stored as chart metadata; the current plotting renderer does not yet expose a separate chart-container layout or font-family path. LDA topic word clouds remain unsupported until `ldaModel` compatibility exists and raise an explicit tracked-gap error."
+    "RunMat uses a deterministic annotation layout rather than attempting to reproduce another renderer's placement algorithm. `FontName`, `TitleFontName`, `Units`, `Position`, and `HandleVisibility` are stored as chart metadata; the current plotting renderer does not yet expose a separate chart-container layout or font-family path. LDA topic word clouds remain unsupported until `ldaModel` support exists."
   ],
   "examples": [
     {
@@ -64,14 +65,18 @@
     },
     {
       "question": "Does RunMat match MATLAB's exact word placement?",
-      "answer": "No. RunMat computes MATLAB-compatible word labels, sizes, and chart properties, then uses a deterministic annotation layout. Exact MATLAB layout parity remains tracked by the Text Analytics umbrella."
+      "answer": "No. RunMat computes compatible word labels, sizes, and chart properties, then uses its own deterministic annotation layout."
     },
     {
       "question": "Can wordcloud preserve gpuArray residency?",
-      "answer": "No. Word clouds are text/chart rendering sinks over host text, table, categorical, and bag metadata, so provider-resident numeric kernels are not applicable to this slice."
+      "answer": "No. Word clouds are host chart-rendering sinks over text, table, categorical, and bag metadata. Explicit `gpuArray` input is not supported."
     }
   ],
   "links": [
+    {
+      "label": "MATLAB language extensions",
+      "url": "/docs/runtime/getting-started/language-extensions"
+    },
     {
       "label": "tokenizedDocument",
       "url": "./tokenizedDocument"

@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "Filesystem inspection is host-side. Numeric and resident inputs are rejected without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -23,13 +23,19 @@
     "unit": null,
     "integration": null
   },
-  "description": "Summarize MATLAB-related files in a folder.",
+  "description": "`what` summarizes recognized source and data files in the current folder or a named folder.",
   "behaviors": [
-    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
-    "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
-    "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
+    "With no input, inspects the current folder. An optional folder must be a host string scalar or character row vector.",
+    "Returns a scalar structure whose implemented fields group recognized files in the selected folder.",
+    "Native integer, floating, logical, and resident numeric folder values are invalid and reject before filesystem or provider access.",
+    "Additional file categories and package/class details not represented by the current structure remain unsupported."
   ],
   "examples": [],
-  "faqs": [],
+  "faqs": [
+    {
+      "question": "Does what gather a numeric folder argument?",
+      "answer": "No. A folder is text, so numeric and resident values are rejected before any gather or filesystem access."
+    }
+  ],
   "links": []
 }

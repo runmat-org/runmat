@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Discriminant model fitting and prediction run on CPU."
+    "notes": "Discriminant model fitting and prediction run on CPU. Any resident input is a mode-gated RunMat extension and is recursively gathered only after role-specific compatibility checks."
   },
   "fusion": {
     "elementwise": false,
@@ -35,6 +35,8 @@
     "`classify(sample,training,group,type)` supports `linear`, `quadratic`, `diagLinear`, `diagQuadratic`, and `mahalanobis` discriminants.",
     "`classify(sample,training,group,type,prior)` accepts priors as a numeric vector, the string `empirical`, or a struct with `group` and `prob` fields.",
     "`sample` and `training` must be finite numeric 2-D matrices with the same number of columns; observations are stored in rows.",
+    "Typed-integer `sample`, `training`, and prior probabilities are independent RunMat extensions for all eight classes and must lie within the exact-integer binary64 range. Logical predictors are separately mode-gated; logical priors reject.",
+    "Typed-integer group labels are a RunMat extension that preserves exact identity and output class, including `uint64` labels above `flintmax`.",
     "`group` can be numeric, logical, string, character-row, or cell-string labels. Missing numeric labels (`NaN`) and empty or `<missing>` text labels are ignored during fitting.",
     "Predicted labels preserve the input label family: numeric vectors return numeric labels, logical labels return logical arrays, string labels return string arrays, character-row labels return character matrices, and cell-string labels return cell arrays of character vectors.",
     "With multiple outputs, `[class,err,posterior,logp,coeff]` returns prior-weighted apparent training error, posterior probabilities, unconditional log densities, and a pairwise discriminant coefficient struct array.",

@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::{LogicalArray, Tensor, Value};
+use runmat_value::{LogicalArray, Tensor, Value};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -33,7 +33,7 @@ fn logical_size_numel_ndims() {
     let sz = runmat_runtime::call_builtin("size", std::slice::from_ref(&v)).unwrap();
     if let Value::Tensor(t) = sz {
         // Verify row vector and product equals numel
-        let dims = t.data.clone();
+        let dims = t.materialize_f64().clone();
         assert!(t.rows() == 1 || t.cols() == 1);
         let prod: usize = dims.iter().map(|x| *x as usize).product();
         let ne = runmat_runtime::call_builtin("numel", std::slice::from_ref(&v)).unwrap();
@@ -64,8 +64,15 @@ fn logical_from_numeric_and_stringarray() {
     } else {
         panic!();
     }
-    let sa = runmat_builtins::StringArray::new(vec!["".to_string(), "a".to_string()], vec![2, 1])
-        .unwrap();
+    let sa =
+        runmat_value::StringArray::new(vec!["".to_string(), "a".to_string()], vec![2, 1]).unwrap();
+    let err = runmat_runtime::call_builtin("logical", &[Value::StringArray(sa.clone())])
+        .expect_err("string-array logical conversion is a RunMat extension");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:compatibility:LogicalStringArrayInputExtension")
+    );
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let l2 = runmat_runtime::call_builtin("logical", &[Value::StringArray(sa)]).unwrap();
     if let Value::LogicalArray(la) = l2 {
         assert_eq!(la.data, vec![0, 1]);

@@ -94,10 +94,7 @@ fn square_summary_type(args: &[Type]) -> Type {
     }
     let total = match data.len() {
         1 => variable_count(data[0]),
-        2 => match (variable_count(data[0]), variable_count(data[1])) {
-            (Some(a), Some(b)) => Some(a + b),
-            _ => None,
-        },
+        2 => Some(2),
         _ => None,
     };
     match total {

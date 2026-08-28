@@ -12,33 +12,25 @@ impl RunMatSession {
     }
 
     fn initialize(enable_jit: bool, verbose: bool) -> Result<Self> {
-        #[cfg(feature = "jit")]
-        let jit_engine = if enable_jit {
-            match TurbineEngine::new() {
-                Ok(engine) => {
-                    info!("JIT compiler initialized successfully");
-                    Some(engine)
-                }
-                Err(e) => {
-                    warn!("JIT compiler initialization failed: {e}, falling back to interpreter");
-                    None
-                }
-            }
-        } else {
-            info!("JIT compiler disabled, using interpreter only");
-            None
-        };
-
-        #[cfg(not(feature = "jit"))]
+        #[cfg(not(target_arch = "wasm32"))]
+        let native_tiering_enabled = enable_jit && cfg!(feature = "jit");
+        #[cfg(all(not(target_arch = "wasm32"), not(feature = "jit")))]
         if enable_jit {
-            info!(
-                "JIT support was requested but the 'jit' feature is disabled; running interpreter-only."
-            );
+            info!("JIT support was requested but the 'jit' feature is disabled; running interpreter-only.");
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = enable_jit;
 
+        let interrupt_flag = Arc::new(AtomicBool::new(false));
+        let search_path = Arc::new(
+            runmat_runtime::builtins::common::path_state::SearchPath::new(
+                runmat_runtime::builtins::common::path_state::current_path_string(),
+            ),
+        );
+        let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
+        let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
+            .with_placement(placement.clone());
         let session = Self {
-            #[cfg(feature = "jit")]
-            jit_engine,
             verbose,
             stats: ExecutionStats::default(),
             variable_array: Vec::new(),
@@ -48,18 +40,25 @@ impl RunMatSession {
             active_source_identity: None,
             function_registry: runmat_vm::FunctionRegistry::default(),
             next_semantic_function_id: 0,
-            search_path: Arc::new(
-                runmat_runtime::builtins::common::path_state::SearchPath::new(
-                    runmat_runtime::builtins::common::path_state::current_path_string(),
-                ),
-            ),
             dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(not(target_arch = "wasm32"))]
+            generic_native_cache: crate::generic_native::GenericNativeCache::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            native_tiering_enabled,
+            project_handoff: None,
             source_pool: SourcePool::default(),
-            interrupt_flag: Arc::new(AtomicBool::new(false)),
+            interrupt_flag: Arc::clone(&interrupt_flag),
+            runtime_context: runmat_runtime::context::RuntimeContext::with_cancellation(
+                std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+                Arc::clone(&interrupt_flag),
+            )
+            .with_search_path(search_path)
+            .with_service_ports(runtime_services),
+            placement_session: placement,
             is_executing: false,
             async_input_handler: None,
-            callstack_limit: runmat_vm::DEFAULT_CALLSTACK_LIMIT,
-            error_namespace: runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string(),
+            callstack_limit: runmat_runtime::context::DEFAULT_CALLSTACK_LIMIT,
+            error_namespace: runmat_runtime::context::DEFAULT_ERROR_NAMESPACE.to_string(),
             active_source_name: "<repl>".to_string(),
             active_source_fullpath_name: None,
             telemetry_consent: true,
@@ -72,12 +71,10 @@ impl RunMatSession {
             compat_mode: CompatMode::Matlab,
             top_level_await_enabled: true,
             dynamic_eval_enabled: true,
-            format_mode: runmat_builtins::FormatMode::default(),
+            format_mode: runmat_value::FormatMode::default(),
             diary_state: runmat_runtime::console::DiaryStateSnapshot::default(),
             pending_companion_source_discovery: None,
         };
-
-        runmat_vm::set_call_stack_limit(session.callstack_limit);
 
         // Cache the shared plotting context (if a GPU provider is active) so the
         // runtime can wire zero-copy render paths without instantiating another

@@ -1,16 +1,16 @@
 //! MATLAB-compatible `matfile` compatibility object.
+use runmat_types::MemberAccess;
 
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, ObjectInstance, PropertyDef, StringArray, StructValue, Value,
 };
 use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
+use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
 
 use super::load::read_mat_file_for_builtin;
 use super::save::encode_workspace_to_mat_bytes;
@@ -33,9 +33,8 @@ const WRITABLE_FIELD: &str = "Writable";
 const PATH_FIELD: &str = "__runmat_matfile_path";
 const WRITABLE_STATE_FIELD: &str = "__runmat_matfile_writable";
 
-thread_local! {
-    static MATFILE_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static MATFILE_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(MATFILE_CLASS);
 
 const MATFILE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "m",
@@ -358,21 +357,17 @@ pub async fn matfile_subsasgn(
 }
 
 pub fn ensure_matfile_class_registered() {
-    MATFILE_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
-
+    MATFILE_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         properties.insert(
             PROPERTIES_FIELD.to_string(),
-            PropertyDef {
+            crate::class_registry::RuntimeProperty {
                 name: PROPERTIES_FIELD.to_string(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
-                get_access: Access::Public,
-                set_access: Access::Private,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Private,
                 default_value: None,
             },
         );
@@ -380,36 +375,35 @@ pub fn ensure_matfile_class_registered() {
         let mut methods = HashMap::new();
         methods.insert(
             OBJECT_SUBSREF_METHOD.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: OBJECT_SUBSREF_METHOD.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: MATFILE_SUBSREF.to_string(),
                 implicit_class_argument: None,
             },
         );
         methods.insert(
             OBJECT_SUBSASGN_METHOD.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: OBJECT_SUBSASGN_METHOD.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: MATFILE_SUBSASGN.to_string(),
                 implicit_class_argument: None,
             },
         );
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: MATFILE_CLASS.to_string(),
             parent: None,
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 
@@ -633,7 +627,7 @@ mod tests {
     use super::*;
     use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntegerStorage, NumericDType, Tensor};
+    use runmat_value::{CharArray, IntegerStorage, Tensor};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
@@ -647,14 +641,7 @@ mod tests {
     }
 
     fn tensor(data: &[f64], shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: shape.clone(),
-            rows: *shape.first().unwrap_or(&1),
-            cols: *shape.get(1).unwrap_or(&data.len()),
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), shape).expect("test tensor"))
     }
 
     fn write_sample(path: &Path) {
@@ -777,10 +764,9 @@ mod tests {
             vec![Value::String("Writable".into()), Value::Bool(true)],
         ))
         .expect("matfile writable");
-        let input = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
-                .expect("integer tensor"),
-        );
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+            .expect("integer tensor");
+        let input = Value::Tensor(tensor);
 
         let object = block_on(matfile_subsasgn(
             object,

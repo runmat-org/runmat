@@ -897,18 +897,55 @@ impl WgpuProvider {
             self.device_ref().poll(wgpu::Maintain::Poll);
             let lda_u32 = view_a.lda;
             let ldb_u32 = view_b.lda;
-            // Accumulator handle across chunks
-            let mut acc: Option<GpuTensorHandle> = None;
-            let mut k_off: usize = 0;
-            let partial_storage = self.create_storage_buffer_checked_with_usage(
+            let out_buffer = self.create_storage_buffer_checked_with_usage(
                 len,
-                "runmat-matmul-partial",
-                BufferUsageClass::MatmulPartial,
+                "runmat-matmul-chunked-out",
+                out_usage,
             )?;
+            // Chunk dispatches execute serially and bind the same tensors throughout the
+            // operation. Keep their parameter buffer and bind group stable so updating the
+            // chunk offsets/accumulation flag cannot alias a stale cached bind group.
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                self.device_ref(),
+                UniformBufferKey::MatmulParams,
+                std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
+                "runmat-matmul-chunked-params",
+            );
+            let bind_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: entry_a.buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: entry_b.buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ];
+            let layout = &self.pipelines.matmul.layout;
+            let bg = self
+                .bind_group_cache
+                .get_or_create(layout, &bind_entries, || {
+                    Arc::new(
+                        self.device_ref()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-matmul-chunked-bind"),
+                                layout,
+                                entries: &bind_entries,
+                            }),
+                    )
+                });
+            let mut k_off: usize = 0;
+            let mut first_chunk = true;
             while k_off < k {
                 let k_sub = std::cmp::min(K_CHUNK, k - k_off);
-                // Create partial output buffer and bind group
-                let partial_buffer = partial_storage.clone();
                 let offset_a_elems = k_off
                     .checked_mul(view_a.rows)
                     .ok_or_else(|| anyhow!("matmul: offset overflow"))?;
@@ -926,46 +963,14 @@ impl WgpuProvider {
                     offset_a: offset_a_u32,
                     offset_b: offset_b_u32,
                     offset_out: 0,
-                    flags: 0,
+                    flags: if first_chunk {
+                        0
+                    } else {
+                        crate::backend::wgpu::params::MATMUL_FLAG_ACCUMULATE
+                    },
                 };
-                let params_buffer = self.kernel_resources.uniform_buffer(
-                    self.device_ref(),
-                    UniformBufferKey::MatmulParams,
-                    std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
-                    "runmat-matmul-params",
-                );
                 self.queue
                     .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-                let bind_entries = [
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry_a.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: entry_b.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: partial_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ];
-                let layout = &self.pipelines.matmul.layout;
-                let bg =
-                    self.bind_group_cache
-                        .get_or_create(layout, &bind_entries, || {
-                            Arc::new(self.device_ref().create_bind_group(
-                                &wgpu::BindGroupDescriptor {
-                                    label: Some("runmat-matmul-bind"),
-                                    layout,
-                                    entries: &bind_entries,
-                                },
-                            ))
-                        });
                 let tile = crate::backend::wgpu::config::effective_matmul_tile();
                 let groups_x =
                     crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
@@ -979,29 +984,11 @@ impl WgpuProvider {
                     groups_x,
                     groups_y,
                 );
-                // Wrap partial buffer into handle
-                let partial = self.register_existing_buffer_with_usage(
-                    partial_buffer,
-                    out_shape.clone(),
-                    len,
-                    BufferUsageClass::MatmulPartial,
-                );
-                acc = match acc {
-                    None => Some(partial),
-                    Some(prev) => {
-                        let sum = self.binary_op_exec(
-                            crate::backend::wgpu::types::BinaryOpCode::Add,
-                            &prev,
-                            &partial,
-                        )?;
-                        self.free_exec(&prev).ok();
-                        self.free_exec(&partial).ok();
-                        Some(sum)
-                    }
-                };
                 k_off += k_sub;
+                first_chunk = false;
             }
-            let handle = acc.expect("matmul chunking produced no output");
+            let handle =
+                self.register_existing_buffer_with_usage(out_buffer, out_shape, len, out_usage);
             self.remember_matmul_sources(&handle, a, b);
             self.mark_buffer_usage(&handle, out_usage);
             self.telemetry.record_matmul_duration(start.elapsed());

@@ -3,20 +3,22 @@ use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use runmat_builtins::Value;
 use runmat_core::{TelemetryPlatformInfo, TelemetrySink};
 use runmat_runtime::build_runtime_error;
 use runmat_runtime::builtins::wasm_registry;
+use runmat_value::Value;
 
 use crate::api::plot::ensure_figure_event_bridge;
 use crate::api::session::RunMatWasm;
 use crate::runtime::config::{apply_plotting_overrides, InitOptions, SessionConfig};
+use crate::runtime::execution::{execution_host_from_options, BrowserExecutionService};
 use crate::runtime::filesystem::install_js_fs_provider;
 use crate::runtime::gpu::{
     capture_gpu_adapter_info, initialize_gpu_provider, install_cpu_provider,
     validate_webgpu_runtime, GpuStatus,
 };
 use crate::runtime::logging::{init_logging_once, set_log_filter_override};
+use crate::runtime::package_cache::JsPackageCacheBackend;
 use crate::wire::errors::{init_error, init_error_with_details, js_value_to_string, InitErrorCode};
 
 #[wasm_bindgen(js_name = initRunMat)]
@@ -43,6 +45,13 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         init_error_with_details(
             InitErrorCode::FilesystemProvider,
             "Failed to install filesystem provider",
+            Some(err),
+        )
+    })?;
+    let package_cache = package_cache_from_options(&options).await.map_err(|err| {
+        init_error_with_details(
+            InitErrorCode::PackageCacheProvider,
+            "Failed to initialize package cache provider",
             Some(err),
         )
     })?;
@@ -84,6 +93,21 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     session.set_compat_mode(config.language_compat);
     session.set_callstack_limit(config.callstack_limit);
     session.set_error_namespace(config.error_namespace.clone());
+    let execution_service =
+        BrowserExecutionService::new(execution_host_from_options(&options).map_err(|error| {
+            init_error_with_details(
+                InitErrorCode::InvalidOptions,
+                "Failed to initialize browser execution host",
+                Some(error),
+            )
+        })?)
+        .map_err(|error| {
+            init_error(
+                InitErrorCode::SessionCreation,
+                format!("Failed to initialize browser execution: {error}"),
+            )
+        })?;
+    session.install_execution_services(execution_service.clone());
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -164,7 +188,39 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         session.set_telemetry_sink(telemetry_sink.clone());
     }
 
-    Ok(RunMatWasm::new(session, config, gpu_status, telemetry_sink))
+    Ok(RunMatWasm::new(
+        session,
+        config,
+        gpu_status,
+        telemetry_sink,
+        package_cache,
+        execution_service,
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn package_cache_from_options(
+    options: &JsValue,
+) -> Result<Option<Arc<dyn runmat_package_cache::CacheBackend>>, JsValue> {
+    if options.is_null() || options.is_undefined() || !options.is_object() {
+        return Ok(None);
+    }
+    let value = js_sys::Reflect::get(options, &JsValue::from_str("packageCacheProvider"))?;
+    if value.is_null() || value.is_undefined() {
+        return Ok(None);
+    }
+    let backend = JsPackageCacheBackend::new(&value)?;
+    runmat_package_cache::CacheBackend::snapshot(&backend)
+        .await
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(Some(Arc::new(backend)))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn package_cache_from_options(
+    _options: &JsValue,
+) -> Result<Option<Arc<dyn runmat_package_cache::CacheBackend>>, JsValue> {
+    Ok(None)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -204,7 +260,7 @@ fn ensure_getrandom_js() {
     }
 }
 
-fn ensure_internal_builtins() {
+pub(crate) fn ensure_internal_builtins() {
     if runmat_builtins::builtin_function_by_name("make_anon").is_none() {
         register_make_anon_fallback();
     }

@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 use test_helpers::execute_source;
 
 fn disable_interactive_plots_for_test() -> runmat_runtime::builtins::plotting::PlotTestLockGuard {
@@ -129,6 +129,32 @@ fn copyobj_dispatches_plot_child_copies() {
 }
 
 #[test]
+fn copyobj_dispatches_gated_integer_handle_aliases() {
+    let _guard = disable_interactive_plots_for_test();
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let input = "\
+        h = plot(1:3, [1 4 9]); \
+        ax2 = subplot(1,2,2); \
+        h2 = copyobj(uint64(h), uint64(ax2)); \
+        if ~isgraphics(h2); error('integer handle alias copy failed'); end; \
+        if get(h2, 'Parent') ~= ax2; error('integer parent alias mismatch'); end;";
+    execute_source(input).expect("execute copyobj integer alias script");
+}
+
+#[test]
+fn contourf_dispatches_integer_data_and_target_axes() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        ax = axes(); \
+        z = uint64([0 2; 1 3]); \
+        h = contourf(ax, z, uint16(3)); \
+        if ~isgraphics(h); error('contourf integer plot should return graphics'); end; \
+        if get(h, 'Parent') ~= ax; error('contourf target axes mismatch'); end; \
+        if ~strcmp(get(h, 'Type'), 'contour'); error('contourf type mismatch'); end;";
+    execute_source(input).expect("execute contourf integer target-axes script");
+}
+
+#[test]
 fn plot_accepts_multiseries_linespec_source_forms() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
@@ -165,6 +191,31 @@ fn barh_dispatches_and_sets_horizontal_bars() {
         h2 = barh([1980 1990 2000], [10 20 30], 'stacked'); \
         if ~isgraphics(h2); error('barh x/y stacked handle mismatch'); end;";
     execute_source(input).expect("execute barh script");
+}
+
+#[test]
+fn bar_compiled_integer_matrix_returns_one_handle_per_series() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        h = bar(int16([1 2; 3 4; 5 6]), uint8(1), 'LineWidth', uint16(2)); \
+        if numel(h) ~= 2; error('bar matrix handle count mismatch'); end; \
+        if ~isgraphics(h(1)) || ~isgraphics(h(2)); error('bar matrix handles invalid'); end; \
+        if ~strcmp(get(h(1), 'Type'), 'bar') || ~strcmp(get(h(2), 'Type'), 'bar'); error('bar handle type mismatch'); end;";
+    execute_source(input).expect("execute integer matrix bar script");
+}
+
+#[test]
+fn barh_accepts_all_integer_classes_through_compiled_execution() {
+    let _guard = disable_interactive_plots_for_test();
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "x = {constructor}([1; 2; 3]); y = {constructor}([10 20; 30 40; 50 60]); h = barh(x, y, {constructor}(1), 'LineWidth', {constructor}(2)); if numel(h) ~= 2; error('integer barh handle count mismatch'); end; if ~isgraphics(h(1)) || ~isgraphics(h(2)); error('integer barh handles invalid'); end; if ~strcmp(get(h(1), 'Type'), 'bar') || ~strcmp(get(h(2), 'Type'), 'bar'); error('integer barh handle type mismatch'); end;"
+        );
+        execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: integer barh failed: {error}"));
+    }
 }
 
 #[test]
@@ -320,6 +371,26 @@ fn colormap_array_generators_round_trip_through_vm() {
 }
 
 #[test]
+fn compiled_graphics_integer_cohort_crosses_only_explicit_host_boundaries() {
+    let _guard = disable_interactive_plots_for_test();
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let input = "\
+        figure(41); \
+        clf(uint8(41)); \
+        cube = colorcube(uint16(6)); \
+        if size(cube, 1) ~= 6 || size(cube, 2) ~= 3; error('colorcube size mismatch'); end; \
+        colormap(uint8([0 255 0; 255 0 255])); \
+        map = colormap(); \
+        if size(map, 1) ~= 2 || map(1, 2) ~= 1; error('colormap normalization mismatch'); end; \
+        colororder(int8([0 1 0; 1 0 1])); \
+        order = colororder(); \
+        if size(order, 1) ~= 2 || order(2, 3) ~= 1; error('colororder mismatch'); end; \
+        status = close(uint8(41)); \
+        if status ~= 1; error('close status mismatch'); end;";
+    execute_source(input).expect("execute compiled graphics integer cohort");
+}
+
+#[test]
 fn data_tip_text_row_dispatches_and_round_trips_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
@@ -432,6 +503,7 @@ fn zoom_object_dispatches_and_preserves_mode_properties() {
 
 #[test]
 fn plotting_ui_compat_helpers_dispatch_through_vm() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let _guard = disable_interactive_plots_for_test();
     let input = "\
         f = figure('Visible', 'off'); \
@@ -670,6 +742,15 @@ fn fcontour_dispatches_function_handle_contour_through_vm() {
 }
 
 #[test]
+fn contour_accepts_transposed_integer_coordinate_matrices_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    execute_source(
+        "x = uint64([10 10 10; 20 20 20]); y = uint64([1 2 3; 1 2 3]); z = uint64([1 2 3; 4 5 6]); h = contour(x,y,z,uint64([2 4]),'LevelList',uint64([2 4]),'LineWidth',uint64(2)); if ~ishandle(h) || ~strcmp(get(h,'Type'),'contour'); error('integer contour mismatch'); end; h2 = contour(x,y,z,'--'); if ~ishandle(h2); error('explicit contour LineSpec mismatch'); end; h3 = contour(x,y,z,'LineWidth',uint64(2)); if ~ishandle(h3); error('explicit integer contour LineWidth mismatch'); end; h4 = contour(z,'--'); if ~ishandle(h4); error('implicit contour LineSpec mismatch'); end;",
+    )
+    .expect("typed integer contour script");
+}
+
+#[test]
 fn animatedline_and_addpoints_dispatch_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
@@ -686,6 +767,34 @@ fn animatedline_and_addpoints_dispatch_through_vm() {
         z = get(an, 'ZData'); \
         if numel(z) ~= 3 || z(3) ~= 500; error('animatedline z append mismatch'); end;";
     execute_source(input).expect("execute animatedline/addpoints script");
+}
+
+#[test]
+fn animatedline_accepts_all_integer_coordinate_and_maximum_classes_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "x = {constructor}([1 2 3]); y = {constructor}([10 20 30]); z = {constructor}([40 50 60]); an = animatedline(x, y, z, 'MaximumNumPoints', {constructor}(2)); xo = get(an, 'XData'); yo = get(an, 'YData'); zo = get(an, 'ZData'); if numel(xo) ~= 2; error('integer animatedline length mismatch'); end; if xo(1) ~= 2 || xo(2) ~= 3; error('integer animatedline x mismatch'); end; if yo(1) ~= 20 || yo(2) ~= 30; error('integer animatedline y mismatch'); end; if zo(1) ~= 50 || zo(2) ~= 60; error('integer animatedline z mismatch'); end;"
+        );
+        execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: animatedline failed: {error}"));
+    }
+}
+
+#[test]
+fn area_accepts_all_integer_data_and_property_classes_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "x = {constructor}([2;1]); y = {constructor}([10 20;30 40]); h = area(x, y, {constructor}(2), 'LineWidth', {constructor}(3)); if numel(h) ~= 2; error('integer area handle count mismatch'); end; if ~strcmp(get(h(1), 'Type'), 'area') || ~strcmp(get(h(2), 'Type'), 'area'); error('integer area type mismatch'); end; xo = get(h(1), 'XData'); y1 = get(h(1), 'YData'); y2 = get(h(2), 'YData'); if xo(1) ~= 1 || xo(2) ~= 2; error('integer area X ordering mismatch'); end; if y1(1) ~= 30 || y1(2) ~= 10; error('integer area first series mismatch'); end; if y2(1) ~= 70 || y2(2) ~= 30; error('integer area stacked series mismatch'); end; if get(h(1), 'BaseValue') ~= 2 || get(h(2), 'BaseValue') ~= 2; error('integer area BaseValue mismatch'); end;"
+        );
+        execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: area failed: {error}"));
+    }
 }
 
 #[test]
@@ -875,6 +984,73 @@ fn axes_creates_axes_and_round_trips_position_properties() {
 }
 
 #[test]
+fn axes_compiled_dispatch_accepts_integer_graphics_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        ax = axes('DataAspectRatio', uint64([1 2 3]), 'XTick', int16([1 2 3])); \
+        ratio = get(ax, 'DataAspectRatio'); \
+        ticks = get(ax, 'XTick'); \
+        if ratio(1) ~= 1 || ratio(2) ~= 2 || ratio(3) ~= 3; \
+            error('axes integer aspect ratio mismatch'); \
+        end; \
+        if ticks(1) ~= 1 || ticks(2) ~= 2 || ticks(3) ~= 3; \
+            error('axes integer ticks mismatch'); \
+        end;";
+    execute_source(input).expect("execute axes integer-property script");
+}
+
+#[test]
+fn axis_compiled_dispatch_accepts_integer_limits_query_and_visibility() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        ax = axes; \
+        axis(uint64([0 10 1 2 0 3 2 8])); \
+        lim = axis(ax); \
+        if numel(lim) ~= 6 || lim(1) ~= 0 || lim(2) ~= 10 || lim(5) ~= 0 || lim(6) ~= 3; \
+            error('axis integer limits or target query mismatch'); \
+        end; \
+        clim = get(ax, 'CLim'); \
+        if clim(1) ~= 2 || clim(2) ~= 8; \
+            error('axis integer color limits mismatch'); \
+        end; \
+        axis(uint8(0)); \
+        if get(ax, 'Visible'); \
+            error('axis integer visibility did not turn axes off'); \
+        end; \
+        axis(true); \
+        if ~get(ax, 'Visible'); \
+            error('axis logical visibility did not turn axes on'); \
+        end;";
+    execute_source(input).expect("execute axis integer semantics script");
+}
+
+#[test]
+fn caxis_compiled_dispatch_gates_integer_limits_and_returns_double_state() {
+    let _guard = disable_interactive_plots_for_test();
+    {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+        let error = execute_source("caxis(uint8([1 2]));")
+            .expect_err("MATLAB mode must reject typed integer caxis limits");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:ClimIntegerLimitsExtension")
+        );
+    }
+    {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let values =
+            execute_source("caxis(uint64([9007199254740993 9007199254740995])); limits = caxis();")
+                .expect("RunMat mode integer caxis limits");
+        assert!(values.iter().any(|value| matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.numeric_dtype() == runmat_value::NumericDType::F64
+                    && tensor.len() == 2
+        )));
+    }
+}
+
+#[test]
 fn axes_parent_property_targets_figure_and_updates_current_axes() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
@@ -932,6 +1108,7 @@ fn gca_returns_active_subplot_axes_handle() {
 
 #[test]
 fn gca_with_figure_handle_returns_that_figures_current_axes() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let _guard = disable_interactive_plots_for_test();
     let input = "\
         f1 = figure(1); \
@@ -1060,4 +1237,40 @@ fn stackedplot_dispatches_multiple_tables_through_vm() {
         labels2 = get(s2, 'DisplayVariables'); \
         if numel(labels2) ~= 2; error('separated label count mismatch'); end;";
     execute_source(input).expect("execute stackedplot multiple-table script");
+}
+
+#[test]
+fn numeric_line_graphics_preserve_native_coordinate_classes_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    for constructor in [
+        "single", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let input = format!(
+            "x={constructor}([1 2]); y={constructor}([3 4]); z={constructor}([5 6]); h=plot(x,y); if ~strcmp(class(get(h,'XData')),'{constructor}'); error('plot class'); end; h=line(x,y); if ~strcmp(class(get(h,'YData')),'{constructor}'); error('line class'); end; h=plot3(x,y,z); if ~strcmp(class(get(h,'ZData')),'{constructor}'); error('plot3 class'); end; h=scatter(x,y); if ~strcmp(class(get(h,'XData')),'{constructor}'); error('scatter class'); end;"
+        );
+        execute_source(&input).unwrap_or_else(|err| panic!("{constructor}: {err}"));
+    }
+}
+
+#[test]
+fn integer_plot_wrappers_preserve_wide_uint64_source_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "wide=uint64(9007199254740992)+uint64(1); x=[wide wide+uint64(1)]; y=[wide+uint64(2) wide+uint64(3)]; h=loglog(x,y); data=get(h,'XData'); if ~strcmp(class(data),'uint64') || data(1)~=wide; error('loglog source'); end; h=semilogx(x,y); data=get(h,'XData'); if ~strcmp(class(data),'uint64') || data(2)~=wide+uint64(1); error('semilogx source'); end; h=semilogy(x,y); data=get(h,'XData'); if ~strcmp(class(data),'uint64') || data(1)~=wide; error('semilogy source'); end; [ax,h1,h2]=plotyy(x,y,x,y); data1=get(h1,'XData'); data2=get(h2,'XData'); if ~strcmp(class(data1),'uint64') || ~strcmp(class(data2),'uint64') || data1(1)~=wide || data2(2)~=wide+uint64(1); error('plotyy source'); end;";
+    execute_source(input).expect("wide integer wrapper graphics semantics");
+}
+
+#[test]
+fn hold_integer_state_remains_available_in_compatibility_mode() {
+    let _guard = disable_interactive_plots_for_test();
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    execute_source("hold(uint8(1)); hold(int64(0));")
+        .expect("documented integer hold state in compatibility mode");
+}
+
+#[test]
+fn integer_gpu_line_graphics_gather_exactly_before_float_only_wgpu_rendering() {
+    let _guard = disable_interactive_plots_for_test();
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let input = "wide=uint64(9007199254740992)+uint64(1); x=gpuArray([wide wide+uint64(1)]); y=gpuArray([wide+uint64(2) wide+uint64(3)]); z=gpuArray([wide+uint64(4) wide+uint64(5)]); h1=plot(x,y); a=get(h1,'XData'); h2=plot3(x,y,z); b=get(h2,'ZData'); h3=scatter(x,y); c=get(h3,'YData'); if ~strcmp(class(a),'uint64') || a(1)~=wide; error('plot gpu gather'); end; if ~strcmp(class(b),'uint64') || b(2)~=wide+uint64(5); error('plot3 gpu gather'); end; if ~strcmp(class(c),'uint64') || c(1)~=wide+uint64(2); error('scatter gpu gather'); end;";
+    execute_source(input).expect("exact integer GPU plotting gather fallback");
 }

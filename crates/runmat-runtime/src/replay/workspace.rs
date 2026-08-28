@@ -1,6 +1,6 @@
 use base64::Engine;
 use chrono::Utc;
-use runmat_builtins::Value;
+use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 
 use crate::builtins::io::mat::load::decode_workspace_from_mat_bytes;
@@ -220,7 +220,7 @@ fn validate_workspace_mode(mode: &str) -> Result<(), RuntimeError> {
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     use super::*;
 

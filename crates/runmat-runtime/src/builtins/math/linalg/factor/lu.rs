@@ -11,13 +11,50 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderLuResult};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 const BUILTIN_NAME: &str = "lu";
+
+const LU_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lu-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lu with integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LuIntegerInputExtension"),
+};
+const LU_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lu-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lu with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LuLogicalInputExtension"),
+};
+pub const LU_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [LU_INTEGER_EXTENSION, LU_LOGICAL_EXTENSION];
+const LU_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "RunMat mode admits integer matrices at an explicit binary64 factorization boundary.",
+}];
+pub const LU_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[L,U,P] = lu(integer_A)",
+        inputs: &LU_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Gated RunMat extension; documented MATLAB input classes remain single and double.",
+    }];
 
 const LU_OUTPUT_COMBINED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "LU",
@@ -164,7 +201,7 @@ pub const LU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "lu",
     op_kind: GpuOpKind::Custom("lu-factor"),
-    supported_precisions: &[ScalarType::F64],
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("lu")],
     constant_strategy: ConstantStrategy::InlineLiteral,
@@ -235,6 +272,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(matrix_unary_type),
     descriptor(crate::builtins::math::linalg::factor::lu::LU_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::factor::lu::LU_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::factor::lu::LU_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
 async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -327,7 +366,21 @@ impl LuEval {
         })
     }
 
-    fn from_provider(result: ProviderLuResult, pivot_mode: PivotMode) -> Self {
+    fn from_provider(
+        mut result: ProviderLuResult,
+        pivot_mode: PivotMode,
+        provenance: runmat_accelerate_api::GpuHandleProvenance,
+    ) -> Self {
+        for handle in [
+            &mut result.combined,
+            &mut result.lower,
+            &mut result.upper,
+            &mut result.perm_matrix,
+            &mut result.perm_vector,
+        ] {
+            runmat_accelerate_api::set_handle_provenance(handle, provenance);
+            runmat_accelerate_api::mark_residency(handle);
+        }
         Self {
             combined: Value::GpuTensor(result.combined),
             lower: Value::GpuTensor(result.lower),
@@ -355,18 +408,119 @@ impl Default for PivotMode {
 /// Evaluate `lu` while preserving all output forms for later extraction.
 pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
     let pivot_mode = parse_pivot_mode(args)?;
+    ensure_lu_extensions(&value).await?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => {
             if let Some(eval) = evaluate_gpu(&handle, pivot_mode).await? {
                 return Ok(eval);
             }
+            let owner = gpu_helpers::exact_provider_for_handle(&handle);
+            let explicit = runmat_accelerate_api::handle_is_explicit(&handle);
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(with_lu_context)?;
-            evaluate_host_value(Value::Tensor(tensor), pivot_mode).await
+            let eval = evaluate_host_value(Value::Tensor(tensor), pivot_mode).await?;
+            if explicit {
+                let owner = owner.ok_or_else(|| {
+                    lu_invalid_input("lu: no exact owner for explicit gpuArray input")
+                })?;
+                restore_lu_eval_to_provider(eval, owner)
+            } else {
+                Ok(eval)
+            }
         }
         other => evaluate_host_value(other, pivot_mode).await,
     }
+}
+
+fn restore_lu_eval_to_provider(
+    eval: LuEval,
+    owner: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> BuiltinResult<LuEval> {
+    fn upload(
+        owner: &'static dyn runmat_accelerate_api::AccelProvider,
+        value: &Value,
+    ) -> BuiltinResult<GpuTensorHandle> {
+        let handle = match value {
+            Value::Tensor(tensor) => gpu_helpers::upload_tensor(owner, tensor)
+                .map_err(|error| lu_internal_error(format!("lu: GPU upload failed: {error}")))?,
+            Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(owner, tensor)?,
+            _ => return Err(lu_internal_error("lu: unexpected host factor value")),
+        };
+        Ok(handle)
+    }
+    let mut uploaded = Vec::with_capacity(5);
+    for value in [
+        &eval.combined,
+        &eval.lower,
+        &eval.upper,
+        &eval.perm_matrix,
+        &eval.perm_vector,
+    ] {
+        match upload(owner, value) {
+            Ok(handle) => uploaded.push(handle),
+            Err(error) => {
+                for handle in &uploaded {
+                    gpu_helpers::free_unprotected_exact_owner(handle, &[]);
+                }
+                return Err(error);
+            }
+        }
+    }
+    let mut uploaded = uploaded.into_iter();
+    let mut combined = uploaded.next().expect("combined upload");
+    let mut lower = uploaded.next().expect("lower upload");
+    let mut upper = uploaded.next().expect("upper upload");
+    let mut perm_matrix = uploaded.next().expect("permutation upload");
+    let mut perm_vector = uploaded.next().expect("pivot upload");
+    for handle in [
+        &mut combined,
+        &mut lower,
+        &mut upper,
+        &mut perm_matrix,
+        &mut perm_vector,
+    ] {
+        runmat_accelerate_api::mark_handle_explicit(handle);
+        runmat_accelerate_api::mark_residency(handle);
+    }
+    Ok(LuEval {
+        combined: Value::GpuTensor(combined),
+        lower: Value::GpuTensor(lower),
+        upper: Value::GpuTensor(upper),
+        perm_matrix: Value::GpuTensor(perm_matrix),
+        perm_vector: Value::GpuTensor(perm_vector),
+        pivot_mode: eval.pivot_mode,
+    })
+}
+
+async fn ensure_lu_extensions(value: &Value) -> BuiltinResult<()> {
+    let extension = match value {
+        Value::Int(_) => Some(&LU_INTEGER_EXTENSION),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Some(&LU_INTEGER_EXTENSION),
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() =>
+        {
+            Some(&LU_INTEGER_EXTENSION)
+        }
+        Value::Bool(_) | Value::LogicalArray(_) => Some(&LU_LOGICAL_EXTENSION),
+        Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle) => {
+            Some(&LU_LOGICAL_EXTENSION)
+        }
+        _ => None,
+    };
+    if let Some(extension) = extension {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+    }
+    if crate::builtins::common::validation::value_has_native_integer_class(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        return Err(lu_invalid_input(
+            "lu: integer input lies outside the exact binary64 interval",
+        ));
+    }
+    Ok(())
 }
 
 async fn evaluate_host_value(value: Value, pivot_mode: PivotMode) -> BuiltinResult<LuEval> {
@@ -379,12 +533,76 @@ async fn evaluate_gpu(
     handle: &GpuTensorHandle,
     pivot_mode: PivotMode,
 ) -> BuiltinResult<Option<LuEval>> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) {
         if let Ok(result) = provider.lu(handle).await {
-            return Ok(Some(LuEval::from_provider(result, pivot_mode)));
+            if valid_provider_lu_result(&result, handle, provider) {
+                let provenance = runmat_accelerate_api::handle_provenance(handle)
+                    .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+                return Ok(Some(LuEval::from_provider(result, pivot_mode, provenance)));
+            }
+            free_invalid_provider_lu_result(&result, handle);
         }
     }
     Ok(None)
+}
+
+fn valid_provider_lu_result(
+    result: &ProviderLuResult,
+    input: &GpuTensorHandle,
+    owner: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    let rows = input.shape.first().copied().unwrap_or(1);
+    let outputs = [
+        &result.combined,
+        &result.lower,
+        &result.upper,
+        &result.perm_matrix,
+        &result.perm_vector,
+    ];
+    let expected = [
+        input.shape.clone(),
+        vec![rows, rows],
+        input.shape.clone(),
+        vec![rows, rows],
+        vec![rows, 1],
+    ];
+    outputs.iter().zip(expected.iter()).all(|(output, shape)| {
+        output.shape == *shape
+            && output.device_id == input.device_id
+            && !gpu_helpers::same_gpu_handle(output, input)
+            && runmat_accelerate_api::handle_storage(output)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+            && runmat_accelerate_api::handle_integer_type(output).is_none()
+            && !runmat_accelerate_api::handle_is_logical(output)
+            && runmat_accelerate_api::handle_precision(output)
+                == runmat_accelerate_api::handle_precision(input)
+            && gpu_helpers::exact_provider_for_handle(output)
+                .is_some_and(|candidate| std::ptr::eq(candidate, owner))
+    }) && outputs.iter().enumerate().all(|(index, output)| {
+        outputs
+            .iter()
+            .skip(index + 1)
+            .all(|other| !gpu_helpers::same_gpu_handle(output, other))
+    })
+}
+
+fn free_invalid_provider_lu_result(result: &ProviderLuResult, input: &GpuTensorHandle) {
+    let outputs = [
+        &result.combined,
+        &result.lower,
+        &result.upper,
+        &result.perm_matrix,
+        &result.perm_vector,
+    ];
+    for (index, output) in outputs.iter().enumerate() {
+        if outputs[..index]
+            .iter()
+            .any(|prior| gpu_helpers::same_gpu_handle(output, prior))
+        {
+            continue;
+        }
+        gpu_helpers::free_unprotected_exact_owner(output, &[input]);
+    }
 }
 
 fn parse_pivot_mode(args: &[Value]) -> BuiltinResult<PivotMode> {
@@ -470,7 +688,7 @@ fn lu_factor(mut matrix: RowMajorMatrix) -> BuiltinResult<LuComponents> {
             perm.swap(pivot_row, k);
         }
 
-        if pivot_abs <= EPS {
+        if pivot_abs == 0.0 {
             // Entire column is effectively zero; set multipliers to zero and continue.
             for r in (k + 1)..rows {
                 matrix.set(r, k, Complex64::new(0.0, 0.0));
@@ -492,7 +710,8 @@ fn lu_factor(mut matrix: RowMajorMatrix) -> BuiltinResult<LuComponents> {
     let combined = matrix.clone();
     let lower = build_lower(&matrix);
     let upper = build_upper(&matrix);
-    let permutation = build_permutation(rows, &perm);
+    let mut permutation = build_permutation(rows, &perm);
+    permutation.single = matrix.single;
     let pivot_vector: Vec<f64> = perm.iter().map(|idx| (*idx + 1) as f64).collect();
 
     Ok(LuComponents {
@@ -509,6 +728,7 @@ fn build_lower(matrix: &RowMajorMatrix) -> RowMajorMatrix {
     let cols = matrix.cols;
     let min_dim = rows.min(cols);
     let mut lower = RowMajorMatrix::identity(rows);
+    lower.single = matrix.single;
     for i in 0..rows {
         for j in 0..min_dim {
             if i > j {
@@ -523,6 +743,7 @@ fn build_upper(matrix: &RowMajorMatrix) -> RowMajorMatrix {
     let rows = matrix.rows;
     let cols = matrix.cols;
     let mut upper = RowMajorMatrix::zeros(rows, cols);
+    upper.single = matrix.single;
     for i in 0..rows {
         for j in 0..cols {
             if i <= j {
@@ -562,8 +783,17 @@ fn matrix_to_value(matrix: &RowMajorMatrix) -> BuiltinResult<Value> {
                 data.push((v.re, v.im));
             }
         }
-        let tensor = ComplexTensor::new(data, vec![matrix.rows, matrix.cols])
-            .map_err(|e| lu_internal_error(format!("lu: {e}")))?;
+        let tensor = if matrix.single {
+            ComplexTensor::from_f32(
+                data.into_iter()
+                    .map(|(re, im)| (re as f32, im as f32))
+                    .collect(),
+                vec![matrix.rows, matrix.cols],
+            )
+        } else {
+            ComplexTensor::new(data, vec![matrix.rows, matrix.cols])
+        }
+        .map_err(|e| lu_internal_error(format!("lu: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     } else {
         let mut data = Vec::with_capacity(matrix.rows * matrix.cols);
@@ -573,8 +803,15 @@ fn matrix_to_value(matrix: &RowMajorMatrix) -> BuiltinResult<Value> {
                 data.push(matrix.data[idx].re);
             }
         }
-        let tensor = Tensor::new(data, vec![matrix.rows, matrix.cols])
-            .map_err(|e| lu_internal_error(format!("lu: {e}")))?;
+        let tensor = if matrix.single {
+            Tensor::from_f32(
+                data.into_iter().map(|value| value as f32).collect(),
+                vec![matrix.rows, matrix.cols],
+            )
+        } else {
+            Tensor::new(data, vec![matrix.rows, matrix.cols])
+        }
+        .map_err(|e| lu_internal_error(format!("lu: {e}")))?;
         Ok(Value::Tensor(tensor))
     }
 }
@@ -591,6 +828,7 @@ struct RowMajorMatrix {
     rows: usize,
     cols: usize,
     data: Vec<Complex64>,
+    single: bool,
 }
 
 impl RowMajorMatrix {
@@ -599,6 +837,7 @@ impl RowMajorMatrix {
             rows,
             cols,
             data: vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)],
+            single: false,
         }
     }
 
@@ -615,6 +854,7 @@ impl RowMajorMatrix {
             rows: 1,
             cols: 1,
             data: vec![value],
+            single: false,
         }
     }
 
@@ -624,15 +864,21 @@ impl RowMajorMatrix {
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
+        let values = tensor::tensor_values_f64_cow(tensor);
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
                 let idx_col_major = row + col * rows;
                 let idx_row_major = row * cols + col;
-                data[idx_row_major] = Complex64::new(tensor.data[idx_col_major], 0.0);
+                data[idx_row_major] = Complex64::new(values[idx_col_major], 0.0);
             }
         }
-        Ok(Self { rows, cols, data })
+        Ok(Self {
+            rows,
+            cols,
+            data,
+            single: tensor.numeric_dtype() == runmat_value::NumericDType::F32,
+        })
     }
 
     fn from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Self> {
@@ -646,11 +892,16 @@ impl RowMajorMatrix {
             for row in 0..rows {
                 let idx_col_major = row + col * rows;
                 let idx_row_major = row * cols + col;
-                let (re, im) = tensor.data[idx_col_major];
+                let (re, im) = tensor.materialize_f64()[idx_col_major];
                 data[idx_row_major] = Complex64::new(re, im);
             }
         }
-        Ok(Self { rows, cols, data })
+        Ok(Self {
+            rows,
+            cols,
+            data,
+            single: tensor.numeric_dtype() == runmat_value::NumericDType::F32,
+        })
     }
 
     fn get(&self, row: usize, col: usize) -> Complex64 {
@@ -676,7 +927,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor as CMatrix, ResolveContext, Tensor as Matrix, Type};
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{ComplexTensor as CMatrix, IntegerStorage, Tensor as Matrix};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -738,6 +992,89 @@ pub(crate) mod tests {
         assert!(codes.contains(&"RM.LU.INTERNAL"));
     }
 
+    #[test]
+    fn lu_matrix_conversion_reads_typed_integer_storage_exactly() {
+        let tensor = Matrix::new_integer(IntegerStorage::I16(vec![4, 6, 3, 3]), vec![2, 2])
+            .expect("typed integer tensor");
+
+        let matrix = RowMajorMatrix::from_tensor(&tensor).expect("matrix");
+        assert_eq!(matrix.rows, 2);
+        assert_eq!(matrix.cols, 2);
+        assert_eq!(
+            matrix.data,
+            vec![
+                Complex64::new(4.0, 0.0),
+                Complex64::new(3.0, 0.0),
+                Complex64::new(6.0, 0.0),
+                Complex64::new(3.0, 0.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn lu_compatibility_mode_gates_integer_and_logical_extensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = Matrix::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).unwrap();
+        let error = match evaluate(Value::Tensor(integer), &[]) {
+            Err(error) => error,
+            Ok(_) => panic!("integer extension must be gated"),
+        };
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:LuIntegerInputExtension")
+        );
+        let error = match evaluate(Value::Bool(true), &[]) {
+            Err(error) => error,
+            Ok(_) => panic!("logical extension must be gated"),
+        };
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:LuLogicalInputExtension")
+        );
+    }
+
+    #[test]
+    fn lu_rejects_integer_values_outside_exact_binary64_interval() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let integer =
+            Matrix::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap();
+        let error = match evaluate(Value::Tensor(integer), &[]) {
+            Err(error) => error,
+            Ok(_) => panic!("wide integer must reject"),
+        };
+        assert_eq!(error.identifier(), LU_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn lu_preserves_single_precision_outputs() {
+        let input = Matrix::from_f32(vec![2.0, 1.0, 1.0, 2.0], vec![2, 2]).unwrap();
+        let eval = evaluate(Value::Tensor(input), &[]).expect("single LU");
+        for output in [
+            eval.combined(),
+            eval.lower(),
+            eval.upper(),
+            eval.permutation_matrix(),
+        ] {
+            let Value::Tensor(tensor) = output else {
+                panic!("expected real tensor");
+            };
+            assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F32);
+        }
+    }
+
+    #[test]
+    fn lu_does_not_treat_small_nonzero_pivot_as_zero() {
+        let input = Matrix::new(vec![1.0e-14, 0.0, 0.0, 2.0e-14], vec![2, 2]).unwrap();
+        let eval = evaluate(Value::Tensor(input.clone()), &[]).expect("small-scale LU");
+        let l = tensor_from_value(eval.lower());
+        let u = tensor_from_value(eval.upper());
+        let p = tensor_from_value(eval.permutation_matrix());
+        let pa = crate::builtins::common::matrix::matrix_mul(&p, &input).unwrap();
+        let product = crate::builtins::common::matrix::matrix_mul(&l, &u).unwrap();
+        assert_tensor_close(&pa, &product, 1e-28);
+    }
+
     fn row_major_matmul(a: &RowMajorMatrix, b: &RowMajorMatrix) -> RowMajorMatrix {
         assert_eq!(a.cols, b.rows, "incompatible shapes for matmul");
         let mut out = RowMajorMatrix::zeros(a.rows, b.cols);
@@ -755,7 +1092,7 @@ pub(crate) mod tests {
 
     fn assert_tensor_close(a: &Matrix, b: &Matrix, tol: f64) {
         assert_eq!(a.shape, b.shape);
-        for (lhs, rhs) in a.data.iter().zip(&b.data) {
+        for (lhs, rhs) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
             assert!(
                 (lhs - rhs).abs() <= tol,
                 "mismatch: lhs={lhs}, rhs={rhs}, tol={tol}"
@@ -835,7 +1172,7 @@ pub(crate) mod tests {
         let u = tensor_from_value(eval.upper());
         let p = tensor_from_value(eval.permutation_matrix());
 
-        assert!(u.data.iter().any(|&v| v.abs() <= 1e-12));
+        assert!(u.materialize_f64().iter().any(|&v| v.abs() <= 1e-12));
 
         let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
         let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
@@ -851,7 +1188,7 @@ pub(crate) mod tests {
         assert_eq!(eval.pivot_mode(), PivotMode::Vector);
         let pivot = tensor_from_value(eval.pivot_vector());
         assert_eq!(pivot.shape, vec![2, 1]);
-        assert_eq!(pivot.data, vec![2.0, 1.0]);
+        assert_eq!(pivot.materialize_f64(), vec![2.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -954,7 +1291,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let host = Matrix::new(vec![10.0, 3.0, 7.0, 2.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &host.data,
+                data: &host.materialize_f64(),
                 shape: &host.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -980,7 +1317,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let host = Matrix::new(vec![4.0, 6.0, 3.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &host.data,
+                data: &host.materialize_f64(),
                 shape: &host.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1002,27 +1339,28 @@ pub(crate) mod tests {
         let l = tensor_from_value(eval.lower());
         let u = tensor_from_value(eval.upper());
         let p = tensor_from_value(eval.permutation_matrix());
-        assert_eq!(l.data, vec![1.0]);
-        assert_eq!(u.data, vec![5.0]);
-        assert_eq!(p.data, vec![1.0]);
+        assert_eq!(l.materialize_f64(), vec![1.0]);
+        assert_eq!(u.materialize_f64(), vec![5.0]);
+        assert_eq!(p.materialize_f64(), vec![1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn lu_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
         let host = Matrix::new(
             vec![2.0, 4.0, -2.0, 1.0, -6.0, 7.0, 1.0, 0.0, 2.0],
             vec![3, 3],
         )
         .unwrap();
         let cpu_eval = evaluate(Value::Tensor(host.clone()), &[]).expect("cpu evaluate");
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &host.data,
+            data: &host.materialize_f64(),
             shape: &host.shape,
         };
         let handle = provider.upload(&view).expect("upload");

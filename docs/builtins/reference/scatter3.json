@@ -34,10 +34,11 @@
   },
   "description": "`scatter3` creates 3-D marker plots from matching x/y/z coordinates and returns a graphics handle. It supports MATLAB-compatible forms for marker sizing, coloring, fill options, axes targeting, and plot property updates.",
   "behaviors": [
-    "`scatter3(x, y, z)` requires matching element counts across all three inputs.",
+    "`scatter3(x, y, z)` requires matching element counts across all three inputs; MATLAB documents all eight integer classes for each coordinate and for marker size `S`.",
     "The builtin returns a scatter handle for the created plot object.",
     "3-D scatter plots work naturally with `view` and `zlabel`, and all camera state remains subplot-local.",
-    "GPU-resident coordinate buffers can feed the renderer directly on the happy path; otherwise RunMat gathers once before plotting.",
+    "Host X/Y/Z graphics properties and FIG scene payloads retain authoritative f64, f32, or native integer class, shape, and exact values. A derived f32 vertex cache is used only for rendering and never becomes property or serialization authority.",
+    "GPU-resident coordinate buffers can feed the renderer directly on the supported single/double path; otherwise RunMat gathers exactly through the handle's owning provider before plotting.",
     "Marker size and display-name style workflows are handled through the shared plotting object/property system."
   ],
   "examples": [
@@ -63,11 +64,11 @@
   "faqs": [
     {
       "question": "How do I size scatter3 points by a data variable?",
-      "answer": "Pass a size vector as the fourth argument. Each element controls the marker area for the corresponding point.\n\n```matlab\nt = linspace(0, 4*pi, 200);\nsizes = linspace(5, 50, 200);\nscatter3(cos(t), sin(t), t, sizes);\n```\n\nA scalar fourth argument sets all points to the same size."
+      "answer": "Pass a size vector as the fourth argument, for example `scatter3(cos(t), sin(t), t, sizes)`. Each element controls the corresponding marker area; a scalar fourth argument sets every point to the same size."
     },
     {
       "question": "Can I color scatter3 points by a fourth variable?",
-      "answer": "Pass a color vector as the fifth argument after the size vector. Each value maps through the active colormap. Add `colorbar` to show the mapping.\n\n```matlab\nscatter3(x, y, z, 20, myValues);\ncolormap('turbo');\ncolorbar;\n```"
+      "answer": "Pass a color vector as the fifth argument after the size vector, for example `scatter3(x, y, z, 20, myValues)`. Each value maps through the active colormap; add `colorbar` to show the mapping."
     },
     {
       "question": "How do I rotate or orbit a scatter3 plot?",
@@ -116,7 +117,7 @@
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/scatter3.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/scatter3.rs"
   },
-  "gpu_residency": "`scatter3` preserves GPU residency when the plotting path can consume exported coordinate buffers directly. If a direct GPU path is not available for the active combination, RunMat gathers once and renders the same plot semantics on the host path.",
+  "gpu_residency": "`scatter3` preserves GPU residency when the plotting path can consume exported single/double coordinate buffers directly. If a direct path is unavailable, RunMat gathers through the input handle's owning provider and renders the same plot semantics on the host path; host integer source data remains exact and authoritative independently of renderer materialization.",
   "gpu_behavior": [
     "The preferred path keeps point buffers on the device and emits renderer-ready geometry without a full host round-trip.",
     "Subplot, view, and object-handle behavior is the same on both the GPU and fallback host paths."

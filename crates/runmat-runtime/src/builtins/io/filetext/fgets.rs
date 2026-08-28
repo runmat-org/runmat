@@ -1,15 +1,21 @@
 //! MATLAB-compatible `fgets` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{
     helpers::{bytes_to_char_array, empty_numeric_row, numeric_row, read_text_line},
     registry,
@@ -18,6 +24,101 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const BUILTIN_NAME: &str = "fgets";
 const NCHAR_NONNEGATIVE_INTEGER_DETAIL: &str = "nchar must be a non-negative integer scalar";
+const NCHAR_OUT_OF_RANGE_DETAIL: &str = "nchar is out of range";
+
+macro_rules! fgets_extension {
+    ($name:ident, $id:literal, $description:literal, $error:literal) => {
+        const $name: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: $description,
+            error_identifier: Some($error),
+        };
+    };
+}
+fgets_extension!(
+    FGETS_INTEGER_ID_EXTENSION,
+    "fgets-integer-fileid",
+    "integer-class fgets file identifiers are a RunMat extension",
+    "RunMat:compatibility:FgetsIntegerIdExtension"
+);
+fgets_extension!(
+    FGETS_INTEGER_NCHAR_EXTENSION,
+    "fgets-integer-nchar",
+    "integer-class fgets nchar values are a RunMat extension",
+    "RunMat:compatibility:FgetsIntegerNcharExtension"
+);
+fgets_extension!(
+    FGETS_SINGLE_ID_EXTENSION,
+    "fgets-single-fileid",
+    "single-precision fgets file identifiers are a RunMat extension",
+    "RunMat:compatibility:FgetsSingleIdExtension"
+);
+fgets_extension!(
+    FGETS_SINGLE_NCHAR_EXTENSION,
+    "fgets-single-nchar",
+    "single-precision fgets nchar values are a RunMat extension",
+    "RunMat:compatibility:FgetsSingleNcharExtension"
+);
+fgets_extension!(
+    FGETS_RESIDENT_ID_EXTENSION,
+    "fgets-resident-fileid",
+    "provider-resident fgets file identifiers are a RunMat extension",
+    "RunMat:compatibility:FgetsResidentIdExtension"
+);
+fgets_extension!(
+    FGETS_RESIDENT_NCHAR_EXTENSION,
+    "fgets-resident-nchar",
+    "provider-resident fgets nchar values are a RunMat extension",
+    "RunMat:compatibility:FgetsResidentNcharExtension"
+);
+pub const FGETS_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    FGETS_INTEGER_ID_EXTENSION,
+    FGETS_INTEGER_NCHAR_EXTENSION,
+    FGETS_SINGLE_ID_EXTENSION,
+    FGETS_SINGLE_NCHAR_EXTENSION,
+    FGETS_RESIDENT_ID_EXTENSION,
+    FGETS_RESIDENT_NCHAR_EXTENSION,
+];
+
+const FGETS_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "MATLAB-compatible file identifiers are integer-valued doubles; all eight typed integer classes are one independently gated RunMat extension and are checked exactly against the registry identifier domain.",
+    }];
+const FGETS_INTEGER_NCHAR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "nchar",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "MATLAB-compatible nchar values are non-negative integer-valued doubles; all eight typed integer classes are one independently gated RunMat extension and are converted exactly to the runtime length domain.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "tline = fgets(integer_fileID, ...)",
+        inputs: &FGETS_INTEGER_ID_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The identifier is validated exactly before registry access; a successful read returns a host character row and end-of-file returns the double sentinel -1.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "tline = fgets(fileID, integer_nchar)",
+        inputs: &FGETS_INTEGER_NCHAR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The character limit is validated exactly before reading; line and terminator outputs remain host values independent of the nchar class.",
+    },
+];
 
 const FGETS_OUTPUT_LINE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tline",
@@ -187,6 +288,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fgets_type),
     descriptor(crate::builtins::io::filetext::fgets::FGETS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::filetext::fgets::INTEGER_CAPABILITIES),
+    extensions(crate::builtins::io::filetext::fgets::FGETS_EXTENSIONS),
     builtin_path = "crate::builtins::io::filetext::fgets"
 )]
 async fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -238,7 +341,12 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
         ));
     }
 
+    preflight_fid(fid_value)?;
+    if let Some(nchar) = rest.first() {
+        preflight_nchar(nchar)?;
+    }
     let fid_host = gather_value(fid_value).await?;
+    preflight_fid(&fid_host)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
         return Err(fgets_error_with_detail(
@@ -265,7 +373,6 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
         registry::shared_handle(fid).ok_or_else(|| fgets_error(&FGETS_ERROR_INVALID_IDENTIFIER))?;
 
     let nchar_limit = parse_nchar(rest).await?;
-    let max_bytes = apply_matlab_nchar_limit(nchar_limit);
     let mut guard = handle.lock().map_err(|_| {
         fgets_error_with_detail(
             &FGETS_ERROR_INTERNAL,
@@ -275,8 +382,12 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
     let file = guard
         .as_mut()
         .ok_or_else(|| fgets_error(&FGETS_ERROR_INVALID_IDENTIFIER))?;
-    let read = read_text_line(file, max_bytes, BUILTIN_NAME)
+    let read = read_text_line(file, nchar_limit, BUILTIN_NAME)
         .map_err(|e| fgets_error_with_detail(&FGETS_ERROR_IO, e.message()))?;
+    drop(guard);
+    if read.encountered_eof {
+        registry::mark_eof_encountered(fid);
+    }
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
     }
@@ -299,6 +410,66 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
     Ok(FgetsEval::new(line_value, terminators_value))
 }
 
+fn preflight_fid(value: &Value) -> BuiltinResult<()> {
+    preflight_numeric_role(
+        value,
+        &FGETS_INTEGER_ID_EXTENSION,
+        &FGETS_SINGLE_ID_EXTENSION,
+        &FGETS_RESIDENT_ID_EXTENSION,
+    )
+}
+
+fn preflight_nchar(value: &Value) -> BuiltinResult<()> {
+    preflight_numeric_role(
+        value,
+        &FGETS_INTEGER_NCHAR_EXTENSION,
+        &FGETS_SINGLE_NCHAR_EXTENSION,
+        &FGETS_RESIDENT_NCHAR_EXTENSION,
+    )
+}
+
+fn preflight_numeric_role(
+    value: &Value,
+    integer_extension: &BuiltinExtensionDescriptor,
+    single_extension: &BuiltinExtensionDescriptor,
+    resident_extension: &BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    match value {
+        Value::Num(_) => Ok(()),
+        Value::Int(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
+        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
+        }
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            crate::compatibility::ensure_builtin_extension_enabled(single_extension, BUILTIN_NAME)
+        }
+        Value::Tensor(_) => Ok(()),
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                resident_extension,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    integer_extension,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    single_extension,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 async fn gather_value(value: &Value) -> BuiltinResult<Value> {
     gather_if_needed_async(value)
         .await
@@ -314,15 +485,6 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             ));
         }
         Ok(n as i32)
-    }
-
-    fn checked_i64_to_i32(n: i64) -> BuiltinResult<i32> {
-        i32::try_from(n).map_err(|_| {
-            fgets_error_with_detail(
-                &FGETS_ERROR_INVALID_INPUT,
-                "file identifier is out of range",
-            )
-        })
     }
 
     match value {
@@ -341,9 +503,23 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             }
             checked_f64_to_i32(*n)
         }
-        Value::Int(i) => checked_i64_to_i32(i.to_i64()),
-        Value::Tensor(t) if t.data.len() == 1 => {
-            let n = t.data[0];
+        Value::Int(i) => i.try_to_i32().ok_or_else(|| {
+            fgets_error_with_detail(
+                &FGETS_ERROR_INVALID_INPUT,
+                "file identifier is out of range",
+            )
+        }),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return value.try_to_i32().ok_or_else(|| {
+                    fgets_error_with_detail(
+                        &FGETS_ERROR_INVALID_INPUT,
+                        "file identifier is out of range",
+                    )
+                });
+            }
+            let n = tensor::tensor_value_f64(t, 0);
             if !n.is_finite() {
                 return Err(fgets_error_with_detail(
                     &FGETS_ERROR_INVALID_INPUT,
@@ -370,12 +546,34 @@ async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
         return Ok(None);
     }
     let value = gather_value(&args[0]).await?;
+    preflight_nchar(&value)?;
+
+    fn checked_f64_to_usize(n: f64) -> BuiltinResult<usize> {
+        let upper_exclusive = usize::MAX as f64 + 1.0;
+        if n >= upper_exclusive {
+            return Err(fgets_error_with_detail(
+                &FGETS_ERROR_INVALID_INPUT,
+                NCHAR_OUT_OF_RANGE_DETAIL,
+            ));
+        }
+        Ok(n as usize)
+    }
+
+    fn checked_int_to_usize(value: &runmat_value::IntValue) -> BuiltinResult<usize> {
+        if let Some(value) = value.try_to_usize() {
+            return Ok(value);
+        }
+        let detail = if value.try_to_u64().is_some() {
+            NCHAR_OUT_OF_RANGE_DETAIL
+        } else {
+            NCHAR_NONNEGATIVE_INTEGER_DETAIL
+        };
+        Err(fgets_error_with_detail(&FGETS_ERROR_INVALID_INPUT, detail))
+    }
+
     match value {
         Value::Num(n) => {
             if !n.is_finite() {
-                if n.is_sign_positive() {
-                    return Ok(None);
-                }
                 return Err(fgets_error_with_detail(
                     &FGETS_ERROR_INVALID_INPUT,
                     NCHAR_NONNEGATIVE_INTEGER_DETAIL,
@@ -393,24 +591,16 @@ async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
                     NCHAR_NONNEGATIVE_INTEGER_DETAIL,
                 ));
             }
-            Ok(Some(n as usize))
+            checked_f64_to_usize(n).map(Some)
         }
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(fgets_error_with_detail(
-                    &FGETS_ERROR_INVALID_INPUT,
-                    NCHAR_NONNEGATIVE_INTEGER_DETAIL,
-                ));
+        Value::Int(i) => checked_int_to_usize(&i).map(Some),
+        Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return checked_int_to_usize(&value).map(Some);
             }
-            Ok(Some(raw as usize))
-        }
-        Value::Tensor(t) if t.data.len() == 1 => {
-            let n = t.data[0];
+            let n = tensor::tensor_value_f64(&t, 0);
             if !n.is_finite() {
-                if n.is_sign_positive() {
-                    return Ok(None);
-                }
                 return Err(fgets_error_with_detail(
                     &FGETS_ERROR_INVALID_INPUT,
                     NCHAR_NONNEGATIVE_INTEGER_DETAIL,
@@ -428,7 +618,7 @@ async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
                     NCHAR_NONNEGATIVE_INTEGER_DETAIL,
                 ));
             }
-            Ok(Some(n as usize))
+            checked_f64_to_usize(n).map(Some)
         }
         _ => Err(fgets_error_with_detail(
             &FGETS_ERROR_INVALID_INPUT,
@@ -442,10 +632,6 @@ fn permission_allows_read(permission: &str) -> bool {
     lower.starts_with('r') || lower.contains('+')
 }
 
-fn apply_matlab_nchar_limit(nchar_limit: Option<usize>) -> Option<usize> {
-    nchar_limit.map(|nchar| nchar.saturating_sub(1))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -453,8 +639,8 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::IntValue;
     use runmat_time::system_time_now;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
     use std::path::{Path, PathBuf};
     use std::time::UNIX_EPOCH;
 
@@ -485,6 +671,133 @@ pub(crate) mod tests {
         assert!(labels.contains(&"tline = fgets(fid)"));
         assert!(labels.contains(&"tline = fgets(fid, nchar)"));
         assert!(labels.contains(&"[tline, terminators] = fgets(fid, ...)"));
+    }
+
+    #[test]
+    fn fgets_integer_capabilities_cover_file_identifier_and_character_limit() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 2);
+        for capability in INTEGER_CAPABILITIES {
+            assert_eq!(capability.inputs[0].classes.len(), 8);
+            assert_eq!(
+                capability.inputs[0].availability,
+                BuiltinIntegerInputAvailability::RunMatOnly
+            );
+        }
+    }
+
+    #[test]
+    fn fgets_typed_single_and_resident_roles_are_independently_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let integer_id = preflight_fid(&Value::Int(IntValue::I32(3))).unwrap_err();
+        assert_eq!(
+            integer_id.identifier(),
+            Some("RunMat:compatibility:FgetsIntegerIdExtension")
+        );
+        let integer_nchar = preflight_nchar(&Value::Int(IntValue::I32(3))).unwrap_err();
+        assert_eq!(
+            integer_nchar.identifier(),
+            Some("RunMat:compatibility:FgetsIntegerNcharExtension")
+        );
+
+        let single_id = Tensor::new_with_dtype(vec![3.0], vec![1, 1], NumericDType::F32)
+            .expect("single identifier");
+        let single_id = preflight_fid(&Value::Tensor(single_id)).unwrap_err();
+        assert_eq!(
+            single_id.identifier(),
+            Some("RunMat:compatibility:FgetsSingleIdExtension")
+        );
+        let single_nchar =
+            Tensor::new_with_dtype(vec![3.0], vec![1, 1], NumericDType::F32).expect("single nchar");
+        let single_nchar = preflight_nchar(&Value::Tensor(single_nchar)).unwrap_err();
+        assert_eq!(
+            single_nchar.identifier(),
+            Some("RunMat:compatibility:FgetsSingleNcharExtension")
+        );
+
+        test_support::with_test_provider(|provider| {
+            let host = [3.0f64];
+            let view = HostTensorView {
+                data: &host,
+                shape: &[1, 1],
+            };
+            let resident_id = Value::GpuTensor(provider.upload(&view).expect("upload identifier"));
+            let resident_id = preflight_fid(&resident_id).unwrap_err();
+            assert_eq!(
+                resident_id.identifier(),
+                Some("RunMat:compatibility:FgetsResidentIdExtension")
+            );
+
+            let resident_nchar = Value::GpuTensor(provider.upload(&view).expect("upload nchar"));
+            let resident_nchar = preflight_nchar(&resident_nchar).unwrap_err();
+            assert_eq!(
+                resident_nchar.identifier(),
+                Some("RunMat:compatibility:FgetsResidentNcharExtension")
+            );
+        });
+    }
+
+    #[test]
+    fn fgets_nchar_rejects_nonfinite_fractional_negative_and_out_of_range_doubles() {
+        for invalid in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN, -1.0, 1.5] {
+            assert!(futures::executor::block_on(parse_nchar(&[Value::Num(invalid)])).is_err());
+        }
+        let out_of_range = usize::MAX as f64 + 1.0;
+        assert!(futures::executor::block_on(parse_nchar(&[Value::Num(out_of_range)])).is_err());
+    }
+
+    #[test]
+    fn typed_fid_and_nchar_parsers_preserve_integer_bounds() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
+        assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+
+        let fid_tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+            .expect("typed fid tensor");
+        assert_eq!(parse_fid(&Value::Tensor(fid_tensor)).unwrap(), 7);
+        let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed fid tensor");
+        assert!(parse_fid(&Value::Tensor(fid_too_large)).is_err());
+
+        let nchar =
+            futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::U16(64))])).unwrap();
+        assert_eq!(nchar, Some(64));
+        let nchar_tensor = Tensor::new_integer(IntegerStorage::U16(vec![64]), vec![1, 1])
+            .expect("typed nchar tensor");
+        let nchar_from_tensor =
+            futures::executor::block_on(parse_nchar(&[Value::Tensor(nchar_tensor)])).unwrap();
+        assert_eq!(nchar_from_tensor, Some(64));
+        let negative_nchar_tensor = Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1])
+            .expect("typed nchar tensor");
+        assert!(
+            futures::executor::block_on(parse_nchar(&[Value::Tensor(negative_nchar_tensor)]))
+                .is_err()
+        );
+        assert!(futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::I8(-1))])).is_err());
+    }
+
+    #[test]
+    fn fgets_typed_scalar_parameters_ignore_poisoned_f64_mirrors() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+        for storage in classes {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
+            let value = Value::Tensor(tensor);
+            assert_eq!(parse_fid(&value).unwrap(), 7);
+            assert_eq!(
+                futures::executor::block_on(parse_nchar(&[value])).unwrap(),
+                Some(7)
+            );
+        }
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
@@ -535,7 +848,7 @@ pub(crate) mod tests {
         let ltout = eval.outputs()[1].clone();
         match ltout {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![10.0]);
+                assert_eq!(t.materialize_f64(), vec![10.0]);
                 assert_eq!(t.shape, vec![1, 1]);
             }
             other => panic!("expected numeric tensor, got {other:?}"),
@@ -575,15 +888,25 @@ pub(crate) mod tests {
         match eval.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
-                assert_eq!(text, "abcd");
+                assert_eq!(text, "abcde");
             }
             other => panic!("expected char array, got {other:?}"),
         }
         match &eval.outputs()[1] {
             Value::Tensor(t) => {
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty numeric tensor, got {other:?}"),
+        }
+
+        let next =
+            run_evaluate(&Value::Num(handle.fid as f64), &[Value::Num(5.0)]).expect("next read");
+        match next.first_output() {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, "fghij");
+            }
+            other => panic!("expected char array, got {other:?}"),
         }
 
         test_support::fs::remove_file(&path).unwrap();
@@ -628,12 +951,12 @@ pub(crate) mod tests {
         match first.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
-                assert_eq!(text, "AB");
+                assert_eq!(text, "ABC");
             }
             other => panic!("expected char array, got {other:?}"),
         }
         match &first.outputs()[1] {
-            Value::Tensor(t) => assert!(t.data.is_empty()),
+            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             other => panic!("expected empty numeric tensor, got {other:?}"),
         }
 
@@ -641,12 +964,12 @@ pub(crate) mod tests {
         match second.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
-                assert_eq!(text, "CDE\r\n");
+                assert_eq!(text, "DE\r\n");
             }
             other => panic!("expected char array, got {other:?}"),
         }
         match &second.outputs()[1] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![13.0, 10.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![13.0, 10.0]),
             other => panic!("expected CRLF terminators, got {other:?}"),
         }
 
@@ -682,9 +1005,38 @@ pub(crate) mod tests {
         }
         match &outputs[1] {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![13.0, 10.0]);
+                assert_eq!(t.materialize_f64(), vec![13.0, 10.0]);
             }
             other => panic!("expected numeric tensor, got {other:?}"),
+        }
+
+        test_support::fs::remove_file(&path).unwrap();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fgets_consumes_lfcr_as_one_newline_sequence() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fgets_lfcr");
+        test_support::fs::write(&path, b"first\n\rsecond").unwrap();
+        let handle = fopen_path(&path);
+
+        let first = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("first");
+        match first.first_output() {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, "first\n\r");
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+        let second = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("second");
+        match second.first_output() {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, "second");
+            }
+            other => panic!("expected char array, got {other:?}"),
         }
 
         test_support::fs::remove_file(&path).unwrap();
@@ -723,6 +1075,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_nchar_zero_returns_empty_char() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_zero");
@@ -748,7 +1101,8 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn fgets_nchar_one_returns_empty_char() {
+    fn fgets_nchar_one_returns_one_character() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_one");
@@ -763,10 +1117,10 @@ pub(crate) mod tests {
         match eval.first_output() {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
-                assert_eq!(ca.cols, 0);
-                assert!(ca.data.is_empty());
+                assert_eq!(ca.cols, 1);
+                assert_eq!(ca.data, vec!['h']);
             }
-            other => panic!("expected empty char array, got {other:?}"),
+            other => panic!("expected one-character row, got {other:?}"),
         }
 
         test_support::fs::remove_file(&path).unwrap();
@@ -775,6 +1129,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgets_gathers_gpu_scalar_arguments() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_gpu_args");
@@ -800,7 +1155,7 @@ pub(crate) mod tests {
             match eval.first_output() {
                 Value::CharArray(ca) => {
                     let text: String = ca.data.iter().collect();
-                    assert_eq!(text, "ab");
+                    assert_eq!(text, "abc");
                 }
                 other => panic!("expected char array, got {other:?}"),
             }

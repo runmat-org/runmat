@@ -143,6 +143,21 @@ impl BindGroupCache {
         }
     }
 
+    /// Release every bind group and reverse-index entry owned by this logical
+    /// provider session.
+    ///
+    /// This must run before session buffers are returned to a shared physical
+    /// allocation pool so no cached bind group keeps those buffers alive.
+    pub fn clear(&self) {
+        if let Ok(mut index) = self.index.lock() {
+            index.clear();
+        }
+        if let Ok(mut map) = self.inner.lock() {
+            map.clear();
+        }
+        self.reset_counters();
+    }
+
     pub fn per_layout_counters(&self) -> HashMap<usize, (u64, u64)> {
         self.per_layout
             .lock()

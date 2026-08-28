@@ -13,7 +13,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Always constructs a host logical array; gpuArray inputs are used only for sizing."
+    "notes": "A `like` prototype preserves supported sparse or gpuArray placement while the output class remains logical."
   },
   "fusion": {
     "elementwise": false,
@@ -31,10 +31,10 @@
     "`true()` returns the scalar logical `true`.",
     "`true(n)` returns an n x n logical array of true values.",
     "`true(m, n, ...)` returns a logical array with the requested dimensions.",
-    "`true(sz)` accepts a size vector (row or column) and returns an array with prod(sz) elements arranged using MATLAB column-major ordering.",
-    "`true(A)` returns a logical array of true with the same size as `A`.",
-    "`true(___, 'like', prototype)` uses the prototype only for sizing; the result is still a host logical array.",
-    "`true(___, 'logical')` is accepted for MATLAB compatibility and has no effect."
+    "`true(sz)` accepts a row size vector and returns an array with prod(sz) elements arranged using MATLAB column-major ordering.",
+    "`true(___, 'like', prototype)` uses the preceding size arguments and preserves supported sparse or gpuArray placement from the prototype; the output class remains logical.",
+    "All eight integer classes are accepted as exact size controls. Negative signed dimensions produce empty dimensions.",
+    "`true(A)` shape inference, single-precision size controls, resident size controls, and the trailing `'logical'` option are optional RunMat language extensions."
   ],
   "examples": [
     {
@@ -48,8 +48,8 @@
       "output": "mask =\n  2x1x3 logical array\n     1\n     1\n     1\n     1\n     1\n     1"
     },
     {
-      "description": "Creating a true mask with the same size as an existing array",
-      "input": "A = rand(3, 2);\nmask = true(A)",
+      "description": "Creating a true mask like an existing array",
+      "input": "A = rand(3, 2);\nmask = true(size(A), 'like', A)",
       "output": "mask =\n  3x2 logical array\n     1     1\n     1     1\n     1     1"
     }
   ],
@@ -64,15 +64,15 @@
     },
     {
       "question": "How does `true(sz)` interpret a size vector?",
-      "answer": "A row or column vector is treated as the full set of dimensions, so `true([2 3 4])` yields a 2x3x4 logical array."
+      "answer": "A row vector is treated as the full set of dimensions, so `true([2 3 4])` yields a 2x3x4 logical array."
     },
     {
       "question": "Does `true` keep results on the GPU?",
-      "answer": "No. The builtin always returns a host logical array. gpuArray inputs are only used to infer the output size."
+      "answer": "Yes. When a gpuArray is supplied after `like`, the logical result is allocated through that array's owning provider and remains resident."
     },
     {
       "question": "Is the `'logical'` option required?",
-      "answer": "No. `true` always returns logical values; the `'logical'` option is accepted only for MATLAB compatibility."
+      "answer": "No. `true` always returns logical values. RunMat can accept the redundant option when language extensions are enabled."
     }
   ],
   "links": [

@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 async fn handle_identity_and_delete_impl() {
     let h1 = runmat_runtime::call_builtin_async(

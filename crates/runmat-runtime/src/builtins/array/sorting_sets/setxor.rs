@@ -1,21 +1,27 @@
 //! MATLAB-compatible `setxor` builtin with host-authoritative set semantics.
 //!
 //! Supports element-wise and row-wise symmetric differences with sorted or stable
-//! ordering and index outputs. GPU tensors are gathered to host memory today,
-//! matching the other set-operation builtins when no provider hook exists.
+//! ordering and index outputs. GPU tensors use typed host fallback and their
+//! public outputs are restored to the owning provider.
 
 use std::cmp::Ordering;
 use std::collections::{hash_map::Entry, HashMap};
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, NumericDType, StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
+    NumericScalar, NumericStorage, StringArray, Tensor, Value,
+};
 
-use super::type_resolvers::set_values_output_type;
+use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -25,6 +31,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::setxor")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -34,12 +41,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: true,
-    notes: "`setxor` currently gathers GPU tensors and evaluates on the host.",
+    notes: "`setxor` gathers through exact typed fallback and restores symmetric-difference values plus double indices to the input owner.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -228,6 +235,18 @@ const SETXOR_ERRORS: [BuiltinErrorDescriptor; 9] = [
     SETXOR_ERROR_INTERNAL,
 ];
 
+const SETXOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[C, ia, ib] = setxor(integer_A, integer_B, options)",
+        inputs: &super::BINARY_SET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "C preserves the common nondouble integer class, including when paired with double; ia and ib are one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback.",
+    }];
+
 pub const SETXOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SETXOR_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -259,12 +278,6 @@ struct SymEntry<T> {
     a_index: Option<usize>,
     b_index: Option<usize>,
     order_rank: usize,
-}
-
-#[derive(Clone, Debug)]
-struct ElementMeta {
-    row_output: bool,
-    dtype: NumericDType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -331,6 +344,7 @@ fn setxor_internal_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     type_resolver(set_values_output_type),
     descriptor(crate::builtins::array::sorting_sets::setxor::SETXOR_DESCRIPTOR),
+    integer_capabilities(SETXOR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::sorting_sets::setxor"
 )]
 async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -340,21 +354,39 @@ async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinR
             "setxor: too many output arguments; maximum is 3",
         ));
     }
+    let provider = super::set_output_provider(&a, &b);
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_values_value()]));
+            let outputs = super::restore_set_outputs(
+                provider,
+                BUILTIN_NAME,
+                vec![eval.into_values_value()],
+                setxor_internal_error,
+            )?;
+            return Ok(Value::OutputList(outputs));
         }
         let (values, ia, ib) = eval.into_triple();
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![values, ia, ib],
-        ));
+        let mut host_outputs = vec![values, ia, ib];
+        host_outputs.truncate(out_count);
+        let outputs = super::restore_set_outputs(
+            provider,
+            BUILTIN_NAME,
+            host_outputs,
+            setxor_internal_error,
+        )?;
+        return Ok(Value::OutputList(outputs));
     }
-    Ok(eval.into_values_value())
+    let mut outputs = super::restore_set_outputs(
+        provider,
+        BUILTIN_NAME,
+        vec![eval.into_values_value()],
+        setxor_internal_error,
+    )?;
+    Ok(outputs.pop().expect("setxor output"))
 }
 
 pub async fn evaluate(
@@ -362,7 +394,19 @@ pub async fn evaluate(
     b: Value,
     rest: &[Value],
 ) -> crate::BuiltinResult<SetxorEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, "setxor")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, "setxor")?;
     let opts = parse_options(rest)?;
+    for value in [&a, &b] {
+        if let Value::GpuTensor(handle) = value {
+            if super::is_unsupported_set_gpu_integer(handle) {
+                return Err(setxor_error_with(
+                    &SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
+                    "setxor: resident 64-bit integer inputs are not supported",
+                ));
+            }
+        }
+    }
     match (a, b) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             setxor_gpu_pair(handle_a, handle_b, &opts).await
@@ -568,9 +612,11 @@ fn value_into_complex_tensor(value: Value) -> crate::BuiltinResult<ComplexTensor
 }
 
 fn tensor_to_complex(tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape;
+    let shape = tensor.shape.clone();
     let data = tensor
-        .data
+        .into_numeric_storage()
+        .map_err(setxor_internal_error)?
+        .materialize_f64()
         .into_iter()
         .map(|real| (real, 0.0))
         .collect::<Vec<_>>();
@@ -634,21 +680,31 @@ fn tensor_into_char_array(tensor: Tensor) -> crate::BuiltinResult<CharArray> {
     let mut values = vec!['\0'; rows * cols];
     for col in 0..cols {
         for row in 0..rows {
-            let value = tensor.data[row + col * rows];
-            values[row * cols + col] = f64_to_char(value)?;
+            let value = tensor.numeric_value_at(row + col * rows).ok_or_else(|| {
+                setxor_internal_error("setxor: numeric character source length mismatch")
+            })?;
+            values[row * cols + col] = numeric_to_char(value)?;
         }
     }
     CharArray::new(values, rows, cols).map_err(|e| setxor_internal_error(format!("setxor: {e}")))
 }
 
-fn f64_to_char(value: f64) -> crate::BuiltinResult<char> {
-    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > u32::MAX as f64 {
-        return Err(setxor_error_with(
-            &SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
-            "setxor: numeric values mixed with char inputs must be finite character codes",
-        ));
-    }
-    char::from_u32(value as u32).ok_or_else(|| {
+fn numeric_to_char(value: NumericScalar) -> crate::BuiltinResult<char> {
+    let code = match value {
+        NumericScalar::F64(value) => float_to_char_code(value)?,
+        NumericScalar::F32(value) => float_to_char_code(f64::from(value))?,
+        value => value
+            .into_int_value()
+            .and_then(|value| value.try_to_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| {
+                setxor_error_with(
+                    &SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
+                    "setxor: numeric values mixed with char inputs must be finite character codes",
+                )
+            })?,
+    };
+    char::from_u32(code).ok_or_else(|| {
         setxor_error_with(
             &SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
             "setxor: numeric values mixed with char inputs must be valid character codes",
@@ -656,19 +712,126 @@ fn f64_to_char(value: f64) -> crate::BuiltinResult<char> {
     })
 }
 
+fn float_to_char_code(value: f64) -> crate::BuiltinResult<u32> {
+    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > u32::MAX as f64 {
+        return Err(setxor_error_with(
+            &SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
+            "setxor: numeric values mixed with char inputs must be finite character codes",
+        ));
+    }
+    Ok(value as u32)
+}
+
 fn setxor_numeric(
     a: Tensor,
     b: Tensor,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
+    let a_dtype = a.numeric_dtype();
+    let b_dtype = b.numeric_dtype();
+    if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
+        if a_storage.class_name() == b_storage.class_name() {
+            return if opts.rows {
+                setxor_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+            } else {
+                setxor_integer_elements(
+                    a_storage,
+                    a.shape.clone(),
+                    b_storage,
+                    b.shape.clone(),
+                    opts,
+                )
+            };
+        }
+    }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(storage), None) if b_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let b = target.cast_tensor(b).map_err(setxor_internal_error)?;
+            return setxor_numeric(a, b, opts);
+        }
+        (None, Some(storage)) if a_dtype == NumericDType::F64 => {
+            let target = IntegerTarget::from_storage(storage);
+            let a = target.cast_tensor(a).map_err(setxor_internal_error)?;
+            return setxor_numeric(a, b, opts);
+        }
+        _ => {}
+    }
+    numeric_output_dtype(a_dtype, b_dtype)?;
+    let a_shape = a.shape.clone();
+    let b_shape = b.shape.clone();
+    let a_storage = a.into_numeric_storage().map_err(setxor_internal_error)?;
+    let b_storage = b.into_numeric_storage().map_err(setxor_internal_error)?;
+    match (a_storage, b_storage) {
+        (NumericStorage::F64(a), NumericStorage::F64(b)) => {
+            setxor_floating(a, a_shape, b, b_shape, opts)
+        }
+        (NumericStorage::F32(a), NumericStorage::F32(b)) => {
+            setxor_floating(a, a_shape, b, b_shape, opts)
+        }
+        (NumericStorage::F64(a), NumericStorage::F32(b)) => {
+            setxor_promoted_left_f64_to_f32(a, a_shape, b, b_shape, opts)
+        }
+        (NumericStorage::F32(a), NumericStorage::F64(b)) => {
+            setxor_promoted_right_f64_to_f32(a, a_shape, b, b_shape, opts)
+        }
+        _ => Err(setxor_error(&SETXOR_ERROR_NUMERIC_CLASS_MISMATCH)),
+    }
+}
+
+fn setxor_promoted_left_f64_to_f32(
+    double_values: Vec<f64>,
+    double_shape: Vec<usize>,
+    single_values: Vec<f32>,
+    single_shape: Vec<usize>,
+    opts: &SetxorOptions,
+) -> crate::BuiltinResult<SetxorEvaluation> {
+    setxor_floating(
+        double_values
+            .into_iter()
+            .map(|value| value as f32)
+            .collect(),
+        double_shape,
+        single_values,
+        single_shape,
+        opts,
+    )
+}
+
+fn setxor_promoted_right_f64_to_f32(
+    single_values: Vec<f32>,
+    single_shape: Vec<usize>,
+    double_values: Vec<f64>,
+    double_shape: Vec<usize>,
+    opts: &SetxorOptions,
+) -> crate::BuiltinResult<SetxorEvaluation> {
+    setxor_floating(
+        single_values,
+        single_shape,
+        double_values
+            .into_iter()
+            .map(|value| value as f32)
+            .collect(),
+        double_shape,
+        opts,
+    )
+}
+
+fn setxor_floating<T: SetFloat>(
+    a_values: Vec<T>,
+    a_shape: Vec<usize>,
+    b_values: Vec<T>,
+    b_shape: Vec<usize>,
+    opts: &SetxorOptions,
+) -> crate::BuiltinResult<SetxorEvaluation> {
     if opts.rows {
-        setxor_numeric_rows(a, b, opts)
+        setxor_floating_rows(a_values, a_shape, b_values, b_shape, opts)
     } else {
-        let meta = element_meta(&a.shape, a.dtype, &b.shape, b.dtype)?;
-        let mut entries = Vec::<SymEntry<f64>>::new();
+        let row_output = element_row_output(&a_shape, &b_shape);
+        let mut entries = Vec::<SymEntry<T>>::new();
         let mut map: HashMap<NumericKey, usize> = HashMap::new();
         let mut order_counter = 0usize;
-        for (idx, &value) in a.data.iter().enumerate() {
+        for (idx, &value) in a_values.iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -679,7 +842,7 @@ fn setxor_numeric(
                 &mut order_counter,
             );
         }
-        for (idx, &value) in b.data.iter().enumerate() {
+        for (idx, &value) in b_values.iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -690,32 +853,125 @@ fn setxor_numeric(
                 &mut order_counter,
             );
         }
-        assemble_numeric(entries, opts, &meta)
+        assemble_floating(entries, opts, row_output)
     }
 }
 
-fn setxor_numeric_rows(
-    a: Tensor,
-    b: Tensor,
+fn setxor_integer_elements(
+    a_storage: &IntegerStorage,
+    a_shape: Vec<usize>,
+    b_storage: &IntegerStorage,
+    b_shape: Vec<usize>,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
-    if a.shape.len() != 2 || b.shape.len() != 2 {
+    let mut entries = Vec::<SymEntry<IntValue>>::new();
+    let mut map = HashMap::<IntValue, usize>::new();
+    let mut order_counter = 0usize;
+    for (index, value) in a_storage.exact_values().into_iter().enumerate() {
+        add_sym_entry(
+            &mut entries,
+            &mut map,
+            value.clone(),
+            value,
+            Origin::A,
+            index,
+            &mut order_counter,
+        );
+    }
+    for (index, value) in b_storage.exact_values().into_iter().enumerate() {
+        add_sym_entry(
+            &mut entries,
+            &mut map,
+            value.clone(),
+            value,
+            Origin::B,
+            index,
+            &mut order_counter,
+        );
+    }
+    assemble_integer(
+        entries,
+        a_storage,
+        opts,
+        element_row_output(&a_shape, &b_shape),
+    )
+}
+
+fn setxor_integer_rows(
+    a_storage: &IntegerStorage,
+    a_shape: Vec<usize>,
+    b_storage: &IntegerStorage,
+    b_shape: Vec<usize>,
+    opts: &SetxorOptions,
+) -> crate::BuiltinResult<SetxorEvaluation> {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
         return Err(setxor_internal_error(
             "setxor: 'rows' option requires 2-D numeric matrices",
         ));
     }
-    if a.shape[1] != b.shape[1] {
+    if a_shape[1] != b_shape[1] {
         return Err(setxor_error(&SETXOR_ERROR_ROWS_COLUMN_MISMATCH));
     }
-    let rows_a = a.shape[0];
-    let rows_b = b.shape[0];
-    let cols = a.shape[1];
-    let dtype = numeric_output_dtype(a.dtype, b.dtype)?;
-    let mut entries = Vec::<SymEntry<Vec<f64>>>::new();
+    let (rows_a, rows_b, cols) = (a_shape[0], b_shape[0], a_shape[1]);
+    let a_values = a_storage.exact_values();
+    let b_values = b_storage.exact_values();
+    let mut entries = Vec::<SymEntry<Vec<IntValue>>>::new();
+    let mut map = HashMap::<Vec<IntValue>, usize>::new();
+    let mut order_counter = 0usize;
+    for row in 0..rows_a {
+        let values: Vec<_> = (0..cols)
+            .map(|col| a_values[row + col * rows_a].clone())
+            .collect();
+        add_sym_entry(
+            &mut entries,
+            &mut map,
+            values.clone(),
+            values,
+            Origin::A,
+            row,
+            &mut order_counter,
+        );
+    }
+    for row in 0..rows_b {
+        let values: Vec<_> = (0..cols)
+            .map(|col| b_values[row + col * rows_b].clone())
+            .collect();
+        add_sym_entry(
+            &mut entries,
+            &mut map,
+            values.clone(),
+            values,
+            Origin::B,
+            row,
+            &mut order_counter,
+        );
+    }
+    assemble_integer_rows(entries, a_storage, opts, cols)
+}
+
+fn setxor_floating_rows<T: SetFloat>(
+    a_values: Vec<T>,
+    a_shape: Vec<usize>,
+    b_values: Vec<T>,
+    b_shape: Vec<usize>,
+    opts: &SetxorOptions,
+) -> crate::BuiltinResult<SetxorEvaluation> {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
+        return Err(setxor_internal_error(
+            "setxor: 'rows' option requires 2-D numeric matrices",
+        ));
+    }
+    if a_shape[1] != b_shape[1] {
+        return Err(setxor_error(&SETXOR_ERROR_ROWS_COLUMN_MISMATCH));
+    }
+    let rows_a = a_shape[0];
+    let rows_b = b_shape[0];
+    let cols = a_shape[1];
+    let mut entries = Vec::<SymEntry<Vec<T>>>::new();
     let mut map: HashMap<NumericRowKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
     for row in 0..rows_a {
-        let values = numeric_row(&a, row, cols);
+        let values = numeric_row_from_values(&a_values, row, rows_a, cols);
         let key = numeric_row_key(&values, Origin::A, row);
         add_sym_entry(
             &mut entries,
@@ -728,7 +984,7 @@ fn setxor_numeric_rows(
         );
     }
     for row in 0..rows_b {
-        let values = numeric_row(&b, row, cols);
+        let values = numeric_row_from_values(&b_values, row, rows_b, cols);
         let key = numeric_row_key(&values, Origin::B, row);
         add_sym_entry(
             &mut entries,
@@ -740,7 +996,7 @@ fn setxor_numeric_rows(
             &mut order_counter,
         );
     }
-    assemble_numeric_rows(entries, opts, cols, dtype)
+    assemble_floating_rows(entries, opts, cols)
 }
 
 fn setxor_complex(
@@ -748,14 +1004,50 @@ fn setxor_complex(
     b: ComplexTensor,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
+    let a_shape = a.shape.clone();
+    let b_shape = b.shape.clone();
+    match (a.into_complex_storage(), b.into_complex_storage()) {
+        (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
+            setxor_floating_complex(a, a_shape, b, b_shape, opts)
+        }
+        (ComplexStorage::F32(a), ComplexStorage::F32(b)) => {
+            setxor_floating_complex(a, a_shape, b, b_shape, opts)
+        }
+        (a, b) => setxor_promoted_complex_f64(a, a_shape, b, b_shape, opts),
+    }
+}
+
+fn setxor_promoted_complex_f64(
+    a: ComplexStorage,
+    a_shape: Vec<usize>,
+    b: ComplexStorage,
+    b_shape: Vec<usize>,
+    opts: &SetxorOptions,
+) -> crate::BuiltinResult<SetxorEvaluation> {
+    setxor_floating_complex(
+        a.materialize_f64(),
+        a_shape,
+        b.materialize_f64(),
+        b_shape,
+        opts,
+    )
+}
+
+fn setxor_floating_complex<T: SetFloat>(
+    a: Vec<(T, T)>,
+    a_shape: Vec<usize>,
+    b: Vec<(T, T)>,
+    b_shape: Vec<usize>,
+    opts: &SetxorOptions,
+) -> crate::BuiltinResult<SetxorEvaluation> {
     if opts.rows {
-        setxor_complex_rows(a, b, opts)
+        setxor_complex_rows(a, a_shape, b, b_shape, opts)
     } else {
-        let row_output = element_row_output(&a.shape, &b.shape);
-        let mut entries = Vec::<SymEntry<(f64, f64)>>::new();
+        let row_output = element_row_output(&a_shape, &b_shape);
+        let mut entries = Vec::<SymEntry<(T, T)>>::new();
         let mut map: HashMap<ComplexElementKey, usize> = HashMap::new();
         let mut order_counter = 0usize;
-        for (idx, &value) in a.data.iter().enumerate() {
+        for (idx, &value) in a.iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -766,7 +1058,7 @@ fn setxor_complex(
                 &mut order_counter,
             );
         }
-        for (idx, &value) in b.data.iter().enumerate() {
+        for (idx, &value) in b.iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -781,27 +1073,29 @@ fn setxor_complex(
     }
 }
 
-fn setxor_complex_rows(
-    a: ComplexTensor,
-    b: ComplexTensor,
+fn setxor_complex_rows<T: SetFloat>(
+    a: Vec<(T, T)>,
+    a_shape: Vec<usize>,
+    b: Vec<(T, T)>,
+    b_shape: Vec<usize>,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
-    if a.shape.len() != 2 || b.shape.len() != 2 {
+    if a_shape.len() != 2 || b_shape.len() != 2 {
         return Err(setxor_internal_error(
             "setxor: 'rows' option requires 2-D complex matrices",
         ));
     }
-    if a.shape[1] != b.shape[1] {
+    if a_shape[1] != b_shape[1] {
         return Err(setxor_error(&SETXOR_ERROR_ROWS_COLUMN_MISMATCH));
     }
-    let rows_a = a.shape[0];
-    let rows_b = b.shape[0];
-    let cols = a.shape[1];
-    let mut entries = Vec::<SymEntry<Vec<(f64, f64)>>>::new();
+    let rows_a = a_shape[0];
+    let rows_b = b_shape[0];
+    let cols = a_shape[1];
+    let mut entries = Vec::<SymEntry<Vec<(T, T)>>>::new();
     let mut map: HashMap<ComplexRowKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
     for row in 0..rows_a {
-        let values = complex_row(&a, row, cols);
+        let values = complex_row(&a, row, rows_a, cols);
         let key = complex_row_key(&values, Origin::A, row);
         add_sym_entry(
             &mut entries,
@@ -814,7 +1108,7 @@ fn setxor_complex_rows(
         );
     }
     for row in 0..rows_b {
-        let values = complex_row(&b, row, cols);
+        let values = complex_row(&b, row, rows_b, cols);
         let key = complex_row_key(&values, Origin::B, row);
         add_sym_entry(
             &mut entries,
@@ -1126,70 +1420,117 @@ fn numeric_output_dtype(
     }
 }
 
-fn element_meta(
-    a_shape: &[usize],
-    a_dtype: NumericDType,
-    b_shape: &[usize],
-    b_dtype: NumericDType,
-) -> crate::BuiltinResult<ElementMeta> {
-    Ok(ElementMeta {
-        row_output: element_row_output(a_shape, b_shape),
-        dtype: numeric_output_dtype(a_dtype, b_dtype)?,
-    })
-}
-
-fn assemble_numeric(
-    entries: Vec<SymEntry<f64>>,
+fn assemble_floating<T: SetFloat>(
+    entries: Vec<SymEntry<T>>,
     opts: &SetxorOptions,
-    meta: &ElementMeta,
+    row_output: bool,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
-    let order = symmetric_order(&entries, opts, |lhs, rhs| compare_f64(*lhs, *rhs));
+    let order = symmetric_order(&entries, opts, |lhs, rhs| lhs.compare(*rhs));
     let values = order
         .iter()
         .map(|&idx| entries[idx].value)
         .collect::<Vec<_>>();
     let (ia, ib) = collect_indices(&entries, &order);
-    let value_tensor = Tensor::new_with_dtype(
-        values,
-        element_shape(meta.row_output, order.len()),
-        meta.dtype,
+    let value_tensor = Tensor::from_numeric_storage(
+        T::numeric_storage(values),
+        element_shape(row_output, order.len()),
     )
     .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
-    Ok(SetxorEvaluation::new(
-        tensor::tensor_into_value(value_tensor),
-        ia_tensor,
-        ib_tensor,
-    ))
+    let value = if value_tensor.numeric_dtype() == NumericDType::F32 {
+        Value::Tensor(value_tensor)
+    } else {
+        tensor::tensor_into_value(value_tensor)
+    };
+    Ok(SetxorEvaluation::new(value, ia_tensor, ib_tensor))
 }
 
-fn assemble_numeric_rows(
-    entries: Vec<SymEntry<Vec<f64>>>,
+fn assemble_integer(
+    entries: Vec<SymEntry<IntValue>>,
+    storage: &IntegerStorage,
+    opts: &SetxorOptions,
+    row_output: bool,
+) -> crate::BuiltinResult<SetxorEvaluation> {
+    let order = symmetric_order(&entries, opts, |lhs, rhs| {
+        integer_order::compare(lhs, rhs, false, false)
+    });
+    let values = order
+        .iter()
+        .map(|&index| entries[index].value.clone())
+        .collect::<Vec<_>>();
+    let (ia, ib) = collect_indices(&entries, &order);
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?,
+        element_shape(row_output, order.len()),
+    )
+    .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
+    let (ia, ib) = index_tensors(ia, ib)?;
+    Ok(SetxorEvaluation::new(Value::Tensor(values), ia, ib))
+}
+
+fn assemble_floating_rows<T: SetFloat>(
+    entries: Vec<SymEntry<Vec<T>>>,
     opts: &SetxorOptions,
     cols: usize,
-    dtype: NumericDType,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
-    let order = symmetric_order(&entries, opts, |lhs, rhs| compare_numeric_rows(lhs, rhs));
+    let order = symmetric_order(&entries, opts, |lhs, rhs| compare_floating_rows(lhs, rhs));
     let rows = order.len();
-    let mut values = vec![0.0; rows * cols];
+    let mut values = vec![T::default(); rows * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         for col in 0..cols {
             values[row_pos + col * rows] = entries[entry_idx].value[col];
         }
     }
     let (ia, ib) = collect_indices(&entries, &order);
-    let value_tensor = Tensor::new_with_dtype(values, vec![rows, cols], dtype)
+    let value_tensor = Tensor::from_numeric_storage(T::numeric_storage(values), vec![rows, cols])
         .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
-    Ok(SetxorEvaluation::new(
-        tensor::tensor_into_value(value_tensor),
-        ia_tensor,
-        ib_tensor,
-    ))
+    let value = if value_tensor.numeric_dtype() == NumericDType::F32 {
+        Value::Tensor(value_tensor)
+    } else {
+        tensor::tensor_into_value(value_tensor)
+    };
+    Ok(SetxorEvaluation::new(value, ia_tensor, ib_tensor))
 }
 
-fn assemble_complex(
-    entries: Vec<SymEntry<(f64, f64)>>,
+fn assemble_integer_rows(
+    entries: Vec<SymEntry<Vec<IntValue>>>,
+    storage: &IntegerStorage,
+    opts: &SetxorOptions,
+    cols: usize,
+) -> crate::BuiltinResult<SetxorEvaluation> {
+    let order = symmetric_order(&entries, opts, |lhs, rhs| {
+        for (left, right) in lhs.iter().zip(rhs) {
+            let ordering = integer_order::compare(left, right, false, false);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+    let rows = order.len();
+    let mut values = Vec::with_capacity(rows * cols);
+    for col in 0..cols {
+        for &index in &order {
+            values.push(entries[index].value[col].clone());
+        }
+    }
+    let (ia, ib) = collect_indices(&entries, &order);
+    let values = Tensor::new_integer(
+        storage
+            .from_exact_values_like(values)
+            .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?,
+        vec![rows, cols],
+    )
+    .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
+    let (ia, ib) = index_tensors(ia, ib)?;
+    Ok(SetxorEvaluation::new(Value::Tensor(values), ia, ib))
+}
+
+fn assemble_complex<T: SetFloat>(
+    entries: Vec<SymEntry<(T, T)>>,
     opts: &SetxorOptions,
     row_output: bool,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
@@ -1199,38 +1540,44 @@ fn assemble_complex(
         .map(|&idx| entries[idx].value)
         .collect::<Vec<_>>();
     let (ia, ib) = collect_indices(&entries, &order);
-    let value_tensor = ComplexTensor::new(values, element_shape(row_output, order.len()))
-        .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
+    let value_tensor = ComplexTensor::from_complex_storage(
+        T::complex_storage(values),
+        element_shape(row_output, order.len()),
+    )
+    .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
-    Ok(SetxorEvaluation::new(
-        complex_tensor_into_value(value_tensor),
-        ia_tensor,
-        ib_tensor,
-    ))
+    let value = if value_tensor.as_f32_slice().is_some() {
+        Value::ComplexTensor(value_tensor)
+    } else {
+        complex_tensor_into_value(value_tensor)
+    };
+    Ok(SetxorEvaluation::new(value, ia_tensor, ib_tensor))
 }
 
-fn assemble_complex_rows(
-    entries: Vec<SymEntry<Vec<(f64, f64)>>>,
+fn assemble_complex_rows<T: SetFloat>(
+    entries: Vec<SymEntry<Vec<(T, T)>>>,
     opts: &SetxorOptions,
     cols: usize,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     let order = symmetric_order(&entries, opts, |lhs, rhs| compare_complex_rows(lhs, rhs));
     let rows = order.len();
-    let mut values = vec![(0.0, 0.0); rows * cols];
+    let mut values = vec![(T::default(), T::default()); rows * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         for col in 0..cols {
             values[row_pos + col * rows] = entries[entry_idx].value[col];
         }
     }
     let (ia, ib) = collect_indices(&entries, &order);
-    let value_tensor = ComplexTensor::new(values, vec![rows, cols])
-        .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
+    let value_tensor =
+        ComplexTensor::from_complex_storage(T::complex_storage(values), vec![rows, cols])
+            .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
-    Ok(SetxorEvaluation::new(
-        complex_tensor_into_value(value_tensor),
-        ia_tensor,
-        ib_tensor,
-    ))
+    let value = if value_tensor.as_f32_slice().is_some() {
+        Value::ComplexTensor(value_tensor)
+    } else {
+        complex_tensor_into_value(value_tensor)
+    };
+    Ok(SetxorEvaluation::new(value, ia_tensor, ib_tensor))
 }
 
 fn assemble_char(
@@ -1365,28 +1712,27 @@ impl SetxorEvaluation {
     }
 }
 
-fn numeric_key(value: f64, origin: Origin, index: usize) -> NumericKey {
+fn numeric_key<T: SetFloat>(value: T, origin: Origin, index: usize) -> NumericKey {
     if value.is_nan() {
         NumericKey::UniqueNan(origin, index)
     } else {
-        NumericKey::Value(canonicalize_f64(value))
+        NumericKey::Value(value.canonical_key())
     }
 }
 
-fn numeric_row_key(values: &[f64], origin: Origin, row: usize) -> NumericRowKey {
+fn numeric_row_key<T: SetFloat>(values: &[T], origin: Origin, row: usize) -> NumericRowKey {
     if values.iter().any(|value| value.is_nan()) {
         NumericRowKey::UniqueNan(origin, row)
     } else {
-        NumericRowKey::Values(
-            values
-                .iter()
-                .map(|&value| canonicalize_f64(value))
-                .collect(),
-        )
+        NumericRowKey::Values(values.iter().map(|&value| value.canonical_key()).collect())
     }
 }
 
-fn complex_element_key(value: (f64, f64), origin: Origin, index: usize) -> ComplexElementKey {
+fn complex_element_key<T: SetFloat>(
+    value: (T, T),
+    origin: Origin,
+    index: usize,
+) -> ComplexElementKey {
     if complex_is_nan(value) {
         ComplexElementKey::UniqueNan(origin, index)
     } else {
@@ -1394,7 +1740,7 @@ fn complex_element_key(value: (f64, f64), origin: Origin, index: usize) -> Compl
     }
 }
 
-fn complex_row_key(values: &[(f64, f64)], origin: Origin, row: usize) -> ComplexRowKey {
+fn complex_row_key<T: SetFloat>(values: &[(T, T)], origin: Origin, row: usize) -> ComplexRowKey {
     if values.iter().any(|&value| complex_is_nan(value)) {
         ComplexRowKey::UniqueNan(origin, row)
     } else {
@@ -1402,16 +1748,12 @@ fn complex_row_key(values: &[(f64, f64)], origin: Origin, row: usize) -> Complex
     }
 }
 
-fn numeric_row(tensor: &Tensor, row: usize, cols: usize) -> Vec<f64> {
-    (0..cols)
-        .map(|col| tensor.data[row + col * tensor.shape[0]])
-        .collect()
+fn numeric_row_from_values<T: Copy>(values: &[T], row: usize, rows: usize, cols: usize) -> Vec<T> {
+    (0..cols).map(|col| values[row + col * rows]).collect()
 }
 
-fn complex_row(tensor: &ComplexTensor, row: usize, cols: usize) -> Vec<(f64, f64)> {
-    (0..cols)
-        .map(|col| tensor.data[row + col * tensor.shape[0]])
-        .collect()
+fn complex_row<T: Copy>(values: &[(T, T)], row: usize, rows: usize, cols: usize) -> Vec<(T, T)> {
+    (0..cols).map(|col| values[row + col * rows]).collect()
 }
 
 fn char_row(array: &CharArray, row: usize) -> Vec<char> {
@@ -1426,31 +1768,9 @@ fn string_row(array: &StringArray, row: usize, cols: usize) -> Vec<String> {
         .collect()
 }
 
-fn canonicalize_f64(value: f64) -> u64 {
-    if value == 0.0 {
-        0
-    } else {
-        value.to_bits()
-    }
-}
-
-fn compare_f64(a: f64, b: f64) -> Ordering {
-    if a.is_nan() {
-        if b.is_nan() {
-            Ordering::Equal
-        } else {
-            Ordering::Greater
-        }
-    } else if b.is_nan() {
-        Ordering::Less
-    } else {
-        a.partial_cmp(&b).unwrap_or(Ordering::Equal)
-    }
-}
-
-fn compare_numeric_rows(a: &[f64], b: &[f64]) -> Ordering {
+fn compare_floating_rows<T: SetFloat>(a: &[T], b: &[T]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
-        let ord = compare_f64(*lhs, *rhs);
+        let ord = lhs.compare(*rhs);
         if ord != Ordering::Equal {
             return ord;
         }
@@ -1459,43 +1779,43 @@ fn compare_numeric_rows(a: &[f64], b: &[f64]) -> Ordering {
 }
 
 impl ComplexKey {
-    fn new(value: (f64, f64)) -> Self {
+    fn new<T: SetFloat>(value: (T, T)) -> Self {
         Self {
-            re: canonicalize_f64(value.0),
-            im: canonicalize_f64(value.1),
+            re: value.0.canonical_key(),
+            im: value.1.canonical_key(),
         }
     }
 }
 
-fn complex_is_nan(value: (f64, f64)) -> bool {
+fn complex_is_nan<T: SetFloat>(value: (T, T)) -> bool {
     value.0.is_nan() || value.1.is_nan()
 }
 
-fn compare_complex(a: (f64, f64), b: (f64, f64)) -> Ordering {
+fn compare_complex<T: SetFloat>(a: (T, T), b: (T, T)) -> Ordering {
     match (complex_is_nan(a), complex_is_nan(b)) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,
         (false, true) => Ordering::Less,
         (false, false) => {
-            let mag_cmp = compare_f64(a.0.hypot(a.1), b.0.hypot(b.1));
+            let mag_cmp = a.0.hypot(a.1).compare(b.0.hypot(b.1));
             if mag_cmp != Ordering::Equal {
                 return mag_cmp;
             }
-            let phase_cmp = compare_f64(a.1.atan2(a.0), b.1.atan2(b.0));
+            let phase_cmp = a.1.atan2(a.0).compare(b.1.atan2(b.0));
             if phase_cmp != Ordering::Equal {
                 return phase_cmp;
             }
-            let re_cmp = compare_f64(a.0, b.0);
+            let re_cmp = a.0.compare(b.0);
             if re_cmp != Ordering::Equal {
                 re_cmp
             } else {
-                compare_f64(a.1, b.1)
+                a.1.compare(b.1)
             }
         }
     }
 }
 
-fn compare_complex_rows(a: &[(f64, f64)], b: &[(f64, f64)]) -> Ordering {
+fn compare_complex_rows<T: SetFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = compare_complex(*lhs, *rhs);
         if ord != Ordering::Equal {
@@ -1530,7 +1850,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::IntValue;
 
     fn evaluate_sync(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<SetxorEvaluation> {
         futures::executor::block_on(evaluate(a, b, rest))
@@ -1538,6 +1859,39 @@ mod tests {
 
     fn builtin_sync(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         futures::executor::block_on(setxor_builtin(a, b, rest))
+    }
+
+    fn assert_double(tensor: &Tensor, expected: &[f64]) {
+        assert_eq!(tensor.as_f64_slice().expect("double tensor"), expected);
+    }
+
+    #[test]
+    fn registered_builtin_restores_resident_outputs() {
+        test_support::with_test_provider(|provider| {
+            let left = Tensor::new_integer(IntegerStorage::I32(vec![7, 2, 9]), vec![3, 1]).unwrap();
+            let right = Tensor::new_integer(IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
+            let left =
+                Value::GpuTensor(gpu_helpers::upload_tensor(provider, &left).expect("upload left"));
+            let right = Value::GpuTensor(
+                gpu_helpers::upload_tensor(provider, &right).expect("upload right"),
+            );
+            let _guard = crate::output_count::push_output_count(Some(3));
+            let Value::OutputList(outputs) =
+                builtin_sync(left, right, Vec::new()).expect("resident setxor")
+            else {
+                panic!("expected output list");
+            };
+            assert_eq!(outputs.len(), 3);
+            assert!(outputs
+                .iter()
+                .all(|output| matches!(output, Value::GpuTensor(_))));
+            assert_eq!(
+                test_support::gather(outputs[0].clone())
+                    .expect("gather values")
+                    .integer_storage(),
+                Some(&IntegerStorage::I32(vec![9]))
+            );
+        });
     }
 
     #[test]
@@ -1557,12 +1911,123 @@ mod tests {
         let b = Tensor::new(vec![4.0, 1.0, 2.0], vec![3, 1]).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setxor");
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
-        assert_eq!(values.data, vec![2.0, 3.0, 4.0, 5.0]);
+        assert_double(&values, &[2.0, 3.0, 4.0, 5.0]);
         assert_eq!(values.shape, vec![4, 1]);
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![3.0, 1.0]);
+        assert_double(&ia, &[3.0, 1.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![3.0, 1.0]);
+        assert_double(&ib, &[3.0, 1.0]);
+    }
+
+    #[test]
+    fn setxor_preserves_exact_integer_elements_and_rows() {
+        let a = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let b = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![0, 7]), vec![2, 1])
+            .expect("input");
+        let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("setxor")
+            .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("exact values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![
+                7,
+                9_007_199_254_740_993,
+                u64::MAX
+            ]))
+        );
+        let ia = tensor::value_into_tensor_for("setxor", ia).expect("indices");
+        assert_double(&ia, &[3.0, 1.0]);
+        let ib = tensor::value_into_tensor_for("setxor", ib).expect("indices");
+        assert_double(&ib, &[2.0]);
+
+        let a = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0, 1]),
+            vec![2, 2],
+        )
+        .expect("rows input");
+        let b = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 4, 1, 2]),
+            vec![2, 2],
+        )
+        .expect("rows input");
+        let (values, ia, ib) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .expect("setxor rows")
+                .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("exact row values");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![4, u64::MAX, 2, 0]))
+        );
+        let ia = tensor::value_into_tensor_for("setxor", ia).expect("row indices");
+        assert_double(&ia, &[1.0]);
+        let ib = tensor::value_into_tensor_for("setxor", ib).expect("row indices");
+        assert_double(&ib, &[2.0]);
+    }
+
+    #[test]
+    fn setxor_numeric_integer_and_double_preserve_exact_target_storage() {
+        let a = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![7, 2, 9]), vec![3, 1])
+            .expect("input");
+        let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).expect("input");
+        let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("setxor")
+            .into_triple();
+        let values = tensor::value_into_tensor_for("setxor", values).expect("values");
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::U16(vec![5, 7, 9]))
+        );
+        assert_eq!(values.shape, vec![3, 1]);
+        let ia = tensor::value_into_tensor_for("setxor", ia).expect("indices");
+        assert_double(&ia, &[1.0, 3.0]);
+        let ib = tensor::value_into_tensor_for("setxor", ib).expect("indices");
+        assert_double(&ib, &[2.0]);
+
+        let a = Tensor::new_integer(
+            runmat_value::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
+            vec![3, 2],
+        )
+        .expect("rows input");
+        let b = Tensor::new(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).expect("rows input");
+        let (values, ia, ib) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+                .expect("setxor rows")
+                .into_triple();
+        let values = tensor::value_into_tensor_for("setxor", values).expect("row values");
+        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::U16(vec![1, 5, 2, 6]))
+        );
+        let ia = tensor::value_into_tensor_for("setxor", ia).expect("row indices");
+        assert_double(&ia, &[1.0]);
+        let ib = tensor::value_into_tensor_for("setxor", ib).expect("row indices");
+        assert_double(&ib, &[2.0]);
+
+        let wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap();
+        let double = Tensor::new(vec![7.0], vec![1, 1]).unwrap();
+        let values = evaluate_sync(Value::Tensor(wide), Value::Tensor(double), &[])
+            .unwrap()
+            .into_values_value();
+        let Value::Tensor(values) = values else {
+            panic!("integer result");
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::U64(vec![7, 9_007_199_254_740_993]))
+        );
     }
 
     #[test]
@@ -1571,7 +2036,7 @@ mod tests {
         let b = Tensor::new(vec![4.0, 1.0, 2.0], vec![1, 3]).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setxor");
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
-        assert_eq!(values.data, vec![2.0, 3.0, 4.0, 5.0]);
+        assert_double(&values, &[2.0, 3.0, 4.0, 5.0]);
         assert_eq!(values.shape, vec![1, 4]);
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_eq!(ia.shape, vec![2, 1]);
@@ -1585,9 +2050,120 @@ mod tests {
         let b = Tensor::new_with_dtype(vec![5.0, 2.0], vec![1, 2], NumericDType::U32).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setxor");
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
-        assert_eq!(values.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::U32(vec![1, 2, 3]))
+        );
         assert_eq!(values.shape, vec![1, 3]);
-        assert_eq!(values.dtype, NumericDType::U32);
+        assert_eq!(values.numeric_dtype(), NumericDType::U32);
+    }
+
+    #[test]
+    fn setxor_preserves_native_single_elements_and_rows() {
+        let a = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let b = Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap();
+        let values = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
+            .expect("single setxor")
+            .into_values_value();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single values");
+        };
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0])
+        );
+
+        let a = Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let b = Tensor::from_f32(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).unwrap();
+        let values = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")])
+            .expect("single row setxor")
+            .into_values_value();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single rows");
+        };
+        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 5.0, 2.0, 6.0])
+        );
+    }
+
+    #[test]
+    fn setxor_double_single_promotion_preserves_origin_and_single_class() {
+        let a = Tensor::from_f32(vec![3.0, 2.0], vec![2, 1]).unwrap();
+        let b = Tensor::new(vec![2.0, 1.0], vec![2, 1]).unwrap();
+        let (values, ia, ib) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("stable")])
+                .expect("single-double setxor")
+                .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single values");
+        };
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![3.0, 1.0])
+        );
+        let ia = tensor::value_into_tensor_for("setxor", ia).unwrap();
+        let ib = tensor::value_into_tensor_for("setxor", ib).unwrap();
+        assert_double(&ia, &[1.0]);
+        assert_double(&ib, &[2.0]);
+
+        let a = Tensor::new(vec![3.0, 2.0], vec![2, 1]).unwrap();
+        let b = Tensor::from_f32(vec![2.0, 1.0], vec![2, 1]).unwrap();
+        let (values, ia, ib) =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("stable")])
+                .expect("double-single setxor")
+                .into_triple();
+        let Value::Tensor(values) = values else {
+            panic!("expected native single values");
+        };
+        assert_eq!(
+            values.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![3.0, 1.0])
+        );
+        let ia = tensor::value_into_tensor_for("setxor", ia).unwrap();
+        let ib = tensor::value_into_tensor_for("setxor", ib).unwrap();
+        assert_double(&ia, &[1.0]);
+        assert_double(&ib, &[2.0]);
+    }
+
+    #[test]
+    fn setxor_preserves_native_complex_single_elements_and_rows() {
+        let a = ComplexTensor::from_f32(vec![(1.0, 1.0), (2.0, 0.0)], vec![2, 1]).unwrap();
+        let b = ComplexTensor::from_f32(vec![(2.0, 0.0)], vec![1, 1]).unwrap();
+        let values = evaluate_sync(Value::ComplexTensor(a), Value::ComplexTensor(b), &[])
+            .expect("complex single setxor")
+            .into_values_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected native complex single value");
+        };
+        assert_eq!(values.as_f32_slice(), Some(&[(1.0, 1.0)][..]));
+
+        let a = ComplexTensor::from_f32(
+            vec![(1.0, 0.0), (3.0, 0.0), (2.0, 1.0), (4.0, 1.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let b = ComplexTensor::from_f32(
+            vec![(3.0, 0.0), (5.0, 0.0), (4.0, 1.0), (6.0, 1.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let values = evaluate_sync(
+            Value::ComplexTensor(a),
+            Value::ComplexTensor(b),
+            &[Value::from("rows")],
+        )
+        .expect("complex single row setxor")
+        .into_values_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected native complex single rows");
+        };
+        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(
+            values.as_f32_slice(),
+            Some(&[(1.0, 0.0), (5.0, 0.0), (2.0, 1.0), (6.0, 1.0),][..])
+        );
     }
 
     #[test]
@@ -1596,8 +2172,11 @@ mod tests {
         let b = Tensor::new(vec![5.0, 2.0], vec![1, 2]).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setxor");
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
-        assert_eq!(values.data, vec![1.0, 2.0, 3.0]);
-        assert_eq!(values.dtype, NumericDType::U32);
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::U32(vec![1, 2, 3]))
+        );
+        assert_eq!(values.numeric_dtype(), NumericDType::U32);
     }
 
     #[test]
@@ -1618,11 +2197,11 @@ mod tests {
         let eval =
             evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("stable")]).unwrap();
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
-        assert_eq!(values.data, vec![5.0, 3.0, 4.0, 2.0]);
+        assert_double(&values, &[5.0, 3.0, 4.0, 2.0]);
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0, 3.0]);
+        assert_double(&ia, &[1.0, 3.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![1.0, 3.0]);
+        assert_double(&ib, &[1.0, 3.0]);
     }
 
     #[test]
@@ -1632,11 +2211,15 @@ mod tests {
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setxor");
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
         assert_eq!(values.shape, vec![4, 1]);
-        assert!(values.data.iter().all(|value| value.is_nan()));
+        assert!(values
+            .as_f64_slice()
+            .expect("double values")
+            .iter()
+            .all(|value| value.is_nan()));
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![2.0, 3.0]);
+        assert_double(&ia, &[2.0, 3.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![2.0, 3.0]);
+        assert_double(&ib, &[2.0, 3.0]);
     }
 
     #[test]
@@ -1657,14 +2240,11 @@ mod tests {
             evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap();
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
         assert_eq!(values.shape, vec![3, 3]);
-        assert_eq!(
-            values.data,
-            vec![7.0, 7.0, 7.0, 7.0, 7.0, 8.0, 1.0, 2.0, 9.0]
-        );
+        assert_double(&values, &[7.0, 7.0, 7.0, 7.0, 7.0, 8.0, 1.0, 2.0, 9.0]);
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![2.0, 1.0]);
+        assert_double(&ia, &[2.0, 1.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![3.0]);
+        assert_double(&ib, &[3.0]);
     }
 
     #[test]
@@ -1676,11 +2256,11 @@ mod tests {
         let Value::ComplexTensor(values) = eval.values_value() else {
             panic!("expected complex tensor");
         };
-        assert_eq!(values.data, vec![(1.0, 1.0), (3.0, 0.0)]);
+        assert_eq!(values.materialize_f64(), vec![(1.0, 1.0), (3.0, 0.0)]);
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0]);
+        assert_double(&ia, &[1.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![2.0]);
+        assert_double(&ib, &[2.0]);
     }
 
     #[test]
@@ -1691,7 +2271,7 @@ mod tests {
         let Value::ComplexTensor(values) = eval.values_value() else {
             panic!("expected complex tensor");
         };
-        assert_eq!(values.data, vec![(1.0, 1.0), (3.0, 0.0)]);
+        assert_eq!(values.materialize_f64(), vec![(1.0, 1.0), (3.0, 0.0)]);
         assert_eq!(values.shape, vec![1, 2]);
     }
 
@@ -1704,7 +2284,7 @@ mod tests {
         let Value::ComplexTensor(values) = eval.values_value() else {
             panic!("expected complex tensor");
         };
-        assert_eq!(values.data, vec![(1.0, 0.0), (0.0, 1.0)]);
+        assert_eq!(values.materialize_f64(), vec![(1.0, 0.0), (0.0, 1.0)]);
         assert_eq!(values.shape, vec![1, 2]);
     }
 
@@ -1719,9 +2299,9 @@ mod tests {
         assert_eq!(values.data, vec!['i', 'o']);
         assert_eq!((values.rows, values.cols), (1, 2));
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![2.0]);
+        assert_double(&ia, &[2.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![2.0]);
+        assert_double(&ib, &[2.0]);
     }
 
     #[test]
@@ -1735,9 +2315,9 @@ mod tests {
         assert_eq!(values.data, vec!['a', 'c', 'd']);
         assert_eq!((values.rows, values.cols), (1, 3));
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0, 3.0]);
+        assert_double(&ia, &[1.0, 3.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![2.0]);
+        assert_double(&ib, &[2.0]);
     }
 
     #[test]
@@ -1795,9 +2375,9 @@ mod tests {
             ]
         );
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0]);
+        assert_double(&ia, &[1.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![2.0]);
+        assert_double(&ib, &[2.0]);
     }
 
     #[test]
@@ -1806,11 +2386,11 @@ mod tests {
             let a = Tensor::new(vec![4.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).unwrap();
             let view_a = HostTensorView {
-                data: &a.data,
+                data: a.as_f64_slice().expect("double A"),
                 shape: &a.shape,
             };
             let view_b = HostTensorView {
-                data: &b.data,
+                data: b.as_f64_slice().expect("double B"),
                 shape: &b.shape,
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
@@ -1822,11 +2402,11 @@ mod tests {
             )
             .expect("setxor");
             let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
-            assert_eq!(values.data, vec![4.0, 1.0, 5.0]);
+            assert_double(&values, &[4.0, 1.0, 5.0]);
             let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-            assert_eq!(ia.data, vec![1.0, 2.0]);
+            assert_double(&ia, &[1.0, 2.0]);
             let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-            assert_eq!(ib.data, vec![2.0]);
+            assert_double(&ib, &[2.0]);
         });
     }
 
@@ -1835,7 +2415,7 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let a = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
             let view_a = HostTensorView {
-                data: &a.data,
+                data: a.as_f64_slice().expect("double A"),
                 shape: &a.shape,
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
@@ -1845,12 +2425,12 @@ mod tests {
             let Value::ComplexTensor(values) = eval.values_value() else {
                 panic!("expected complex tensor");
             };
-            assert_eq!(values.data, vec![(1.0, 1.0), (3.0, 0.0)]);
+            assert_eq!(values.materialize_f64(), vec![(1.0, 1.0), (3.0, 0.0)]);
             assert_eq!(values.shape, vec![1, 2]);
             let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-            assert_eq!(ia.data, vec![2.0]);
+            assert_double(&ia, &[2.0]);
             let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-            assert_eq!(ib.data, vec![1.0]);
+            assert_double(&ib, &[1.0]);
         });
     }
 
@@ -1901,11 +2481,14 @@ mod tests {
         let eval =
             evaluate_sync(Value::Int(IntValue::I32(1)), Value::Num(3.0), &[]).expect("setxor");
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
-        assert_eq!(values.data, vec![1.0, 3.0]);
+        assert_eq!(
+            values.integer_storage(),
+            Some(&IntegerStorage::I32(vec![1, 3]))
+        );
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.data, vec![1.0]);
+        assert_double(&ia, &[1.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.data, vec![1.0]);
+        assert_double(&ib, &[1.0]);
     }
 
     #[test]

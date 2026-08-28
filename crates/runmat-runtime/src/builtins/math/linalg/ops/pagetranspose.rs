@@ -15,11 +15,37 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, Value};
 
 const NAME: &str = "pagetranspose";
+
+const PAGETRANSPOSE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public input-class table lists all eight integer classes; real and paired complex-integer storage is transposed without arithmetic.",
+    }];
+
+pub const PAGETRANSPOSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pagetranspose(integer_X)",
+        inputs: &PAGETRANSPOSE_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "The first two dimensions are permuted while exact native real or paired-complex integer payloads remain in their original class; providers may keep supported layouts resident and otherwise use transparent gather/restore.",
+    }];
 
 const PAGETRANSPOSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -149,6 +175,9 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     type_resolver(page_transpose_type),
     descriptor(crate::builtins::math::linalg::ops::pagetranspose::PAGETRANSPOSE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::math::linalg::ops::pagetranspose::PAGETRANSPOSE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::ops::pagetranspose"
 )]
 async fn pagetranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
@@ -235,13 +264,11 @@ fn pagetranspose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
     CellArray::new(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
-fn pagetranspose_char_array(
-    ca: runmat_builtins::CharArray,
-) -> BuiltinResult<runmat_builtins::CharArray> {
+fn pagetranspose_char_array(ca: runmat_value::CharArray) -> BuiltinResult<runmat_value::CharArray> {
     let rows = ca.rows;
     let cols = ca.cols;
     if ca.data.is_empty() {
-        return runmat_builtins::CharArray::new(Vec::new(), cols, rows)
+        return runmat_value::CharArray::new(Vec::new(), cols, rows)
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
     let mut out = vec!['\0'; ca.data.len()];
@@ -254,7 +281,7 @@ fn pagetranspose_char_array(
             }
         }
     }
-    runmat_builtins::CharArray::new(out, cols, rows)
+    runmat_value::CharArray::new(out, cols, rows)
         .map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
@@ -323,10 +350,12 @@ fn compute_strides(shape: &[usize]) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, SparseTensor,
-        StringArray, StructValue, Tensor, Type,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
+        SparseTensor, StringArray, StructValue, Tensor,
     };
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -335,6 +364,66 @@ mod tests {
 
     fn call_one(value: Value) -> BuiltinResult<Value> {
         call(vec![value])
+    }
+
+    #[test]
+    fn pagetranspose_preserves_typed_complex_integer_components_exactly() {
+        let input = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 1_u64 << 63]),
+                IntegerStorage::U64((1..=12).collect()),
+            )
+            .expect("storage"),
+            vec![2, 3, 2],
+        )
+        .expect("tensor");
+
+        let Value::ComplexTensor(result) =
+            call_one(Value::ComplexTensor(input)).expect("pagetranspose")
+        else {
+            panic!("expected complex tensor");
+        };
+        let storage = result.integer_storage().expect("exact integer storage");
+        assert_eq!(result.shape, vec![3, 2, 2]);
+        assert_eq!(
+            storage.real,
+            IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 1_u64 << 63,])
+        );
+        assert_eq!(
+            storage.imag,
+            IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 12])
+        );
+    }
+
+    #[test]
+    fn pagetranspose_preserves_resident_wide_integer_class_and_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX, 3, 4]),
+                vec![2, 2],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            let Value::GpuTensor(output) =
+                call_one(Value::GpuTensor(handle)).expect("resident pagetranspose")
+            else {
+                panic!("documented gpuArray path must remain resident");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather output");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    9_007_199_254_740_993,
+                    3,
+                    u64::MAX,
+                    4,
+                ]))
+            );
+        });
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
@@ -414,7 +503,7 @@ mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2, 2]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0, 7.0, 9.0, 11.0, 8.0, 10.0, 12.0]
                 );
             }
@@ -433,7 +522,7 @@ mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_eq!(out.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -447,7 +536,7 @@ mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![(1.0, 2.0), (3.0, -4.0)]);
+                assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -531,7 +620,7 @@ mod tests {
                 assert_eq!(out.cols, 2);
                 assert_eq!(out.col_ptrs, vec![0, 1, 3]);
                 assert_eq!(out.row_indices, vec![1, 0, 2]);
-                assert_eq!(out.values, vec![5.0, 4.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![5.0, 4.0, 6.0]);
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
@@ -546,7 +635,7 @@ mod tests {
         match call_one(Value::Tensor(tensor(&[], &[0, 3]))).expect("pagetranspose") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 0]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }

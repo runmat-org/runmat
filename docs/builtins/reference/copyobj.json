@@ -6,10 +6,9 @@
     "copy graphics object",
     "graphics handle",
     "axes",
-    "figure",
     "plotting"
   ],
-  "summary": "Copy plot-child graphics objects to an axes or figure parent.",
+  "summary": "Copy plot-child graphics objects to a compatible axes parent.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -28,16 +27,17 @@
     "unit": "builtins::plotting::copyobj::tests",
     "vm": "runmat-vm plotting::copyobj_dispatches_plot_child_copies"
   },
-  "description": "`copyobj` duplicates supported graphics objects and returns fresh graphics handles. RunMat currently supports plot-child object copies, including line, scatter, bar, stairs, stem, area, quiver, image, heatmap, binscatter, surface, patch, line3, scatter3, contour, fcontour, fsurf, constant-line, pie, and histogram-backed plot children.",
+  "description": "`copyobj` duplicates supported graphics objects and returns fresh graphics handles. MATLAB's public inputs are graphics objects rather than integer data. RunMat currently supports plot-child object copies, including line, scatter, bar, stairs, stem, area, quiver, image, heatmap, binscatter, surface, patch, line3, scatter3, contour, fcontour, fsurf, constant-line, pie, and histogram-backed plot children.",
   "behaviors": [
-    "`copyobj(h, parent)` copies each plot-child handle in `h` to an axes or figure parent.",
-    "When `parent` is an axes handle, copied objects are inserted into that axes.",
-    "When `parent` is a figure handle, copied objects are inserted into the figure's active axes.",
+    "`copyobj(h, parent)` copies each plot-child handle in `h` to a compatible axes parent. Plot children such as lines do not accept a figure or panel as their destination parent.",
+    "Copied objects are inserted into the destination axes identified by `parent`.",
     "A scalar parent is applied to every source handle; same-sized source and parent arrays copy each source into the corresponding parent; a scalar source can be copied into each parent in a parent array.",
-    "Handle arrays preserve the controlling input shape and receive fresh handle values.",
+    "Handle arrays preserve the controlling input shape and receive fresh handle values. MATLAB forbids copying the same object more than once to the same parent in one call; enforcing that rule remains a compatibility gap.",
+    "Because RunMat currently encodes graphics handles numerically, compatibility mode can separately enable exact host typed-integer handle aliases for all eight integer classes. Negative and nonexact values reject before lookup; exactly representable aligned wide integers proceed to ordinary handle lookup. Resident integer arrays always reject without provider gather.",
     "RunMat validates the whole source/parent copy plan before mutating graphics state, so invalid handle arrays do not leave partial copies behind.",
     "Copied plot children preserve their plotted geometry and readable/writable plot-child properties such as `Type`, `Parent`, data vectors, line styling, and display names.",
-    "Figure, axes, text, legend, ruler, and root-object deep copies are rejected with `RunMat:copyobj:InvalidArgument` rather than silently returning shallow placeholders."
+    "Figure, axes, text, legend, ruler, root-object, UI-container, and composite-chart deep copies are rejected with `RunMat:copyobj:InvalidArgument` rather than silently returning shallow placeholders.",
+    "The optional `copyobj(obj, parent, 'legacy')` callback/application-data form is not implemented. Callback, application-data, context-menu, toolbar, axes-interaction, and data-tip-template copy rules remain general object-copy gaps."
   ],
   "examples": [
     {

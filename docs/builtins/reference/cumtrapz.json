@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Real, logical, and complex-interleaved GPU sample inputs route through provider `cumtrapz_dim` for unit, scalar, vector, and tensor real spacing. Provider-missing cases fall back to host semantics."
+    "notes": "Documented single- and double-precision real or complex resident samples use the owning provider's `cumtrapz_dim` hook when its contract is satisfied. RunMat-only integer, logical, same-size-X, mixed-provider, or rejected-provider cases use validated host fallback and return to the first resident owner when its precision permits."
   },
   "fusion": {
     "elementwise": false,
@@ -32,9 +32,10 @@
   "description": "`cumtrapz(Y)` computes cumulative trapezoidal integrals of sampled data in `Y`. The output matches `Y` in size, with zero at the first element of the integration dimension and running integral values thereafter.",
   "behaviors": [
     "`cumtrapz(Y)` assumes unit spacing between adjacent samples.",
-    "`cumtrapz(X, Y)` accepts a scalar spacing, a vector of coordinates whose length matches the working dimension, or an array `X` with the same size as `Y`.",
+    "`cumtrapz(X, Y)` accepts documented single- or double-precision scalar spacing or a coordinate vector whose length matches the working dimension. A same-size coordinate tensor is an explicitly gated RunMat extension.",
     "`cumtrapz(..., dim)` selects the working dimension explicitly. Dimensions larger than `ndims(Y)` behave like singleton axes, so the result stays zero along those slices.",
-    "Logical inputs are promoted to double precision before integration. Complex-valued `Y` inputs are integrated component-wise and preserve their complex output type.",
+    "Documented `Y` classes are single and double, real or complex, and output preserves single versus double. Typed-integer and logical `Y`, typed-integer or logical `X`, and typed-integer `dim` are separate RunMat-only extensions.",
+    "Typed-integer `Y` and `X` cross the binary64 integration boundary only when every authoritative integer value is exactly representable; otherwise RunMat reports an error instead of silently rounding.",
     "When the selected dimension has length 0 or 1, the output is zero along that dimension because there are no intervals to accumulate."
   ],
   "examples": [
@@ -70,7 +71,7 @@
     },
     {
       "question": "What forms of `X` are accepted?",
-      "answer": "A scalar spacing, a vector of coordinates matching the integration dimension, or an array with the same size as `Y`."
+      "answer": "The compatibility surface is a single- or double-precision scalar spacing or coordinate vector matching the integration dimension. RunMat mode additionally admits same-size coordinate tensors behind the `cumtrapz-tensor-spacing` extension gate."
     },
     {
       "question": "Does cumtrapz support complex inputs?",
@@ -78,7 +79,7 @@
     },
     {
       "question": "Does cumtrapz keep gpuArray residency?",
-      "answer": "For real, logical, and complex-valued gpuArray sample inputs, yes. RunMat uses the acceleration provider's `cumtrapz_dim` hook with real unit, scalar, vector, or tensor spacing."
+      "answer": "Yes for documented floating real or complex samples when the owning provider accepts and returns the required shape, storage, precision, device, and ownership contract. Other admitted RunMat forms fall back through host computation and are restored to the first resident owner when possible."
     }
   ],
   "links": [
@@ -107,9 +108,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/reduction/cumtrapz.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/cumtrapz.rs"
   },
-  "gpu_residency": "Manual `gpuArray` promotion is optional. If real, logical, or complex-interleaved sampled data already lives on the GPU, RunMat preserves cumulative outputs as gpuArrays through the provider `cumtrapz_dim` path.",
+  "gpu_residency": "Resident floating input dispatch is resolved from the input handle's owner, not the ambient active provider. Native results are validated for shape, storage, precision, device, and owner; invalid native results are freed before host fallback. Fallback returns to the first resident owner when provider precision permits.",
   "gpu_behavior": [
-    "Real, logical, and complex-interleaved gpuArray sample inputs use provider-backed cumulative trapezoidal integration for unit spacing, scalar spacing, coordinate-vector spacing, and same-size coordinate-tensor spacing.",
-    "Spacing inputs must be real-valued. Provider-missing cases use the host fallback path to preserve MATLAB-compatible semantics."
+    "Floating real and complex-interleaved resident `Y` can use provider-backed cumulative trapezoidal integration with real unit, scalar, coordinate-vector, or gated same-size coordinate-tensor spacing.",
+    "Mixed-provider spacing does not cross-dispatch. Integer or logical resident values, missing hooks, provider errors, and contract-invalid results use the exactness-checked host fallback path."
   ]
 }

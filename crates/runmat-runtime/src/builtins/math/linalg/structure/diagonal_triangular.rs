@@ -5,15 +5,22 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderBandwidth
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, SparseTensor, Tensor, Value,
+};
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, LogicalArray, NumericStorage, SparseTensor, Tensor, Value,
+};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -107,6 +114,19 @@ pub const ISDIAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISDIAG_ERRORS,
 };
 
+const ISDIAG_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "isdiag-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "isdiag with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsdiagIntegerInputExtension"),
+};
+const ISDIAG_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISDIAG_INTEGER_INPUT_EXTENSION];
+pub const ISDIAG_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
+};
+
 pub const ISTRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISTRIL_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -114,11 +134,37 @@ pub const ISTRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISTRIL_ERRORS,
 };
 
+const ISTRIL_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "istril-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "istril with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IstrilIntegerInputExtension"),
+};
+const ISTRIL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIL_INTEGER_INPUT_EXTENSION];
+pub const ISTRIL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
+};
+
 pub const ISTRIU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISTRIU_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISTRIU_ERRORS,
+};
+
+const ISTRIU_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "istriu-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "istriu with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IstriuIntegerInputExtension"),
+};
+const ISTRIU_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIU_INTEGER_INPUT_EXTENSION];
+pub const ISTRIU_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
 };
 
 #[runmat_macros::register_gpu_spec(
@@ -238,9 +284,19 @@ struct BuiltinContext {
     accel = "structure",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISDIAG_DESCRIPTOR),
+    extensions(ISDIAG_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::diagonal_triangular::ISDIAG_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn isdiag_builtin(value: Value) -> BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISDIAG_INTEGER_INPUT_EXTENSION,
+            "isdiag",
+        )?;
+    }
     structure_predicate_builtin(
         value,
         StructurePredicate::Diagonal,
@@ -253,6 +309,14 @@ async fn isdiag_builtin(value: Value) -> BuiltinResult<Value> {
     .await
 }
 
+fn value_has_integer_storage(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(value) if value.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
 #[runtime_builtin(
     name = "istril",
     category = "math/linalg/structure",
@@ -261,9 +325,19 @@ async fn isdiag_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "structure",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_DESCRIPTOR),
+    extensions(ISTRIL_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISTRIL_INTEGER_INPUT_EXTENSION,
+            "istril",
+        )?;
+    }
     structure_predicate_builtin(
         value,
         StructurePredicate::LowerTriangular,
@@ -284,9 +358,19 @@ async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "structure",
     type_resolver(logical_scalar_type),
     descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_DESCRIPTOR),
+    extensions(ISTRIU_EXTENSIONS),
+    integer_audit(
+        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istriu_builtin(value: Value) -> BuiltinResult<Value> {
+    if value_has_integer_storage(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISTRIU_INTEGER_INPUT_EXTENSION,
+            "istriu",
+        )?;
+    }
     structure_predicate_builtin(
         value,
         StructurePredicate::UpperTriangular,
@@ -322,13 +406,16 @@ async fn gpu_structure_predicate(
         let Some((_rows, _cols)) = matrix_dims_or_false(&handle.shape) else {
             return Ok(false);
         };
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
-            .or_else(runmat_accelerate_api::provider)
-        {
+        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+            let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
             match provider.bandwidth(&handle) {
-                Ok(bandwidth) => return Ok(bandwidth_satisfies(bandwidth, predicate)),
+                Ok(bandwidth) => {
+                    gpu_helpers::restore_handle_metadata(&handle, &metadata);
+                    return Ok(bandwidth_satisfies(bandwidth, predicate));
+                }
                 Err(err) => debug!("{}: provider bandwidth fallback: {err}", ctx.name),
             }
+            gpu_helpers::restore_handle_metadata(&handle, &metadata);
         }
     }
 
@@ -349,6 +436,11 @@ enum MatrixInput {
         rows: usize,
         cols: usize,
         data: Vec<f64>,
+    },
+    DenseInteger {
+        rows: usize,
+        cols: usize,
+        data: Vec<IntValue>,
     },
     DenseComplex {
         rows: usize,
@@ -371,6 +463,9 @@ impl MatrixInput {
         match self {
             Self::DenseReal { rows, cols, data } => {
                 dense_real_satisfies(*rows, *cols, data, predicate)
+            }
+            Self::DenseInteger { rows, cols, data } => {
+                dense_integer_satisfies(*rows, *cols, data, predicate)
             }
             Self::DenseComplex { rows, cols, data } => {
                 dense_complex_satisfies(*rows, *cols, data, predicate)
@@ -422,7 +517,10 @@ async fn matrix_from_gpu(
     handle: GpuTensorHandle,
     ctx: BuiltinContext,
 ) -> BuiltinResult<MatrixInput> {
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+    let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        runtime_error_with_detail(ctx, ctx.internal, "no acceleration provider owns the input")
+    })?;
+    let gathered = gpu_helpers::download_value_preserving_residency_async(owner, &handle)
         .await
         .map_err(|err| runtime_error_with_detail(ctx, ctx.internal, err))?;
     matrix_from_host_value(gathered, ctx)
@@ -434,7 +532,7 @@ fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult
     };
     if rows
         .checked_mul(cols)
-        .is_none_or(|len| len > tensor.data.len())
+        .is_none_or(|len| len > tensor_utils::tensor_element_len(&tensor))
     {
         return Err(runtime_error_with_detail(
             ctx,
@@ -442,11 +540,25 @@ fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult
             "tensor shape exceeds backing data length",
         ));
     }
-    Ok(MatrixInput::DenseReal {
-        rows,
-        cols,
-        data: tensor.data,
-    })
+    match tensor
+        .into_numeric_storage()
+        .map_err(|error| runtime_error_with_detail(ctx, ctx.internal, error))?
+    {
+        NumericStorage::F64(data) => Ok(MatrixInput::DenseReal { rows, cols, data }),
+        NumericStorage::F32(data) => Ok(MatrixInput::DenseReal {
+            rows,
+            cols,
+            data: data.into_iter().map(f64::from).collect(),
+        }),
+        storage => Ok(MatrixInput::DenseInteger {
+            rows,
+            cols,
+            data: storage
+                .into_integer_storage()
+                .expect("non-floating numeric storage is integer")
+                .exact_values(),
+        }),
+    }
 }
 
 fn matrix_from_complex_tensor(
@@ -458,7 +570,7 @@ fn matrix_from_complex_tensor(
     };
     if rows
         .checked_mul(cols)
-        .is_none_or(|len| len > tensor.data.len())
+        .is_none_or(|len| len > tensor_utils::complex_tensor_element_len(&tensor))
     {
         return Err(runtime_error_with_detail(
             ctx,
@@ -469,7 +581,10 @@ fn matrix_from_complex_tensor(
     Ok(MatrixInput::DenseComplex {
         rows,
         cols,
-        data: tensor.data,
+        data: tensor_utils::complex_tensor_into_values_complex64(tensor)
+            .into_iter()
+            .map(|value| (value.re, value.im))
+            .collect(),
     })
 }
 
@@ -524,6 +639,20 @@ fn dense_real_satisfies(
     )
 }
 
+fn dense_integer_satisfies(
+    rows: usize,
+    cols: usize,
+    data: &[IntValue],
+    predicate: StructurePredicate,
+) -> bool {
+    scan_dense(
+        rows,
+        cols,
+        |row, col| !data[row + col * rows].is_zero(),
+        predicate,
+    )
+}
+
 fn dense_complex_satisfies(
     rows: usize,
     cols: usize,
@@ -561,8 +690,11 @@ fn sparse_satisfies(sparse: &SparseTensor, predicate: StructurePredicate) -> boo
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
             let row = sparse.row_indices[idx];
-            let value = sparse.values[idx];
-            if is_forbidden_nonzero(row, col, predicate) && (value != 0.0 || value.is_nan()) {
+            let value = sparse
+                .numeric_value_at(idx)
+                .expect("sparse structure keeps value storage aligned");
+            if is_forbidden_nonzero(row, col, predicate) && (!value.is_zero() || !value.is_finite())
+            {
                 return false;
             }
         }
@@ -598,19 +730,23 @@ mod tests {
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, HostTensorOwned, HostTensorView,
     };
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage};
 
     use crate::builtins::common::test_support;
 
     fn call_isdiag(value: Value) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(isdiag_builtin(value))
     }
 
     fn call_istril(value: Value) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(istril_builtin(value))
     }
 
     fn call_istriu(value: Value) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(istriu_builtin(value))
     }
 
@@ -626,6 +762,29 @@ mod tests {
         assert_eq!(ISDIAG_DESCRIPTOR.signatures[0].label, "tf = isdiag(A)");
         assert_eq!(ISTRIL_DESCRIPTOR.signatures[0].label, "tf = istril(A)");
         assert_eq!(ISTRIU_DESCRIPTOR.signatures[0].label, "tf = istriu(A)");
+    }
+
+    #[test]
+    fn compatibility_mode_rejects_integer_structure_extensions_before_execution() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let isdiag_error = block_on(isdiag_builtin(Value::Int(IntValue::I32(1))))
+            .expect_err("integer isdiag is a RunMat extension");
+        assert_eq!(
+            isdiag_error.identifier(),
+            ISDIAG_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let istril_error = block_on(istril_builtin(Value::Int(IntValue::I32(1))))
+            .expect_err("integer istril is a RunMat extension");
+        assert_eq!(
+            istril_error.identifier(),
+            ISTRIL_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let istriu_error = block_on(istriu_builtin(Value::Int(IntValue::I32(1))))
+            .expect_err("integer istriu is a RunMat extension");
+        assert_eq!(
+            istriu_error.identifier(),
+            ISTRIU_INTEGER_INPUT_EXTENSION.error_identifier
+        );
     }
 
     #[test]
@@ -685,6 +844,56 @@ mod tests {
             vec![3, 3],
         )
         .unwrap();
+        assert!(!expect_bool(
+            call_isdiag(Value::Tensor(upper.clone())).unwrap()
+        ));
+        assert!(!expect_bool(
+            call_istril(Value::Tensor(upper.clone())).unwrap()
+        ));
+        assert!(expect_bool(call_istriu(Value::Tensor(upper)).unwrap()));
+    }
+
+    #[test]
+    fn dense_structure_predicates_read_typed_integer_storage_exactly() {
+        let lower = Tensor::new_integer(
+            IntegerStorage::I16(vec![1, 2, 3, 0, 4, 5, 0, 0, 6]),
+            vec![3, 3],
+        )
+        .unwrap();
+
+        assert!(!expect_bool(
+            call_isdiag(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(!expect_bool(call_istriu(Value::Tensor(lower)).unwrap()));
+    }
+
+    #[test]
+    fn dense_structure_predicates_read_native_single_storage() {
+        let lower = Tensor::from_numeric_storage(
+            NumericStorage::F32(vec![1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 0.0, 0.0, 6.0]),
+            vec![3, 3],
+        )
+        .unwrap();
+        assert!(!expect_bool(
+            call_isdiag(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(!expect_bool(call_istriu(Value::Tensor(lower)).unwrap()));
+    }
+
+    #[test]
+    fn dense_structure_predicates_read_wide_integer_storage_without_float_mirror() {
+        let upper = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, 0, 0, u64::MAX, 1_u64 << 63, 0, 0, 1, 1]),
+            vec![3, 3],
+        )
+        .expect("upper triangular integer matrix");
+
         assert!(!expect_bool(
             call_isdiag(Value::Tensor(upper.clone())).unwrap()
         ));
@@ -790,6 +999,26 @@ mod tests {
     }
 
     #[test]
+    fn dense_structure_predicates_read_typed_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 0, 0, 0]),
+            IntegerStorage::I16(vec![0, 2, 0, 0]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor::new_integer(storage, vec![2, 2]).unwrap();
+
+        assert!(!expect_bool(
+            call_isdiag(Value::ComplexTensor(tensor.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::ComplexTensor(tensor.clone())).unwrap()
+        ));
+        assert!(!expect_bool(
+            call_istriu(Value::ComplexTensor(tensor)).unwrap()
+        ));
+    }
+
+    #[test]
     fn sparse_inputs_are_scanned_without_densifying() {
         let sparse =
             SparseTensor::new(3, 3, vec![0, 2, 3, 3], vec![0, 2, 1], vec![1.0, 4.0, 2.0]).unwrap();
@@ -829,6 +1058,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id,
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -877,6 +1107,7 @@ mod tests {
             shape: vec![3, 3],
             device_id: provider.device_id(),
             buffer_id: 1,
+            descriptor: Default::default(),
         })
     }
 
@@ -889,6 +1120,7 @@ mod tests {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
                 buffer_id: 1,
+                descriptor: Default::default(),
             })
         }
 
@@ -966,11 +1198,17 @@ mod tests {
         let _guard = test_support::accel_test_lock();
         let _thread_provider =
             runmat_accelerate_api::ThreadProviderGuard::set(Some(&FALLBACK_PROVIDER));
-        let handle = Value::GpuTensor(GpuTensorHandle {
+        let handle = GpuTensorHandle {
             shape: vec![2, 2],
             device_id: FALLBACK_PROVIDER.device_id(),
             buffer_id: 1,
-        });
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F64,
+            GpuTensorStorage::Real,
+        );
+        let handle = Value::GpuTensor(handle);
         assert!(!expect_bool(call_isdiag(handle.clone()).unwrap()));
         assert!(expect_bool(call_istril(handle.clone()).unwrap()));
         assert!(!expect_bool(call_istriu(handle).unwrap()));
@@ -982,7 +1220,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .unwrap();
@@ -1010,7 +1248,7 @@ mod tests {
         .unwrap();
         let handle = provider
             .upload(&HostTensorView {
-                data: &lower.data,
+                data: &lower.materialize_f64(),
                 shape: &lower.shape,
             })
             .expect("upload lower");

@@ -1,0 +1,23 @@
+{
+  "title": "fea.loadCase",
+  "category": "fea",
+  "keywords": ["fea", "load", "force", "moment", "pressure"],
+  "summary": "Create a typed RunMat FEA load or source.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_load_case", "integration": null },
+  "description": "`fea.loadCase(id, region, kind, Name, Value, ...)` creates a force, moment, pressure, body-force, current-density, coil-current, or heat-source load.",
+  "behaviors": [
+    "Load id, region selector, and kind are exact text values. `torque` is accepted as an alias for the canonical `moment` kind.",
+    "Required vectors contain exactly three finite real numeric values; scalar fields must be finite real numeric scalars.",
+    "All eight built-in integer classes are accepted for numeric fields and remain exact until one host-only binary64 model-storage conversion, so sufficiently wide integers can round.",
+    "Kind-specific fields and vector shape are validated before the typed load object is created; resident numeric fields are rejected."
+  ],
+  "integer_forms": [
+    "Force, moment/torque, body-force, and current-density vectors.",
+    "Pressure magnitude, current-density phase and amplitude, coil current phase and amplitude, and volumetric heat-source magnitude."
+  ],
+  "examples": [{ "description": "Create an integer-valued force", "input": "load = fea.loadCase(\"tip_force\", \"name:Tip_Load\", \"force\", \"Vector\", int32([0 -1000 0]));" }],
+  "faqs": [{ "question": "When is a moment rejected for a solid region?", "answer": "The constructor validates load syntax first. Model validation or assembly later rejects direct moments on regions without rotational degrees of freedom." }],
+  "links": [{ "label": "FEA models", "url": "../../fea/models" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

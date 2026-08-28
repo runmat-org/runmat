@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 #[cfg(test)]
 use runmat_meshing_core::quality::predicate::tetrahedron_centroid;
+#[cfg(test)]
 use runmat_meshing_core::{
     quality::predicate::{
         distance_squared, point_in_closed_triangle_surface, PointInClosedSurface, Triangle3,
@@ -21,13 +22,7 @@ use super::{ConstrainedCavityRefillOptions, ConstrainedCavityRefillTetrahedron};
 
 mod apex_candidates;
 pub(super) use apex_candidates::local_cap_apex_candidates;
-#[cfg(test)]
-pub(super) use apex_candidates::LocalCapApexCandidate;
-mod boundary_cap;
-pub use boundary_cap::generate_constrained_cavity_boundary_cap_nodes;
-mod patch_steiner;
-pub use patch_steiner::generate_constrained_cavity_patch_steiner_nodes;
-
+pub(in crate::cavity::constrained) use apex_candidates::LocalCapApexCandidate;
 #[cfg(test)]
 pub(super) fn best_local_cap_for_face(
     face: [u32; 3],
@@ -159,6 +154,7 @@ pub(super) fn patch_steiner_point_inside_cavity(
         .next()
 }
 
+#[cfg(test)]
 pub(super) fn patch_steiner_candidate_points(
     surface_point: [f64; 3],
     cavity_centroid: [f64; 3],

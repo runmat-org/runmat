@@ -3,7 +3,7 @@
   "category": "missing",
   "keywords": ["rmmissing", "missing", "NaN", "string", "table"],
   "summary": "Remove missing elements, rows, or columns.",
-  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "GPU inputs are gathered before removal."},
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "GPU inputs use exact owner-aware download and class-preserving restoration, including the logical removal mask, so automatic gather remains transparent and explicit residency is preserved."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
@@ -12,7 +12,8 @@
     "Vectors remove individual missing elements while preserving row or column orientation.",
     "Matrices remove rows by default and columns when `dim` is `2` or the option is `\"columns\"`.",
     "Tables remove rows with any missing variable entry by default, preserving variable names and row names.",
-    "Two-output calls return the result and a logical mask indicating removed rows, columns, or vector elements."
+    "Two-output calls return the result and a logical mask indicating removed rows, columns, or vector elements.",
+    "Every integer class has no standard missing value, so integer input is an exact class-preserving no-op with an all-false mask. A typed-integer dimension is a separately declared RunMat extension and MATLAB compatibility mode rejects it before provider access."
   ],
   "examples": [
     {"description": "Remove missing columns", "input": "B = rmmissing([1 NaN 3; 4 5 6], 2)", "output": "B = [1 3; 4 6]"}

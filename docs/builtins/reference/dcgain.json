@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`dcgain` evaluates host-side transfer-function metadata."
+    "notes": "`dcgain` accepts a host dynamic-system object. Resident numeric values are invalid `sys` inputs and reject before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,18 +28,25 @@
     "unit": "builtins::control::dcgain::tests",
     "integration": "crates/runmat-vm/tests/control.rs"
   },
-  "description": "`dcgain(sys)` evaluates a SISO transfer function at `s = 0` for continuous-time models or `z = 1` for discrete-time models.",
+  "description": "`dcgain(sys)` computes the low-frequency gain of an LTI model: the transfer-function value at `s = 0` for continuous-time models or `z = 1` for discrete-time models. RunMat currently implements the SISO `tf` subset.",
   "behaviors": [
-    "Supports SISO `tf` objects.",
+    "Current RunMat support is limited to SISO `tf` objects; MATLAB also supports broader LTI model families and MIMO gain matrices.",
     "Returns a real scalar for real-valued gains and a complex scalar for complex-valued gains.",
     "Continuous-time models are evaluated at zero frequency.",
-    "Discrete-time models are evaluated at `z = 1`."
+    "Discrete-time models are evaluated at `z = 1`.",
+    "A typed integer array is not a valid `sys` input. Integer coefficients admitted by `tf` have already crossed the model constructor's numeric boundary and do not make `dcgain` an integer-array operation.",
+    "The documented DC gain is infinite for systems with integrators. RunMat derives the sign or complex axis from the first nonzero local denominator coefficient at the DC evaluation point, avoiding spurious NaN components while preserving exact pole-zero cancellation as indeterminate."
   ],
   "examples": [
     {
       "description": "Continuous-time DC gain",
       "input": "H = tf(2, [1 3]);\ndcgain(H)",
       "output": "ans = 0.6667"
+    },
+    {
+      "description": "Infinite gain of an integrator",
+      "input": "H = tf(2, [1 0]);\ndcgain(H)",
+      "output": "ans = Inf"
     }
   ],
   "faqs": [
@@ -69,15 +76,16 @@
       "output": "gain is a scalar."
     },
     "points": [
-      "`sys` must be a SISO `tf` object."
+      "`sys` must currently be a SISO `tf` object in RunMat.",
+      "Typed integer and resident numeric values are rejected as invalid model inputs before provider access."
     ]
   },
   "validation": {
-    "summary": "`dcgain` validates the input model and evaluates numerator and denominator polynomials at the steady-state point. Tests cover real continuous-time gains and VM integration.",
+    "summary": "`dcgain` validates the object boundary before provider access and evaluates SISO transfer-function numerator and denominator polynomials at the steady-state point. Tests cover finite gains, signed continuous integrator infinity, discrete integrator infinity, complex-axis singular direction, exact pole-zero cancellation, invalid integer `sys` inputs, and integer coefficients already admitted by `tf`; broader LTI families and MIMO gain matrices remain explicit general control-system gaps.",
     "implementation": {
       "label": "`crates/runmat-runtime/src/builtins/control/dcgain.rs`",
       "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/dcgain.rs"
     }
   },
-  "gpu_residency": "`dcgain` returns a host scalar."
+  "gpu_residency": "`dcgain` returns a host scalar for the currently supported SISO form. A resident numeric array is not a dynamic-system object and is rejected without gather or provider dispatch."
 }

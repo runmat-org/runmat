@@ -14,6 +14,8 @@ pub mod fs;
 pub mod gpu_helpers;
 pub mod identifiers;
 pub mod indexing;
+pub mod integer_capability;
+pub mod json;
 pub mod linalg;
 pub mod matrix;
 pub mod path_search;

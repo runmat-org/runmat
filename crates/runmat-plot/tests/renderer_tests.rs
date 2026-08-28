@@ -740,6 +740,13 @@ mod new_plots_tests {
             LineStyle::Solid,
             0.2,
         );
+        eb.set_marker(Some(line::LineMarkerAppearance {
+            kind: scatter::MarkerStyle::Circle,
+            size: 6.0,
+            edge_color: glam::Vec4::ZERO,
+            face_color: glam::Vec4::ONE,
+            filled: false,
+        }));
         let vertices = eb.generate_vertices();
         // For 3 points with caps: 2 (line) + 4 (caps) per point = 6 per point => 18
         assert!(vertices.len() >= 6);

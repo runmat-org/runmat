@@ -7,15 +7,18 @@ use std::time::Instant;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor,
-    Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, LogicalArray, ObjectInstance, StringArray, StructValue, Tensor, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{call_function, value_to_scalar};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -376,7 +379,7 @@ fn string_property(object: &ObjectInstance, name: &str) -> BuiltinResult<String>
 
 fn numeric_range(value: &Value, name: &str) -> BuiltinResult<(f64, f64)> {
     let values = match value {
-        Value::Tensor(tensor) => tensor.data.clone(),
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor),
         Value::Num(n) => vec![*n],
         Value::Int(i) => vec![i.to_f64()],
         other => {
@@ -1181,7 +1184,9 @@ async fn constraint_allows(handle: &Value, row: Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(value),
         Value::LogicalArray(logical) if logical.data.len() == 1 => Ok(logical.data[0] != 0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            Ok(tensor::tensor_value_f64(&tensor, 0) != 0.0)
+        }
         Value::Num(value) => Ok(value != 0.0),
         other => Err(bayesopt_error(
             format!("bayesopt: XConstraintFcn must return a logical scalar, got {other:?}"),
@@ -1508,7 +1513,7 @@ fn finite_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
         Value::Num(n) => vec![n],
         Value::Int(i) => vec![i.to_f64()],
         Value::Bool(b) => vec![if b { 1.0 } else { 0.0 }],
-        Value::Tensor(tensor) => tensor.data,
+        Value::Tensor(tensor) => tensor::tensor_into_values_f64(tensor),
         Value::LogicalArray(logical) => logical
             .data
             .iter()
@@ -1543,21 +1548,56 @@ fn value_to_text(value: &Value, label: &str) -> BuiltinResult<String> {
 }
 
 fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
-    match value {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(bayesopt_error(
+                format!("bayesopt: option {name} must be logical scalar, got {value:?}"),
+                &ERROR_INVALID_ARGUMENT,
+            )),
+        };
+    }
+    let parsed = match value {
         Value::Bool(value) => Ok(*value),
         Value::LogicalArray(logical) if logical.data.len() == 1 => Ok(logical.data[0] != 0),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let parsed = tensor::tensor_value_f64(tensor, 0);
+            if parsed == 0.0 || parsed == 1.0 {
+                Ok(parsed != 0.0)
+            } else {
+                Err(bayesopt_error(
+                    format!("bayesopt: option {name} must be logical scalar, got {value:?}"),
+                    &ERROR_INVALID_ARGUMENT,
+                ))
+            }
+        }
         other => Err(bayesopt_error(
             format!("bayesopt: option {name} must be logical scalar, got {other:?}"),
             &ERROR_INVALID_ARGUMENT,
         )),
-    }
+    }?;
+    Ok(parsed)
 }
 
 fn option_usize(value: &Value, name: &str, min: usize, max: usize) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        let parsed = integer.try_to_usize();
+        return match parsed.filter(|parsed| *parsed >= min && *parsed <= max) {
+            Some(parsed) => Ok(parsed),
+            None => Err(bayesopt_error(
+                format!("bayesopt: option {name} must be an integer in [{min}, {max}]"),
+                &ERROR_INVALID_ARGUMENT,
+            )),
+        };
+    }
     let parsed = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         other => {
             return Err(bayesopt_error(
                 format!("bayesopt: option {name} must be numeric scalar, got {other:?}"),
@@ -1575,9 +1615,22 @@ fn option_usize(value: &Value, name: &str, min: usize, max: usize) -> BuiltinRes
 }
 
 fn option_unit_f64(value: &Value, name: &str) -> BuiltinResult<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(0.0),
+            Some(1) => Ok(1.0),
+            _ => Err(bayesopt_error(
+                format!("bayesopt: option {name} must be in [0, 1]"),
+                &ERROR_INVALID_ARGUMENT,
+            )),
+        };
+    }
     let parsed = match value {
         Value::Num(value) => *value,
         Value::Int(value) => value.to_f64(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         other => {
             return Err(bayesopt_error(
                 format!("bayesopt: option {name} must be numeric scalar, got {other:?}"),
@@ -1596,7 +1649,7 @@ fn option_unit_f64(value: &Value, name: &str) -> BuiltinResult<f64> {
 
 fn is_empty_option(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::String(text) => text.is_empty() || text.eq_ignore_ascii_case("none"),
         Value::StringArray(array) => array.data.is_empty(),
@@ -1619,6 +1672,7 @@ fn is_callable(value: &Value) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
     use std::sync::Arc;
 
     fn variable(name: &str, range: Vec<f64>, var_type: Option<&str>) -> Value {
@@ -1641,6 +1695,53 @@ mod tests {
             .properties
             .insert("Optimize".into(), Value::Bool(true));
         Value::Object(object)
+    }
+
+    fn variable_with_range(name: &str, range: Value, var_type: Option<&str>) -> Value {
+        let mut object = ObjectInstance::new("optimizableVariable".into());
+        object
+            .properties
+            .insert("Name".into(), Value::String(name.into()));
+        object.properties.insert("Range".into(), range);
+        object.properties.insert(
+            "Type".into(),
+            Value::String(var_type.unwrap_or("real").into()),
+        );
+        object
+            .properties
+            .insert("Transform".into(), Value::String("none".into()));
+        object
+            .properties
+            .insert("Optimize".into(), Value::Bool(true));
+        Value::Object(object)
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn option_parsers_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = poisoned_int_tensor(storage, vec![1, 1]);
+            assert!(option_bool(&value, "Verbose").unwrap());
+            assert_eq!(
+                option_usize(&value, "MaxObjectiveEvaluations", 1, 2).unwrap(),
+                1
+            );
+            assert_eq!(option_unit_f64(&value, "ExplorationRatio").unwrap(), 1.0);
+        }
     }
 
     fn categorical_variable(name: &str, categories: Vec<&str>) -> Value {
@@ -1684,7 +1785,7 @@ mod tests {
         let Value::Tensor(tensor) = vars.fields.get(name).unwrap() else {
             panic!("expected numeric column");
         };
-        tensor.data[0]
+        tensor.materialize_f64()[0]
     }
 
     fn table_string_arg(args: &[Value], name: &str) -> String {
@@ -1835,5 +1936,64 @@ mod tests {
             object.properties.get("FeasibilityTrace"),
             Some(Value::LogicalArray(_))
         ));
+    }
+
+    #[test]
+    fn bayesopt_reads_typed_integer_storage_exactly() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, _requested_outputs| {
+                let x = table_scalar_arg(args, "x");
+                Box::pin(async move {
+                    if function == 11 {
+                        return Ok(poisoned_int_tensor(IntegerStorage::I8(vec![1]), vec![1, 1]));
+                    }
+                    let mut out = StructValue::new();
+                    out.insert("Objective", Value::Num((x - 1.0).powi(2)));
+                    out.insert(
+                        "ConstraintViolations",
+                        poisoned_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
+                    );
+                    Ok(Value::Struct(out))
+                })
+            },
+        )));
+        let result = block_on(bayesopt_builtin(
+            Value::BoundFunctionHandle {
+                name: "objective".into(),
+                function: 10,
+            },
+            variable_with_range(
+                "x",
+                poisoned_int_tensor(IntegerStorage::I16(vec![-1, 2]), vec![1, 2]),
+                None,
+            ),
+            vec![
+                Value::String("MaxObjectiveEvaluations".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![6]), vec![1, 1]),
+                Value::String("NumSeedPoints".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                Value::String("ExplorationRatio".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+                Value::String("IsObjectiveDeterministic".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+                Value::String("XConstraintFcn".into()),
+                Value::BoundFunctionHandle {
+                    name: "constraint".into(),
+                    function: 11,
+                },
+            ],
+        ))
+        .unwrap();
+        let Value::Object(object) = result else {
+            panic!("expected BayesianOptimization object");
+        };
+        let Some(Value::Num(count)) = object.properties.get("NumObjectiveEvaluations") else {
+            panic!("expected count");
+        };
+        assert_eq!(*count, 6.0);
+        let Some(Value::Num(minimum)) = object.properties.get("MinObjective") else {
+            panic!("expected minimum");
+        };
+        assert!(*minimum <= 0.25, "minimum was {minimum}");
     }
 }

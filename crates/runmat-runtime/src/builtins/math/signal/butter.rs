@@ -4,11 +4,15 @@ use std::f64::consts::PI;
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::signal::type_resolvers::butter_type;
@@ -17,6 +21,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "butter";
 const EPS: f64 = 1.0e-12;
 const REAL_TOL: f64 = 1.0e-8;
+const MAX_DOCUMENTED_ORDER: usize = 500;
 const MAX_ORDER: usize = 1024;
 
 const BUTTER_OUTPUT_B: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -329,6 +334,114 @@ const BUTTER_ERRORS: [BuiltinErrorDescriptor; 6] = [
     BUTTER_ERROR_INTERNAL,
 ];
 
+const BUTTER_INTEGER_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "butter-integer-order",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "butter with a typed-integer filter order is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ButterIntegerOrderExtension"),
+};
+const BUTTER_LOGICAL_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "butter-logical-order",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "butter with a logical filter order is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ButterLogicalOrderExtension"),
+};
+const BUTTER_SINGLE_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "butter-single-order",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "butter with a single-precision filter order is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ButterSingleOrderExtension"),
+};
+const BUTTER_INTEGER_CUTOFF_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "butter-integer-cutoff",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "butter with typed-integer cutoff frequencies is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ButterIntegerCutoffExtension"),
+};
+const BUTTER_LOGICAL_CUTOFF_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "butter-logical-cutoff",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "butter with logical cutoff frequencies is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ButterLogicalCutoffExtension"),
+};
+const BUTTER_SINGLE_CUTOFF_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "butter-single-cutoff",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "butter with single-precision cutoff frequencies is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ButterSingleCutoffExtension"),
+};
+const BUTTER_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "butter-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "butter with resident GPU-array arguments is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ButterGpuInputExtension"),
+};
+const BUTTER_OPTION_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "butter-option-alias",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "butter with a nonstandard filter-type alias is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ButterOptionAliasExtension"),
+};
+const BUTTER_LARGE_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "butter-order-above-500",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "butter with a filter order above the documented limit of 500 is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ButterLargeOrderExtension"),
+};
+
+pub const BUTTER_EXTENSIONS: [BuiltinExtensionDescriptor; 9] = [
+    BUTTER_INTEGER_ORDER_EXTENSION,
+    BUTTER_LOGICAL_ORDER_EXTENSION,
+    BUTTER_SINGLE_ORDER_EXTENSION,
+    BUTTER_INTEGER_CUTOFF_EXTENSION,
+    BUTTER_LOGICAL_CUTOFF_EXTENSION,
+    BUTTER_SINGLE_CUTOFF_EXTENSION,
+    BUTTER_GPU_INPUT_EXTENSION,
+    BUTTER_OPTION_ALIAS_EXTENSION,
+    BUTTER_LARGE_ORDER_EXTENSION,
+];
+
+const BUTTER_INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented order datatype is double; RunMat mode additionally accepts every scalar integer class and parses it exactly into a bounded host order.",
+    }];
+const BUTTER_INTEGER_CUTOFF_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Wn",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented cutoff datatype is double; RunMat mode additionally accepts scalar or two-element integer cutoff storage before the deliberate double filter-design boundary.",
+    }];
+
+pub const BUTTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[b,a]/[z,p,k]/[A,B,C,D] = butter(integer_n,Wn,...)",
+        inputs: &BUTTER_INTEGER_ORDER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer n is checked exactly against positive host and documented-order bounds. Resident order input is separately gated, gathers through its owning provider in RunMat mode, and every numeric output remains double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[b,a]/[z,p,k]/[A,B,C,D] = butter(n,integer_Wn,...)",
+        inputs: &BUTTER_INTEGER_CUTOFF_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer Wn is retained through scalar/vector validation and then explicitly materialized into the double Butterworth design domain. Resident cutoff input is separately gated and returns host double outputs.",
+    },
+];
+
 pub const BUTTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &BUTTER_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -379,6 +492,8 @@ fn butter_error_with_message(
     keywords = "butter,butterworth,IIR,lowpass,highpass,bandpass,bandstop,signal processing",
     type_resolver(butter_type),
     descriptor(crate::builtins::math::signal::butter::BUTTER_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::butter::BUTTER_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::butter::BUTTER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::butter"
 )]
 async fn butter_builtin(n: Value, wn: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -431,13 +546,26 @@ impl ButterArgs {
             return Err(butter_error(&BUTTER_ERROR_ARG_COUNT));
         }
 
+        ensure_input_extensions(&n, &wn, rest)?;
         let order = parse_order(gather_value(&n).await?)?;
+        if order > MAX_DOCUMENTED_ORDER {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &BUTTER_LARGE_ORDER_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
         let cutoff = parse_cutoff(gather_value(&wn).await?)?;
         let mut analog = false;
         let mut kind = None;
 
         for value in rest {
             let token = parse_option_token(gather_value(value).await?)?;
+            if is_runmat_option_alias(&token) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &BUTTER_OPTION_ALIAS_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
             match classify_option_token(&token)? {
                 OptionToken::Analog => {
                     if analog {
@@ -481,6 +609,64 @@ impl ButterArgs {
             analog,
         })
     }
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn is_single_value(value: &Value) -> bool {
+    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        || matches!(value, Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_precision(handle)
+                    == Some(runmat_accelerate_api::ProviderPrecision::F32))
+}
+
+fn ensure_input_extensions(n: &Value, wn: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    for (value, integer, logical, single) in [
+        (
+            n,
+            &BUTTER_INTEGER_ORDER_EXTENSION,
+            &BUTTER_LOGICAL_ORDER_EXTENSION,
+            &BUTTER_SINGLE_ORDER_EXTENSION,
+        ),
+        (
+            wn,
+            &BUTTER_INTEGER_CUTOFF_EXTENSION,
+            &BUTTER_LOGICAL_CUTOFF_EXTENSION,
+            &BUTTER_SINGLE_CUTOFF_EXTENSION,
+        ),
+    ] {
+        if is_typed_integer_value(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(integer, BUILTIN_NAME)?;
+        }
+        if is_logical_value(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(logical, BUILTIN_NAME)?;
+        }
+        if is_single_value(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(single, BUILTIN_NAME)?;
+        }
+    }
+    if std::iter::once(n)
+        .chain(std::iter::once(wn))
+        .chain(rest.iter())
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BUTTER_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -546,9 +732,17 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
 }
 
 fn parse_order(value: Value) -> BuiltinResult<usize> {
+    if let Some(value) = tensor::scalar_integer_value(&value) {
+        let order = value.try_to_usize().ok_or_else(|| {
+            butter_error_with_detail(
+                &BUTTER_ERROR_INVALID_ORDER,
+                "order is outside the supported host range",
+            )
+        })?;
+        return validate_integer_order(order);
+    }
     let raw = match value {
         Value::Num(value) => value,
-        Value::Int(value) => value.to_f64(),
         Value::Bool(value) => {
             if value {
                 1.0
@@ -556,7 +750,9 @@ fn parse_order(value: Value) -> BuiltinResult<usize> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            tensor::tensor_value_f64(&tensor, 0)
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             if logical.data[0] != 0 {
                 1.0
@@ -594,6 +790,22 @@ fn parse_order(value: Value) -> BuiltinResult<usize> {
     Ok(rounded as usize)
 }
 
+fn validate_integer_order(order: usize) -> BuiltinResult<usize> {
+    if order == 0 {
+        return Err(butter_error_with_detail(
+            &BUTTER_ERROR_INVALID_ORDER,
+            "order must be an integer greater than or equal to 1",
+        ));
+    }
+    if order > MAX_ORDER {
+        return Err(butter_error_with_detail(
+            &BUTTER_ERROR_INVALID_ORDER,
+            format!("order exceeds RunMat's resource limit of {MAX_ORDER}"),
+        ));
+    }
+    Ok(order)
+}
+
 fn parse_cutoff(value: Value) -> BuiltinResult<Vec<f64>> {
     let values = match value {
         Value::Num(value) => vec![value],
@@ -601,14 +813,14 @@ fn parse_cutoff(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Bool(value) => vec![if value { 1.0 } else { 0.0 }],
         Value::Tensor(tensor) => {
             ensure_vector_shape("Wn", &tensor.shape)?;
-            tensor.data
+            tensor::tensor_into_values_f64(tensor)
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(|detail| {
                 butter_error_with_detail(&BUTTER_ERROR_INVALID_FREQUENCY, detail)
             })?;
             ensure_vector_shape("Wn", &tensor.shape)?;
-            tensor.data
+            tensor::tensor_into_values_f64(tensor)
         }
         other => {
             return Err(butter_error_with_detail(
@@ -657,6 +869,13 @@ fn classify_option_token(token: &str) -> BuiltinResult<OptionToken> {
             format!("unrecognized option '{other}'"),
         )),
     }
+}
+
+fn is_runmat_option_alias(token: &str) -> bool {
+    matches!(
+        token.trim().to_ascii_lowercase().as_str(),
+        "lowpass" | "highpass" | "pass" | "bandstop" | "bandreject" | "notch"
+    )
 }
 
 fn validate_cutoff(cutoff: &[f64], kind: FilterKind, analog: bool) -> BuiltinResult<()> {
@@ -1083,25 +1302,39 @@ fn complex_is_finite(value: Complex64) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn output_values(order: usize, cutoff: Value, rest: Vec<Value>, outputs: usize) -> Vec<Value> {
         let _guard = crate::output_count::push_output_count(Some(outputs));
-        match block_on(butter_builtin(
-            Value::Int(IntValue::U64(order as u64)),
-            cutoff,
-            rest,
-        ))
-        .expect("butter")
-        {
+        match block_on(butter_builtin(Value::Num(order as f64), cutoff, rest)).expect("butter") {
             Value::OutputList(values) => values,
             other => panic!("expected output list, got {other:?}"),
         }
     }
 
+    fn call_values(
+        order: Value,
+        cutoff: Value,
+        rest: Vec<Value>,
+        outputs: usize,
+    ) -> BuiltinResult<Value> {
+        let _guard = crate::output_count::push_output_count(Some(outputs));
+        block_on(butter_builtin(order, cutoff, rest))
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn register_wgpu_provider_available() -> bool {
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_ok()
+            && runmat_accelerate_api::provider().is_some()
+    }
+
     fn tensor_data(value: &Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data.clone(),
+            Value::Tensor(tensor) => tensor.materialize_f64().clone(),
             other => panic!("expected real tensor, got {other:?}"),
         }
     }
@@ -1120,12 +1353,12 @@ mod tests {
     fn complex_column(value: &Value) -> Vec<Complex64> {
         match value {
             Value::Tensor(tensor) => tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|value| Complex64::new(*value, 0.0))
                 .collect(),
             Value::ComplexTensor(tensor) => tensor
-                .data
+                .materialize_f64()
                 .iter()
                 .map(|(re, im)| Complex64::new(*re, *im))
                 .collect(),
@@ -1191,6 +1424,12 @@ mod tests {
             .errors
             .iter()
             .any(|error| error.code == "RM.BUTTER.INVALID_FREQUENCY"));
+        assert_eq!(builtin.extensions.len(), 9);
+        assert_eq!(builtin.integer_capabilities.len(), 2);
+        assert!(builtin
+            .integer_capabilities
+            .iter()
+            .all(|capability| capability.output_class == BuiltinIntegerOutputClassRule::Double));
     }
 
     #[test]
@@ -1287,6 +1526,213 @@ mod tests {
     }
 
     #[test]
+    fn butter_order_reads_typed_integer_storage_exactly() {
+        let order = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("order");
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _guard = crate::output_count::push_output_count(Some(2));
+
+        let values = match block_on(butter_builtin(
+            Value::Tensor(order),
+            Value::Num(0.5),
+            Vec::new(),
+        ))
+        .expect("butter")
+        {
+            Value::OutputList(values) => values,
+            other => panic!("expected output list, got {other:?}"),
+        };
+
+        assert_slice_close(&tensor_data(&values[0]), &[0.5, 0.5], 1e-12);
+        assert_slice_close(&tensor_data(&values[1]), &[1.0, 0.0], 1e-12);
+    }
+
+    #[test]
+    fn butter_cutoff_reads_typed_integer_storage_exactly() {
+        let cutoff = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("cutoff");
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let values = output_values(
+            1,
+            Value::Tensor(cutoff),
+            vec![Value::String("s".to_string())],
+            2,
+        );
+        assert_slice_close(&tensor_data(&values[0]), &[0.0, 1.0], 1e-12);
+        assert_slice_close(&tensor_data(&values[1]), &[1.0, 1.0], 1e-12);
+    }
+
+    #[test]
+    fn butter_accepts_all_integer_order_and_cutoff_classes_only_in_runmat_mode() {
+        let integer_orders = [
+            Value::Int(IntValue::I8(1)),
+            Value::Int(IntValue::I16(1)),
+            Value::Int(IntValue::I32(1)),
+            Value::Int(IntValue::I64(1)),
+            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U16(1)),
+            Value::Int(IntValue::U32(1)),
+            Value::Int(IntValue::U64(1)),
+        ];
+        let integer_cutoffs = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = call_values(Value::Int(IntValue::U64(1)), Value::Num(0.5), Vec::new(), 2)
+                .expect_err("typed order must be gated");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:ButterIntegerOrderExtension")
+            );
+            let cutoff =
+                Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("cutoff");
+            let err = call_values(
+                Value::Num(1.0),
+                Value::Tensor(cutoff),
+                vec![Value::String("s".to_string())],
+                2,
+            )
+            .expect_err("typed cutoff must be gated");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:ButterIntegerCutoffExtension")
+            );
+        }
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for order in integer_orders {
+            let Value::OutputList(outputs) =
+                call_values(order, Value::Num(0.5), Vec::new(), 2).expect("integer order")
+            else {
+                panic!("expected coefficient outputs");
+            };
+            assert!(outputs.iter().all(
+                |value| matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64)
+            ));
+        }
+        for storage in integer_cutoffs {
+            let cutoff = Tensor::new_integer(storage, vec![1, 1]).expect("cutoff");
+            let Value::OutputList(outputs) = call_values(
+                Value::Num(1.0),
+                Value::Tensor(cutoff),
+                vec![Value::String("s".to_string())],
+                2,
+            )
+            .expect("integer cutoff") else {
+                panic!("expected coefficient outputs");
+            };
+            assert_slice_close(&tensor_data(&outputs[0]), &[0.0, 1.0], 1e-12);
+            assert_slice_close(&tensor_data(&outputs[1]), &[1.0, 1.0], 1e-12);
+        }
+    }
+
+    #[test]
+    fn butter_nondouble_alias_and_large_order_extensions_are_independent() {
+        let single_one = || Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single");
+        let cases = [
+            (
+                Value::Bool(true),
+                Value::Num(0.5),
+                Vec::new(),
+                "RunMat:compatibility:ButterLogicalOrderExtension",
+            ),
+            (
+                Value::Tensor(single_one()),
+                Value::Num(0.5),
+                Vec::new(),
+                "RunMat:compatibility:ButterSingleOrderExtension",
+            ),
+            (
+                Value::Num(1.0),
+                Value::Bool(true),
+                vec![Value::String("s".to_string())],
+                "RunMat:compatibility:ButterLogicalCutoffExtension",
+            ),
+            (
+                Value::Num(1.0),
+                Value::Tensor(single_one()),
+                vec![Value::String("s".to_string())],
+                "RunMat:compatibility:ButterSingleCutoffExtension",
+            ),
+            (
+                Value::Num(1.0),
+                Value::Num(0.5),
+                vec![Value::String("lowpass".to_string())],
+                "RunMat:compatibility:ButterOptionAliasExtension",
+            ),
+            (
+                Value::Num(501.0),
+                Value::Num(0.5),
+                Vec::new(),
+                "RunMat:compatibility:ButterLargeOrderExtension",
+            ),
+        ];
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (order, cutoff, rest, identifier) in cases {
+            let err = call_values(order, cutoff, rest, 2).expect_err("extension must be gated");
+            assert_eq!(err.identifier(), Some(identifier));
+        }
+    }
+
+    #[test]
+    fn butter_rejects_wide_integer_order_without_float_rounding() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let err = call_values(
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Num(0.5),
+            Vec::new(),
+            2,
+        )
+        .expect_err("wide order must reject exactly");
+        assert_eq!(err.identifier(), BUTTER_ERROR_INVALID_ORDER.identifier);
+        assert!(err.message().contains("resource limit"));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn butter_gpu_input_is_gated_before_gather_and_runmat_fallback_is_host_double() {
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("provider");
+        let cutoff = Tensor::new(vec![0.5], vec![1, 1]).expect("cutoff");
+        let handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &cutoff).expect("upload");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = call_values(
+                Value::Num(1.0),
+                Value::GpuTensor(handle.clone()),
+                Vec::new(),
+                2,
+            )
+            .expect_err("gpu input must be gated");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:ButterGpuInputExtension")
+            );
+        }
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::OutputList(outputs) =
+            call_values(Value::Num(1.0), Value::GpuTensor(handle), Vec::new(), 2)
+                .expect("host fallback")
+        else {
+            panic!("expected coefficient outputs");
+        };
+        assert!(outputs.iter().all(
+            |value| matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64)
+        ));
+    }
+
+    #[test]
     fn butter_first_order_highpass_matches_closed_form() {
         let values = output_values(
             1,
@@ -1364,7 +1810,7 @@ mod tests {
         match &values[1] {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![1.0, 0.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 0.0]);
             }
             other => panic!("expected input matrix, got {other:?}"),
         }

@@ -1,10 +1,3 @@
----
-title: "wgpu Backend & Accelerate Provider"
-category: "GPU Acceleration & Fusion Engine"
-section: "4.2"
-last_updated: "May 28, 2026"
----
-
 # WGPU Backend & Accelerate Provider
 
 The `wgpu` backend is RunMat's primary hardware acceleration provider. It implements the `AccelProvider` trait with a `WgpuProvider` that owns the device, queue, adapter metadata, buffer table, residency pool, compute pipelines, kernel resources, caches, telemetry, and autotuning state.
@@ -25,6 +18,8 @@ classDiagram
     linalg()
     random()
     indexing()
+    capability_snapshot()
+    query_feasibility()
     export_context()
   }
 
@@ -97,6 +92,16 @@ flowchart TD
 
 The provider also exposes `export_context` and `export_wgpu_buffer` for zero-copy consumers. Plotting and other GPU-aware subsystems can use those APIs to avoid unnecessary readbacks when the active provider supports them.
 
+## Capability and Feasibility Discovery
+
+`capability_snapshot()` returns a versioned description of the provider device, supported pilot operation identities, element representations, resource limits, and concurrency behavior. `query_feasibility()` accepts one operation identity together with its operation family, input/output representations, and workload dimensions. It returns either a resource estimate or a structured rejection code.
+
+Both calls are observational. Providers must not allocate buffers, compile pipelines, transfer values, submit commands, or synchronize the device while answering them. This lets placement eliminate unsupported candidates before profitability comparison and prevents call-to-discover behavior. Operation identities advertised by the WGPU and in-process providers cover the current transfer, automatic-offload, and fusion pilot paths; they are not an assertion that every builtin has completed systematic placement migration.
+
+`estimate_cost()` is also observational. For an operation already proven feasible, it can report cold or warm preparation, transfer, allocation, queue, execution, synchronization, download, downstream, and scratch-memory estimates. WGPU uses observed dispatch averages when trustworthy telemetry exists and otherwise returns explicit low-confidence priors. Placement accounts for uncertainty and supplies a bounded fallback when a provider returns no estimate; it never runs a probe operation to discover cost.
+
+`placement_resources()` is the corresponding side-effect-free admission snapshot. It reports live allocations, pooled allocations that may be reclaimed, scratch and queue availability when known, loss state, and a resource epoch without allocating or polling by execution. WebGPU does not expose a trustworthy total device-memory budget or queue backlog, so the WGPU provider leaves total capacity, scratch availability, and queue occupancy explicitly unknown while still reporting observed allocation pressure; placement never substitutes the maximum single-buffer size as total VRAM or fabricates queue telemetry.
+
 ## Operation Categories
 
 | Category | Examples |
@@ -119,10 +124,30 @@ Complex operations can combine device kernels with host fallback when the backen
 - Precision: `f32` or `f64`.
 - Storage: real or complex-interleaved.
 - Logical flags for MATLAB logical arrays.
+- Exact integer element type: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, or `u64`.
 - Transpose annotations.
 - Provider-owned `wgpu::Buffer` references for exported buffers.
 
 The provider validates adapter limits before creating buffers or bind groups. It also classifies buffer usage so residency pooling and cleanup can make reasonable reuse decisions.
+
+### Exact integer ABI
+
+Exact integer tensors do not use the provider's floating precision or a floating compatibility buffer. They use a packed `u32` word ABI:
+
+| Integer class | Words per logical element | Interpretation |
+| --- | ---: | --- |
+| `int8`, `uint8` | 1 | low 8 bits |
+| `int16`, `uint16` | 1 | low 16 bits |
+| `int32`, `uint32` | 1 | full word |
+| `int64`, `uint64` | 2 | low word followed by high word |
+
+Signed values use two's-complement interpretation. This representation makes exact 64-bit integer support independent of native WGSL `i64`/`u64` availability. Integer comparison, arithmetic, cast, extrema, reduction, scan, and structural kernels decode the packed representation explicitly.
+
+The `AccelProvider` contract separates `upload_integer`/`download_integer` and native integer reductions/casts from floating methods. A provider without an exact path must return unsupported; it must not route native integers through `f32` or `f64`.
+
+The buffer entry's integer-type annotation and the API-level handle registry must be copied to every derived handle and cleared when a handle is released. Losing that annotation can make an exact word buffer look like floating storage, so metadata propagation is part of correctness rather than optional introspection.
+
+GPU handles retain durable storage, precision, integer-class, logical, provenance, and device-owner metadata. Floating and integer transfers use specialized physical paths, but runtime dispatch derives behavior from that coherent handle metadata. A fallback that cannot preserve the required class, precision, or owner returns an unsupported result instead of relabeling the payload.
 
 ## Pipeline and Shader Management
 
@@ -133,5 +158,12 @@ Autotuning and calibrated workgroup sizing are part of provider state. The selec
 ## SimpleProvider Fallback
 
 `SimpleProvider` is the host-side fallback provider. It keeps the same provider-facing shape as the GPU backend but delegates unsupported or CPU-better operations to host implementations. This gives the runtime a single acceleration interface while preserving correctness when WebGPU is unavailable or a specific kernel is not implemented.
+
+Fallback has two separate correctness obligations:
+
+- Automatically promoted ordinary values may return to the CPU whenever the planner or provider selects the CPU semantic baseline.
+- An exact integer handle must be downloaded with `download_integer`; fallback must preserve class and values and may re-upload only through `upload_integer`.
+
+Handle metadata distinguishes explicit `gpuArray` construction from automatic promotion. Automatically promoted values may transparently return to the shared runtime path after a feasibility rejection; explicit GPU values retain their user-visible residency contract and are not silently reclassified as automatic values.
 
 For how the VM decides when to invoke provider execution, see [Fusion Engine & Residency Management](/docs/runtime/gpu/fusion).

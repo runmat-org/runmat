@@ -3,15 +3,16 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::fs::{compare_names, expand_user_path, path_to_string};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::io::repl_fs::tensor_char_codes_to_string;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
@@ -546,24 +547,7 @@ fn tensor_to_string(
         return Err(genpath_error(type_error));
     }
 
-    let mut text = String::with_capacity(tensor.data.len());
-    for &code in &tensor.data {
-        if !code.is_finite() {
-            return Err(genpath_error(type_error));
-        }
-        let rounded = code.round();
-        if (code - rounded).abs() > 1e-6 {
-            return Err(genpath_error(type_error));
-        }
-        let int_code = rounded as i64;
-        if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(genpath_error(type_error));
-        }
-        let ch = char::from_u32(int_code as u32).ok_or_else(|| genpath_error(type_error))?;
-        text.push(ch);
-    }
-
-    Ok(text)
+    tensor_char_codes_to_string(tensor).ok_or_else(|| genpath_error(type_error))
 }
 
 #[cfg(test)]
@@ -571,7 +555,7 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::PATH_LIST_SEPARATOR;
-    use runmat_builtins::{CharArray, StringArray, Tensor};
+    use runmat_value::{CharArray, StringArray, Tensor};
     use std::convert::TryFrom;
     use std::fs;
     use tempfile::tempdir;

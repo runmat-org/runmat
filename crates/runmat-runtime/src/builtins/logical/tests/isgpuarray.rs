@@ -1,11 +1,15 @@
 //! MATLAB-compatible `isgpuarray` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -71,6 +75,27 @@ pub const ISGPUARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ISGPUARRAY_ERRORS,
 };
 
+const ISGPUARRAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "An explicitly constructed gpuArray may contain any of the eight integer classes; the predicate inspects residency intent without downloading its payload.",
+    }];
+
+pub const ISGPUARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = isgpuarray(integer_gpuArray)",
+        inputs: &ISGPUARRAY_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The metadata query returns true for explicit integer gpuArray values and false for host integers or RunMat-internal automatic residency; it performs no gather or numeric conversion.",
+    }];
+
 #[runtime_builtin(
     name = "isgpuarray",
     category = "logical/tests",
@@ -79,10 +104,16 @@ pub const ISGPUARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::logical::tests::isgpuarray::ISGPUARRAY_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::logical::tests::isgpuarray::ISGPUARRAY_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::logical::tests::isgpuarray"
 )]
 async fn isgpuarray_builtin(value: Value) -> BuiltinResult<Value> {
-    Ok(Value::Bool(matches!(value, Value::GpuTensor(_))))
+    Ok(Value::Bool(match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(&handle),
+        _ => false,
+    }))
 }
 
 fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
@@ -95,7 +126,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{Tensor, Value};
+    use runmat_value::{Tensor, Value};
 
     fn run_isgpuarray(value: Value) -> BuiltinResult<Value> {
         block_on(super::isgpuarray_builtin(value))
@@ -109,16 +140,23 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn gpu_handles_report_true() {
+    fn only_explicit_gpuarray_handles_report_true() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = run_isgpuarray(Value::GpuTensor(handle.clone())).expect("isgpuarray");
-            assert_eq!(result, Value::Bool(true));
+            let automatic =
+                run_isgpuarray(Value::GpuTensor(handle.clone())).expect("isgpuarray automatic");
+            assert_eq!(automatic, Value::Bool(false));
+
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit =
+                run_isgpuarray(Value::GpuTensor(handle.clone())).expect("isgpuarray explicit");
+            assert_eq!(explicit, Value::Bool(true));
             provider.free(&handle).ok();
         });
     }

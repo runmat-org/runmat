@@ -1,7 +1,9 @@
+mod clusters;
 mod fs;
 mod git;
 mod history;
 mod login;
+mod node;
 mod orgs;
 mod projects;
 mod retention;
@@ -11,8 +13,8 @@ mod snapshots;
 use anyhow::Result;
 
 use crate::cli::{
-    FsCommand, OrgCommand, ProjectCommand, ProjectMembersCommand, ProjectRetentionCommand,
-    RemoteCommand,
+    ClusterCommand, FsCommand, OrgCommand, ProjectCommand, ProjectMembersCommand,
+    ProjectRetentionCommand, RemoteCommand,
 };
 
 pub async fn execute_login_command(
@@ -29,6 +31,52 @@ pub async fn execute_login_command(
 pub async fn execute_org_command(command: OrgCommand) -> Result<()> {
     match command {
         OrgCommand::List { limit, cursor } => orgs::list_orgs(limit, cursor).await,
+    }
+}
+
+pub async fn execute_cluster_command(command: ClusterCommand) -> Result<()> {
+    match command {
+        ClusterCommand::List {
+            org,
+            limit,
+            cursor,
+            json,
+        } => clusters::list(org, limit, cursor, json).await,
+        ClusterCommand::Create {
+            org,
+            name,
+            project,
+            queues,
+            json,
+        } => clusters::create(org, name, project, queues, json).await,
+        ClusterCommand::State {
+            org,
+            cluster,
+            state,
+            json,
+        } => clusters::set_state(org, cluster, state, json).await,
+        ClusterCommand::Enroll {
+            org,
+            cluster,
+            ttl_seconds,
+            identity_fingerprint,
+            json,
+        } => clusters::enroll(org, cluster, ttl_seconds, identity_fingerprint, json).await,
+        ClusterCommand::Nodes {
+            org,
+            cluster,
+            limit,
+            cursor,
+            json,
+        } => clusters::list_nodes(org, cluster, limit, cursor, json).await,
+        ClusterCommand::NodeState {
+            org,
+            cluster,
+            node,
+            state,
+            json,
+        } => clusters::set_node_state(org, cluster, node, state, json).await,
+        ClusterCommand::Join(args) => node::execute(args).await,
     }
 }
 

@@ -2,13 +2,20 @@
 
 use std::collections::BTreeMap;
 
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, ObjectInstance, StringArray, Tensor, Value};
 
+use crate::builtins::common::{random, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const CVPARTITION_NAME: &str = "cvpartition";
@@ -17,6 +24,123 @@ const TEST_SETS_PROPERTY: &str = "__RunMatCvPartitionTestSets";
 const ACTIVE_ROWS_PROPERTY: &str = "__RunMatCvPartitionActiveRows";
 const MAX_MATERIALIZED_MASK_CELLS: usize = 10_000_000;
 const EPS: f64 = 1.0e-12;
+
+pub const CVPARTITION_INTEGER_N_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "cvpartition-integer-observation-count",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "cvpartition with a typed-integer observation count is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CvpartitionIntegerObservationCountExtension"),
+    };
+pub const CVPARTITION_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "cvpartition-integer-partition-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "cvpartition with typed-integer KFold or Holdout control is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CvpartitionIntegerPartitionControlExtension"),
+    };
+pub const CVPARTITION_INTEGER_STRATIFICATION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "cvpartition-integer-stratification",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "cvpartition with typed-integer stratification labels is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CvpartitionIntegerStratificationExtension"),
+    };
+pub const CVPARTITION_INTEGER_CUSTOM_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "cvpartition-integer-custom-testsets",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "cvpartition with typed-integer custom test sets is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CvpartitionIntegerCustomTestsetsExtension"),
+    };
+pub const CVPARTITION_BOOLEAN_ALIAS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "cvpartition-nonlogical-stratify-option",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "cvpartition with a nonlogical Stratify option is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CvpartitionNonlogicalStratifyOptionExtension"),
+    };
+pub const CVPARTITION_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    CVPARTITION_INTEGER_N_EXTENSION,
+    CVPARTITION_INTEGER_CONTROL_EXTENSION,
+    CVPARTITION_INTEGER_STRATIFICATION_EXTENSION,
+    CVPARTITION_INTEGER_CUSTOM_EXTENSION,
+    CVPARTITION_BOOLEAN_ALIAS_EXTENSION,
+];
+
+const TEST_INTEGER_INDEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cvpartition-test-integer-index",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "test with typed-integer repetition indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CvpartitionTestIntegerIndexExtension"),
+};
+const TEST_LOGICAL_INDEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cvpartition-test-logical-index",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "test with logical repetition indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CvpartitionTestLogicalIndexExtension"),
+};
+const TRAINING_INTEGER_INDEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cvpartition-training-integer-index",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "training with typed-integer repetition indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CvpartitionTrainingIntegerIndexExtension"),
+};
+const TRAINING_LOGICAL_INDEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cvpartition-training-logical-index",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "training with logical repetition indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CvpartitionTrainingLogicalIndexExtension"),
+};
+pub const TEST_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [TEST_INTEGER_INDEX_EXTENSION, TEST_LOGICAL_INDEX_EXTENSION];
+pub const TRAINING_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    TRAINING_INTEGER_INDEX_EXTENSION,
+    TRAINING_LOGICAL_INDEX_EXTENSION,
+];
+
+const MASK_INTEGER_INDEX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "i",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Public repetition indices are single or double. RunMat mode additionally decodes all eight integer classes exactly as one-based structural indices.",
+    }];
+pub const TEST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "idx = test(c, integer_i)",
+        inputs: &MASK_INTEGER_INDEX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed repetition indices are gated before provider access, decoded without binary64 conversion, and select logical output columns.",
+    }];
+pub const TRAINING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "idx = training(c, integer_i)",
+        inputs: &MASK_INTEGER_INDEX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The adjacent training method shares test's exact typed-index policy and returns logical mask columns.",
+    }];
+
+const INTEGER_N_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "n", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The public observation count lists single and double; all eight typed integer scalar classes are independently gated and read exactly." }];
+const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "kOrP", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Typed KFold and integer-count Holdout controls are independently gated; documented single/double integer-valued controls remain accepted." }];
+const INTEGER_STRAT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "stratvar", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The public numeric stratification class list is single/double; RunMat mode additionally preserves all eight integer label classes through structural grouping." }];
+const INTEGER_CUSTOM_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "testSets", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The public custom-test-set class list is single/double/logical; typed integer assignment vectors or 0/1 masks are independently gated." }];
+pub const CVPARTITION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "c = cvpartition(integer_n, ___)", inputs: &INTEGER_N_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Typed n determines object and mask sizes only; public count properties remain double and mask properties remain logical." },
+    BuiltinIntegerCapabilityDescriptor { form: "c = cvpartition(___, integer_kOrP)", inputs: &INTEGER_CONTROL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Typed partition controls are validated exactly before random assignment and do not determine property classes." },
+    BuiltinIntegerCapabilityDescriptor { form: "c = cvpartition(integer_stratvar, ___)", inputs: &INTEGER_STRAT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer labels are compared structurally from authoritative storage and never treated as floating observations." },
+    BuiltinIntegerCapabilityDescriptor { form: "c = cvpartition(CustomPartition=integer_testSets)", inputs: &INTEGER_CUSTOM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer test-set identifiers and 0/1 masks are interpreted exactly before logical mask construction." },
+];
 
 const OUTPUT_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "c",
@@ -118,7 +242,9 @@ const CVPARTITION_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     },
 ];
 
-const MASK_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const MASK_ALL_INPUTS: [BuiltinParamDescriptor; 2] = [PARAM_C, PARAM_INDEX];
+
+const MASK_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "mask = training(c)",
         inputs: &MASK_INPUTS_C,
@@ -129,9 +255,14 @@ const MASK_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         inputs: &MASK_INPUTS_C_I,
         outputs: &OUTPUT_MASK,
     },
+    BuiltinSignatureDescriptor {
+        label: "mask = training(c, \"all\")",
+        inputs: &MASK_ALL_INPUTS,
+        outputs: &OUTPUT_MASK,
+    },
 ];
 
-const TEST_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const TEST_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "mask = test(c)",
         inputs: &MASK_INPUTS_C,
@@ -140,6 +271,11 @@ const TEST_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "mask = test(c, i)",
         inputs: &MASK_INPUTS_C_I,
+        outputs: &OUTPUT_MASK,
+    },
+    BuiltinSignatureDescriptor {
+        label: "mask = test(c, \"all\")",
+        inputs: &MASK_ALL_INPUTS,
         outputs: &OUTPUT_MASK,
     },
 ];
@@ -252,6 +388,10 @@ struct PartitionSpec {
     keywords = "cvpartition,cross validation,kfold,holdout,leaveout,resubstitution,statistics,machine learning",
     type_resolver(object_type),
     descriptor(crate::builtins::stats::ml::cvpartition::CVPARTITION_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::cvpartition::CVPARTITION_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::stats::ml::cvpartition::CVPARTITION_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::stats::ml::cvpartition"
 )]
 async fn cvpartition_builtin(
@@ -259,11 +399,75 @@ async fn cvpartition_builtin(
     second: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    ensure_cvpartition_extensions(&first, &second, &rest)?;
     let first = gather_value(first).await?;
     let second = gather_value(second).await?;
     let rest = gather_values(rest).await?;
     let spec = cvpartition_compute(first, second, rest)?;
     partition_object(spec).map(Value::Object)
+}
+
+fn enable_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinResult<()> {
+    crate::compatibility::ensure_builtin_extension_enabled(extension, CVPARTITION_NAME)
+}
+
+fn typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn scalar_value(value: &Value) -> bool {
+    matches!(value, Value::Num(_) | Value::Int(_) | Value::Bool(_))
+        || matches!(value, Value::Tensor(value_tensor) if tensor::is_scalar_tensor(value_tensor))
+        || matches!(value, Value::LogicalArray(array) if array.data.len() == 1)
+        || matches!(value, Value::GpuTensor(handle) if tensor::element_count(&handle.shape) == 1)
+}
+
+fn documented_logical_scalar(value: &Value) -> bool {
+    matches!(value, Value::Bool(_))
+        || matches!(value, Value::LogicalArray(array) if array.data.len() == 1)
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle) && tensor::element_count(&handle.shape) == 1)
+}
+
+fn ensure_cvpartition_extensions(
+    first: &Value,
+    second: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    if string_matches(first, "CustomPartition") {
+        if typed_integer_value(second) {
+            enable_extension(&CVPARTITION_INTEGER_CUSTOM_EXTENSION)?;
+        }
+        return Ok(());
+    }
+
+    if typed_integer_value(first) {
+        if scalar_value(first) {
+            enable_extension(&CVPARTITION_INTEGER_N_EXTENSION)?;
+        } else {
+            enable_extension(&CVPARTITION_INTEGER_STRATIFICATION_EXTENSION)?;
+        }
+    }
+
+    let kind = scalar_text(second, "partition kind")
+        .map(|text| canonical(&text))
+        .unwrap_or_default();
+    let option_start = if matches!(kind.as_str(), "kfold" | "holdout") {
+        if rest.first().is_some_and(typed_integer_value) {
+            enable_extension(&CVPARTITION_INTEGER_CONTROL_EXTENSION)?;
+        }
+        1
+    } else {
+        0
+    };
+    let options = &rest[option_start.min(rest.len())..];
+    for pair in options.chunks_exact(2) {
+        if string_matches(&pair[0], "Stratify") && !documented_logical_scalar(&pair[1]) {
+            enable_extension(&CVPARTITION_BOOLEAN_ALIAS_EXTENSION)?;
+        }
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -273,12 +477,17 @@ async fn cvpartition_builtin(
     keywords = "training,cvpartition,cross validation,mask,statistics,machine learning",
     type_resolver(logical_type),
     descriptor(crate::builtins::stats::ml::cvpartition::TRAINING_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::cvpartition::TRAINING_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::cvpartition::TRAINING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::cvpartition"
 )]
 async fn training_builtin(c: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_mask_extensions(&rest, true)?;
+    let output_source = mask_output_source(&rest, "training")?;
     let c = gather_value(c).await?;
     let rest = gather_values(rest).await?;
-    mask_from_partition(c, rest, true)
+    let output = mask_from_partition(c, rest, true)?;
+    restore_mask_output(output, output_source.as_ref(), "training")
 }
 
 #[runtime_builtin(
@@ -288,12 +497,75 @@ async fn training_builtin(c: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "test,cvpartition,cross validation,mask,statistics,machine learning",
     type_resolver(logical_type),
     descriptor(crate::builtins::stats::ml::cvpartition::TEST_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::cvpartition::TEST_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::cvpartition::TEST_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::cvpartition"
 )]
 async fn test_builtin(c: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_mask_extensions(&rest, false)?;
+    let output_source = mask_output_source(&rest, "test")?;
     let c = gather_value(c).await?;
     let rest = gather_values(rest).await?;
-    mask_from_partition(c, rest, false)
+    let output = mask_from_partition(c, rest, false)?;
+    restore_mask_output(output, output_source.as_ref(), "test")
+}
+
+fn mask_output_source(
+    rest: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    crate::builtins::common::gpu_helpers::select_resident_output_source(
+        rest.iter().filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        }),
+        builtin,
+    )
+}
+
+fn restore_mask_output(
+    output: Value,
+    source: Option<&GpuTensorHandle>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    match source {
+        Some(source) => crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+            source, output, builtin,
+        ),
+        None => Ok(output),
+    }
+}
+
+fn ensure_mask_extensions(rest: &[Value], training: bool) -> BuiltinResult<()> {
+    let Some(index) = rest.first() else {
+        return Ok(());
+    };
+    let (integer, logical) = if training {
+        (
+            &TRAINING_INTEGER_INDEX_EXTENSION,
+            &TRAINING_LOGICAL_INDEX_EXTENSION,
+        )
+    } else {
+        (&TEST_INTEGER_INDEX_EXTENSION, &TEST_LOGICAL_INDEX_EXTENSION)
+    };
+    if typed_integer_value(index) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            integer,
+            if training { "training" } else { "test" },
+        )?;
+    }
+    if is_logical_index(index) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            logical,
+            if training { "training" } else { "test" },
+        )?;
+    }
+    Ok(())
+}
+
+fn is_logical_index(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
 async fn gather_value(value: Value) -> BuiltinResult<Value> {
@@ -389,13 +661,21 @@ impl PartitionInput {
                 labels: None,
             }),
             Value::Int(integer) => Ok(Self {
-                n: positive_integer_number(integer.to_f64(), "n")?,
+                n: integer.try_to_usize().filter(|n| *n > 0).ok_or_else(|| {
+                    invalid_argument("cvpartition: n must be a positive integer scalar")
+                })?,
                 labels: None,
             }),
-            Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Self {
-                n: positive_integer_number(tensor.data[0], "n")?,
-                labels: None,
-            }),
+            Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+                let n = if let Some(integer) = tensor.integer_storage().and_then(|s| s.value_at(0)) {
+                    integer.try_to_usize().filter(|n| *n > 0).ok_or_else(|| {
+                        invalid_argument("cvpartition: n must be a positive integer scalar")
+                    })?
+                } else {
+                    positive_integer_number(tensor::tensor_value_f64(&tensor, 0), "n")?
+                };
+                Ok(Self { n, labels: None })
+            }
             Value::Tensor(tensor) => numeric_labels(tensor),
             Value::LogicalArray(array) => logical_labels(array),
             Value::Bool(flag) => Ok(Self {
@@ -423,7 +703,8 @@ impl PartitionInput {
 }
 
 fn numeric_labels(tensor: Tensor) -> BuiltinResult<PartitionInput> {
-    if tensor.data.is_empty() {
+    let len = tensor::tensor_element_len(&tensor);
+    if len == 0 {
         return Err(invalid_argument(
             "cvpartition: stratification variable must be nonempty",
         ));
@@ -433,22 +714,41 @@ fn numeric_labels(tensor: Tensor) -> BuiltinResult<PartitionInput> {
             "cvpartition: stratification variable must be a vector",
         ));
     }
+    let labels = if let Some(storage) = tensor.integer_storage() {
+        storage
+            .exact_values()
+            .iter()
+            .map(|value| Some(integer_label_key(value)))
+            .collect()
+    } else {
+        tensor::tensor_values_f64_cow(&tensor)
+            .iter()
+            .map(|value| {
+                if value.is_nan() {
+                    None
+                } else {
+                    Some(label_number(*value))
+                }
+            })
+            .collect()
+    };
     Ok(PartitionInput {
-        n: tensor.data.len(),
-        labels: Some(
-            tensor
-                .data
-                .into_iter()
-                .map(|value| {
-                    if value.is_nan() {
-                        None
-                    } else {
-                        Some(label_number(value))
-                    }
-                })
-                .collect(),
-        ),
+        n: len,
+        labels: Some(labels),
     })
+}
+
+fn integer_label_key(value: &runmat_value::IntValue) -> String {
+    match value {
+        runmat_value::IntValue::I8(value) => format!("i:{value}"),
+        runmat_value::IntValue::I16(value) => format!("i:{value}"),
+        runmat_value::IntValue::I32(value) => format!("i:{value}"),
+        runmat_value::IntValue::I64(value) => format!("i:{value}"),
+        runmat_value::IntValue::U8(value) => format!("u:{value}"),
+        runmat_value::IntValue::U16(value) => format!("u:{value}"),
+        runmat_value::IntValue::U32(value) => format!("u:{value}"),
+        runmat_value::IntValue::U64(value) => format!("u:{value}"),
+    }
 }
 
 fn logical_labels(array: LogicalArray) -> BuiltinResult<PartitionInput> {
@@ -497,7 +797,7 @@ fn string_array_labels(array: StringArray) -> BuiltinResult<PartitionInput> {
     })
 }
 
-fn char_row_labels(chars: runmat_builtins::CharArray) -> Vec<Option<String>> {
+fn char_row_labels(chars: runmat_value::CharArray) -> Vec<Option<String>> {
     let mut labels = Vec::with_capacity(chars.rows);
     for row in 0..chars.rows {
         let mut label = String::with_capacity(chars.cols);
@@ -579,13 +879,16 @@ fn kfold_partition(
             ));
         }
         for indices in grouped_indices(labels).values() {
-            for (offset, row) in indices.iter().enumerate() {
+            for (offset, row) in shuffled_indices(indices)?.iter().enumerate() {
                 test_sets[row + n * (offset % k)] = 1;
             }
         }
     } else {
-        for row in 0..n {
-            test_sets[row + n * (row % k)] = 1;
+        for (offset, row) in shuffled_indices(&(0..n).collect::<Vec<_>>())?
+            .iter()
+            .enumerate()
+        {
+            test_sets[row + n * (offset % k)] = 1;
         }
     }
     Ok(PartitionSpec {
@@ -620,26 +923,29 @@ fn holdout_partition(
         for indices in groups.values() {
             let group_target = ((indices.len() * test_count) + (n / 2)) / n;
             let group_target = group_target.min(indices.len());
-            for row in indices.iter().take(group_target) {
+            for row in shuffled_indices(indices)?.iter().take(group_target) {
                 if selected < test_count {
                     test_sets[*row] = 1;
                     selected += 1;
                 }
             }
         }
-        let mut row = 0usize;
-        while selected < test_count && row < n {
+        for row in shuffled_indices(&(0..n).collect::<Vec<_>>())? {
+            if selected >= test_count {
+                break;
+            }
             if active_rows[row] != 0 && test_sets[row] == 0 {
                 test_sets[row] = 1;
                 selected += 1;
             }
-            row += 1;
         }
     } else {
-        test_sets
-            .iter_mut()
+        for row in shuffled_indices(&(0..n).collect::<Vec<_>>())?
+            .into_iter()
             .take(test_count)
-            .for_each(|flag| *flag = 1);
+        {
+            test_sets[row] = 1;
+        }
     }
     Ok(PartitionSpec {
         kind: PartitionKind::Holdout,
@@ -650,6 +956,20 @@ fn holdout_partition(
         is_custom: false,
         is_stratified: labels.is_some(),
     })
+}
+
+fn shuffled_indices(indices: &[usize]) -> BuiltinResult<Vec<usize>> {
+    let mut output = indices.to_vec();
+    if output.len() <= 1 {
+        return Ok(output);
+    }
+    let uniforms = random::generate_uniform(output.len() - 1, CVPARTITION_NAME)?;
+    for (index, uniform) in uniforms.into_iter().enumerate() {
+        let span = output.len() - index;
+        let offset = ((uniform * span as f64).floor() as usize).min(span - 1);
+        output.swap(index, index + offset);
+    }
+    Ok(output)
 }
 
 fn leaveout_partition(n: usize) -> BuiltinResult<PartitionSpec> {
@@ -721,15 +1041,18 @@ fn custom_partition(value: Value) -> BuiltinResult<PartitionSpec> {
 }
 
 fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
-    if tensor.data.is_empty() {
+    if tensor.integer_storage().is_some() {
+        return custom_integer_partition(tensor);
+    }
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    if values.is_empty() {
         return Err(invalid_argument(
             "cvpartition: CustomPartition test sets must be nonempty",
         ));
     }
     let is_vector = tensor.shape.iter().filter(|dim| **dim > 1).count() <= 1;
     if !is_vector {
-        let data = tensor
-            .data
+        let data = values
             .iter()
             .map(|value| {
                 if (*value - 0.0).abs() <= EPS {
@@ -748,9 +1071,8 @@ fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
         return custom_partition(Value::LogicalArray(array));
     }
 
-    if tensor.data.iter().any(|value| (*value - 0.0).abs() <= EPS) {
-        let data = tensor
-            .data
+    if values.iter().any(|value| (*value - 0.0).abs() <= EPS) {
+        let data = values
             .iter()
             .map(|value| {
                 if (*value - 0.0).abs() <= EPS {
@@ -764,15 +1086,19 @@ fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
                 }
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
-        let array = LogicalArray::new(data, vec![tensor.data.len(), 1])
+        let array = LogicalArray::new(data, vec![values.len(), 1])
             .map_err(|err| internal_error(format!("cvpartition: {err}")))?;
         return custom_partition(Value::LogicalArray(array));
     }
 
-    let mut ids = Vec::with_capacity(tensor.data.len());
+    let mut ids = Vec::with_capacity(values.len());
     let mut max_id = 0usize;
-    for value in &tensor.data {
-        if !value.is_finite() || value.fract() != 0.0 || *value < 1.0 || *value > usize::MAX as f64
+    for value in values.iter() {
+        if !value.is_finite()
+            || value.fract() != 0.0
+            || *value < 1.0
+            || *value > usize::MAX as f64
+            || (usize::BITS == 64 && *value == usize::MAX as f64)
         {
             return Err(invalid_argument(
                 "cvpartition: custom partition ids must be positive integers",
@@ -782,6 +1108,76 @@ fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
         max_id = max_id.max(id);
         ids.push(id);
     }
+    let n = ids.len();
+    let len = materialized_mask_len(n, max_id, "CustomPartition")?;
+    let mut test_sets = vec![0u8; len];
+    let mut nonempty = vec![0usize; max_id];
+    for (row, id) in ids.into_iter().enumerate() {
+        test_sets[row + n * (id - 1)] = 1;
+        nonempty[id - 1] += 1;
+    }
+    if nonempty.contains(&0) {
+        return Err(invalid_argument(
+            "cvpartition: custom partition ids must form nonempty test sets",
+        ));
+    }
+    Ok(PartitionSpec {
+        kind: PartitionKind::Custom,
+        n,
+        test_sets,
+        test_set_count: max_id,
+        active_rows: vec![1; n],
+        is_custom: true,
+        is_stratified: false,
+    })
+}
+
+fn custom_integer_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
+    let storage = tensor
+        .integer_storage()
+        .expect("custom_integer_partition requires integer storage");
+    let values = storage.exact_values();
+    if values.is_empty() {
+        return Err(invalid_argument(
+            "cvpartition: CustomPartition test sets must be nonempty",
+        ));
+    }
+    let is_vector = tensor.shape.iter().filter(|dim| **dim > 1).count() <= 1;
+    let logical_byte = |value: &runmat_value::IntValue| match value.try_to_usize() {
+        Some(0) => Ok(0),
+        Some(1) => Ok(1),
+        _ => Err(invalid_argument(
+            "cvpartition: numeric custom logical values must contain only 0 or 1",
+        )),
+    };
+    if !is_vector || values.iter().any(|value| value.is_zero()) {
+        let data = values
+            .iter()
+            .map(logical_byte)
+            .collect::<BuiltinResult<Vec<_>>>()?;
+        let shape = if is_vector {
+            vec![values.len(), 1]
+        } else {
+            tensor.shape.clone()
+        };
+        let array = LogicalArray::new(data, shape)
+            .map_err(|err| internal_error(format!("cvpartition: {err}")))?;
+        return custom_partition(Value::LogicalArray(array));
+    }
+
+    let mut ids = Vec::with_capacity(values.len());
+    let mut max_id = 0usize;
+    for value in values {
+        let id = value.try_to_usize().filter(|id| *id > 0).ok_or_else(|| {
+            invalid_argument("cvpartition: custom partition ids must be positive integers")
+        })?;
+        max_id = max_id.max(id);
+        ids.push(id);
+    }
+    custom_partition_from_ids(ids, max_id)
+}
+
+fn custom_partition_from_ids(ids: Vec<usize>, max_id: usize) -> BuiltinResult<PartitionSpec> {
     let n = ids.len();
     let len = materialized_mask_len(n, max_id, "CustomPartition")?;
     let mut test_sets = vec![0u8; len];
@@ -938,10 +1334,42 @@ fn selected_indices(value: &Value, cols: usize) -> BuiltinResult<Vec<usize>> {
     if string_matches(value, "all") {
         return Ok((0..cols).collect());
     }
+    if let Value::Int(integer) = value {
+        return integer
+            .try_to_usize()
+            .filter(|index| *index >= 1 && *index <= cols)
+            .map(|index| vec![index - 1])
+            .ok_or_else(|| {
+                invalid_argument(format!(
+                    "cvpartition: index must be an integer between 1 and {cols}"
+                ))
+            });
+    }
+    if let Value::Tensor(tensor) = value {
+        if let Some(storage) = tensor.integer_storage() {
+            if storage.is_empty() {
+                return Err(invalid_argument("cvpartition: index must be nonempty"));
+            }
+            return storage
+                .exact_values()
+                .iter()
+                .map(|value| {
+                    value
+                        .try_to_usize()
+                        .filter(|index| *index >= 1 && *index <= cols)
+                        .map(|index| index - 1)
+                        .ok_or_else(|| {
+                            invalid_argument(format!(
+                                "cvpartition: index must be an integer between 1 and {cols}"
+                            ))
+                        })
+                })
+                .collect();
+        }
+    }
     let raw = match value {
         Value::Num(number) => vec![*number],
-        Value::Int(integer) => vec![integer.to_f64()],
-        Value::Tensor(tensor) => tensor.data.clone(),
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor),
         Value::LogicalArray(array) => array
             .data
             .iter()
@@ -1032,6 +1460,16 @@ fn materialized_mask_len(rows: usize, cols: usize, label: &str) -> BuiltinResult
 }
 
 fn holdout_count(value: &Value, n: usize) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .filter(|count| *count > 0 && *count < n)
+            .ok_or_else(|| {
+                invalid_argument(
+                    "cvpartition: Holdout must be a fraction in (0,1) or an integer in [1,n)",
+                )
+            });
+    }
     let raw = scalar_number(value, "Holdout")?;
     if raw > 0.0 && raw < 1.0 {
         let count = (raw * n as f64).round() as usize;
@@ -1046,11 +1484,26 @@ fn holdout_count(value: &Value, n: usize) -> BuiltinResult<usize> {
 }
 
 fn positive_integer(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Value::Int(integer) = value {
+        return integer
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                invalid_argument(format!(
+                    "cvpartition: {label} must be a positive integer scalar"
+                ))
+            });
+    }
     positive_integer_number(scalar_number(value, label)?, label)
 }
 
 fn positive_integer_number(raw: f64, label: &str) -> BuiltinResult<usize> {
-    if !raw.is_finite() || raw.fract() != 0.0 || raw < 1.0 || raw > usize::MAX as f64 {
+    if !raw.is_finite()
+        || raw.fract() != 0.0
+        || raw < 1.0
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(invalid_argument(format!(
             "cvpartition: {label} must be a positive integer scalar"
         )));
@@ -1069,7 +1522,9 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             if array.data[0] == 0 {
                 0.0
@@ -1098,9 +1553,13 @@ fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
         Value::Num(number) if (*number - 0.0).abs() <= EPS || (*number - 1.0).abs() <= EPS => {
             Ok((*number - 1.0).abs() <= EPS)
         }
-        Value::Int(integer) if integer.to_f64() == 0.0 || integer.to_f64() == 1.0 => {
-            Ok(integer.to_f64() == 1.0)
-        }
+        Value::Int(integer) => match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid_argument(format!(
+                "cvpartition: {label} must be logical scalar"
+            ))),
+        },
         Value::String(text)
             if text.eq_ignore_ascii_case("true") || text.eq_ignore_ascii_case("false") =>
         {
@@ -1150,6 +1609,7 @@ fn canonical(text: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1159,7 +1619,36 @@ mod tests {
         Value::LogicalArray(LogicalArray::new(data, shape).unwrap())
     }
 
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn scalar_counts_read_every_integer_storage_variant_not_the_float_mirror() {
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            let value = poisoned_int_tensor(storage, vec![1, 1]);
+            assert_eq!(PartitionInput::from_value(value.clone()).unwrap().n, 2);
+            assert_eq!(holdout_count(&value, 6).unwrap(), 2);
+        }
+    }
+
     fn cv(first: Value, second: Value, rest: Vec<Value>) -> Value {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(cvpartition_builtin(first, second, rest)).expect("cvpartition")
     }
 
@@ -1172,6 +1661,8 @@ mod tests {
 
     #[test]
     fn kfold_partition_exposes_balanced_masks() {
+        let _lock = random::test_guard();
+        random::set_seed(2026).unwrap();
         let partition = cv(
             Value::Num(6.0),
             Value::String("KFold".into()),
@@ -1194,20 +1685,77 @@ mod tests {
             .expect("test all"),
         );
         assert_eq!(all_test.shape, vec![6, 3]);
-        assert_eq!(
-            all_test.data,
-            vec![1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1]
-        );
+        for fold in 0..3 {
+            assert_eq!(
+                all_test.data[fold * 6..(fold + 1) * 6]
+                    .iter()
+                    .filter(|flag| **flag != 0)
+                    .count(),
+                2
+            );
+        }
+        for row in 0..6 {
+            assert_eq!(
+                (0..3)
+                    .filter(|fold| all_test.data[row + fold * 6] != 0)
+                    .count(),
+                1
+            );
+        }
 
         let train1 = logical_output(
             block_on(training_builtin(partition, vec![Value::Num(1.0)])).expect("training 1"),
         );
         assert_eq!(train1.shape, vec![6, 1]);
-        assert_eq!(train1.data, vec![0, 1, 1, 0, 1, 1]);
+        assert_eq!(train1.data.iter().filter(|flag| **flag != 0).count(), 4);
+    }
+
+    #[test]
+    fn test_and_training_typed_indices_follow_compatibility_mode_and_decode_exactly() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::set_seed(2030).unwrap();
+        let partition = cv(
+            Value::Num(8.0),
+            Value::String("KFold".into()),
+            vec![Value::Num(4.0)],
+        );
+        let index = cleared_int_tensor(IntegerStorage::U64(vec![1, 3]), vec![1, 2]);
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let test_error = block_on(test_builtin(partition.clone(), vec![index.clone()]))
+                .expect_err("typed test index must be gated");
+            assert_eq!(
+                test_error.identifier(),
+                TEST_INTEGER_INDEX_EXTENSION.error_identifier
+            );
+            let training_error = block_on(training_builtin(partition.clone(), vec![index.clone()]))
+                .expect_err("typed training index must be gated");
+            assert_eq!(
+                training_error.identifier(),
+                TRAINING_INTEGER_INDEX_EXTENSION.error_identifier
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let test = logical_output(
+            block_on(test_builtin(partition.clone(), vec![index.clone()]))
+                .expect("typed test indices"),
+        );
+        let training = logical_output(
+            block_on(training_builtin(partition, vec![index])).expect("typed training indices"),
+        );
+        assert_eq!(test.shape, vec![8, 2]);
+        assert_eq!(training.shape, vec![8, 2]);
+        for (test, training) in test.data.iter().zip(training.data.iter()) {
+            assert_eq!(*test == 0, *training != 0);
+        }
     }
 
     #[test]
     fn holdout_fraction_and_stratification_work() {
+        let _lock = random::test_guard();
+        random::set_seed(2027).unwrap();
         let labels = Value::StringArray(
             StringArray::new(
                 vec!["a".into(), "a".into(), "b".into(), "b".into()],
@@ -1228,7 +1776,20 @@ mod tests {
             logical_output(block_on(test_builtin(partition, Vec::new())).expect("test"));
         assert_eq!(test_mask.shape, vec![4, 1]);
         assert_eq!(test_mask.data.iter().filter(|flag| **flag != 0).count(), 2);
-        assert_eq!(test_mask.data, vec![1, 0, 1, 0]);
+        assert_eq!(
+            test_mask.data[..2]
+                .iter()
+                .filter(|flag| **flag != 0)
+                .count(),
+            1
+        );
+        assert_eq!(
+            test_mask.data[2..]
+                .iter()
+                .filter(|flag| **flag != 0)
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -1295,6 +1856,38 @@ mod tests {
     }
 
     #[test]
+    fn custom_integer_vector_reads_typed_integer_storage_exactly() {
+        let partition = cv(
+            Value::String("CustomPartition".into()),
+            cleared_int_tensor(IntegerStorage::U8(vec![1, 2, 2, 1]), vec![1, 4]),
+            Vec::new(),
+        );
+        let all = logical_output(
+            block_on(test_builtin(partition, vec![Value::String("all".into())]))
+                .expect("custom integer all"),
+        );
+        assert_eq!(all.shape, vec![4, 2]);
+        assert_eq!(all.data, vec![1, 0, 0, 1, 0, 1, 1, 0]);
+
+        let partition = cv(
+            Value::String("CustomPartition".into()),
+            cleared_int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), vec![1, 4]),
+            Vec::new(),
+        );
+        let mask = logical_output(block_on(test_builtin(partition, Vec::new())).expect("test"));
+        assert_eq!(mask.shape, vec![4, 1]);
+        assert_eq!(mask.data, vec![1, 0, 1, 0]);
+
+        let err = block_on(cvpartition_builtin(
+            Value::String("CustomPartition".into()),
+            tensor(vec![usize::MAX as f64], vec![1, 1]),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:cvpartition:InvalidArgument"));
+    }
+
+    #[test]
     fn custom_logical_row_vector_is_single_test_set() {
         let partition = cv(
             Value::String("CustomPartition".into()),
@@ -1335,6 +1928,8 @@ mod tests {
 
     #[test]
     fn selected_fold_vector_returns_one_column_per_index() {
+        let _lock = random::test_guard();
+        random::set_seed(2028).unwrap();
         let partition = cv(
             Value::Num(6.0),
             Value::String("KFold".into()),
@@ -1348,11 +1943,20 @@ mod tests {
             .expect("selected folds"),
         );
         assert_eq!(selected.shape, vec![6, 2]);
-        assert_eq!(selected.data, vec![1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1]);
+        assert_eq!(
+            selected.data[..6].iter().filter(|flag| **flag != 0).count(),
+            2
+        );
+        assert_eq!(
+            selected.data[6..].iter().filter(|flag| **flag != 0).count(),
+            2
+        );
     }
 
     #[test]
     fn missing_numeric_stratification_rows_are_discarded_from_masks() {
+        let _lock = random::test_guard();
+        random::set_seed(2029).unwrap();
         let partition = cv(
             tensor(vec![1.0, f64::NAN, 1.0, 2.0, 2.0], vec![5, 1]),
             Value::String("KFold".into()),
@@ -1378,5 +1982,257 @@ mod tests {
         );
         assert_eq!(all_train.data[1], 0);
         assert_eq!(all_train.data[6], 0);
+    }
+
+    #[test]
+    fn typed_integer_partition_counts_and_indices_are_exact() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let input = PartitionInput::from_value(Value::Int(runmat_value::IntValue::U16(6))).unwrap();
+        assert_eq!(input.n, 6);
+        let input = PartitionInput::from_value(cleared_int_tensor(
+            IntegerStorage::U16(vec![6]),
+            vec![1, 1],
+        ))
+        .unwrap();
+        assert_eq!(input.n, 6);
+        assert_eq!(
+            positive_integer(&Value::Int(runmat_value::IntValue::U8(3)), "KFold").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_integer(
+                &cleared_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1]),
+                "KFold"
+            )
+            .unwrap(),
+            3
+        );
+        assert_eq!(
+            holdout_count(&Value::Int(runmat_value::IntValue::U8(2)), 6).unwrap(),
+            2
+        );
+        assert_eq!(
+            holdout_count(
+                &cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                6
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            selected_indices(&Value::Int(runmat_value::IntValue::U8(3)), 3).unwrap(),
+            vec![2]
+        );
+        assert_eq!(
+            selected_indices(
+                &cleared_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1]),
+                3
+            )
+            .unwrap(),
+            vec![2]
+        );
+
+        let partition = cv(
+            cleared_int_tensor(IntegerStorage::U16(vec![6]), vec![1, 1]),
+            Value::from("KFold"),
+            vec![cleared_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1])],
+        );
+        let selected = logical_output(
+            block_on(test_builtin(
+                partition,
+                vec![cleared_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1])],
+            ))
+            .unwrap(),
+        );
+        assert_eq!(selected.shape, vec![6, 1]);
+
+        for value in [
+            Value::Int(runmat_value::IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(positive_integer(&value, "KFold").is_err());
+        }
+        assert!(selected_indices(&Value::Int(runmat_value::IntValue::I8(-1)), 3).is_err());
+    }
+
+    #[test]
+    fn cvpartition_extensions_are_independently_mode_gated() {
+        let integer_scalar = || Value::Int(runmat_value::IntValue::U16(6));
+        let integer_labels =
+            || cleared_int_tensor(IntegerStorage::U8(vec![1, 1, 2, 2]), vec![4, 1]);
+        let cases = [
+            (
+                integer_scalar(),
+                Value::from("KFold"),
+                vec![Value::Num(2.0)],
+                CVPARTITION_INTEGER_N_EXTENSION.error_identifier,
+            ),
+            (
+                Value::Num(6.0),
+                Value::from("KFold"),
+                vec![Value::Int(runmat_value::IntValue::U8(2))],
+                CVPARTITION_INTEGER_CONTROL_EXTENSION.error_identifier,
+            ),
+            (
+                integer_labels(),
+                Value::from("KFold"),
+                vec![Value::Num(2.0)],
+                CVPARTITION_INTEGER_STRATIFICATION_EXTENSION.error_identifier,
+            ),
+            (
+                Value::from("CustomPartition"),
+                integer_labels(),
+                Vec::new(),
+                CVPARTITION_INTEGER_CUSTOM_EXTENSION.error_identifier,
+            ),
+            (
+                Value::Num(6.0),
+                Value::from("KFold"),
+                vec![Value::Num(2.0), Value::from("Stratify"), Value::Num(1.0)],
+                CVPARTITION_BOOLEAN_ALIAS_EXTENSION.error_identifier,
+            ),
+        ];
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (first, second, rest, identifier) in cases {
+            let error =
+                block_on(cvpartition_builtin(first, second, rest)).expect_err("strict rejection");
+            assert_eq!(error.identifier(), identifier);
+        }
+    }
+
+    #[test]
+    fn scalar_string_array_kind_cannot_bypass_typed_control_gate() {
+        let kind = Value::StringArray(
+            StringArray::new(vec!["KFold".into()], vec![1, 1]).expect("scalar string"),
+        );
+        let control = cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(cvpartition_builtin(Value::Num(6.0), kind, vec![control]))
+            .expect_err("typed control gate");
+        assert_eq!(
+            error.identifier(),
+            CVPARTITION_INTEGER_CONTROL_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn wide_integer_stratification_keys_remain_distinct_and_custom_validation_is_exact() {
+        let wide = 9_007_199_254_740_992_i64;
+        for value in [
+            cleared_int_tensor(
+                IntegerStorage::I64(vec![wide, wide + 1, wide, wide + 1]),
+                vec![4, 1],
+            ),
+            cleared_int_tensor(
+                IntegerStorage::U64(vec![
+                    wide as u64,
+                    wide as u64 + 1,
+                    wide as u64,
+                    wide as u64 + 1,
+                ]),
+                vec![4, 1],
+            ),
+        ] {
+            let input = PartitionInput::from_value(value).expect("exact integer labels");
+            let labels = input.labels.expect("stratification labels");
+            assert_eq!(labels[0], labels[2]);
+            assert_eq!(labels[1], labels[3]);
+            assert_ne!(labels[0], labels[1]);
+        }
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in [
+            IntegerStorage::I64(vec![wide, wide + 1]),
+            IntegerStorage::U64(vec![wide as u64, wide as u64 + 1]),
+        ] {
+            let error = block_on(cvpartition_builtin(
+                Value::from("CustomPartition"),
+                cleared_int_tensor(storage, vec![2, 1]),
+                Vec::new(),
+            ))
+            .expect_err("wide custom identifiers reject structurally");
+            assert!(error.message().contains("CustomPartition"));
+        }
+    }
+
+    #[test]
+    fn resident_integer_roles_gate_before_gather() {
+        fn resident(shape: Vec<usize>, buffer_id: u64) -> Value {
+            let handle = runmat_accelerate_api::GpuTensorHandle {
+                shape,
+                device_id: u32::MAX,
+                buffer_id,
+                descriptor: Default::default(),
+            }
+            .with_numeric_descriptor(
+                runmat_accelerate_api::NumericElementType::U64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            );
+            Value::GpuTensor(handle)
+        }
+        let cases = [
+            (
+                resident(vec![1, 1], u64::MAX - 510),
+                Value::from("KFold"),
+                vec![Value::Num(2.0)],
+                CVPARTITION_INTEGER_N_EXTENSION.error_identifier,
+            ),
+            (
+                Value::Num(6.0),
+                Value::from("KFold"),
+                vec![resident(vec![1, 1], u64::MAX - 511)],
+                CVPARTITION_INTEGER_CONTROL_EXTENSION.error_identifier,
+            ),
+            (
+                resident(vec![4, 1], u64::MAX - 512),
+                Value::from("KFold"),
+                vec![Value::Num(2.0)],
+                CVPARTITION_INTEGER_STRATIFICATION_EXTENSION.error_identifier,
+            ),
+            (
+                Value::from("CustomPartition"),
+                resident(vec![4, 1], u64::MAX - 513),
+                Vec::new(),
+                CVPARTITION_INTEGER_CUSTOM_EXTENSION.error_identifier,
+            ),
+        ];
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (first, second, rest, identifier) in cases {
+            let error = block_on(cvpartition_builtin(first, second, rest))
+                .expect_err("resident role rejects at extension gate");
+            assert_eq!(error.identifier(), identifier);
+        }
+    }
+
+    #[test]
+    fn cvpartition_logical_stratify_is_documented_and_rng_respects_seed() {
+        let _lock = random::test_guard();
+        let call = |seed| {
+            random::set_seed(seed).unwrap();
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let partition = block_on(cvpartition_builtin(
+                Value::Num(12.0),
+                Value::from("KFold"),
+                vec![Value::Num(3.0), Value::from("Stratify"), Value::Bool(false)],
+            ))
+            .unwrap();
+            logical_output(block_on(test_builtin(partition, vec![Value::from("all")])).unwrap())
+                .data
+        };
+        let first = call(101);
+        let same = call(101);
+        let different = call(102);
+        assert_eq!(first, same);
+        assert_ne!(first, different);
+    }
+
+    #[test]
+    fn cvpartition_integer_capabilities_cover_all_classes() {
+        assert_eq!(CVPARTITION_INTEGER_CAPABILITIES.len(), 4);
+        assert!(CVPARTITION_INTEGER_CAPABILITIES
+            .iter()
+            .all(|capability| capability.inputs[0].classes.len() == 8));
     }
 }

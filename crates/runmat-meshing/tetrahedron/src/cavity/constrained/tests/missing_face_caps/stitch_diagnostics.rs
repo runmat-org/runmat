@@ -10,7 +10,6 @@ fn missing_face_local_cap_stitch_reports_boundary_complete_fixture() {
     assert_eq!(diagnostic.missing_face_count, 0);
     assert_eq!(diagnostic.capped_face_count, 0);
     assert_eq!(diagnostic.inserted_node_count, 0);
-    assert_eq!(diagnostic.side_connector_candidate_count, 0);
     assert_eq!(diagnostic.candidate_tetrahedron_count, 0);
     assert_eq!(diagnostic.cap_side_face_count, 0);
     assert_eq!(diagnostic.zero_mate_cap_side_face_count, 0);
@@ -44,7 +43,6 @@ fn missing_face_shared_patch_cap_stitch_reports_boundary_complete_fixture() {
     assert!(diagnostic.incomplete_patch_size_histogram.is_empty());
     assert_eq!(diagnostic.capped_face_count, 0);
     assert_eq!(diagnostic.inserted_node_count, 0);
-    assert_eq!(diagnostic.side_connector_candidate_count, 0);
     assert_eq!(diagnostic.candidate_tetrahedron_count, 0);
     assert!(!diagnostic.found_cover);
     assert_eq!(diagnostic.reason, "no_missing_faces");

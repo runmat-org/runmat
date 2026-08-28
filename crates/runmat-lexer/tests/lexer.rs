@@ -2,7 +2,7 @@ use runmat_lexer::{tokenize, Token};
 
 #[test]
 fn keywords() {
-    let src = "function if else elseif for while break continue return end";
+    let src = "function if else elseif for parfor spmd while break continue return end";
     let tokens = tokenize(src);
     assert_eq!(
         tokens,
@@ -12,6 +12,8 @@ fn keywords() {
             Token::Else,
             Token::ElseIf,
             Token::For,
+            Token::ParFor,
+            Token::Spmd,
             Token::While,
             Token::Break,
             Token::Continue,

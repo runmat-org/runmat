@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "Comparison is host-only. Integer `N` is parsed exactly; unsupported numeric text operands return false before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "tf = strncmpi(A, B, N) - Compare text inputs case-insensitively up to N leading characters.",
+  "description": "`strncmpi(A, B, N)` compares up to `N` leading characters while ignoring letter case. `A` and `B` are text containers; `N` may be double, single, or any of the eight integer classes.",
   "signatures": [
     {
       "label": "tf = strncmpi(A, B, N)",
@@ -67,7 +67,9 @@
     }
   ],
   "behaviors": [
-    "Compare text inputs case-insensitively up to N leading characters."
+    "String arrays, character arrays, and cell arrays of character vectors follow the same scalar expansion and result-shape rules as `strncmp`.",
+    "`N` accepts all eight integer classes directly from native storage. Zero and negative values compare zero characters and therefore return true.",
+    "Integer or other numeric values in `A` or `B` are unsupported text datatypes and return scalar logical false without provider access."
   ],
   "examples": [
     "strncmpi(\"RunMat\", \"runway\", 3) returns true."

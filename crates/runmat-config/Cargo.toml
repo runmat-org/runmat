@@ -1,6 +1,6 @@
 [package]
 name = "runmat-config"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "Shared configuration schema and loaders for RunMat"
 license = "Apache-2.0"
@@ -21,7 +21,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 toml = "0.8"
+toml_edit = { version = "0.22", features = ["serde"] }
 
 [dev-dependencies]
+futures = "0.3"
 once_cell = "1"
 tempfile = "3.12"

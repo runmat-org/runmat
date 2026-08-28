@@ -1,12 +1,16 @@
 //! MATLAB-compatible `polarplot` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{AxesKind, LinePlot, LineStyle};
+use runmat_value::{ComplexTensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -127,6 +131,72 @@ pub const POLARPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &POLARPLOT_ERRORS,
 };
 
+const POLARPLOT_COMPLEX_INTEGER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "polarplot-complex-integer-z",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "polarplot accepts paired complex-integer Z data as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PolarplotComplexIntegerZExtension"),
+    };
+pub const POLARPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [POLARPLOT_COMPLEX_INTEGER_EXTENSION];
+const POLARPLOT_INTEGER_COORDINATE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "theta, rho, or selected real table data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public plotting surface accepts real numeric coordinate data and explicitly permits any real numeric class in selected table variables.",
+    }];
+const POLARPLOT_COMPLEX_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "complex Z components",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public evidence does not establish paired complex-integer Z admission. RunMat keeps this useful form behind an explicit compatibility gate and checked renderer boundary.",
+    }];
+const POLARPLOT_INTEGER_SELECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "thetavar or rhovar variable indices",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents numeric scalar/vector table-variable indices; these are exact one-based structural selectors.",
+    }];
+pub const POLARPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = polarplot(integer_theta,integer_rho,___) or polarplot(integer_rho,___)",
+        inputs: &POLARPLOT_INTEGER_COORDINATE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Coordinate storage is read authoritatively; polar-to-Cartesian conversion and rendering are explicit floating geometry boundaries.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = polarplot(complex_integer_Z,___)",
+        inputs: &POLARPLOT_COMPLEX_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Componentwise integer Z is gated before conversion to polar renderer geometry.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = polarplot(tbl,integer_thetavar,integer_rhovar,___)",
+        inputs: &POLARPLOT_INTEGER_SELECTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Variable selection remains exact; broader table-form implementation is tracked as a general plotting surface concern.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::polarplot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polarplot",
@@ -163,9 +233,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::polarplot::POLARPLOT_DESCRIPTOR),
+    extensions(crate::builtins::plotting::polarplot::POLARPLOT_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::polarplot::POLARPLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::polarplot"
 )]
 pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+    for value in &args {
+        if crate::builtins::common::validation::is_typed_complex_integer(value) {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                value,
+                &POLARPLOT_COMPLEX_INTEGER_EXTENSION,
+                BUILTIN_NAME,
+                "complex Z component",
+            )
+            .await?;
+        }
+    }
     let (axes_target, args) =
         split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_polarplot_invalid_argument)?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_polarplot_invalid_argument)?;
@@ -517,17 +600,10 @@ mod tests {
     use crate::builtins::plotting::{
         clone_figure, current_figure_handle, reset_hold_state_for_run, reset_plot_state,
     };
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_value::Tensor;
 
     fn tensor(data: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![data.len()]).expect("polar plot vector"))
     }
 
     #[test]
@@ -580,14 +656,7 @@ mod tests {
 
     #[test]
     fn matrix_rho_expands_to_column_series() {
-        let rho = Tensor {
-            data: vec![1.0, 2.0, 3.0, 4.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: NumericDType::F64,
-        };
+        let rho = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("polar plot matrix");
         let data = futures::executor::block_on(evaluate_polar_data(PolarSeriesInput::Rho(
             Value::Tensor(rho),
         )))
@@ -629,14 +698,7 @@ mod tests {
         reset_plot_state();
         reset_hold_state_for_run();
 
-        let empty = Value::Tensor(Tensor {
-            data: Vec::new(),
-            integer_data: None,
-            shape: vec![0, 0],
-            rows: 0,
-            cols: 0,
-            dtype: NumericDType::F64,
-        });
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty polar plot"));
         futures::executor::block_on(polarplot_builtin(vec![empty])).unwrap();
 
         let mut figure = clone_figure(current_figure_handle()).unwrap();
@@ -659,14 +721,9 @@ mod tests {
         reset_hold_state_for_run();
 
         let theta = tensor(&[0.0, std::f64::consts::FRAC_PI_2]);
-        let rho = Value::Tensor(Tensor {
-            data: vec![1.0, 2.0, 3.0, 4.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: NumericDType::F64,
-        });
+        let rho = Value::Tensor(
+            Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("polar plot matrix"),
+        );
         futures::executor::block_on(polarplot_builtin(vec![
             theta,
             rho,

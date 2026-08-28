@@ -8,10 +8,14 @@ use crate::layout::VmAssemblyLayout;
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::FusionGroup;
-use runmat_builtins::{Type, Value};
+use runmat_builtins::Type;
 use runmat_hir::FunctionId;
+use runmat_types::{FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator};
+use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+
+use super::region::BytecodeRegion;
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {
@@ -27,8 +31,20 @@ pub struct ExecutionContext {
     pub call_stack: Vec<CallFrame>,
     pub locals: Vec<Value>,
     pub instruction_pointer: usize,
-    pub spawned_task_ids: HashSet<u64>,
-    pub next_spawn_task_id: u64,
+    pub runtime: runmat_runtime::context::RuntimeContext,
+}
+
+impl Default for ExecutionContext {
+    fn default() -> Self {
+        Self {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            runtime: runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +60,8 @@ pub struct FunctionBytecode {
     pub instr_spans: Vec<runmat_hir::Span>,
     #[serde(default)]
     pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
+    #[serde(default)]
+    pub coverage_sites: Vec<Vec<u64>>,
     pub var_count: usize,
     pub input_slots: Vec<usize>,
     #[serde(default)]
@@ -62,6 +80,10 @@ pub struct FunctionBytecode {
     pub initially_unassigned_slots: HashSet<usize>,
     #[serde(default)]
     pub argument_validations: Vec<FunctionArgumentValidation>,
+    #[serde(default, with = "crate::layout::resume_point_map_serde")]
+    pub resume_points: std::collections::BTreeMap<runmat_types::ProgramPointId, usize>,
+    #[serde(default)]
+    pub regions: Vec<BytecodeRegion>,
 }
 
 impl Default for FunctionBytecode {
@@ -74,6 +96,7 @@ impl Default for FunctionBytecode {
             instructions: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
+            coverage_sites: Vec::new(),
             var_count: 0,
             input_slots: Vec::new(),
             varargin_slot: None,
@@ -85,20 +108,10 @@ impl Default for FunctionBytecode {
             var_names: HashMap::new(),
             initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
+            resume_points: std::collections::BTreeMap::new(),
+            regions: Vec::new(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FunctionArgDim {
-    Any,
-    Exact(usize),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FunctionArgSizeSpec {
-    pub rows: FunctionArgDim,
-    pub cols: FunctionArgDim,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,64 +123,6 @@ pub struct FunctionArgumentValidation {
     pub validators: Vec<FunctionArgValidator>,
     #[serde(default)]
     pub default_value: Option<FunctionArgDefaultValue>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FunctionArgValidator {
-    A(Vec<String>),
-    Column,
-    Finite,
-    Float,
-    Folder,
-    File,
-    NumericOrLogical,
-    Numeric,
-    Text,
-    TextScalar,
-    NonzeroLengthText,
-    Nonempty,
-    ScalarOrEmpty,
-    Real,
-    Integer,
-    Vector,
-    Positive,
-    Negative,
-    Nonnegative,
-    Nonmissing,
-    NonNan,
-    Nonzero,
-    Nonpositive,
-    Nonsparse,
-    Sparse,
-    ValidVariableName,
-    UnderlyingType(Vec<String>),
-    Member(Vec<FunctionArgValidationLiteral>),
-    InRange(f64, f64, FunctionArgRangeInclusivity),
-    GreaterThanOrEqual(f64),
-    LessThanOrEqual(f64),
-    GreaterThan(f64),
-    LessThan(f64),
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct FunctionArgRangeInclusivity {
-    pub lower: bool,
-    pub upper: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FunctionArgValidationLiteral {
-    Number(f64),
-    Text(String),
-    Bool(bool),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FunctionArgDefaultValue {
-    Number(f64),
-    Bool(bool),
-    String(String),
-    EmptyArray,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -275,6 +230,12 @@ impl FunctionRegistry {
     }
 }
 
+impl runmat_runtime::call::descriptor::FunctionNameResolver for FunctionRegistry {
+    fn resolve_function(&self, name: &str) -> Option<FunctionId> {
+        self.resolve_name(name)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytecode {
     pub instructions: Vec<Instr>,
@@ -282,6 +243,8 @@ pub struct Bytecode {
     pub instr_spans: Vec<runmat_hir::Span>,
     #[serde(default)]
     pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
+    #[serde(default)]
+    pub coverage_sites: Vec<Vec<u64>>,
     #[serde(default)]
     pub source_id: Option<runmat_hir::SourceId>,
     pub var_count: usize,
@@ -299,6 +262,9 @@ pub struct Bytecode {
     pub layout: Option<VmAssemblyLayout>,
     #[serde(default)]
     pub async_metadata: AsyncMetadata,
+    /// Canonical region identities mapped onto function-local bytecode PCs.
+    #[serde(default)]
+    pub regions: Vec<BytecodeRegion>,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub accel_graph: Option<AccelGraph>,
@@ -415,6 +381,7 @@ impl Bytecode {
             instructions: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
+            coverage_sites: Vec::new(),
             source_id: None,
             var_count: 0,
             bound_functions: HashMap::new(),
@@ -424,6 +391,7 @@ impl Bytecode {
             initially_unassigned_slots: HashSet::new(),
             layout: None,
             async_metadata: AsyncMetadata::default(),
+            regions: Vec::new(),
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]
@@ -436,10 +404,12 @@ impl Bytecode {
     pub fn with_instructions(instructions: Vec<Instr>, var_count: usize) -> Self {
         let instr_spans = vec![runmat_hir::Span::default(); instructions.len()];
         let call_arg_spans = vec![None; instructions.len()];
+        let coverage_sites = vec![Vec::new(); instructions.len()];
         Self {
             instructions,
             instr_spans,
             call_arg_spans,
+            coverage_sites,
             var_count,
             ..Self::empty()
         }
@@ -450,6 +420,35 @@ impl Bytecode {
             return FunctionRegistry::new(self.bound_functions.clone());
         }
         self.function_registry.clone()
+    }
+
+    pub fn for_function(
+        function: &FunctionBytecode,
+        registry: FunctionRegistry,
+        layout: VmAssemblyLayout,
+    ) -> Self {
+        Self {
+            instructions: function.instructions.clone(),
+            instr_spans: function.instr_spans.clone(),
+            call_arg_spans: function.call_arg_spans.clone(),
+            coverage_sites: function.coverage_sites.clone(),
+            source_id: function.source_id,
+            var_count: function.var_count,
+            bound_functions: registry.functions.clone(),
+            function_registry: registry,
+            var_types: vec![Type::Unknown; function.var_count],
+            var_names: function.var_names.clone(),
+            initially_unassigned_slots: function.initially_unassigned_slots.clone(),
+            layout: Some(layout),
+            async_metadata: AsyncMetadata::default(),
+            regions: function.regions.clone(),
+            #[cfg(feature = "native-accel")]
+            accel_graph: None,
+            #[cfg(feature = "native-accel")]
+            fusion_groups: Vec::new(),
+            #[cfg(feature = "native-accel")]
+            fusion_metadata: FusionMetadata::default(),
+        }
     }
 
     #[cfg(feature = "native-accel")]
@@ -533,9 +532,13 @@ impl Bytecode {
 
 #[cfg(test)]
 mod function_registry_tests {
-    use super::{FunctionBytecode, FunctionRegistry};
+    use super::{Bytecode, FunctionBytecode, FunctionRegistry};
     use crate::Instr;
     use runmat_hir::FunctionId;
+    use runmat_types::{
+        ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan, RegionContract, RegionId,
+        RegionProvenance, REGION_CONTRACT_SCHEMA_VERSION,
+    };
     use std::collections::{HashMap, HashSet};
 
     fn test_function(id: usize, display_name: &str, private_owner_scope: &str) -> FunctionBytecode {
@@ -547,6 +550,7 @@ mod function_registry_tests {
             instructions: vec![Instr::Return],
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
+            coverage_sites: Vec::new(),
             var_count: 0,
             input_slots: Vec::new(),
             varargin_slot: None,
@@ -558,6 +562,8 @@ mod function_registry_tests {
             var_names: HashMap::new(),
             initially_unassigned_slots: HashSet::new(),
             argument_validations: Vec::new(),
+            resume_points: std::collections::BTreeMap::new(),
+            regions: Vec::new(),
         }
     }
 
@@ -588,6 +594,113 @@ mod function_registry_tests {
             None,
             "qualified names should not be rewritten as private-folder aliases"
         );
+    }
+
+    fn region_contract() -> RegionContract {
+        let function = ProgramFunctionId(7);
+        RegionContract {
+            schema_version: REGION_CONTRACT_SCHEMA_VERSION,
+            id: RegionId {
+                function,
+                ordinal: 2,
+            },
+            source: ProgramSourceId(1),
+            span: ProgramSpan { start: 10, end: 20 },
+            entry: ProgramPointId {
+                function,
+                block: 3,
+                position: 1,
+            },
+            exits: vec![ProgramPointId {
+                function,
+                block: 3,
+                position: 4,
+            }],
+            live_in: Vec::new(),
+            live_out: Vec::new(),
+            value_facts: Vec::new(),
+            effects: Default::default(),
+            capabilities: Default::default(),
+            guards: Vec::new(),
+            provenance: RegionProvenance::Inferred,
+        }
+    }
+
+    #[test]
+    fn bytecode_installs_exact_region_boundaries_for_every_function_authority() {
+        let contract = region_contract();
+        let mut function = test_function(7, "region_owner", "");
+        function.resume_points.insert(contract.entry, 5);
+        function.resume_points.insert(contract.exits[0], 11);
+        let mut bytecode = Bytecode::empty();
+        bytecode
+            .function_registry
+            .functions
+            .insert(FunctionId(7), function.clone());
+        bytecode
+            .bound_functions
+            .insert(FunctionId(7), function.clone());
+
+        bytecode
+            .install_regions(std::slice::from_ref(&contract))
+            .unwrap();
+
+        assert_eq!(bytecode.regions.len(), 1);
+        assert_eq!(bytecode.regions[0].entry.pc, 5);
+        assert_eq!(bytecode.regions[0].exits[0].pc, 11);
+        assert_eq!(
+            bytecode
+                .function_registry
+                .functions
+                .get(&FunctionId(7))
+                .unwrap()
+                .regions,
+            bytecode.regions
+        );
+        assert_eq!(
+            bytecode
+                .bound_functions
+                .get(&FunctionId(7))
+                .unwrap()
+                .regions,
+            bytecode.regions
+        );
+    }
+
+    #[test]
+    fn bytecode_omits_regions_without_an_exact_resume_boundary() {
+        let contract = region_contract();
+        let mut function = test_function(7, "region_owner", "");
+        function.resume_points.insert(contract.entry, 5);
+        function.resume_points.insert(contract.exits[0], 11);
+        let mut bytecode = Bytecode::empty();
+        bytecode
+            .function_registry
+            .functions
+            .insert(FunctionId(7), function);
+        bytecode
+            .install_regions(std::slice::from_ref(&contract))
+            .unwrap();
+        bytecode
+            .function_registry
+            .functions
+            .get_mut(&FunctionId(7))
+            .unwrap()
+            .resume_points
+            .remove(&contract.exits[0]);
+
+        bytecode
+            .install_regions(std::slice::from_ref(&contract))
+            .unwrap();
+
+        assert!(bytecode.regions.is_empty());
+        assert!(bytecode
+            .function_registry
+            .functions
+            .get(&FunctionId(7))
+            .unwrap()
+            .regions
+            .is_empty());
     }
 }
 

@@ -1,10 +1,3 @@
----
-title: "Plotting System"
-category: "Plotting System"
-section: "8.0"
-last_updated: "May 28, 2026"
----
-
 # Plotting System
 
 Plotting is the runtime subsystem that turns MATLAB plotting commands into persistent graphics state. A call like `plot(x, y)` selects a figure and axes, creates or updates graphics objects, assigns handles, records axes-local state, and leaves behind a figure that can later be inspected, restyled, rendered, replayed, or exported.

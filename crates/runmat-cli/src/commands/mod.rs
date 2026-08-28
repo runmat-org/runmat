@@ -1,12 +1,17 @@
 pub mod accel;
+pub mod batch;
 pub mod benchmark;
 pub mod bytecode;
 pub mod check;
+pub mod compile;
 pub mod config;
 pub mod fea;
 pub mod gc;
+pub mod job;
+pub mod package;
 pub mod repl;
 pub mod script;
 pub mod session;
 pub mod streams;
+pub mod test;
 pub mod version;

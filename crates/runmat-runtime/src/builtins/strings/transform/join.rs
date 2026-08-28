@@ -1,17 +1,22 @@
 //! MATLAB-compatible `join` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::type_resolvers::text_concat_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -44,6 +49,51 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "join";
+
+const JOIN_TYPED_INTEGER_DIMENSION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "join-typed-integer-dimension",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "join with a typed-integer dimension is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:JoinTypedIntegerDimensionExtension"),
+    };
+const JOIN_REVERSED_ARGUMENTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "join-dimension-before-delimiter",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "join(str, dim, delimiter) is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:JoinDimensionBeforeDelimiterExtension"),
+};
+const JOIN_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "join-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "join with an explicitly resident gpuArray argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:JoinResidentInputExtension"),
+};
+pub const JOIN_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    JOIN_TYPED_INTEGER_DIMENSION_EXTENSION,
+    JOIN_REVERSED_ARGUMENTS_EXTENSION,
+    JOIN_RESIDENT_INPUT_EXTENSION,
+];
+
+const JOIN_INTEGER_DIMENSION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented dimension is a positive integer-valued double scalar. RunMat mode additionally accepts every native typed-integer scalar exactly.",
+    }];
+pub const JOIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "out = join(str, delimiter?, integer_dim)",
+        inputs: &JOIN_INTEGER_DIMENSION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Typed dimensions are compatibility-gated before resident access, parsed from authoritative integer storage, and never converted through floating point.",
+    }];
 
 const JOIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -119,31 +169,7 @@ const JOIN_INPUTS_DELIMITER_DIM: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const JOIN_INPUTS_DIM_DELIMITER: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive dimension index to join along.",
-    },
-    BuiltinParamDescriptor {
-        name: "delimiter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimiter scalar or delimiter array matching join shape constraints.",
-    },
-];
-
-const JOIN_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+const JOIN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "out = join(str)",
         inputs: &JOIN_INPUTS_BASE,
@@ -162,11 +188,6 @@ const JOIN_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
         label: "out = join(str, delimiter, dim)",
         inputs: &JOIN_INPUTS_DELIMITER_DIM,
-        outputs: &JOIN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = join(str, dim, delimiter)",
-        inputs: &JOIN_INPUTS_DIM_DELIMITER,
         outputs: &JOIN_OUTPUT,
     },
 ];
@@ -259,9 +280,12 @@ fn join_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     accel = "none",
     type_resolver(text_concat_type),
     descriptor(crate::builtins::strings::transform::join::JOIN_DESCRIPTOR),
+    extensions(crate::builtins::strings::transform::join::JOIN_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::transform::join::JOIN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::transform::join"
 )]
 async fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    preflight_join_extensions(&text, &rest)?;
     let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let mut args = Vec::with_capacity(rest.len());
     for arg in rest {
@@ -302,6 +326,115 @@ async fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     input.build_output(output_data, output_shape)
 }
 
+fn preflight_join_extensions(text: &Value, args: &[Value]) -> BuiltinResult<()> {
+    if args.len() > 2 {
+        return Err(join_error(&JOIN_ERROR_ARG_COUNT));
+    }
+    if !is_join_input(text) {
+        return Err(join_error(&JOIN_ERROR_INPUT_TYPE));
+    }
+
+    let dimension = match args {
+        [] => None,
+        [only] if is_dimension_candidate(only) => Some(only),
+        [delimiter] => {
+            if !is_join_delimiter(delimiter) {
+                return Err(join_error(&JOIN_ERROR_DELIMITER_TYPE));
+            }
+            None
+        }
+        [delimiter, dimension] if is_dimension_candidate(dimension) => {
+            if !is_join_delimiter(delimiter) {
+                return Err(join_error(&JOIN_ERROR_DELIMITER_TYPE));
+            }
+            Some(dimension)
+        }
+        [dimension, delimiter] if is_dimension_candidate(dimension) => {
+            if !is_join_delimiter(delimiter) {
+                return Err(join_error(&JOIN_ERROR_DELIMITER_TYPE));
+            }
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &JOIN_REVERSED_ARGUMENTS_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            Some(dimension)
+        }
+        [_, _] => return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE)),
+        _ => unreachable!("join arity checked above"),
+    };
+
+    if dimension.is_some_and(is_typed_integer_dimension_candidate) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &JOIN_TYPED_INTEGER_DIMENSION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if args.iter().any(value_contains_explicit_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &JOIN_RESIDENT_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn is_join_input(value: &Value) -> bool {
+    match value {
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .all(|value| cell_element_to_string(value).is_some()),
+        _ => false,
+    }
+}
+
+fn is_join_delimiter(value: &Value) -> bool {
+    match value {
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .all(|value| cell_element_to_string(value).is_some()),
+        _ => false,
+    }
+}
+
+fn value_contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),
+        _ => false,
+    }
+}
+
+fn is_typed_integer_dimension_candidate(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => {
+            tensor::is_scalar_tensor(tensor) && tensor.integer_storage().is_some()
+        }
+        Value::GpuTensor(handle) => {
+            handle.shape.iter().copied().product::<usize>() == 1
+                && runmat_accelerate_api::handle_integer_type(handle).is_some()
+        }
+        _ => false,
+    }
+}
+
+fn is_dimension_candidate(value: &Value) -> bool {
+    match value {
+        Value::Num(_) | Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+        Value::GpuTensor(handle) => handle.shape.iter().copied().product::<usize>() == 1,
+        _ => false,
+    }
+}
+
 fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<Value>, Option<usize>)> {
     match args.len() {
         0 => Ok((None, None)),
@@ -337,11 +470,11 @@ fn default_dimension(shape: &[usize]) -> usize {
 fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Int(i) => {
-            let v = i.to_i64();
-            if v <= 0 {
-                return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
-            }
-            Ok(Some(v as usize))
+            let v = i
+                .try_to_usize()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| join_error(&JOIN_ERROR_DIMENSION_TYPE))?;
+            Ok(Some(v))
         }
         Value::Num(n) => {
             if !n.is_finite() || *n <= 0.0 {
@@ -351,10 +484,17 @@ fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
             if (rounded - n).abs() > f64::EPSILON {
                 return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
-            Ok(Some(rounded as usize))
+            parse_dimension_float(rounded)
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
-            let val = t.data[0];
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                let dim = int
+                    .try_to_usize()
+                    .filter(|value| *value > 0)
+                    .ok_or_else(|| join_error(&JOIN_ERROR_DIMENSION_TYPE))?;
+                return Ok(Some(dim));
+            }
+            let val = tensor::tensor_value_f64(t, 0);
             if !val.is_finite() || val <= 0.0 {
                 return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
@@ -362,10 +502,21 @@ fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
             if (rounded - val).abs() > f64::EPSILON {
                 return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
-            Ok(Some(rounded as usize))
+            parse_dimension_float(rounded)
         }
         _ => Ok(None),
     }
+}
+
+fn parse_dimension_float(rounded: f64) -> BuiltinResult<Option<usize>> {
+    if rounded > usize::MAX.saturating_sub(1) as f64 {
+        return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
+    }
+    let parsed = rounded as usize;
+    if parsed as f64 != rounded || parsed == usize::MAX {
+        return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
+    }
+    Ok(Some(parsed))
 }
 
 struct JoinInput {
@@ -742,7 +893,8 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::join_builtin(text, rest))
@@ -855,11 +1007,7 @@ pub(crate) mod tests {
             vec![3, 2],
         )
         .unwrap();
-        let result = join_builtin(
-            Value::StringArray(array),
-            vec![Value::Int(IntValue::I32(1))],
-        )
-        .expect("join");
+        let result = join_builtin(Value::StringArray(array), vec![Value::Num(1.0)]).expect("join");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
@@ -875,15 +1023,148 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn join_dimension_parser_preserves_typed_integer_tensor_bounds() {
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("dim");
+        assert_eq!(value_to_dimension(&Value::Tensor(dim)).unwrap(), Some(2));
+
+        let zero = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1]).expect("dim");
+        assert!(value_to_dimension(&Value::Tensor(zero)).is_err());
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative dim");
+        assert!(value_to_dimension(&Value::Tensor(negative)).is_err());
+        assert!(value_to_dimension(&Value::Num(1.0e300)).is_err());
+    }
+
+    #[test]
+    fn join_typed_integer_dimension_is_gated_before_evaluation() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
+        let error = join_builtin(
+            Value::StringArray(input),
+            vec![Value::Int(IntValue::U64(u64::MAX))],
+        )
+        .expect_err("typed integer dimension extension");
+        assert_eq!(
+            error.identifier(),
+            JOIN_TYPED_INTEGER_DIMENSION_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn join_resident_typed_dimension_gate_precedes_provider_access() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
+        let input = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
+        let error = join_builtin(
+            Value::StringArray(input),
+            vec![Value::GpuTensor(handle.clone())],
+        )
+        .expect_err("resident typed dimension extension");
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+        assert_eq!(
+            error.identifier(),
+            JOIN_TYPED_INTEGER_DIMENSION_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn join_only_explicit_residency_is_compatibility_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let automatic = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 1,
+            descriptor: Default::default(),
+        };
+        let automatic =
+            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let input = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
+        let automatic_error = join_builtin(
+            Value::StringArray(input.clone()),
+            vec![Value::GpuTensor(automatic.clone())],
+        )
+        .expect_err("automatic residency may proceed to owner lookup");
+        assert_ne!(
+            automatic_error.identifier(),
+            JOIN_RESIDENT_INPUT_EXTENSION.error_identifier
+        );
+
+        let explicit = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 2,
+            descriptor: Default::default(),
+        };
+        let explicit =
+            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit_error = join_builtin(
+            Value::StringArray(input),
+            vec![Value::GpuTensor(explicit.clone())],
+        )
+        .expect_err("explicit residency must be compatibility gated");
+        assert_eq!(
+            explicit_error.identifier(),
+            JOIN_RESIDENT_INPUT_EXTENSION.error_identifier
+        );
+        runmat_accelerate_api::clear_handle_metadata(&automatic);
+        runmat_accelerate_api::clear_handle_metadata(&explicit);
+    }
+
+    #[test]
+    fn join_delimiter_role_error_precedes_dimension_extension() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
+        let error = join_builtin(
+            Value::StringArray(input),
+            vec![Value::Int(IntValue::U8(1)), Value::Num(2.0)],
+        )
+        .expect_err("numeric delimiter must reject as a delimiter");
+        assert_eq!(error.identifier(), JOIN_ERROR_DELIMITER_TYPE.identifier);
+    }
+
+    #[test]
+    fn join_dimension_before_delimiter_is_a_gated_extension() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
+        let error = join_builtin(
+            Value::StringArray(input),
+            vec![Value::Num(2.0), Value::from("-")],
+        )
+        .expect_err("reversed join syntax extension");
+        assert_eq!(
+            error.identifier(),
+            JOIN_REVERSED_ARGUMENTS_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn join_integer_metadata_records_exact_runmat_only_dimension() {
+        assert_eq!(JOIN_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            JOIN_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(JOIN_EXTENSIONS.len(), 3);
+        assert_eq!(JOIN_DESCRIPTOR.signatures.len(), 4);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn join_dimension_greater_than_ndims_returns_input() {
         let array = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
-        let result = join_builtin(
-            Value::StringArray(array.clone()),
-            vec![Value::Int(IntValue::I32(4))],
-        )
-        .expect("join");
+        let result =
+            join_builtin(Value::StringArray(array.clone()), vec![Value::Num(4.0)]).expect("join");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, array.shape);
@@ -940,11 +1221,7 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let result = join_builtin(
-            Value::StringArray(array),
-            vec![Value::Int(IntValue::I32(1))],
-        )
-        .expect("join");
+        let result = join_builtin(Value::StringArray(array), vec![Value::Num(1.0)]).expect("join");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
@@ -994,11 +1271,8 @@ pub(crate) mod tests {
             1,
         )
         .expect("cell");
-        let result = join_builtin(
-            Value::StringArray(array),
-            vec![delimiters, Value::Int(IntValue::I32(2))],
-        )
-        .expect("join");
+        let result = join_builtin(Value::StringArray(array), vec![delimiters, Value::Num(2.0)])
+            .expect("join");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![3, 1]);
@@ -1029,7 +1303,7 @@ pub(crate) mod tests {
         let array = StringArray::new(data, vec![2, 2, 2]).unwrap();
         let result = join_builtin(
             Value::StringArray(array),
-            vec![Value::String(":".into()), Value::Int(IntValue::I32(3))],
+            vec![Value::String(":".into()), Value::Num(3.0)],
         )
         .expect("join");
         match result {
@@ -1129,7 +1403,7 @@ pub(crate) mod tests {
         let delims = StringArray::new(vec!["-".into()], vec![1, 1]).unwrap();
         let result = join_builtin(
             Value::StringArray(array),
-            vec![Value::StringArray(delims), Value::Int(IntValue::I32(2))],
+            vec![Value::StringArray(delims), Value::Num(2.0)],
         )
         .expect("join");
         match result {

@@ -1,0 +1,45 @@
+{
+  "title": "narginchk",
+  "category": "introspection",
+  "keywords": ["narginchk", "function arguments", "arity", "validation"],
+  "summary": "Validate the number of inputs supplied to the current function.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host call-context validation. Interactive resident bounds are not a documented input surface and reject without provider access."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::introspection::arity_check::tests::arity_checks_accept_every_documented_integer_class",
+    "integration": "crates/runmat-vm/tests/functions.rs::narginchk_nargoutchk_validate_function_arity"
+  },
+  "description": "`narginchk(minArgs,maxArgs)` throws when the current function received fewer than `minArgs` or more than `maxArgs` inputs.",
+  "behaviors": [
+    "`minArgs` accepts nonnegative scalar single, double, or any of the eight integer classes.",
+    "`maxArgs` accepts the same classes and also positive double infinity for an unbounded maximum.",
+    "All integer classes are read from authoritative scalar storage without floating conversion.",
+    "The minimum cannot exceed the maximum, and bounds outside the host argument-count range are rejected rather than rounded or saturated.",
+    "The check uses the current VM function-call context and has no output value."
+  ],
+  "examples": [
+    {
+      "description": "Require one or two inputs",
+      "input": "function y = f(x, varargin)\n    narginchk(1, 2);\n    y = x;\nend",
+      "output": "Calls with one or two inputs continue; other calls throw."
+    }
+  ],
+  "faqs": [],
+  "links": [{"label": "nargoutchk", "url": "./nargoutchk"}],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/arity_check.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/arity_check.rs"
+  }
+}

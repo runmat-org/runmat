@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "No GPU form is documented. Automatically resident byte vectors gather transparently; explicit gpuArray input is rejected."
   },
   "fusion": {
     "elementwise": false,
@@ -28,24 +28,24 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "s = native2unicode(bytes, encoding) - Decode native byte values into Unicode text.",
+  "description": "`native2unicode(bytes, encoding)` range-checks a numeric byte vector and decodes it to a host character vector using UTF-8 by default.",
   "signatures": [
     {
       "label": "s = native2unicode(bytes, encoding)",
       "inputs": [
         {
-          "name": "text",
-          "ty": "Any",
+          "name": "bytes",
+          "ty": "NumericArray",
           "arity": "Required",
           "default": null,
-          "description": "Input text."
+          "description": "Numeric byte vector with values in the range 0 through 255."
         },
         {
-          "name": "arg",
-          "ty": "Any",
-          "arity": "Variadic",
-          "default": null,
-          "description": "Additional arguments."
+          "name": "encoding",
+          "ty": "StringScalar",
+          "arity": "Optional",
+          "default": "\"UTF-8\"",
+          "description": "Source character encoding."
         }
       ],
       "outputs": [
@@ -60,10 +60,12 @@
     }
   ],
   "behaviors": [
-    "Decode native byte values into Unicode text."
+    "All eight integer classes are accepted, but every element must be exactly within 0 through 255; values are never clamped or converted through binary64.",
+    "ASCII-width decoding preserves the input row or column vector shape, and character or string input passes through unchanged.",
+    "Unsupported encoding names and explicit gpuArray inputs reject."
   ],
   "examples": [
-    "native2unicode([104 105], \"UTF-8\") returns \"hi\"."
+    "native2unicode(uint16([104 105]), \"UTF-8\") returns the character vector `'hi'`."
   ],
   "faqs": [],
   "links": [

@@ -8,7 +8,7 @@
     "training",
     "embedding"
   ],
-  "summary": "Train a local word embedding compatibility model.",
+  "summary": "Train a word embedding from a text file or tokenized documents.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -27,21 +27,22 @@
     "unit": "builtins::strings::text_analytics::embeddings::tests",
     "integration": null
   },
-  "description": "`trainWordEmbedding(filename)` and `trainWordEmbedding(documents)` return a RunMat `wordEmbedding` compatibility object trained from local text. File input is UTF-8 text with one document per line and whitespace-separated words. `tokenizedDocument` input uses the stored document tokens.",
+  "description": "`trainWordEmbedding(filename)` and `trainWordEmbedding(documents)` return a `wordEmbedding` trained from local text. File input is UTF-8 text with one document per line and whitespace-separated words; `tokenizedDocument` input uses its stored tokens.",
   "behaviors": [
     "`filename` may be a string scalar, character vector, scalar string array, or 1-by-1 cell containing a text filename.",
-    "`documents` must be a RunMat `tokenizedDocument` compatibility object.",
+    "`documents` must be a `tokenizedDocument` object.",
     "`Dimension`, `Window`, `Model`, `DiscardFactor`, `LossFunction`, `NumNegativeSamples`, `NumEpochs`, `MinCount`, `NGramRange`, `InitialLearnRate`, `UpdateRate`, and `Verbose` are parsed and validated using the documented MATLAB option names.",
     "`MinCount` filters vocabulary words before model construction. Vocabulary order is descending frequency with first-seen order as the tie-breaker.",
     "The returned object exposes `Dimension` and `Vocabulary` and stores dense vectors in the same implementation-detail property used by `word2vec` and `vec2word`.",
-    "RunMat uses a deterministic local compatibility trainer based on lexical/subword hashing and windowed co-occurrence features. This is suitable for repeatable scripts and downstream embedding lookup, but it is not MATLAB's exact fastText optimizer.",
-    "Very large dense embedding outputs are rejected with a controlled error until sparse/model-storage infrastructure is added."
+    "The current trainer is deterministic and uses lexical/subword hashing with windowed co-occurrence features. It supports repeatable embedding lookup workflows but does not implement the fastText optimizer.",
+    "RunMat mode accepts native integer option values. Counts, sizes, ranges, and `Verbose` are decoded exactly; integer-valued learning-rate controls must be exactly representable as double.",
+    "Very large dense embedding outputs are rejected before allocation when they exceed the configured model-size limit."
   ],
   "examples": [
     {
       "description": "Train From File",
       "input": "emb = trainWordEmbedding(\"training.txt\", \"Dimension\", 50, \"MinCount\", 1)",
-      "output": "`emb` is a RunMat `wordEmbedding` compatibility object."
+      "output": "`emb` is a `wordEmbedding` object."
     },
     {
       "description": "Train From Tokenized Documents",
@@ -52,11 +53,11 @@
   "faqs": [
     {
       "question": "Does RunMat implement MATLAB's exact fastText training algorithm?",
-      "answer": "Not yet. This slice implements a deterministic local compatibility trainer and keeps exact optimizer parity in the broader Text Analytics queue."
+      "answer": "No. The current deterministic lexical/subword and co-occurrence trainer produces a usable `wordEmbedding`, but its vectors are not fastText optimizer results."
     },
     {
       "question": "Can the trained model be used with `word2vec` and `vec2word`?",
-      "answer": "Yes. The output is the same RunMat `wordEmbedding` compatibility object used by the existing embedding lookup builtins."
+      "answer": "Yes. The output is the `wordEmbedding` object consumed by the existing embedding lookup builtins."
     },
     {
       "question": "Does `trainWordEmbedding` execute on the GPU?",
@@ -85,7 +86,7 @@
     "example": {
       "description": "Supported forms",
       "input": "emb = trainWordEmbedding(filename)\nemb = trainWordEmbedding(documents)\nemb = trainWordEmbedding(___, Name, Value)",
-      "output": "`emb` is a `wordEmbedding` compatibility object."
+      "output": "`emb` is a `wordEmbedding` object."
     },
     "points": [
       "`Dimension`, `NumEpochs`, `MinCount`, `NumNegativeSamples`, and `UpdateRate` must be positive integers.",

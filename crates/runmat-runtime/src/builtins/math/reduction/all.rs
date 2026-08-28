@@ -6,20 +6,24 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::{
-    gpu_helpers,
+    gpu_helpers::{self, HostTruthTensorOwned},
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
 use crate::builtins::math::reduction::type_resolvers::reduce_logical_type;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
 
 const NAME: &str = "all";
 
@@ -198,6 +202,42 @@ const ALL_ERRORS: [BuiltinErrorDescriptor; 3] = [
     ALL_ERROR_INTERNAL,
 ];
 
+const ALL_NANFLAG_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "all-nanflag",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "all with an explicit omitnan or includenan flag is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AllNanflagExtension"),
+};
+pub const ALL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ALL_NANFLAG_EXTENSION];
+
+const ALL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Real scalar and array data accepts every built-in integer class and tests exact zero versus nonzero values.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Dimension scalars and vectors accept all eight integer classes as well as integer-valued floating selectors.",
+    },
+];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = all(integer_A, dim_or_vecdim|\"all\")",
+        inputs: &ALL_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Every reduced element is tested exactly for zero; output is logical with reduced dimensions retained at size one, including empty identities.",
+    }];
+
 pub const ALL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ALL_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -281,6 +321,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     type_resolver(all_type),
     descriptor(crate::builtins::math::reduction::all::ALL_DESCRIPTOR),
+    extensions(crate::builtins::math::reduction::all::ALL_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::reduction::all::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::all"
 )]
 async fn all_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -330,12 +372,12 @@ async fn try_all_gpu(
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
     nan_mode: ReductionNaN,
-) -> BuiltinResult<Option<HostTensorOwned>> {
+) -> BuiltinResult<Option<HostTruthTensorOwned>> {
     let omit_nan = matches!(nan_mode, ReductionNaN::Omit);
 
     if let ReductionSpec::All = spec {
         if let Ok(tmp) = provider.reduce_all(handle, omit_nan).await {
-            let host = download_handle_async(provider, &tmp)
+            let host = gpu_helpers::download_truth_values_async(provider, &tmp)
                 .await
                 .map_err(|e| all_error(format!("all: {e}")))?;
             let _ = provider.free(&tmp);
@@ -351,7 +393,7 @@ async fn reduce_dims_gpu(
     handle: &GpuTensorHandle,
     spec: &ReductionSpec,
     omit_nan: bool,
-) -> BuiltinResult<Option<HostTensorOwned>> {
+) -> BuiltinResult<Option<HostTruthTensorOwned>> {
     let mut dims = dims_from_spec(spec, &handle.shape);
     if dims.is_empty() {
         return Ok(None);
@@ -408,7 +450,7 @@ async fn reduce_dims_gpu(
         return Ok(None);
     }
 
-    let host = download_handle_async(provider, &current)
+    let host = gpu_helpers::download_truth_values_async(provider, &current)
         .await
         .map_err(|e| all_error(format!("all: {e}")))?;
     let _ = provider.free(&current);
@@ -418,9 +460,9 @@ async fn reduce_dims_gpu(
     Ok(Some(host))
 }
 
-fn logical_from_host(host: HostTensorOwned) -> BuiltinResult<Value> {
+fn logical_from_host(host: HostTruthTensorOwned) -> BuiltinResult<Value> {
     if host.data.len() == 1 {
-        return Ok(Value::Bool(host.data[0] != 0.0));
+        return Ok(Value::Bool(host.data[0] != 0));
     }
     let shape = if tensor::element_count(&host.shape) == host.data.len() {
         normalize_scalar_shape(&host.shape)
@@ -436,7 +478,7 @@ fn logical_from_host(host: HostTensorOwned) -> BuiltinResult<Value> {
     let logical_data: Vec<u8> = host
         .data
         .into_iter()
-        .map(|v| if v != 0.0 { 1 } else { 0 })
+        .map(|v| if v != 0 { 1 } else { 0 })
         .collect();
     LogicalArray::new(logical_data, shape)
         .map(Value::LogicalArray)
@@ -550,19 +592,20 @@ impl TruthTensor {
     }
 
     fn from_tensor(tensor: Tensor) -> Self {
-        let shape = if tensor::element_count(&tensor.shape) == tensor.data.len() {
+        let values = tensor::tensor_values_f64_cow(&tensor);
+        let len = values.len();
+        let shape = if tensor::element_count(&tensor.shape) == len {
             normalize_scalar_shape(&tensor.shape)
         } else if is_scalar_shape(&tensor.shape) {
-            if tensor.data.is_empty() {
+            if len == 0 {
                 Vec::new()
             } else {
-                vec![tensor.data.len()]
+                vec![len]
             }
         } else {
             tensor.shape.clone()
         };
-        let data = tensor
-            .data
+        let data = values
             .iter()
             .map(|&v| TruthValue {
                 truthy: if v.is_nan() { true } else { v != 0.0 },
@@ -588,18 +631,29 @@ impl TruthTensor {
     }
 
     fn from_complex_tensor(ct: ComplexTensor) -> Self {
-        let data = ct
-            .data
-            .iter()
-            .map(|&(re, im)| TruthValue {
-                truthy: if re.is_nan() || im.is_nan() {
-                    true
-                } else {
-                    re != 0.0 || im != 0.0
-                },
-                has_nan: re.is_nan() || im.is_nan(),
-            })
-            .collect();
+        let data = if let Some(storage) = ct.integer_storage() {
+            (0..storage.len())
+                .map(|index| {
+                    TruthValue::from_bool(
+                        storage
+                            .is_nonzero_at(index)
+                            .expect("typed complex integer storage is structurally valid"),
+                    )
+                })
+                .collect()
+        } else {
+            ct.materialize_f64()
+                .iter()
+                .map(|&(re, im)| TruthValue {
+                    truthy: if re.is_nan() || im.is_nan() {
+                        true
+                    } else {
+                        re != 0.0 || im != 0.0
+                    },
+                    has_nan: re.is_nan() || im.is_nan(),
+                })
+                .collect()
+        };
         TruthTensor {
             shape: ct.shape.clone(),
             data,
@@ -772,6 +826,7 @@ fn apply_reduction(
 async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, ReductionNaN)> {
     let mut spec = ReductionSpec::Default;
     let mut nan_mode = ReductionNaN::Include;
+    let mut nan_mode_seen = false;
 
     let tokens = crate::builtins::common::arg_tokens::tokens_from_values(args);
     for (arg, token) in args.iter().zip(tokens.iter()) {
@@ -786,13 +841,15 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
             continue;
         }
         if let Some(mode) = parse_nan_mode_token(token)? {
-            if !matches!(nan_mode, ReductionNaN::Include) {
+            if nan_mode_seen {
                 return Err(all_descriptor_error_with_detail(
                     &ALL_ERROR_INVALID_ARGUMENT,
                     "multiple NaN handling options specified",
                 ));
             }
+            crate::compatibility::ensure_builtin_extension_enabled(&ALL_NANFLAG_EXTENSION, NAME)?;
             nan_mode = mode;
+            nan_mode_seen = true;
             continue;
         }
         let dims = parse_dimensions(arg).await?;
@@ -907,7 +964,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue};
+    use runmat_value::{CharArray, ComplexTensor, IntValue, IntegerStorage};
 
     fn all_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::all_builtin(value, rest))
@@ -963,6 +1020,49 @@ pub(crate) mod tests {
                 assert_eq!(out.data, vec![1, 1, 0]);
             }
             other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn all_reads_all_integer_storage_classes_without_floating_materialization() {
+        let storages = [
+            IntegerStorage::I8(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::I16(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::I32(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::I64(vec![1, 1, 4, 5, 0, i64::MAX]),
+            IntegerStorage::U8(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::U16(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::U32(vec![1, 1, 4, 5, 0, 6]),
+            IntegerStorage::U64(vec![1, 1, 4, 5, 0, u64::MAX]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage, vec![2, 3]).expect("typed integer input");
+            let result = all_builtin(Value::Tensor(tensor), Vec::new()).expect("all");
+            match result {
+                Value::LogicalArray(out) => {
+                    assert_eq!(out.shape, vec![1, 3]);
+                    assert_eq!(out.data, vec![1, 1, 0]);
+                }
+                other => panic!("expected logical array, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn all_nanflag_is_a_declared_runmat_only_extension() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = all_builtin(Value::Num(1.0), vec![Value::from("omitnan")])
+                .expect_err("MATLAB mode rejects nanflag");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:AllNanflagExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            all_builtin(Value::Num(1.0), vec![Value::from("omitnan")])
+                .expect("RunMat mode accepts nanflag");
         }
     }
 
@@ -1050,6 +1150,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_handles_nan_modes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![f64::NAN, f64::NAN, 1.0, 0.0], vec![2, 2]).unwrap();
         let includenan = all_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("all");
         match includenan {
@@ -1080,6 +1181,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_includenan_keyword_allowed() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![f64::NAN, 1.0], vec![2, 1]).unwrap();
         let result =
             all_builtin(Value::Tensor(tensor), vec![Value::from("includenan")]).expect("all");
@@ -1096,6 +1198,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_complex_tensor_with_omitnan() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let complex = ComplexTensor::new(vec![(f64::NAN, 0.0), (1.0, 0.0)], vec![2, 1]).unwrap();
         let tensor_value = Value::ComplexTensor(complex);
         let omit = all_builtin(tensor_value.clone(), vec![Value::from("omitnan")]).expect("all");
@@ -1121,6 +1224,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_vecdim_with_omitnan() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let mut data = vec![0.0; 8];
         data[7] = f64::NAN;
         let tensor = Tensor::new(data, vec![2, 2, 2]).unwrap();
@@ -1158,7 +1262,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 1.0, 2.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1176,10 +1280,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_gpu_provider_omitnan_roundtrip() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![f64::NAN, f64::NAN, 1.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1222,7 +1327,7 @@ pub(crate) mod tests {
         ))
         .unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = match runmat_accelerate_api::provider() {
@@ -1253,6 +1358,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn all_wgpu_omitnan_matches_cpu() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let init = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -1276,7 +1382,7 @@ pub(crate) mod tests {
         ))
         .unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = match runmat_accelerate_api::provider() {

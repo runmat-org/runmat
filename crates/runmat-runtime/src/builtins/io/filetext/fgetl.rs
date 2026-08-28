@@ -1,15 +1,21 @@
 //! MATLAB-compatible `fgetl` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{
     helpers::{bytes_to_char_array, read_text_line},
     registry,
@@ -17,6 +23,50 @@ use crate::builtins::io::filetext::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "fgetl";
+
+const FGETL_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fgetl-integer-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integer-class fgetl file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FgetlIntegerIdExtension"),
+};
+const FGETL_SINGLE_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fgetl-single-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "single-precision fgetl file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FgetlSingleIdExtension"),
+};
+const FGETL_RESIDENT_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fgetl-resident-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "provider-resident fgetl file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FgetlResidentIdExtension"),
+};
+pub const FGETL_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    FGETL_INTEGER_ID_EXTENSION,
+    FGETL_SINGLE_ID_EXTENSION,
+    FGETL_RESIDENT_ID_EXTENSION,
+];
+
+const FGETL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "MATLAB-compatible file identifiers are integer-valued doubles; all eight typed integer classes are one gated RunMat extension and are checked exactly against the registry identifier domain.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tline = fgetl(integer_fileID)",
+        inputs: &FGETL_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The identifier is validated exactly before registry access; a successful read returns a host character row and end-of-file returns the double sentinel -1.",
+    }];
 
 const FGETL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tline",
@@ -142,6 +192,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fgetl_type),
     descriptor(crate::builtins::io::filetext::fgetl::FGETL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::filetext::fgetl::INTEGER_CAPABILITIES),
+    extensions(crate::builtins::io::filetext::fgetl::FGETL_EXTENSIONS),
     builtin_path = "crate::builtins::io::filetext::fgetl"
 )]
 async fn fgetl_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -187,7 +239,9 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
         ));
     }
 
+    preflight_fid(fid_value)?;
     let fid_host = gather_value(fid_value).await?;
+    preflight_fid(&fid_host)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
         return Err(fgetl_error_with_detail(
@@ -224,6 +278,10 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
         .ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
     let read = read_text_line(file, None, BUILTIN_NAME)
         .map_err(|e| fgetl_error_with_detail(&FGETL_ERROR_IO, e.message()))?;
+    drop(guard);
+    if read.encountered_eof {
+        registry::mark_eof_encountered(fid);
+    }
     if read.eof_before_any {
         return Ok(FgetlEval::end_of_file());
     }
@@ -238,6 +296,50 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
     let line_value = bytes_to_char_array(&read.data[..line_len], &encoding, BUILTIN_NAME)
         .map_err(|e| fgetl_error_with_detail(&FGETL_ERROR_IO, e.message()))?;
     Ok(FgetlEval::new(line_value))
+}
+
+fn preflight_fid(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Num(_) => Ok(()),
+        Value::Int(_) => crate::compatibility::ensure_builtin_extension_enabled(
+            &FGETL_INTEGER_ID_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FGETL_INTEGER_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FGETL_SINGLE_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(_) => Ok(()),
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FGETL_RESIDENT_ID_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FGETL_INTEGER_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FGETL_SINGLE_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 async fn gather_value(value: &Value) -> BuiltinResult<Value> {
@@ -257,15 +359,6 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
         Ok(n as i32)
     }
 
-    fn checked_i64_to_i32(n: i64) -> BuiltinResult<i32> {
-        i32::try_from(n).map_err(|_| {
-            fgetl_error_with_detail(
-                &FGETL_ERROR_INVALID_INPUT,
-                "file identifier is out of range",
-            )
-        })
-    }
-
     match value {
         Value::Num(n) => {
             if !n.is_finite() {
@@ -282,9 +375,23 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             }
             checked_f64_to_i32(*n)
         }
-        Value::Int(i) => checked_i64_to_i32(i.to_i64()),
-        Value::Tensor(t) if t.data.len() == 1 => {
-            let n = t.data[0];
+        Value::Int(i) => i.try_to_i32().ok_or_else(|| {
+            fgetl_error_with_detail(
+                &FGETL_ERROR_INVALID_INPUT,
+                "file identifier is out of range",
+            )
+        }),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                return value.try_to_i32().ok_or_else(|| {
+                    fgetl_error_with_detail(
+                        &FGETL_ERROR_INVALID_INPUT,
+                        "file identifier is out of range",
+                    )
+                });
+            }
+            let n = tensor::tensor_value_f64(t, 0);
             if !n.is_finite() {
                 return Err(fgetl_error_with_detail(
                     &FGETL_ERROR_INVALID_INPUT,
@@ -318,8 +425,8 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
     use runmat_time::system_time_now;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
     use std::path::{Path, PathBuf};
     use std::time::UNIX_EPOCH;
 
@@ -348,6 +455,48 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"tline = fgetl(fid)"));
+    }
+
+    #[test]
+    fn fgetl_integer_capability_covers_all_typed_file_identifiers() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        assert_eq!(
+            INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+    }
+
+    #[test]
+    fn fgetl_typed_single_and_resident_identifiers_are_independently_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = preflight_fid(&Value::Int(IntValue::I32(3))).unwrap_err();
+        assert_eq!(
+            integer.identifier(),
+            Some("RunMat:compatibility:FgetlIntegerIdExtension")
+        );
+
+        let single = Tensor::new_with_dtype(vec![3.0], vec![1, 1], NumericDType::F32)
+            .expect("single identifier");
+        let single = preflight_fid(&Value::Tensor(single)).unwrap_err();
+        assert_eq!(
+            single.identifier(),
+            Some("RunMat:compatibility:FgetlSingleIdExtension")
+        );
+
+        test_support::with_test_provider(|provider| {
+            let host = [3.0f64];
+            let view = HostTensorView {
+                data: &host,
+                shape: &[1, 1],
+            };
+            let resident = Value::GpuTensor(provider.upload(&view).expect("upload identifier"));
+            let resident = preflight_fid(&resident).unwrap_err();
+            assert_eq!(
+                resident.identifier(),
+                Some("RunMat:compatibility:FgetlResidentIdExtension")
+            );
+        });
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
@@ -429,6 +578,32 @@ pub(crate) mod tests {
             )
         );
 
+        let uint64_too_large =
+            unwrap_error_message(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).unwrap_err());
+        assert_eq!(
+            uint64_too_large,
+            format!(
+                "{}: file identifier is out of range",
+                FGETL_ERROR_INVALID_INPUT.message
+            )
+        );
+
+        let typed_tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid");
+        assert_eq!(parse_fid(&Value::Tensor(typed_tensor)).unwrap(), 7);
+        let typed_tensor_too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("typed fid");
+        let typed_tensor_too_large =
+            unwrap_error_message(parse_fid(&Value::Tensor(typed_tensor_too_large)).unwrap_err());
+        assert_eq!(
+            typed_tensor_too_large,
+            format!(
+                "{}: file identifier is out of range",
+                FGETL_ERROR_INVALID_INPUT.message
+            )
+        );
+
         let tensor = Tensor::new(vec![i32::MAX as f64 + 1.0], vec![1, 1]).expect("tensor");
         let tensor_too_large = unwrap_error_message(parse_fid(&Value::Tensor(tensor)).unwrap_err());
         assert_eq!(
@@ -438,6 +613,24 @@ pub(crate) mod tests {
                 FGETL_ERROR_INVALID_INPUT.message
             )
         );
+    }
+
+    #[test]
+    fn fgetl_typed_identifier_tensors_ignore_poisoned_f64_mirrors() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+        for storage in classes {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
+            assert_eq!(parse_fid(&Value::Tensor(tensor)).unwrap(), 7);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -513,6 +706,23 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fgetl_consumes_lfcr_as_one_newline_sequence() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fgetl_lfcr");
+        test_support::fs::write(&path, b"first\n\rsecond").unwrap();
+        let handle = fopen_path(&path);
+
+        let first = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("first");
+        assert_eq!(char_text(first.first_output()), "first");
+        let second = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("second");
+        assert_eq!(char_text(second.first_output()), "second");
+
+        test_support::fs::remove_file(&path).unwrap();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn fgetl_preserves_position_across_repeated_reads() {
         let _guard = registry_guard();
         registry::reset_for_tests();
@@ -577,6 +787,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fgetl_gathers_gpu_scalar_argument() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgetl_gpu_args");

@@ -39,7 +39,7 @@
     "Supplying vector `InputMin` and `InputMax` values supports independent row-wise or column-wise scaling while preserving MATLAB implicit expansion behavior.",
     "Values below `InputMin` are clipped to `InputMin`; values above `InputMax` are clipped to `InputMax` before scaling.",
     "Constant input ranges return the lower output bound, or `NaN` when the output interval contains `Inf`.",
-    "Single-precision tensor inputs preserve single dtype metadata; other numeric and logical inputs return double values.",
+    "Single-precision tensor inputs preserve native single storage; integer and other numeric or logical inputs return double values. Every integer data or bound value must be exactly representable at this explicit floating rescaling boundary rather than being silently rounded.",
     "NaN values are omitted when computing the default input range, and NaN input elements remain NaN in the corresponding output positions. All-NaN inputs produce NaN outputs.",
     "Complex, string, cell, struct, object, and function-handle inputs are rejected."
   ],

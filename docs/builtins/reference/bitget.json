@@ -1,0 +1,23 @@
+{
+  "title": "bitget",
+  "category": "logical/bit",
+  "keywords": ["bitget", "bit", "position", "integer", "gpuArray"],
+  "summary": "Read selected one-based bit positions from integer-valued input.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "scalar-or-exact-size",
+    "notes": "Supported gpuArray data input uses exact owner-aware fallback and returns resident output; bit-position controls do not select residency."
+  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "none"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::logical::bit::integer::integer_tests"},
+  "description": "`B = bitget(A,bit)` returns the value of each selected one-based bit. A scalar input expands, while nonscalar inputs must have exactly matching sizes.",
+  "behaviors": [
+    "All eight native integer classes are supported and the result preserves the data class.",
+    "Bit positions must be finite positive integers within the selected storage width.",
+    "Only data input selects GPU output ownership; scalar or exact-size bit-position input is a control."
+  ],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"}
+}

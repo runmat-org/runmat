@@ -1,10 +1,3 @@
----
-title: "Classes (classdef)"
-category: "Reference"
-section: "classes"
-last_updated: "June 1, 2026"
----
-
 # Classes (classdef)
 
 RunMat supports MATLAB-style object-oriented programming through `classdef`. You can
@@ -512,6 +505,6 @@ See [Module Composition](/docs/runtime/compiler/modules) for package resolution 
   `meta.class` object.
 
 For how `classdef` fits into RunMat's broader MATLAB compatibility, see
-[MATLAB Language Compatability](/docs/runtime/getting-started/compatability). For the
+[MATLAB Language Compatability](/docs/runtime/matlab-compatibility). For the
 runtime internals of object dispatch, see
 [Callable Resolution & Function Dispatch](/docs/runtime/vm/dispatch).

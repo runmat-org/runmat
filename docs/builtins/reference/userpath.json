@@ -4,13 +4,13 @@
   "keywords": [
     "userpath"
   ],
-  "summary": "Query or set the MATLAB-compatible user path.",
+  "summary": "Query the default user path or normalize a user-path request.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "User-path metadata is host-only. Numeric and provider-resident values are rejected before provider or search-path access."
   },
   "fusion": {
     "elementwise": false,
@@ -23,11 +23,12 @@
     "unit": null,
     "integration": null
   },
-  "description": "Query or set the MATLAB-compatible user path.",
+  "description": "`userpath` returns RunMat's default user path. `userpath('reset')`, `userpath('clear')`, and `userpath(newpath)` return the corresponding normalized path value.",
   "behaviors": [
-    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
-    "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
-    "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
+    "Accepts no input or one host string scalar or character row vector.",
+    "The default path is the `Documents/MATLAB` directory beneath the active home directory when that directory can be resolved.",
+    "The current implementation returns the requested value but does not persistently change the session search path; persistent user-path mutation remains an implementation gap.",
+    "Numeric values, including native integer values, are not path text and are rejected before provider or search-path access."
   ],
   "examples": [],
   "faqs": [],

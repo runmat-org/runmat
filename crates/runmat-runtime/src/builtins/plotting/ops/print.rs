@@ -6,20 +6,25 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-    Value,
 };
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-use super::op_common::handles::handle_from_scalar;
+use super::op_common::handles::{handle_from_integer, handle_from_scalar};
 use super::state::{current_figure_handle, FigureHandle};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::print")]
@@ -145,6 +150,33 @@ pub const PRINT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PRINT_ERRORS,
 };
 
+const PRINT_INTEGER_FIGURE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "print-integer-figure-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "print accepts a typed-integer alias for RunMat's numeric figure registry",
+    error_identifier: Some("RunMat:compatibility:PrintIntegerFigureHandleExtension"),
+};
+pub const PRINT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [PRINT_INTEGER_FIGURE_EXTENSION];
+const PRINT_INTEGER_FIGURE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fig numeric handle alias",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB documents a Figure object, not a typed integer. RunMat mode permits an exact nonnegative alias for its numeric graphics registry.",
+    }];
+pub const PRINT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ok = print(integer_fig,___)",
+        inputs: &PRINT_INTEGER_FIGURE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The alias is gated before gather and must map exactly into RunMat's f64-backed graphics handle registry; resolution remains a documented text option such as '-r300'.",
+    }];
+
 pub fn print_type(_args: &[Type], _context: &runmat_builtins::ResolveContext) -> Type {
     Type::Bool
 }
@@ -159,9 +191,21 @@ pub fn print_type(_args: &[Type], _context: &runmat_builtins::ResolveContext) ->
     accel = "metadata",
     type_resolver(print_type),
     descriptor(crate::builtins::plotting::print::PRINT_DESCRIPTOR),
+    extensions(crate::builtins::plotting::print::PRINT_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::print::PRINT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::print"
 )]
 pub async fn print_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
+    if let Some(first) = args.first() {
+        crate::builtins::common::validation::reject_typed_complex_integer(first, "print")?;
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            first,
+            &PRINT_INTEGER_FIGURE_EXTENSION,
+            "print",
+            "figure handle",
+        )
+        .await?;
+    }
     let args = gather_values(&args).await?;
     let request = parse_print_args(&args)?;
     let path = request.output_path()?;
@@ -290,9 +334,18 @@ fn parse_print_args(args: &[Value]) -> BuiltinResult<PrintRequest> {
 fn figure_handle_arg(value: &Value) -> BuiltinResult<Option<FigureHandle>> {
     match value {
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, BUILTIN_NAME)?)),
-        Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), BUILTIN_NAME)?)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(Some(handle_from_scalar(tensor.data[0], BUILTIN_NAME)?))
+        Value::Int(i) => Ok(Some(handle_from_integer(i, BUILTIN_NAME)?)),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return Ok(Some(handle_from_integer(
+                    &storage.value_at(0).expect("one-element integer storage"),
+                    BUILTIN_NAME,
+                )?));
+            }
+            Ok(Some(handle_from_scalar(
+                tensor_utils::tensor_value_f64(tensor, 0),
+                BUILTIN_NAME,
+            )?))
         }
         _ => Ok(None),
     }
@@ -591,7 +644,7 @@ mod tests {
     use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use futures::executor::block_on;
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_value::Tensor;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -602,14 +655,7 @@ mod tests {
     }
 
     fn tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("print test vector")
     }
 
     fn unique_temp_path(stem: &str) -> PathBuf {
@@ -631,6 +677,18 @@ mod tests {
             safe_thread_name
         ));
         path
+    }
+
+    #[test]
+    fn print_figure_handle_arg_reads_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::U32(vec![5]), vec![1, 1]).unwrap();
+
+        assert_eq!(
+            figure_handle_arg(&Value::Tensor(tensor)).unwrap(),
+            Some(FigureHandle::from(5))
+        );
     }
 
     #[test]

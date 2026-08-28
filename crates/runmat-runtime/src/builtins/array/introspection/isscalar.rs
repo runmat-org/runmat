@@ -8,9 +8,11 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::array::introspection::isscalar"
@@ -22,12 +24,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Inspects tensor metadata; downloads handles only when providers omit shapes.",
+    notes: "Inspects tensor metadata without provider access; an empty internal shape is normalized to scalar dimensions.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -51,6 +53,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::array::introspection::isscalar::ISSCALAR_DESCRIPTOR),
+    integer_audit(crate::builtins::array::introspection::isscalar::ISSCALAR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::introspection::isscalar"
 )]
 async fn isscalar_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -91,6 +94,11 @@ pub const ISSCALAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISSCALAR_ERRORS,
 };
+pub const ISSCALAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "isscalar is a universal shape predicate; integer class and values are irrelevant and resident element-count/shape metadata is read without gathering payload data.",
+};
 
 async fn value_is_scalar(value: &Value) -> crate::BuiltinResult<bool> {
     if value_numel(value).await? != 1 {
@@ -113,7 +121,8 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{CellArray, CharArray, ResolveContext, StructValue, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CellArray, CharArray, StructValue, Tensor};
 
     #[test]
     fn isscalar_type_returns_bool() {
@@ -158,8 +167,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_string_scalar_true_but_empty_array_false() {
-        let scalar = runmat_builtins::StringArray::new(vec!["RunMat".into()], vec![1, 1]).unwrap();
-        let empty = runmat_builtins::StringArray::new(Vec::new(), vec![0, 1]).unwrap();
+        let scalar = runmat_value::StringArray::new(vec!["RunMat".into()], vec![1, 1]).unwrap();
+        let empty = runmat_value::StringArray::new(Vec::new(), vec![0, 1]).unwrap();
         let scalar_result =
             isscalar_builtin(Value::StringArray(scalar)).expect("isscalar string scalar");
         let empty_result =
@@ -195,11 +204,11 @@ pub(crate) mod tests {
             let scalar_tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let vector_tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let scalar_view = runmat_accelerate_api::HostTensorView {
-                data: &scalar_tensor.data,
+                data: &scalar_tensor.materialize_f64(),
                 shape: &scalar_tensor.shape,
             };
             let vector_view = runmat_accelerate_api::HostTensorView {
-                data: &vector_tensor.data,
+                data: &vector_tensor.materialize_f64(),
                 shape: &vector_tensor.shape,
             };
             let scalar_handle = provider.upload(&scalar_view).expect("upload scalar");
@@ -222,7 +231,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

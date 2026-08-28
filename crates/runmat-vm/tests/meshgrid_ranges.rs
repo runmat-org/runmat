@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 use runmat_vm::Instr;
 use test_helpers::compile_source;
 use test_helpers::execute_source;
@@ -22,7 +22,7 @@ fn colon_range_produces_row_vector() {
 #[test]
 fn meshgrid_accepts_colon_ranges() {
     let vars = execute_source("[X, Y] = meshgrid(-2:0.08:2, -2:0.08:2);").unwrap();
-    let mut tensors: Vec<&runmat_builtins::Tensor> = vars
+    let mut tensors: Vec<&runmat_value::Tensor> = vars
         .iter()
         .filter_map(|v| match v {
             Value::Tensor(t) => Some(t),

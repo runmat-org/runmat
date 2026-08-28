@@ -1,6 +1,6 @@
 [package]
 name = "runmat-plot"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -9,6 +9,7 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
+runmat-value = { workspace = true }
 # Interactive GPU-accelerated plotting
 bytemuck = { version = "1.0", features = ["derive"] }
 
@@ -42,6 +43,7 @@ rfd = { version = "0.15", optional = true }
 thiserror = { workspace = true }
 runmat-time = { workspace = true }
 runmat-thread-local = { workspace = true }
+runmat-builtins = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = "24.0.0"

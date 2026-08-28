@@ -1,14 +1,21 @@
 //! Classification performance curve compatibility surface.
 
+use runmat_value::IntValue;
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ObjectInstance, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, ObjectInstance, Tensor, Value};
 
+use crate::builtins::common::tensor;
 use crate::{
     build_runtime_error, gather_if_needed_async, output_count, BuiltinResult, RuntimeError,
 };
@@ -166,6 +173,115 @@ pub const PERFCURVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const PERFCURVE_INTEGER_LABELS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "perfcurve-integer-labels",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "perfcurve accepts typed-integer labels and class selections as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PerfcurveIntegerLabelsExtension"),
+};
+const PERFCURVE_INTEGER_SCORES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "perfcurve-integer-scores",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "perfcurve accepts typed-integer classifier scores as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PerfcurveIntegerScoresExtension"),
+};
+const PERFCURVE_INTEGER_NUMERIC_OPTIONS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "perfcurve-integer-numeric-options",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "perfcurve accepts typed-integer numeric option values as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PerfcurveIntegerNumericOptionsExtension"),
+    };
+const PERFCURVE_INTEGER_LOGICAL_CONTROLS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "perfcurve-integer-logical-controls",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "perfcurve accepts typed-integer logical controls as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PerfcurveIntegerLogicalControlsExtension"),
+    };
+pub const PERFCURVE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    PERFCURVE_INTEGER_LABELS_EXTENSION,
+    PERFCURVE_INTEGER_SCORES_EXTENSION,
+    PERFCURVE_INTEGER_NUMERIC_OPTIONS_EXTENSION,
+    PERFCURVE_INTEGER_LOGICAL_CONTROLS_EXTENSION,
+];
+const PERFCURVE_INTEGER_LABEL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "labels, posclass, or NegClass",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents floating numeric, logical, text, cellstr, and categorical labels, but not typed-integer labels. RunMat compares native integer labels exactly without routing them through f64.",
+    }];
+const PERFCURVE_INTEGER_SCORE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "scores",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents floating classifier scores. RunMat accepts typed integers only when every score is exactly representable in the binary64 computation domain.",
+    }];
+const PERFCURVE_INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Weights, Prior, Cost, TVals, or XVals",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat extends the documented floating numeric option domains with typed integers after proving exact binary64 representability.",
+    }];
+const PERFCURVE_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "UseNearest",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "RunMat accepts an exact typed-integer zero or one for the logical UseNearest control.",
+    }];
+pub const PERFCURVE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "perfcurve(integer_labels, scores, integer_posclass, 'NegClass', integer_classes)",
+        inputs: &PERFCURVE_INTEGER_LABEL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Labels retain their authoritative integer payload through class selection, deduplication, ordering, and equality; curve coordinates remain floating outputs.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "perfcurve(labels, integer_scores, posclass)",
+        inputs: &PERFCURVE_INTEGER_SCORE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The extension and exactness gate run before provider lookup or gathering, then scores enter the floating ROC computation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "perfcurve(..., Name, integer_numeric_value)",
+        inputs: &PERFCURVE_INTEGER_OPTION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Weights, priors, costs, and requested threshold or X-coordinate values cross an explicit checked binary64 boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "perfcurve(..., 'UseNearest', integer_zero_or_one)",
+        inputs: &PERFCURVE_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The native integer is interpreted structurally and must be exactly zero or one.",
+    },
+];
+
 fn perfcurve_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Tensor {
         shape: Some(vec![None, Some(1)]),
@@ -205,6 +321,7 @@ enum LabelKind {
 #[derive(Clone, Debug, PartialEq)]
 enum Label {
     Numeric(f64),
+    Integer(IntValue),
     Text(String),
     Logical(bool),
 }
@@ -306,6 +423,8 @@ struct Curve {
     keywords = "perfcurve,roc,auc,classification,statistics,machine learning",
     type_resolver(perfcurve_type),
     descriptor(crate::builtins::stats::ml::perfcurve::PERFCURVE_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::perfcurve::PERFCURVE_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::perfcurve::PERFCURVE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::perfcurve"
 )]
 async fn perfcurve_builtin(
@@ -314,6 +433,7 @@ async fn perfcurve_builtin(
     posclass: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    gate_integer_inputs(&labels, &scores, &posclass, &rest).await?;
     let requested_outputs = output_count::current_output_count();
     if let Some(0) = requested_outputs {
         return Ok(Value::OutputList(Vec::new()));
@@ -332,6 +452,70 @@ async fn perfcurve_builtin(
         None => Ok(outputs[0].clone()),
         Some(count) => Ok(output_count::output_list_with_padding(count, outputs)),
     }
+}
+
+async fn gate_integer_inputs(
+    labels: &Value,
+    scores: &Value,
+    posclass: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    for value in [labels, scores, posclass] {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, NAME)?;
+    }
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, NAME)?;
+    }
+    for value in [labels, posclass] {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PERFCURVE_INTEGER_LABELS_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        scores,
+        &PERFCURVE_INTEGER_SCORES_EXTENSION,
+        NAME,
+        "score",
+    )
+    .await?;
+    for pair in rest.chunks_exact(2) {
+        let Ok(option) = scalar_text(&pair[0], "option name") else {
+            continue;
+        };
+        let value = &pair[1];
+        match canonical(&option).as_str() {
+            "negclass" => {
+                if crate::builtins::common::validation::value_has_native_integer_class(value) {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &PERFCURVE_INTEGER_LABELS_EXTENSION,
+                        NAME,
+                    )?;
+                }
+            }
+            "weights" | "prior" | "cost" | "tvals" | "xvals" => {
+                crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                    value,
+                    &PERFCURVE_INTEGER_NUMERIC_OPTIONS_EXTENSION,
+                    NAME,
+                    "numeric option",
+                )
+                .await?;
+            }
+            "usenearest"
+                if crate::builtins::common::validation::value_has_native_integer_class(value) =>
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &PERFCURVE_INTEGER_LOGICAL_CONTROLS_EXTENSION,
+                    NAME,
+                )?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
@@ -591,8 +775,8 @@ fn parse_cost(value: &Value) -> BuiltinResult<[[f64; 2]; 2]> {
     if tensor.shape.as_slice() != [2, 2] {
         return Err(invalid("perfcurve: Cost must be a 2-by-2 numeric matrix"));
     }
-    if tensor
-        .data
+    let values = tensor::tensor_values_f64(tensor);
+    if values
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)
     {
@@ -600,17 +784,14 @@ fn parse_cost(value: &Value) -> BuiltinResult<[[f64; 2]; 2]> {
             "perfcurve: Cost entries must be finite and nonnegative",
         ));
     }
-    Ok([
-        [tensor.data[0], tensor.data[2]],
-        [tensor.data[1], tensor.data[3]],
-    ])
+    Ok([[values[0], values[2]], [values[1], values[3]]])
 }
 
 fn score_vector(value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape, "scores")?;
-            Ok(tensor.data)
+            Ok(tensor::tensor_into_values_f64(tensor))
         }
         Value::Num(value) => Ok(vec![value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
@@ -624,7 +805,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape, name)?;
-            Ok(tensor.data.clone())
+            Ok(tensor::tensor_values_f64(tensor))
         }
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
@@ -639,7 +820,8 @@ fn scalar_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
         Value::Bool(value) => Ok(*value),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Int(value) => Ok(value.to_i64() != 0),
+        Value::Int(value) if value.is_zero() => Ok(false),
+        Value::Int(value) if value.try_to_u64() == Some(1) => Ok(true),
         _ => match canonical(&scalar_text(value, name)?).as_str() {
             "true" | "on" | "yes" => Ok(true),
             "false" | "off" | "no" => Ok(false),
@@ -652,21 +834,33 @@ fn scalar_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
 
 fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
     match value {
-        Value::Tensor(tensor) => Ok(LabelVector {
-            labels: vector_values(&tensor, name)?
-                .into_iter()
-                .map(Label::Numeric)
-                .collect(),
-            kind: LabelKind::Numeric,
-            categories: None,
-        }),
+        Value::Tensor(tensor) => {
+            ensure_vector_shape(&tensor.shape, name)?;
+            let labels = if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .exact_values()
+                    .into_iter()
+                    .map(Label::Integer)
+                    .collect()
+            } else {
+                tensor::tensor_into_values_f64(tensor)
+                    .into_iter()
+                    .map(Label::Numeric)
+                    .collect()
+            };
+            Ok(LabelVector {
+                labels,
+                kind: LabelKind::Numeric,
+                categories: None,
+            })
+        }
         Value::Num(value) => Ok(LabelVector {
             labels: vec![Label::Numeric(value)],
             kind: LabelKind::Numeric,
             categories: None,
         }),
         Value::Int(value) => Ok(LabelVector {
-            labels: vec![Label::Numeric(value.to_f64())],
+            labels: vec![Label::Integer(value)],
             kind: LabelKind::Numeric,
             categories: None,
         }),
@@ -767,7 +961,12 @@ fn coerce_label_to_kind(label: Label, kind: LabelKind, name: &str) -> BuiltinRes
         (LabelKind::Logical, Label::Numeric(value)) if value == 0.0 || value == 1.0 => {
             Ok(Label::Logical(value != 0.0))
         }
+        (LabelKind::Logical, Label::Integer(value)) if value.is_zero() => Ok(Label::Logical(false)),
+        (LabelKind::Logical, Label::Integer(value)) if value.try_to_u64() == Some(1) => {
+            Ok(Label::Logical(true))
+        }
         (LabelKind::Numeric, Label::Numeric(value)) => Ok(Label::Numeric(value)),
+        (LabelKind::Numeric, Label::Integer(value)) => Ok(Label::Integer(value)),
         (LabelKind::Numeric, Label::Text(value)) => value
             .parse::<f64>()
             .map(Label::Numeric)
@@ -782,17 +981,16 @@ fn coerce_label_to_kind(label: Label, kind: LabelKind, name: &str) -> BuiltinRes
         ) => Ok(Label::Text(format_number(value))),
         (
             LabelKind::String | LabelKind::Char | LabelKind::Cell | LabelKind::Categorical,
+            Label::Integer(value),
+        ) => Ok(Label::Text(value.decimal_string())),
+        (
+            LabelKind::String | LabelKind::Char | LabelKind::Cell | LabelKind::Categorical,
             Label::Logical(value),
         ) => Ok(Label::Text(value.to_string())),
         _ => Err(invalid(format!(
             "perfcurve: {name} label type must match labels"
         ))),
     }
-}
-
-fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
-    ensure_vector_shape(&tensor.shape, name)?;
-    Ok(tensor.data.clone())
 }
 
 fn ensure_vector_shape(shape: &[usize], name: &str) -> BuiltinResult<()> {
@@ -1391,6 +1589,21 @@ fn sort_labels(labels: &mut [Label], kind: LabelKind) {
     match kind {
         LabelKind::Numeric => labels.sort_by(|left, right| match (left, right) {
             (Label::Numeric(a), Label::Numeric(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+            (Label::Integer(a), Label::Integer(b)) => {
+                crate::builtins::logical::rel::integer_comparison::compare_integer_values(
+                    a.clone(),
+                    b.clone(),
+                )
+            }
+            (Label::Integer(a), Label::Numeric(b)) => {
+                crate::builtins::logical::rel::integer_comparison::integer_f64_order(a.clone(), *b)
+                    .unwrap_or(Ordering::Equal)
+            }
+            (Label::Numeric(a), Label::Integer(b)) => {
+                crate::builtins::logical::rel::integer_comparison::integer_f64_order(b.clone(), *a)
+                    .map(Ordering::reverse)
+                    .unwrap_or(Ordering::Equal)
+            }
             _ => Ordering::Equal,
         }),
         LabelKind::String | LabelKind::Char | LabelKind::Cell | LabelKind::Categorical => labels
@@ -1409,6 +1622,7 @@ fn label_key(label: &Label) -> String {
     match label {
         Label::Numeric(value) if *value == 0.0 => "n:0".to_string(),
         Label::Numeric(value) => format!("n:{:016x}", value.to_bits()),
+        Label::Integer(value) => format!("i:{}", value.decimal_string()),
         Label::Text(value) => format!("t:{value}"),
         Label::Logical(value) => format!("l:{}", usize::from(*value)),
     }
@@ -1418,6 +1632,15 @@ fn same_label(left: &Label, right: &Label) -> bool {
     label_key(left) == label_key(right)
         || matches!(
             (left, right),
+            (Label::Integer(integer), Label::Numeric(float))
+                | (Label::Numeric(float), Label::Integer(integer))
+                if crate::builtins::logical::rel::integer_comparison::integer_f64_order(
+                    integer.clone(),
+                    *float,
+                ) == Some(Ordering::Equal)
+        )
+        || matches!(
+            (left, right),
             (Label::Numeric(a), Label::Numeric(b)) if a.is_nan() && b.is_nan()
         )
 }
@@ -1425,6 +1648,7 @@ fn same_label(left: &Label, right: &Label) -> bool {
 fn is_missing_label(label: &Label) -> bool {
     match label {
         Label::Numeric(value) => value.is_nan(),
+        Label::Integer(_) => false,
         Label::Text(value) => value.is_empty() || value == "<missing>",
         Label::Logical(_) => false,
     }
@@ -1447,6 +1671,7 @@ fn labels_to_cell_value(labels: &[Label]) -> BuiltinResult<Value> {
 fn label_display(label: &Label) -> String {
     match label {
         Label::Numeric(value) => format_number(*value),
+        Label::Integer(value) => value.decimal_string(),
         Label::Text(value) => value.clone(),
         Label::Logical(value) => value.to_string(),
     }
@@ -1470,7 +1695,7 @@ fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect::<String>()),
         Value::Num(value) if value.is_finite() => Ok(format_number(*value)),
-        Value::Int(value) => Ok(value.to_i64().to_string()),
+        Value::Int(value) => Ok(value.decimal_string()),
         Value::Bool(value) => Ok(value.to_string()),
         other => Err(invalid(format!(
             "perfcurve: {name} must be text scalar; got {other:?}"
@@ -1511,10 +1736,29 @@ fn tensor_row(data: Vec<f64>) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::StringArray;
+    use runmat_value::{IntegerStorage, StringArray};
+
+    #[test]
+    fn perfcurve_scalar_text_preserves_exact_uint64() {
+        assert_eq!(
+            scalar_text(&Value::Int(runmat_value::IntValue::U64(u64::MAX)), "option")
+                .expect("scalar text"),
+            "18446744073709551615"
+        );
+    }
+
+    #[test]
+    fn perfcurve_scalar_bool_rejects_wide_uint64_option() {
+        assert!(scalar_bool(&Value::Int(runmat_value::IntValue::U64(u64::MAX)), "option").is_err());
+    }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), shape.to_vec()).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: &[usize]) -> Value {
+        let tensor = Tensor::new_integer(storage, shape.to_vec()).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn output_tensor(value: &Value, index: usize) -> &Tensor {
@@ -1555,13 +1799,40 @@ mod tests {
         assert_eq!(y.shape, vec![5, 1]);
         assert_eq!(thresholds.shape, vec![5, 1]);
         assert!((output_num(&result, 3) - 0.75).abs() < 1.0e-12);
-        assert_eq!(x.data[0], 0.0);
-        assert_eq!(y.data[0], 0.0);
-        assert_eq!(thresholds.data[0], thresholds.data[1]);
-        assert_eq!(x.data[4], 1.0);
-        assert_eq!(y.data[4], 1.0);
+        assert_eq!(x.materialize_f64()[0], 0.0);
+        assert_eq!(y.materialize_f64()[0], 0.0);
+        assert_eq!(
+            thresholds.materialize_f64()[0],
+            thresholds.materialize_f64()[1]
+        );
+        assert_eq!(x.materialize_f64()[4], 1.0);
+        assert_eq!(y.materialize_f64()[4], 1.0);
         let opt = output_tensor(&result, 4);
         assert_eq!(opt.shape, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn perfcurve_accepts_typed_integer_labels_scores_and_weights() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _guard = output_count::push_output_count(Some(4));
+        let result = perfcurve_builtin(
+            int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), &[4, 1]),
+            int_tensor(IntegerStorage::U16(vec![9, 8, 4, 1]), &[4, 1]),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            vec![
+                Value::String("Weights".into()),
+                int_tensor(IntegerStorage::U8(vec![1, 2, 1, 1]), &[4, 1]),
+                Value::String("Prior".into()),
+                int_tensor(IntegerStorage::U8(vec![1, 1]), &[1, 2]),
+                Value::String("Cost".into()),
+                int_tensor(IntegerStorage::U8(vec![0, 1, 1, 0]), &[2, 2]),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(output_tensor(&result, 0).shape, vec![5, 1]);
+        assert_eq!(output_tensor(&result, 1).shape, vec![5, 1]);
+        assert!(output_num(&result, 3).is_finite());
     }
 
     #[tokio::test]
@@ -1602,7 +1873,10 @@ mod tests {
         let suby = output_tensor(&result, 5);
         assert_eq!(x.shape, vec![4, 1]);
         assert_eq!(suby.shape, vec![4, 1]);
-        assert!(y.data.iter().any(|value| (*value - 0.5).abs() < 1.0e-12));
+        assert!(y
+            .materialize_f64()
+            .iter()
+            .any(|value| (*value - 0.5).abs() < 1.0e-12));
         match &result {
             Value::OutputList(values) => match &values[6] {
                 Value::Cell(names) => assert_eq!(
@@ -1628,7 +1902,7 @@ mod tests {
         .unwrap();
         let x = output_tensor(&result, 0);
         assert_eq!(x.shape, vec![2, 1]);
-        assert_eq!(x.data, vec![0.5, 0.0]);
+        assert_eq!(x.materialize_f64(), vec![0.5, 0.0]);
         assert!(output_num(&result, 3).is_finite());
 
         let result = perfcurve_builtin(
@@ -1644,7 +1918,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(output_tensor(&result, 0).data, vec![0.0, 0.5]);
+        assert_eq!(output_tensor(&result, 0).materialize_f64(), vec![0.0, 0.5]);
     }
 
     #[tokio::test]
@@ -1690,7 +1964,7 @@ mod tests {
         let _guard = output_count::push_output_count(Some(5));
         let result = perfcurve_builtin(
             Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(vec![1, 0, 1, 0], vec![4, 1]).unwrap(),
+                runmat_value::LogicalArray::new(vec![1, 0, 1, 0], vec![4, 1]).unwrap(),
             ),
             tensor(&[0.9, f64::NAN, f64::NAN, 0.1], &[4, 1]),
             Value::String("true".into()),
@@ -1704,8 +1978,11 @@ mod tests {
         .await
         .unwrap();
         let y = output_tensor(&result, 1);
-        assert!(y.data.iter().any(|value| (*value - 0.5).abs() < 1.0e-12));
+        assert!(y
+            .materialize_f64()
+            .iter()
+            .any(|value| (*value - 0.5).abs() < 1.0e-12));
         let opt = output_tensor(&result, 4);
-        assert!(opt.data.iter().all(|value| value.is_nan()));
+        assert!(opt.materialize_f64().iter().all(|value| value.is_nan()));
     }
 }

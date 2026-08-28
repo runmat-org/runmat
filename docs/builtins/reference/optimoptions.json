@@ -1,0 +1,63 @@
+{
+  "title": "optimoptions",
+  "category": "math/optim",
+  "keywords": [
+    "optimoptions",
+    "optimization",
+    "options",
+    "TolX",
+    "MaxIter",
+    "Display"
+  ],
+  "summary": "Create or update solver-specific optimization options.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Options are host metadata. Automatically resident option values gather transparently; explicit gpuArray option values are a gated RunMat extension."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::optimoptions::tests"
+  },
+  "description": "`optimoptions(solver, name, value, ...)` builds solver-specific optimization metadata, and `optimoptions(existing, ...)` copies and updates an existing RunMat options struct.",
+  "behaviors": [
+    "RunMat implements a compatibility subset for its optimization solvers and currently returns a struct rather than MATLAB's solver-options object class.",
+    "Recognized option names, defaults, aliases, and validation depend on the selected solver.",
+    "Native integer option values are independently gated RunMat extensions because documented numeric options use floating classes.",
+    "Integer tolerances must be exactly representable before normalization to double. Integer iteration and evaluation limits are parsed as exact structural counts, and accepted 0/1 flag values become logical fields.",
+    "Automatically resident option values gather into host metadata. Explicit gpuArray option values are rejected in compatibility mode before gather."
+  ],
+  "examples": [
+    {
+      "description": "Create options for a nonlinear solver",
+      "input": "opts = optimoptions(\"fsolve\", \"TolX\", 1e-8, \"Display\", \"off\")",
+      "output": "opts is a RunMat options struct for fsolve"
+    }
+  ],
+  "links": [
+    {
+      "label": "optimset",
+      "url": "./optimset"
+    },
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    },
+    {
+      "label": "lsqcurvefit",
+      "url": "./lsqcurvefit"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/optimoptions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/optimoptions.rs"
+  }
+}

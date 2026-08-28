@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`textscatter` is a chart/annotation rendering sink. Coordinates are materialized on the host so text annotations can be created; marker rendering reuses the existing scatter plot path."
+    "notes": "`textscatter` is a host chart and annotation sink. Automatically resident inputs are gathered through their exact owning provider. Explicit gpuArray input is a RunMat-mode extension."
   },
   "fusion": {
     "elementwise": false,
@@ -28,10 +28,11 @@
     "unit": "builtins::plotting::textscatter::tests",
     "vm": "crates/runmat-vm/tests/plotting.rs"
   },
-  "description": "`textscatter(x,y,str)` creates a text scatter chart with labels from `str` at matching x/y coordinates. `textscatter(xy,str)` accepts an N-by-2 coordinate matrix. The returned handle is a `textscatter` chart object with MATLAB-style data and display properties.",
+  "description": "`textscatter(x,y,str)` creates a text scatter chart with labels from `str` at matching x/y coordinates. `textscatter(xy,str)` accepts an N-by-2 coordinate matrix. The returned handle provides chart data and display properties.",
   "behaviors": [
     "`x`, `y`, and `str` must have equal element counts.",
     "`xy` must be an N-by-2 matrix whose first and second columns provide x and y coordinates.",
+    "Coordinates can use single, double, or any of the eight integer classes. `XData` and `YData` retain their native class, shape, and exact values.",
     "`str` can be a string scalar, string array, character row, character matrix, or cell array of text scalars.",
     "The axes-target form `textscatter(ax,...)` renders into the supplied axes handle.",
     "`TextDensityPercentage` controls how many labels are visible; `0` hides all text labels and `100` shows all labels and suppresses marker creation.",
@@ -39,7 +40,8 @@
     "`MarkerColor` accepts `auto`, `none`, or an RGB color. `ColorData` accepts an RGB triplet or N-by-3 RGB matrix for text colors.",
     "`get` supports `Type`, `Parent`, `Children`, `TextData`, `XData`, `YData`, `ZData`, `TextDensityPercentage`, `MaxTextLength`, `MarkerColor`, `MarkerSize`, `ColorData`, `Colors`, `Visible`, `DisplayName`, and `Tag`; 2-D charts report empty `ZData`.",
     "`set` supports `TextData`, `XData`, `YData`, `TextDensityPercentage`, `MaxTextLength`, `MarkerColor`, `MarkerSize`, `ColorData`, `Colors`, `Visible`, `Color`, `FontSize`, `FontWeight`, `FontAngle`, and `Interpreter`. `ZData` mutation is reserved for `textscatter3` charts.",
-    "Categorical `ColorData`, datasource properties, callbacks, app data, and interactive data-tip template objects are not implemented yet and raise explicit unsupported-property errors."
+    "Categorical `ColorData`, datasource properties, callbacks, app data, and interactive data-tip template objects are not implemented yet and raise explicit unsupported-property errors.",
+    "Typed-integer numeric axes aliases and explicit gpuArray inputs are RunMat-mode extensions."
   ],
   "examples": [
     {
@@ -66,7 +68,11 @@
     },
     {
       "question": "Can textscatter preserve gpuArray residency?",
-      "answer": "Not currently. Text annotations require host coordinate and label materialization. Marker rendering reuses the existing scatter plot path once the chart has been constructed."
+      "answer": "The chart and its annotations are host graphics objects. Automatically resident inputs are gathered transparently through their owning provider. Explicit gpuArray inputs require RunMat mode."
+    },
+    {
+      "question": "Does `get(ts,'XData')` preserve integer values?",
+      "answer": "Yes. Coordinate properties use authoritative native storage, including `int64` and `uint64` values outside the exact double range. Renderer geometry is a separate derived cache."
     }
   ],
   "links": [

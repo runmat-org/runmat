@@ -5,5 +5,6 @@ pub mod docs;
 pub mod formatting;
 pub mod position;
 pub mod project;
+pub mod semantic;
 pub mod semantic_tokens;
 pub mod workspace;

@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Runs entirely on the GPU when the provider implements elem_hypot; otherwise the runtime gathers inputs and falls back to the CPU path."
+    "notes": "Runs entirely on the owning GPU provider when it implements `elem_hypot`; an explicitly unsupported hook falls back through exact gather and restores the result to the original owner. Provider execution and contract failures are terminal."
   },
   "fusion": {
     "elementwise": true,
@@ -31,9 +31,9 @@
     "integration": "builtins::math::elementwise::hypot::tests::hypot_gpu_provider_roundtrip",
     "gpu": "builtins::math::elementwise::hypot::tests::hypot_wgpu_matches_cpu_elementwise"
   },
-  "description": "`z = hypot(x, y)` computes `sqrt(|x|.^2 + |y|.^2)` element-wise using overflow-resistant arithmetic. Implicit expansion, complex handling, and output shape follow MATLAB semantics.",
+  "description": "`z = hypot(x, y)` computes `sqrt(|x|.^2 + |y|.^2)` element-wise using overflow-resistant arithmetic. Single/double inputs, implicit expansion, complex handling, NaN precedence, and output shape follow MATLAB semantics. Integer, logical, and character operands are RunMat extensions.",
   "behaviors": [
-    "Real inputs return non-negative doubles even when the operands are negative.",
+    "Real inputs return non-negative results even when the operands are negative; all-single inputs preserve single precision and other supported real numeric combinations return double.",
     "Complex arguments are converted to their magnitudes before forming `sqrt(|x|.^2 + |y|.^2)`, matching MATLAB's definition since R2020b.",
     "Scalars broadcast across the other operand when shapes are compatible; otherwise an error is raised.",
     "Empty inputs propagate emptiness according to MATLAB's size rules.",
@@ -61,7 +61,7 @@
       "output": "mag = [3.1623 5.1962]"
     },
     {
-      "description": "Applying `hypot` to character data",
+      "description": "Computing hypotenuse values from character codes",
       "input": "codes = hypot('A', zeros(1, 1))",
       "output": "codes = 65.0000"
     },
@@ -86,7 +86,7 @@
     },
     {
       "question": "Does `hypot` accept logical or character arrays?",
-      "answer": "Yes. Logical values map to `0` and `1`, while character arrays use their Unicode code points (as doubles), matching MATLAB semantics."
+      "answer": "Yes, when RunMat extensions are enabled. Logical values map to `0` and `1`, while character arrays use their Unicode code points as doubles."
     },
     {
       "question": "How does broadcasting work?",
@@ -223,10 +223,10 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs"
   },
-  "gpu_residency": "Manual `gpuArray` calls are typically unnecessary. RunMat's planner keeps tensors on the GPU when profitable and automatically gathers data when the active provider lacks `elem_hypot`. You can still force residency with explicit `gpuArray`/`gather` to mirror MATLAB workflows or when interoperating with custom kernels.",
+  "gpu_residency": "Manual `gpuArray` calls are typically unnecessary. RunMat's planner keeps tensors on the GPU when profitable. When `elem_hypot` is explicitly unsupported or implicit expansion requires the host path, RunMat downloads non-destructively through each input owner and restores the result when the selected output precision can be preserved; otherwise it returns the correctly typed host result. Source handles remain resident.",
   "gpu_behavior": [
     "**Hook available and shapes match:** the Euclidean norm executes in a single fused GPU kernel.",
-    "**Hook missing or implicit expansion required:** RunMat gathers the data to the host, computes the MATLAB-compatible result, and reuses the host tensor downstream.",
+    "**Hook missing or implicit expansion required:** RunMat downloads each resident operand non-destructively through its owner, computes the MATLAB-compatible result on the host, and restores the result to the selected owner when its physical precision preserves the public output class; otherwise the correctly typed result remains on the host.",
     "**Fusion-enabled expressions:** the fusion planner can emit a WGSL `hypot(a, b)` node so long as the active provider marks the group as supported; otherwise the execution seamlessly falls back to the host path.\n\nProviders can implement `elem_hypot` by emitting a single WGSL/compute shader that calls `hypot(a, b)`; the included WGPU backend demonstrates this pattern."
   ]
 }

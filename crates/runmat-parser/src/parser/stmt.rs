@@ -19,6 +19,8 @@ impl Parser {
         match self.peek_token() {
             Some(Token::If) => self.parse_if().map_err(|e| e.into()),
             Some(Token::For) => self.parse_for().map_err(|e| e.into()),
+            Some(Token::ParFor) => self.parse_parfor().map_err(|e| e.into()),
+            Some(Token::Spmd) => self.parse_spmd().map_err(|e| e.into()),
             Some(Token::While) => self.parse_while().map_err(|e| e.into()),
             Some(Token::Switch) => self.parse_switch().map_err(|e| e.into()),
             Some(Token::Try) => self.parse_try_catch().map_err(|e| e.into()),
@@ -285,6 +287,87 @@ impl Parser {
         Ok(Stmt::For {
             var,
             expr,
+            body,
+            span: self.span_from(start, end),
+        })
+    }
+
+    fn parse_parfor(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
+        self.consume(&Token::ParFor);
+        let parenthesized = self.consume(&Token::LParen);
+        let var = self.expect_ident()?;
+        if !self.consume(&Token::Assign) {
+            return Err("expected '='".into());
+        }
+        let expr = self.parse_expr()?;
+        let maximum_workers = if self.consume(&Token::Comma) {
+            if !parenthesized {
+                return Err("parfor maximum workers requires parenthesized control syntax".into());
+            }
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+        if parenthesized && !self.consume(&Token::RParen) {
+            return Err("expected ')' after parfor control".into());
+        }
+        let body = self.parse_block(|t| matches!(t, Token::End))?;
+        if !self.consume(&Token::End) {
+            return Err("expected 'end'".into());
+        }
+        let end = self.last_token_end();
+        Ok(Stmt::ParFor {
+            var,
+            expr,
+            maximum_workers,
+            body,
+            span: self.span_from(start, end),
+        })
+    }
+
+    fn parse_spmd(&mut self) -> Result<Stmt, String> {
+        let start = self.tokens[self.pos].position;
+        self.consume(&Token::Spmd);
+        let header = if self.consume(&Token::LParen) {
+            if self.consume(&Token::RParen) {
+                return Err("spmd control list cannot be empty; omit parentheses".into());
+            } else {
+                let first = self.parse_expr()?;
+                let second = self
+                    .consume(&Token::Comma)
+                    .then(|| self.parse_expr())
+                    .transpose()?;
+                let third = if second.is_some() && self.consume(&Token::Comma) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                if third.is_some() && self.consume(&Token::Comma) {
+                    return Err("spmd accepts at most three control arguments".into());
+                }
+                if !self.consume(&Token::RParen) {
+                    return Err("expected ')' after spmd lab range".into());
+                }
+                match (second, third) {
+                    (None, None) => crate::ast::SpmdHeader::One(first),
+                    (Some(second), None) => crate::ast::SpmdHeader::Two(first, second),
+                    (Some(second), Some(third)) => {
+                        crate::ast::SpmdHeader::Three(first, second, third)
+                    }
+                    (None, Some(_)) => unreachable!(),
+                }
+            }
+        } else {
+            crate::ast::SpmdHeader::Default
+        };
+        let body = self.parse_block(|t| matches!(t, Token::End))?;
+        if !self.consume(&Token::End) {
+            return Err("expected 'end'".into());
+        }
+        let end = self.last_token_end();
+        Ok(Stmt::Spmd {
+            header,
             body,
             span: self.span_from(start, end),
         })

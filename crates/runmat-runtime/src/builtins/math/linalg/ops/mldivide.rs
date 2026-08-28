@@ -2,21 +2,24 @@
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntegerStorage, Tensor, Value};
 
-use crate::builtins::common::linalg;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -77,6 +80,35 @@ pub const MLDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &MLDIVIDE_ERRORS,
 };
+
+const MLDIVIDE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "When an integer participates, A must be scalar; same-class integer and scalar-double forms follow scalar element-wise division.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The nonscalar integer right-hand side supplies the preserved output class and shape.",
+    },
+];
+
+pub const MLDIVIDE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "X = scalar_A \\ integer_B",
+        inputs: &MLDIVIDE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Integer matrix left division is unsupported; the documented scalar-left form is exact class-preserving element-wise division, and resident results return to the first input owner.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::mldivide")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -156,21 +188,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "mldivide",
     type_resolver(left_divide_type),
     descriptor(crate::builtins::math::linalg::ops::mldivide::MLDIVIDE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::math::linalg::ops::mldivide::MLDIVIDE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::ops::mldivide"
 )]
 async fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
+        || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
+    {
+        return Err(mldivide_invalid_input(
+            "complex integer arithmetic is not supported",
+        ));
+    }
     mldivide_eval(&lhs, &rhs).await
 }
 
 pub(crate) async fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     if contains_integer(lhs) || contains_integer(rhs) {
-        let lhs_host = crate::dispatcher::gather_if_needed_async(lhs)
-            .await
-            .map_err(map_control_flow)?;
-        let rhs_host = crate::dispatcher::gather_if_needed_async(rhs)
-            .await
-            .map_err(map_control_flow)?;
-        return mldivide_cpu(lhs_host, rhs_host);
+        return mldivide_integer_eval(lhs, rhs).await;
     }
     if let Some(result) = try_gpu_mldivide(lhs, rhs).await? {
         return Ok(result);
@@ -185,6 +221,32 @@ pub(crate) async fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Val
     mldivide_cpu(lhs_host, rhs_host)
 }
 
+async fn mldivide_integer_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+    let restore_provider = [lhs, rhs].into_iter().find_map(|value| match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle),
+        _ => None,
+    });
+    let lhs = crate::dispatcher::gather_if_needed_async(lhs)
+        .await
+        .map_err(map_control_flow)?;
+    let rhs = crate::dispatcher::gather_if_needed_async(rhs)
+        .await
+        .map_err(map_control_flow)?;
+    let result = mldivide_cpu(lhs, rhs)?;
+    let Some(provider) = restore_provider else {
+        return Ok(result);
+    };
+    let tensor = match result {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => tensor,
+        Value::Int(value) => Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+            .map_err(mldivide_internal_error)?,
+        other => return Ok(other),
+    };
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|error| mldivide_internal_error(format!("{NAME}: {error}")))?;
+    Ok(gpu_helpers::resident_gpu_value(handle))
+}
+
 async fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
     // A configured accelerator must not change the residency of an otherwise
     // host-only operation. Only continue on the GPU when at least one operand
@@ -193,7 +255,7 @@ async fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Valu
         return Ok(None);
     }
 
-    let provider = match runmat_accelerate_api::provider() {
+    let provider = match solve_provider(lhs, rhs) {
         Some(p) => p,
         None => return Ok(None),
     };
@@ -201,17 +263,26 @@ async fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Valu
     if contains_complex(lhs) || contains_complex(rhs) {
         return Ok(None);
     }
+    if selected_floating_output_precision(lhs, rhs) != Some(provider.precision()) {
+        return Ok(None);
+    }
 
     let mut lhs_operand = match prepare_gpu_operand(lhs, provider)? {
         Some(op) => op,
         None => return Ok(None),
     };
-    let mut rhs_operand = match prepare_gpu_operand(rhs, provider)? {
-        Some(op) => op,
-        None => {
+    let mut rhs_operand = match prepare_gpu_operand(rhs, provider) {
+        Err(error) => {
             release_operand(provider, &mut lhs_operand);
-            return Ok(None);
+            return Err(error);
         }
+        Ok(value) => match value {
+            Some(op) => op,
+            None => {
+                release_operand(provider, &mut lhs_operand);
+                return Ok(None);
+            }
+        },
     };
 
     if is_scalar_handle(lhs_operand.handle()) || is_scalar_handle(rhs_operand.handle()) {
@@ -220,17 +291,41 @@ async fn try_gpu_mldivide(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Valu
         return Ok(None);
     }
 
-    let result = provider
+    let expected_shape = vec![
+        matrix_cols(&lhs_operand.handle().shape),
+        matrix_cols(&rhs_operand.handle().shape),
+    ];
+    let result = match provider
         .mldivide(lhs_operand.handle(), rhs_operand.handle())
         .await
-        .ok();
+    {
+        Ok(output)
+            if native_solve_output_matches(&output, provider, &expected_shape)
+                && !same_owned_buffer(&output, provider, lhs_operand.handle(), provider)
+                && !same_owned_buffer(&output, provider, rhs_operand.handle(), provider) =>
+        {
+            Some(output)
+        }
+        Ok(output) => {
+            free_rejected_native_output(
+                &output,
+                provider,
+                &[lhs_operand.handle(), rhs_operand.handle()],
+            );
+            None
+        }
+        Err(_) => None,
+    };
     release_operand(provider, &mut lhs_operand);
     release_operand(provider, &mut rhs_operand);
     Ok(result.map(Value::GpuTensor))
 }
 
 fn mldivide_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    if contains_integer(&lhs) || contains_integer(&rhs) {
+    if (contains_integer(&lhs) || contains_integer(&rhs))
+        && !contains_complex(&lhs)
+        && !contains_complex(&rhs)
+    {
         if !scalar_divide_input(&lhs) {
             return Err(mldivide_invalid_input(
                 "mldivide: integer inputs are only supported for scalar left division",
@@ -271,6 +366,7 @@ fn contains_integer(value: &Value) -> bool {
     match value {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
         _ => false,
     }
 }
@@ -319,8 +415,8 @@ fn mldivide_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
     ensure_matrix_shape(NAME, &rhs.shape)?;
 
     if tensor::is_scalar_tensor(lhs) {
-        let divisor = lhs.data[0];
-        let scaled = linalg::scalar_mul_real(rhs, divisor.recip());
+        let divisor = tensor::tensor_value_f64(lhs, 0);
+        let scaled = scale_real_preserving_float_class(rhs, divisor.recip())?;
         return Ok(scaled);
     }
 
@@ -334,10 +430,12 @@ fn mldivide_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
         return Ok(result);
     }
 
-    let lhs_matrix = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), &lhs.data);
-    let rhs_matrix = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), &rhs.data);
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
+    let rhs_values = tensor::tensor_values_f64_cow(rhs);
+    let lhs_matrix = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), lhs_values.as_ref());
+    let rhs_matrix = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), rhs_values.as_ref());
     let solution = solve_real_matrix(&lhs_matrix, &rhs_matrix)?;
-    matrix_real_to_tensor(solution)
+    matrix_real_to_tensor(solution, floating_result_dtype(lhs, rhs))
 }
 
 fn mldivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
@@ -345,9 +443,9 @@ fn mldivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<C
     ensure_matrix_shape(NAME, &rhs.shape)?;
 
     if complex_tensor_is_scalar(lhs) {
-        let divisor = Complex64::new(lhs.data[0].0, lhs.data[0].1);
+        let divisor = Complex64::new(lhs.materialize_f64()[0].0, lhs.materialize_f64()[0].1);
         let inv = Complex64::new(1.0, 0.0) / divisor;
-        let scaled = linalg::scalar_mul_complex_tensor(rhs, inv.re, inv.im);
+        let scaled = scale_complex_preserving_float_class(rhs, inv)?;
         return Ok(scaled);
     }
 
@@ -362,19 +460,28 @@ fn mldivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<C
     }
 
     let lhs_data: Vec<Complex64> = lhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let rhs_data: Vec<Complex64> = rhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let lhs_matrix = DMatrix::from_column_slice(lhs.rows, lhs.cols, &lhs_data);
     let rhs_matrix = DMatrix::from_column_slice(rhs.rows, rhs.cols, &rhs_data);
     let solution = solve_complex_matrix(&lhs_matrix, &rhs_matrix)?;
-    matrix_complex_to_tensor(solution)
+    matrix_complex_to_tensor(
+        solution,
+        if lhs.numeric_dtype() == runmat_value::NumericDType::F32
+            || rhs.numeric_dtype() == runmat_value::NumericDType::F32
+        {
+            runmat_value::NumericDType::F32
+        } else {
+            runmat_value::NumericDType::F64
+        },
+    )
 }
 
 fn solve_real_matrix(lhs: &DMatrix<f64>, rhs: &DMatrix<f64>) -> BuiltinResult<DMatrix<f64>> {
@@ -403,24 +510,84 @@ fn compute_svd_tolerance(singular_values: &[f64], rows: usize, cols: usize) -> f
     f64::EPSILON * max_dim * max_sv.max(1.0)
 }
 
-fn matrix_real_to_tensor(matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {
+fn matrix_real_to_tensor(
+    matrix: DMatrix<f64>,
+    dtype: runmat_value::NumericDType,
+) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
+    Tensor::new_with_dtype(matrix.as_slice().to_vec(), vec![rows, cols], dtype)
         .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
 
-fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<ComplexTensor> {
+fn floating_result_dtype(lhs: &Tensor, rhs: &Tensor) -> runmat_value::NumericDType {
+    if lhs.numeric_dtype() == runmat_value::NumericDType::F32
+        || rhs.numeric_dtype() == runmat_value::NumericDType::F32
+    {
+        runmat_value::NumericDType::F32
+    } else {
+        runmat_value::NumericDType::F64
+    }
+}
+
+fn scale_real_preserving_float_class(tensor: &Tensor, scalar: f64) -> BuiltinResult<Tensor> {
+    let dtype = if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+        runmat_value::NumericDType::F32
+    } else {
+        runmat_value::NumericDType::F64
+    };
+    Tensor::new_with_dtype(
+        tensor::tensor_values_f64_cow(tensor)
+            .iter()
+            .map(|value| value * scalar)
+            .collect(),
+        tensor.shape.clone(),
+        dtype,
+    )
+    .map_err(mldivide_internal_error)
+}
+
+fn scale_complex_preserving_float_class(
+    tensor: &ComplexTensor,
+    scalar: Complex64,
+) -> BuiltinResult<ComplexTensor> {
+    let dtype = if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+        runmat_value::NumericDType::F32
+    } else {
+        runmat_value::NumericDType::F64
+    };
+    let data = tensor
+        .materialize_f64()
+        .iter()
+        .map(|&(real, imag)| {
+            let value = Complex64::new(real, imag) * scalar;
+            (value.re, value.im)
+        })
+        .collect();
+    ComplexTensor::from_f64_values_with_dtype(data, tensor.shape.clone(), dtype)
+        .map_err(|error| mldivide_internal_error(format!("{NAME}: {error}")))
+}
+
+fn matrix_complex_to_tensor(
+    matrix: DMatrix<Complex64>,
+    dtype: runmat_value::NumericDType,
+) -> BuiltinResult<ComplexTensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
-    ComplexTensor::new(data, vec![rows, cols])
+    ComplexTensor::from_f64_values_with_dtype(data, vec![rows, cols], dtype)
         .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
 
 fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
-    let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape.clone())
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
+    let dtype = if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+        runmat_value::NumericDType::F32
+    } else {
+        runmat_value::NumericDType::F64
+    };
+    ComplexTensor::from_f64_values_with_dtype(data, tensor.shape.clone(), dtype)
         .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
 
@@ -454,7 +621,7 @@ fn contains_complex(value: &Value) -> bool {
 }
 
 fn complex_tensor_is_scalar(tensor: &ComplexTensor) -> bool {
-    tensor.data.len() == 1
+    tensor.materialize_f64().len() == 1
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
@@ -492,7 +659,15 @@ fn prepare_gpu_operand(
 ) -> BuiltinResult<Option<PreparedOperand>> {
     match value {
         Value::GpuTensor(handle) => {
-            if is_scalar_handle(handle) {
+            let owner = runmat_accelerate_api::provider_for_handle(handle);
+            if is_scalar_handle(handle)
+                || owner.is_none_or(|owner| !std::ptr::eq(owner, provider))
+                || runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_precision(handle)
+                    .is_some_and(|precision| precision != provider.precision())
+            {
                 Ok(None)
             } else {
                 Ok(Some(PreparedOperand::borrowed(handle)))
@@ -523,12 +698,7 @@ fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<GpuTensorHandle> {
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    provider
-        .upload(&view)
+    gpu_helpers::upload_tensor(provider, tensor)
         .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
 
@@ -539,12 +709,113 @@ fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedO
     }
 }
 
+fn solve_provider(lhs: &Value, rhs: &Value) -> Option<&'static dyn AccelProvider> {
+    let handles: Vec<&GpuTensorHandle> = [lhs, rhs]
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect();
+    let Some(first) = handles.first() else {
+        return runmat_accelerate_api::provider();
+    };
+    let provider = runmat_accelerate_api::provider_for_handle(first)?;
+    if handles.iter().skip(1).all(|handle| {
+        runmat_accelerate_api::provider_for_handle(handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+    }) {
+        Some(provider)
+    } else {
+        None
+    }
+}
+
+fn selected_floating_output_precision(lhs: &Value, rhs: &Value) -> Option<ProviderPrecision> {
+    let lhs = value_floating_precision(lhs)?;
+    let rhs = value_floating_precision(rhs)?;
+    if lhs == ProviderPrecision::F32 || rhs == ProviderPrecision::F32 {
+        Some(ProviderPrecision::F32)
+    } else {
+        Some(ProviderPrecision::F64)
+    }
+}
+
+fn value_floating_precision(value: &Value) -> Option<ProviderPrecision> {
+    match value {
+        Value::Num(_) | Value::Bool(_) | Value::LogicalArray(_) => Some(ProviderPrecision::F64),
+        Value::Tensor(tensor) => Some(
+            if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+                ProviderPrecision::F32
+            } else {
+                ProviderPrecision::F64
+            },
+        ),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_precision(handle),
+        _ => None,
+    }
+}
+
+fn native_solve_output_matches(
+    output: &GpuTensorHandle,
+    provider: &dyn AccelProvider,
+    expected_shape: &[usize],
+) -> bool {
+    output.shape == expected_shape
+        && output.device_id == provider.device_id()
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && runmat_accelerate_api::handle_precision(output)
+            == Some(match provider.precision() {
+                ProviderPrecision::F32 => ProviderPrecision::F32,
+                ProviderPrecision::F64 => ProviderPrecision::F64,
+            })
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn free_rejected_native_output(
+    output: &GpuTensorHandle,
+    invoked_provider: &dyn AccelProvider,
+    inputs: &[&GpuTensorHandle],
+) {
+    let output_owner =
+        runmat_accelerate_api::provider_for_handle(output).unwrap_or(invoked_provider);
+    if inputs.iter().any(|input| {
+        let input_owner =
+            runmat_accelerate_api::provider_for_handle(input).unwrap_or(invoked_provider);
+        same_owned_buffer(input, input_owner, output, output_owner)
+    }) {
+        return;
+    }
+    let _ = output_owner.free(output);
+}
+
+fn same_owned_buffer(
+    lhs: &GpuTensorHandle,
+    lhs_owner: &dyn AccelProvider,
+    rhs: &GpuTensorHandle,
+    rhs_owner: &dyn AccelProvider,
+) -> bool {
+    lhs.buffer_id == rhs.buffer_id && std::ptr::eq(lhs_owner, rhs_owner)
+}
+
+fn matrix_cols(shape: &[usize]) -> usize {
+    shape
+        .get(1)
+        .copied()
+        .unwrap_or_else(|| shape.first().copied().unwrap_or(1))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::ProviderTelemetry;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::IntegerElementType;
+    use runmat_accelerate_api::{HostTensorView, ProviderTelemetry};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -563,8 +834,69 @@ pub(crate) mod tests {
         runmat_accelerate_api::clear_provider();
     }
 
+    #[cfg(feature = "wgpu")]
+    fn integer_scalar_mldivide_cases() -> Vec<(IntValue, IntegerStorage, IntegerStorage)> {
+        vec![
+            (
+                IntValue::I8(2),
+                IntegerStorage::I8(vec![6, -8, 10]),
+                IntegerStorage::I8(vec![3, -4, 5]),
+            ),
+            (
+                IntValue::I16(2),
+                IntegerStorage::I16(vec![6, -8, 10]),
+                IntegerStorage::I16(vec![3, -4, 5]),
+            ),
+            (
+                IntValue::I32(2),
+                IntegerStorage::I32(vec![6, -8, 10]),
+                IntegerStorage::I32(vec![3, -4, 5]),
+            ),
+            (
+                IntValue::I64(2),
+                IntegerStorage::I64(vec![6, -8, 10]),
+                IntegerStorage::I64(vec![3, -4, 5]),
+            ),
+            (
+                IntValue::U8(2),
+                IntegerStorage::U8(vec![6, 8, 10]),
+                IntegerStorage::U8(vec![3, 4, 5]),
+            ),
+            (
+                IntValue::U16(2),
+                IntegerStorage::U16(vec![6, 8, 10]),
+                IntegerStorage::U16(vec![3, 4, 5]),
+            ),
+            (
+                IntValue::U32(2),
+                IntegerStorage::U32(vec![6, 8, 10]),
+                IntegerStorage::U32(vec![3, 4, 5]),
+            ),
+            (
+                IntValue::U64(2),
+                IntegerStorage::U64(vec![6, 8, 10]),
+                IntegerStorage::U64(vec![3, 4, 5]),
+            ),
+        ]
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn integer_element_type(storage: &IntegerStorage) -> IntegerElementType {
+        match storage {
+            IntegerStorage::I8(_) => IntegerElementType::I8,
+            IntegerStorage::I16(_) => IntegerElementType::I16,
+            IntegerStorage::I32(_) => IntegerElementType::I32,
+            IntegerStorage::I64(_) => IntegerElementType::I64,
+            IntegerStorage::U8(_) => IntegerElementType::U8,
+            IntegerStorage::U16(_) => IntegerElementType::U16,
+            IntegerStorage::U32(_) => IntegerElementType::U32,
+            IntegerStorage::U64(_) => IntegerElementType::U64,
+        }
+    }
+
     use num_complex::Complex64;
-    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -624,9 +956,237 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![2.0, 4.0, 6.0], vec![1, 3]).expect("tensor");
         let result = mldivide_builtin(Value::Num(2.0), Value::Tensor(tensor)).expect("mldivide");
         match result {
-            Value::Tensor(out) => assert_eq!(out.data, vec![1.0, 2.0, 3.0]),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn host_single_solve_preserves_single_storage() {
+        let lhs = Tensor::from_f32(vec![2.0, 0.0, 0.0, 4.0], vec![2, 2]).expect("single A");
+        let rhs = Tensor::from_f32(vec![8.0, 12.0], vec![2, 1]).expect("single B");
+        let Value::Tensor(result) =
+            mldivide_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("single solve")
+        else {
+            panic!("expected tensor")
+        };
+        assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(result.materialize_f64(), vec![4.0, 3.0]);
+    }
+
+    #[test]
+    fn ambient_f64_provider_does_not_widen_host_single_solve() {
+        test_support::with_test_provider(|_| {
+            let lhs = Tensor::from_f32(vec![2.0, 0.0, 0.0, 4.0], vec![2, 2]).expect("A");
+            let rhs = Tensor::from_f32(vec![8.0, 12.0], vec![2, 1]).expect("B");
+            let Value::Tensor(result) =
+                mldivide_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("solve")
+            else {
+                panic!("precision mismatch must use host fallback")
+            };
+            assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
+        });
+    }
+
+    #[test]
+    fn mldivide_declares_documented_integer_scalar_capability() {
+        let builtin = runmat_builtins::builtin_function_by_name(NAME).expect("mldivide");
+        assert_eq!(builtin.integer_capabilities.len(), 1);
+        let capability = &builtin.integer_capabilities[0];
+        assert_eq!(capability.inputs.len(), 2);
+        assert_eq!(capability.inputs[0].classes.len(), 8);
+        assert_eq!(capability.inputs[1].classes.len(), 8);
+        assert_eq!(
+            capability.output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
+        assert_eq!(
+            capability.backend,
+            BuiltinIntegerBackendRule::GatherFallback
+        );
+    }
+
+    #[test]
+    fn resident_integer_result_restores_to_the_input_owner_not_the_ambient_provider() {
+        let _guard = test_support::accel_test_lock();
+        let owner = Box::leak(Box::new(
+            runmat_accelerate::simple_provider::InProcessProvider::new(),
+        ));
+        let ambient = Box::leak(Box::new(
+            runmat_accelerate::simple_provider::InProcessProvider::new(),
+        ));
+        unsafe {
+            runmat_accelerate_api::register_provider(owner);
+            runmat_accelerate_api::register_provider(ambient);
+        }
+        let rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![8, 12]), vec![1, 2]).expect("integer rhs");
+        let rhs_handle = gpu_helpers::upload_tensor(owner, &rhs).expect("owner upload");
+
+        let result = mldivide_builtin(
+            Value::Int(IntValue::U64(2)),
+            Value::GpuTensor(rhs_handle.clone()),
+        )
+        .expect("integer divide");
+        let Value::GpuTensor(result_handle) = result else {
+            panic!("expected resident result")
+        };
+        let result_owner =
+            runmat_accelerate_api::provider_for_handle(&result_handle).expect("restored owner");
+        assert!(std::ptr::eq(result_owner, owner));
+        assert!(!std::ptr::eq(result_owner, ambient));
+        let gathered = block_on(owner.download_integer(&result_handle)).expect("owner download");
+        assert_eq!(
+            gathered.data,
+            runmat_accelerate_api::HostIntegerDataOwned::U64(vec![4, 6])
+        );
+        owner.free(&rhs_handle).expect("free rhs");
+        owner.free(&result_handle).expect("free result");
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn wgpu_integer_scalar_mldivide_preserves_all_classes_and_residency() {
+        let _guard = test_support::accel_test_lock();
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("registered WGPU provider");
+
+        for (scalar, rhs, expected) in integer_scalar_mldivide_cases() {
+            let rhs = Tensor::new_integer(rhs, vec![1, 3]).expect("WGPU integer RHS");
+            let rhs_handle = gpu_helpers::upload_tensor(provider, &rhs).expect("upload RHS");
+            let result_handle =
+                match mldivide_builtin(Value::Int(scalar), Value::GpuTensor(rhs_handle.clone())) {
+                    Ok(Value::GpuTensor(handle)) => handle,
+                    Ok(other) => {
+                        provider.free(&rhs_handle).expect("free RHS");
+                        panic!("expected resident integer result, got {other:?}");
+                    }
+                    Err(error) => {
+                        provider.free(&rhs_handle).expect("free RHS");
+                        panic!("WGPU integer scalar-left division failed: {error}");
+                    }
+                };
+
+            let owner = runmat_accelerate_api::provider_for_handle(&result_handle)
+                .expect("result WGPU owner");
+            let owner_matches = std::ptr::eq(owner, provider);
+            let result_type = runmat_accelerate_api::handle_integer_type(&result_handle);
+            let gathered = test_support::gather(Value::GpuTensor(result_handle.clone()));
+
+            provider.free(&rhs_handle).expect("free RHS");
+            provider.free(&result_handle).expect("free result");
+
+            assert!(owner_matches, "result must restore to the WGPU RHS owner");
+            assert_eq!(result_type, Some(integer_element_type(&expected)));
+            let gathered = gathered.expect("gather WGPU integer result");
+            assert_eq!(gathered.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn complex_single_scalar_left_division_preserves_single_storage() {
+        let divisor = ComplexTensor::from_f32(vec![(2.0, 1.0)], vec![1, 1]).expect("divisor");
+        let rhs = ComplexTensor::from_f32(vec![(8.0, 4.0), (12.0, 6.0)], vec![2, 1]).expect("rhs");
+        let Value::ComplexTensor(result) =
+            mldivide_builtin(Value::ComplexTensor(divisor), Value::ComplexTensor(rhs))
+                .expect("complex single scalar solve")
+        else {
+            panic!("expected complex tensor")
+        };
+        assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(result.shape, vec![2, 1]);
+    }
+
+    #[test]
+    fn solve_provider_uses_resident_owner_and_rejects_mixed_owners() {
+        let _guard = test_support::accel_test_lock();
+        let first = Box::leak(Box::new(
+            runmat_accelerate::simple_provider::InProcessProvider::new(),
+        ));
+        let second = Box::leak(Box::new(
+            runmat_accelerate::simple_provider::InProcessProvider::new(),
+        ));
+        unsafe {
+            runmat_accelerate_api::register_provider(first);
+            runmat_accelerate_api::register_provider(second);
+        }
+        let first_handle = first
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0, 0.0, 1.0],
+                shape: &[2, 2],
+            })
+            .expect("first upload");
+        let second_handle = second
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0, 0.0, 1.0],
+                shape: &[2, 2],
+            })
+            .expect("second upload");
+
+        let selected = solve_provider(&Value::GpuTensor(first_handle.clone()), &Value::Num(1.0))
+            .expect("resident owner");
+        assert!(std::ptr::eq(selected, first));
+        assert!(solve_provider(
+            &Value::GpuTensor(first_handle.clone()),
+            &Value::GpuTensor(second_handle.clone())
+        )
+        .is_none());
+
+        first.free(&first_handle).expect("free first");
+        second.free(&second_handle).expect("free second");
+    }
+
+    #[test]
+    fn rejected_native_output_is_freed_by_its_owner_but_aliases_are_retained() {
+        let _guard = test_support::accel_test_lock();
+        let invoked = Box::leak(Box::new(
+            runmat_accelerate::simple_provider::InProcessProvider::new(),
+        ));
+        let owner = Box::leak(Box::new(
+            runmat_accelerate::simple_provider::InProcessProvider::new(),
+        ));
+        unsafe {
+            runmat_accelerate_api::register_provider(invoked);
+            runmat_accelerate_api::register_provider(owner);
+        }
+        let input = invoked
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0, 0.0, 1.0],
+                shape: &[2, 2],
+            })
+            .expect("input upload");
+        let rejected = owner
+            .upload(&HostTensorView {
+                data: &[99.0; 4],
+                shape: &[2, 2],
+            })
+            .expect("rejected upload");
+
+        let foreign_collision = GpuTensorHandle {
+            shape: rejected.shape.clone(),
+            device_id: invoked.device_id(),
+            buffer_id: rejected.buffer_id,
+            descriptor: Default::default(),
+        };
+        assert!(!same_owned_buffer(
+            &rejected,
+            owner,
+            &foreign_collision,
+            invoked
+        ));
+
+        free_rejected_native_output(&rejected, invoked, &[&foreign_collision]);
+        assert!(block_on(owner.download(&rejected)).is_err());
+
+        free_rejected_native_output(&input, invoked, &[&input]);
+        assert!(block_on(invoked.download(&input)).is_ok());
+        invoked.free(&input).expect("free input");
     }
 
     #[test]
@@ -657,6 +1217,37 @@ pub(crate) mod tests {
         assert!(err.message().contains("only supported for scalar"));
     }
 
+    #[test]
+    fn mldivide_complex_scalar_promotion_reads_typed_integer_storage_exactly() {
+        let divisor =
+            Tensor::new_integer(IntegerStorage::I64(vec![2]), vec![1, 1]).expect("integer scalar");
+        let rhs = ComplexTensor::new(vec![(6.0, 4.0), (2.0, -8.0)], vec![2, 1]).unwrap();
+
+        let result =
+            mldivide_builtin(Value::Tensor(divisor), Value::ComplexTensor(rhs)).expect("mldivide");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor result");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        assert!((out.materialize_f64()[0].0 - 3.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].1 - 2.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
+        assert!((out.materialize_f64()[1].1 + 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn mldivide_host_real_reads_typed_integer_storage_exactly() {
+        let lhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![2]), vec![1, 1]).expect("typed divisor");
+        let rhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![6, 10]), vec![2, 1]).expect("typed rhs");
+
+        let out = mldivide_host_real_for_provider(&lhs, &rhs).expect("host mldivide");
+
+        assert_eq!(out.materialize_f64(), vec![3.0, 5.0]);
+        assert!(out.integer_storage().is_none());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn solves_square_system() {
@@ -669,9 +1260,13 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![2, 1]);
 
-        let mat_a = DMatrix::from_column_slice(a.rows(), a.cols(), &a.data);
-        let mat_x = DMatrix::from_column_slice(gathered.rows(), gathered.cols(), &gathered.data);
-        let mat_b = DMatrix::from_column_slice(b.rows(), b.cols(), &b.data);
+        let mat_a = DMatrix::from_column_slice(a.rows(), a.cols(), &a.materialize_f64());
+        let mat_x = DMatrix::from_column_slice(
+            gathered.rows(),
+            gathered.cols(),
+            &gathered.materialize_f64(),
+        );
+        let mat_b = DMatrix::from_column_slice(b.rows(), b.cols(), &b.materialize_f64());
         let residual = &mat_a * &mat_x - mat_b;
         assert!(residual.norm() < 1e-12);
     }
@@ -688,9 +1283,13 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![2, 1]);
 
-        let mat_a = DMatrix::from_column_slice(a.rows(), a.cols(), &a.data);
-        let mat_x = DMatrix::from_column_slice(gathered.rows(), gathered.cols(), &gathered.data);
-        let mat_b = DMatrix::from_column_slice(b.rows(), b.cols(), &b.data);
+        let mat_a = DMatrix::from_column_slice(a.rows(), a.cols(), &a.materialize_f64());
+        let mat_x = DMatrix::from_column_slice(
+            gathered.rows(),
+            gathered.cols(),
+            &gathered.materialize_f64(),
+        );
+        let mat_b = DMatrix::from_column_slice(b.rows(), b.cols(), &b.materialize_f64());
         let residual = &mat_a * &mat_x - mat_b;
         assert!(residual.norm() < 1e-10);
     }
@@ -712,17 +1311,17 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 let mat_a: Vec<Complex64> = a
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex64::new(re, im))
                     .collect();
                 let mat_b: Vec<Complex64> = b
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex64::new(re, im))
                     .collect();
                 let mat_x: Vec<Complex64> = out
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex64::new(re, im))
                     .collect();
@@ -762,11 +1361,11 @@ pub(crate) mod tests {
             let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
 
             let view_a = HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let view_b = HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
             let ha = provider.upload(&view_a).expect("upload A");
@@ -779,7 +1378,11 @@ pub(crate) mod tests {
             let _ = provider.free(&hb);
 
             assert_eq!(gathered.shape, cpu_tensor.shape);
-            for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+            for (gpu, cpu) in gathered
+                .materialize_f64()
+                .iter()
+                .zip(cpu_tensor.materialize_f64().iter())
+            {
                 assert!((gpu - cpu).abs() < 1e-12);
             }
         });
@@ -793,13 +1396,13 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
             let ha = provider
                 .upload(&HostTensorView {
-                    data: &a.data,
+                    data: &a.materialize_f64(),
                     shape: &a.shape,
                 })
                 .expect("upload A");
             let hb = provider
                 .upload(&HostTensorView {
-                    data: &b.data,
+                    data: &b.materialize_f64(),
                     shape: &b.shape,
                 })
                 .expect("upload B");
@@ -826,13 +1429,13 @@ pub(crate) mod tests {
             let matrix = Tensor::new(vec![2.0, 4.0, 6.0], vec![1, 3]).unwrap();
             let hs = provider
                 .upload(&HostTensorView {
-                    data: &scalar.data,
+                    data: &scalar.materialize_f64(),
                     shape: &scalar.shape,
                 })
                 .expect("upload scalar");
             let hm = provider
                 .upload(&HostTensorView {
-                    data: &matrix.data,
+                    data: &matrix.materialize_f64(),
                     shape: &matrix.shape,
                 })
                 .expect("upload matrix");
@@ -841,7 +1444,7 @@ pub(crate) mod tests {
                 mldivide_eval(&Value::GpuTensor(hs.clone()), &Value::GpuTensor(hm.clone()))
                     .expect("fallback mldivide");
             let gathered = test_support::gather(result).expect("gather fallback");
-            assert_eq!(gathered.data, vec![1.0, 2.0, 3.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 3.0]);
 
             let telemetry = provider.telemetry_snapshot();
             assert_eq!(telemetry.mldivide.count, 0);
@@ -878,11 +1481,11 @@ pub(crate) mod tests {
         provider.reset_telemetry();
 
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -894,7 +1497,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -928,11 +1535,11 @@ pub(crate) mod tests {
         provider.reset_telemetry();
 
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -944,7 +1551,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -977,11 +1588,11 @@ pub(crate) mod tests {
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
 
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -993,7 +1604,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < tol, "gpu={gpu} cpu={cpu}");
         }
     }

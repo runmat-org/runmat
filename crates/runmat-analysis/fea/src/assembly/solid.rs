@@ -8,6 +8,7 @@ use super::elements::solid::{
     global_stiffness_matrix as tetrahedron4_global_stiffness_matrix, SolidMaterial,
     Tetrahedron4ElementGeometry, TETRAHEDRON4_ELEMENT_DOF_COUNT, TETRAHEDRON4_NODE_DOF_COUNT,
 };
+use super::solid_matrix::{empty_rows, rows_to_csr, scatter_csr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SolidAssemblyTopology {
@@ -124,9 +125,7 @@ pub fn assemble_solid_stiffness_csr_with_materials(
         node_offsets.insert(node.node_id, index * TETRAHEDRON4_NODE_DOF_COUNT);
     }
 
-    let mut rows = (0..topology.dof_count)
-        .map(|_| BTreeMap::<usize, f64>::new())
-        .collect::<Vec<_>>();
+    let mut rows = empty_rows(topology.dof_count);
     for element in &mesh.volume_elements {
         if element.node_ids.len() != 4 {
             return Err(SolidAssemblyError::InvalidElementNodeCount {
@@ -163,7 +162,7 @@ pub fn assemble_solid_stiffness_csr_with_materials(
                     element_id: element.element_id.clone(),
                     message: err.to_string(),
                 })?;
-        scatter_tetrahedron4_csr_rows(&mut rows, dof_offsets, &element_stiffness);
+        scatter_csr(&mut rows, &dof_offsets, &element_stiffness);
     }
     Ok(rows_to_csr(rows))
 }
@@ -187,48 +186,6 @@ fn scatter_tetrahedron4(
                 }
             }
         }
-    }
-}
-
-fn scatter_tetrahedron4_csr_rows(
-    rows: &mut [BTreeMap<usize, f64>],
-    dof_offsets: [usize; 4],
-    element_stiffness: &[[f64; TETRAHEDRON4_ELEMENT_DOF_COUNT]; TETRAHEDRON4_ELEMENT_DOF_COUNT],
-) {
-    for local_row_node in 0..4 {
-        for local_row_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
-            let local_row = local_row_node * TETRAHEDRON4_NODE_DOF_COUNT + local_row_axis;
-            let global_row = dof_offsets[local_row_node] + local_row_axis;
-            for (local_col_node, global_col_offset) in dof_offsets.iter().enumerate() {
-                for local_col_axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
-                    let local_col = local_col_node * TETRAHEDRON4_NODE_DOF_COUNT + local_col_axis;
-                    let global_col = global_col_offset + local_col_axis;
-                    *rows[global_row].entry(global_col).or_insert(0.0) +=
-                        element_stiffness[local_row][local_col];
-                }
-            }
-        }
-    }
-}
-
-fn rows_to_csr(rows: Vec<BTreeMap<usize, f64>>) -> CsrMatrix {
-    let mut row_offsets = Vec::with_capacity(rows.len() + 1);
-    let mut column_indices = Vec::new();
-    let mut values = Vec::new();
-    row_offsets.push(0);
-    for row in rows {
-        for (column, value) in row {
-            if value.abs() > 0.0 {
-                column_indices.push(column);
-                values.push(value);
-            }
-        }
-        row_offsets.push(values.len());
-    }
-    CsrMatrix {
-        row_offsets,
-        column_indices,
-        values,
     }
 }
 

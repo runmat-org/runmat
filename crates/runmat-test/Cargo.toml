@@ -1,0 +1,19 @@
+[package]
+name = "runmat-test"
+version = "0.6.2"
+edition = "2021"
+description = "Portable test identities, lifecycle, results, events, and worker protocol for RunMat"
+license = "Apache-2.0"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+runmat-execution = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+futures = "0.3"
+wasm-bindgen-test = "0.3"

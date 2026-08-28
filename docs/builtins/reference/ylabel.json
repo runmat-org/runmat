@@ -1,0 +1,11 @@
+{
+  "title": "ylabel",
+  "category": "plotting",
+  "keywords": ["ylabel", "axes label", "plot annotation"],
+  "summary": "Set the y-axis label for the current or specified axes.",
+  "description": "`ylabel(txt)` sets the y-axis label and returns the label object's graphics handle.",
+  "behaviors": ["Text may be supplied as a string, character vector, string array, cell array, or numeric scalar.", "Native integer scalar labels use their exact decimal spelling.", "`FontSize` accepts single, double, and all eight native integer classes; values must be positive and finite.", "An axes handle may be supplied first. RunMat mode additionally accepts a typed-integer alias for an encoded axes handle."],
+  "examples": [{"description": "Label an axis", "input": "plot(1:10, rand(1, 10));\nylabel('Amplitude')"}, {"description": "Use an integer label and font size", "input": "ylabel(intmax('uint64'), 'FontSize', uint8(14))"}],
+  "links": [{"label": "MATLAB language extensions", "url": "/docs/runtime/getting-started/language-extensions"}, {"label": "xlabel", "url": "./xlabel"}, {"label": "zlabel", "url": "./zlabel"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/plotting/ops/ylabel.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/ylabel.rs"}
+}

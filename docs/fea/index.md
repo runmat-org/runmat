@@ -1,10 +1,3 @@
----
-title: "FEA on Geometry"
-category: "FEA"
-section: "13.0"
-last_updated: "June 10, 2026"
----
-
 # FEA: Run Math on Geometry (Beta)
 
 RunMat FEA lets you start with a CAD or mesh file and run repeatable physics studies against it. The FEA subsystem in RunMat allows you to load geometry, mesh it into finite elements, define material properties, loads, constraints, domains, interfaces, and steps, and solve multi-physics ODEs and parametric sweeps.

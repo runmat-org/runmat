@@ -6,8 +6,8 @@ use crate::runtime::workspace::{
     refresh_workspace_state, set_transient_workspace_state, set_workspace_state,
     take_pending_workspace_state, WorkspaceStateGuard,
 };
-use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
 pub fn prepare_workspace_guard(

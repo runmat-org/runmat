@@ -18,10 +18,10 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to the host implementation when the active provider lacks unary_expm1."
+    "notes": "Real floating inputs use unary_expm1; unsupported hooks and complex inputs use an owner-preserving host fallback."
   },
   "fusion": {
-    "elementwise": true,
+    "elementwise": false,
     "reduction": false,
     "max_inputs": 1,
     "constants": "inline"
@@ -31,12 +31,15 @@
     "unit": "builtins::math::elementwise::expm1::tests",
     "integration": "builtins::math::elementwise::expm1::tests::expm1_gpu_provider_roundtrip"
   },
-  "description": "`Y = expm1(X)` evaluates `exp(X) - 1` element-wise with improved numerical accuracy for values near zero. Input handling and output behavior follow MATLAB semantics.",
+  "description": "`Y = expm1(X)` evaluates `exp(X) - 1` element-wise with improved numerical accuracy near zero for real or complex single/double input. Sparse input remains sparse because implicit zeros remain zero, and table or timetable variables are mapped independently.",
   "behaviors": [
-    "Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0.0`) before execution.",
-    "Character arrays are interpreted as their numeric code points and return dense double tensors.",
+    "Dense single/double input preserves class and shape, including complex storage.",
+    "Integer, logical, and character inputs are three independent RunMat-only extensions; each is rejected in MATLAB-compatible mode with its own `RunMat:compatibility:*Extension` identifier.",
+    "The integer extension accepts all eight classes, returns double, and rejects values outside the inclusive exact binary64 interval `[-2^53, 2^53]` before conversion.",
     "Complex values follow MATLAB's definition by computing `exp(z) - 1` using complex arithmetic.",
-    "Existing GPU tensors remain on the device when the registered provider implements `unary_expm1`; otherwise RunMat gathers the data, computes on the CPU, and returns the result."
+    "Sparse single/double input preserves sparse storage because `expm1(0) = 0`; table and timetable variables are mapped only when every variable supports `expm1`.",
+    "GPU input returns to its original owning provider after direct execution or host fallback; complex-interleaved storage never enters a real unary provider hook.",
+    "Fusion is disabled until the fusion ABI can use the precise expm1 helper instead of the inaccurate `exp(x) - 1` expression."
   ],
   "examples": [
     {
@@ -60,7 +63,7 @@
       "output": "w = [0.4687 + 2.2874i, -1.3679 + 0.0000i]"
     },
     {
-      "description": "Applying expm1 to character data",
+      "description": "Computing exp(X)-1 from character codes",
       "input": "C = 'ABC';\nY = expm1(C)",
       "output": "Y = [1.6949e+28 4.6072e+28 1.2524e+29]"
     }
@@ -76,7 +79,7 @@
     },
     {
       "question": "How are logical arrays handled?",
-      "answer": "Logical values convert to doubles before applying `expm1`, so `expm1([true false])` yields a double array `[e - 1, 0]`."
+      "answer": "Logical values convert to double only when the RunMat-only `expm1-logical-input` extension is enabled; MATLAB-compatible mode rejects that form."
     },
     {
       "question": "What about complex inputs?",
@@ -84,15 +87,15 @@
     },
     {
       "question": "What happens if the GPU provider lacks `unary_expm1`?",
-      "answer": "RunMat gathers the tensor to the host, computes with double precision, and returns the correct result. Subsequent fused kernels still see accurate residency metadata."
+      "answer": "RunMat gathers through the input's owning provider and computes with the required output class. It restores the result only when the owner physically supports that precision; otherwise the correctly typed result remains on the host."
     },
     {
       "question": "Can I expect double precision?",
-      "answer": "Yes. RunMat stores dense numeric tensors in double precision (`f64`). GPU providers may choose single precision internally but convert back to double when returning data to the runtime."
+      "answer": "Double input returns double and single input returns single. Integer, logical, and character extension forms return double."
     },
     {
       "question": "How does `expm1` interact with fusion?",
-      "answer": "The fusion planner recognises `expm1` as an element-wise op. Providers that support fused kernels can materialise `expm1` directly in generated WGSL."
+      "answer": "Fusion is currently disabled so the runtime never replaces precise `expm1` with cancellation-prone `exp(x) - 1`. The direct WGPU unary kernel uses a dedicated precise helper."
     }
   ],
   "links": [
@@ -211,6 +214,6 @@
   },
   "gpu_residency": "In most workflows you do **not** need to call `gpuArray` manually. RunMat's auto-offload planner and fusion engine keep data on the GPU when beneficial. You can still call `gpuArray` to mirror MathWorks MATLAB workflows or to pin data on the device explicitly.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors resident on the GPU whenever the provider exposes the `unary_expm1` hook. When the hook is missing or errors, RunMat automatically gathers the tensor, performs the computation on the host using `f64::expm1` for the real components, and returns the result while preserving residency metadata. This ensures users always observe MATLAB-compatible behaviour without manual residency management."
+    "RunMat Accelerate keeps real floating tensors resident through the precise `unary_expm1` hook. An explicitly unsupported hook and complex input use an owner-preserving host fallback; other provider errors and malformed or hostile handles are reported as internal errors."
   ]
 }

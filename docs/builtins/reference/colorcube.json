@@ -16,6 +16,8 @@
   "behaviors": [
     "`colorcube()` returns an m-by-3 RGB matrix.",
     "`colorcube(m)` returns exactly `m` rows, where `m` must be a nonnegative integer.",
+    "`m` can use any of the eight integer classes. It is read exactly as a host structural row count, and the result remains an m-by-3 double matrix.",
+    "Resident scalar controls are rejected without provider dispatch; `colorcube` does not run a numeric GPU kernel.",
     "The result can be passed directly to `colormap`."
   ],
   "examples": [
@@ -32,6 +34,10 @@
     {
       "question": "What size is `colorcube()`?",
       "answer": "It returns the active colormap length when one exists, otherwise 256 rows by 3 columns."
+    },
+    {
+      "question": "Which integer classes can specify `m`?",
+      "answer": "All eight built-in integer classes are documented: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64`. The value must be nonnegative and no larger than RunMat's allocation guard."
     }
   ],
   "links": [
@@ -47,5 +53,9 @@
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/colormap_arrays.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/colormap_arrays.rs"
-  }
+  },
+  "gpu_residency": "The generated colormap is a host double matrix. A resident `m` control is rejected without gathering.",
+  "gpu_behavior": [
+    "`colorcube` performs host structural allocation and RGB generation only; it does not invoke provider kernels."
+  ]
 }

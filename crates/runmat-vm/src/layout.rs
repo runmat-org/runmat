@@ -4,7 +4,10 @@ use runmat_hir::{
 };
 use runmat_mir::{MirAssembly, MirLocalId};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+/// Portable schema for serialized [`VmAssemblyLayout`] payloads.
+pub const VM_LAYOUT_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct VmSlotId(pub usize);
@@ -13,6 +16,9 @@ pub struct VmSlotId(pub usize);
 pub struct VmAssemblyLayout {
     pub functions: HashMap<FunctionId, VmFunctionLayout>,
     pub entrypoints: HashMap<EntrypointId, VmEntrypointLayout>,
+    /// Complete semantic binding catalog retained for every executor and
+    /// portable-product consumer. The historical field name is serialized and
+    /// remains stable; entries are not limited to non-lexical storage.
     pub storage_bindings: HashMap<BindingId, VmStorageBinding>,
 }
 
@@ -26,6 +32,43 @@ pub struct VmFunctionLayout {
     pub mir_local_slots: HashMap<MirLocalId, VmSlotId>,
     pub captures: Vec<VmCaptureSlot>,
     pub local_count: usize,
+    /// Bytecode instruction at which an empty-operand MIR boundary can resume.
+    #[serde(default, with = "resume_point_map_serde")]
+    pub resume_points: BTreeMap<runmat_types::ProgramPointId, usize>,
+}
+
+/// Portable sequence encoding for a map whose structured program-point keys
+/// cannot be represented as JSON object keys.
+pub(crate) mod resume_point_map_serde {
+    use std::collections::BTreeMap;
+
+    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+
+    use runmat_types::ProgramPointId;
+
+    pub fn serialize<S>(
+        points: &BTreeMap<ProgramPointId, usize>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        points.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<ProgramPointId, usize>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let entries = Vec::<(ProgramPointId, usize)>::deserialize(deserializer)?;
+        let mut points = BTreeMap::new();
+        for (point, pc) in entries {
+            if points.insert(point, pc).is_some() {
+                return Err(D::Error::custom("duplicate VM resume program point"));
+            }
+        }
+        Ok(points)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,6 +111,58 @@ pub struct VmStorageBinding {
     pub storage: BindingStorage,
 }
 
+/// Apply Core's unit-local to session/program function publication map to the
+/// retained VM layout. Binding and local-slot identities remain unchanged.
+pub fn remap_layout_function_ids(
+    layout: &mut VmAssemblyLayout,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), LayoutError> {
+    if remap.is_empty() {
+        return Ok(());
+    }
+    let mut published_ids = HashSet::with_capacity(layout.functions.len());
+    for function in layout.functions.keys().copied() {
+        let published = remap.get(&function).copied().unwrap_or(function);
+        if !published_ids.insert(published) {
+            return Err(LayoutError::FunctionRemapCollision(published));
+        }
+    }
+    let mut functions = HashMap::with_capacity(layout.functions.len());
+    for (function, mut metadata) in std::mem::take(&mut layout.functions) {
+        let published = remap
+            .get(&metadata.function)
+            .copied()
+            .unwrap_or(metadata.function);
+        metadata.function = published;
+        metadata.resume_points = std::mem::take(&mut metadata.resume_points)
+            .into_iter()
+            .map(|(mut point, pc)| {
+                point.function = runmat_types::ProgramFunctionId(
+                    u32::try_from(published.0)
+                        .expect("published VM function identity exceeds portable schema"),
+                );
+                (point, pc)
+            })
+            .collect();
+        for capture in &mut metadata.captures {
+            capture.from_function = remap
+                .get(&capture.from_function)
+                .copied()
+                .unwrap_or(capture.from_function);
+        }
+        let published = remap.get(&function).copied().unwrap_or(function);
+        functions.insert(published, metadata);
+    }
+    layout.functions = functions;
+    for entrypoint in layout.entrypoints.values_mut() {
+        entrypoint.target = remap
+            .get(&entrypoint.target)
+            .copied()
+            .unwrap_or(entrypoint.target);
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LayoutError {
     MissingFunction(FunctionId),
@@ -77,6 +172,7 @@ pub enum LayoutError {
         function: FunctionId,
         binding: BindingId,
     },
+    FunctionRemapCollision(FunctionId),
 }
 
 pub fn derive_layout(
@@ -117,7 +213,6 @@ pub fn derive_layout(
     let storage_bindings = hir
         .bindings
         .iter()
-        .filter(|binding| binding.storage != BindingStorage::Lexical)
         .map(|binding| {
             (
                 binding.id,
@@ -210,6 +305,7 @@ fn derive_function_layout(
         mir_local_slots,
         captures,
         local_count: next_slot,
+        resume_points: BTreeMap::new(),
     })
 }
 
@@ -371,7 +467,7 @@ mod tests {
             ..HirAssembly::default()
         };
         let mir = MirAssembly {
-            bodies: HashMap::from([(
+            bodies: BTreeMap::from([(
                 function,
                 MirBody {
                     function,
@@ -385,6 +481,7 @@ mod tests {
                     blocks: vec![],
                 },
             )]),
+            ..MirAssembly::default()
         };
 
         let layout = derive_layout(&assembly, &mir).expect("layout");
@@ -394,6 +491,11 @@ mod tests {
         assert_eq!(function_layout.binding_slots[&binding], VmSlotId(0));
         assert_eq!(function_layout.mir_local_slots[&MirLocalId(0)], VmSlotId(0));
         assert_eq!(function_layout.local_count, 1);
+        assert_eq!(layout.storage_bindings[&binding].name, "x");
+        assert_eq!(
+            layout.storage_bindings[&binding].storage,
+            BindingStorage::Lexical
+        );
     }
 
     #[test]
@@ -463,7 +565,7 @@ mod tests {
             ..HirAssembly::default()
         };
         let mir = MirAssembly {
-            bodies: HashMap::from([(
+            bodies: BTreeMap::from([(
                 function,
                 MirBody {
                     function,
@@ -485,6 +587,7 @@ mod tests {
                     blocks: vec![],
                 },
             )]),
+            ..MirAssembly::default()
         };
 
         let layout = derive_layout(&assembly, &mir).expect("layout");
@@ -492,5 +595,44 @@ mod tests {
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].binding, visible);
         assert_eq!(exports[0].name, "x");
+    }
+
+    #[test]
+    fn function_id_remap_rejects_layout_collisions_without_mutating_layout() {
+        let function_layout = |function| VmFunctionLayout {
+            function,
+            display_name: format!("function_{}", function.0),
+            private_owner_scope: String::new(),
+            frame_abi: VmFrameAbi {
+                fixed_inputs: Vec::new(),
+                varargin: None,
+                fixed_outputs: Vec::new(),
+                varargout: None,
+                implicit_nargin: None,
+                implicit_nargout: None,
+            },
+            binding_slots: HashMap::new(),
+            mir_local_slots: HashMap::new(),
+            captures: Vec::new(),
+            local_count: 0,
+            resume_points: BTreeMap::new(),
+        };
+        let first = FunctionId(0);
+        let second = FunctionId(1);
+        let mut layout = VmAssemblyLayout {
+            functions: HashMap::from([
+                (first, function_layout(first)),
+                (second, function_layout(second)),
+            ]),
+            entrypoints: HashMap::new(),
+            storage_bindings: HashMap::new(),
+        };
+        let original = layout.clone();
+
+        let error = remap_layout_function_ids(&mut layout, &HashMap::from([(second, first)]))
+            .expect_err("two functions cannot publish to one layout identity");
+
+        assert_eq!(error, LayoutError::FunctionRemapCollision(first));
+        assert_eq!(layout, original);
     }
 }

@@ -91,7 +91,7 @@
       "`documents` must be a RunMat `tokenizedDocument` object.",
       "`Name, Value` pairs may include `RetokenizeMethod`, `DiscardKnownValues`, and `Model`.",
       "`RetokenizeMethod` may be `\"entity\"` or `\"none\"`.",
-      "`DiscardKnownValues` must be a logical scalar or numeric 0/1 scalar.",
+      "`DiscardKnownValues` must be a logical scalar; numeric and integer 0/1 values are rejected.",
       "`Model` currently accepts `\"auto\"`; custom entity model objects remain tracked.",
       "Use `tokenDetails(updatedDocuments)` to view the resulting `Entity` table column."
     ]

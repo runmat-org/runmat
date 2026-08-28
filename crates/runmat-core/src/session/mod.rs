@@ -1,8 +1,6 @@
 use anyhow::Result;
-use runmat_builtins::{self, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
-#[cfg(feature = "jit")]
-use tracing::warn;
+use runmat_value::Value;
 use tracing::{debug, info, info_span};
 
 use runmat_hir::{LoweringContext, LoweringResult, SourceId};
@@ -13,8 +11,6 @@ use runmat_runtime::{
     runtime_export_workspace_state, runtime_import_workspace_state, WorkspaceReplayMode,
 };
 use runmat_time::Instant;
-#[cfg(feature = "jit")]
-use runmat_turbine::TurbineEngine;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
@@ -45,17 +41,24 @@ use crate::{
     value_shape, CompatMode, RunError,
 };
 
+fn runtime_language_mode(mode: CompatMode) -> runmat_runtime::context::RuntimeLanguageMode {
+    match mode {
+        CompatMode::Matlab => runmat_runtime::context::RuntimeLanguageMode::Matlab,
+        CompatMode::RunMat => runmat_runtime::context::RuntimeLanguageMode::RunMat,
+        CompatMode::Strict => runmat_runtime::context::RuntimeLanguageMode::Strict,
+    }
+}
+
 mod compile;
 mod config;
+mod executable;
 mod init;
+mod project;
 mod run;
 mod workspace;
 
 /// Host-agnostic RunMat execution session (parser + interpreter + optional JIT).
 pub struct RunMatSession {
-    /// JIT compiler engine (optional for fallback mode)
-    #[cfg(feature = "jit")]
-    jit_engine: Option<TurbineEngine>,
     /// Verbose output for debugging
     verbose: bool,
     /// Execution statistics
@@ -73,14 +76,24 @@ pub struct RunMatSession {
     /// Semantic function registry persisted across interactive inputs.
     function_registry: runmat_vm::FunctionRegistry,
     next_semantic_function_id: usize,
-    /// MATLAB-compatible search path persisted by this session.
-    search_path: Arc<runmat_runtime::builtins::common::path_state::SearchPath>,
     /// Canonically compiled functions discovered through the runtime search path.
     dynamic_function_cache: Arc<Mutex<HashMap<PathBuf, DynamicFunctionCacheEntry>>>,
+    /// Session-scoped production native entry publication and invalidation.
+    #[cfg(not(target_arch = "wasm32"))]
+    generic_native_cache: crate::generic_native::GenericNativeCache,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_tiering_enabled: bool,
+    /// Optional host-frozen project snapshot used by every compilation in this session.
+    project_handoff: Option<runmat_package::FrozenProjectHandoff>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
     /// Cooperative cancellation flag shared with the runtime.
     interrupt_flag: Arc<AtomicBool>,
+    /// Root-scoped execution authority inherited by every invocation.
+    runtime_context: runmat_runtime::context::RuntimeContext,
+    /// Typed handle retained alongside the executor-neutral runtime port so a
+    /// host may explicitly persist or restore this session's bounded profile.
+    placement_session: std::rc::Rc<runmat_accelerate::placement::PlacementSession>,
     /// Tracks whether an execution is currently active.
     is_executing: bool,
     /// Optional async input handler (Phase 2). When set, stdin interactions are awaited
@@ -105,7 +118,7 @@ pub struct RunMatSession {
     top_level_await_enabled: bool,
     dynamic_eval_enabled: bool,
     /// Persisted numeric display format for this session (survives across executions).
-    format_mode: runmat_builtins::FormatMode,
+    format_mode: runmat_value::FormatMode,
     /// Persisted diary logging state for this session (survives across executions).
     diary_state: runmat_runtime::console::DiaryStateSnapshot,
     /// Preloaded companion statements discovered asynchronously by the request path.
@@ -115,6 +128,7 @@ pub struct RunMatSession {
 pub(crate) struct PreparedExecution {
     ast: runmat_parser::Program,
     lowering: LoweringResult,
+    mir: runmat_mir::MirAssembly,
     analysis: runmat_mir::analysis::AnalysisStore,
     pub(crate) bytecode: runmat_vm::Bytecode,
     function_registry_after_success: runmat_vm::FunctionRegistry,
@@ -147,6 +161,7 @@ struct WorkspaceMaterializeTicket {
 #[derive(Clone)]
 struct DynamicFunctionCacheEntry {
     source_text: String,
+    project_revision: Option<runmat_package::ProjectRevision>,
     registry: Arc<runmat_vm::FunctionRegistry>,
 }
 
@@ -176,6 +191,14 @@ impl Drop for ActiveExecutionGuard {
                 *flag = false;
             }
         }
+    }
+}
+
+impl Drop for RunMatSession {
+    fn drop(&mut self) {
+        self.runtime_context
+            .execution()
+            .drain_scope(runmat_execution::CancellationReason::Shutdown);
     }
 }
 

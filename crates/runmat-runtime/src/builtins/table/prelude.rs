@@ -8,11 +8,11 @@ pub(in crate::builtins::table) use calamine::{
 };
 pub(in crate::builtins::table) use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 pub(in crate::builtins::table) use encoding_rs::{Encoding, UTF_8};
-pub(in crate::builtins::table) use runmat_builtins::{
+pub(in crate::builtins::table) use runmat_filesystem::File;
+pub(in crate::builtins::table) use runmat_value::{
     CellArray, CharArray, ComplexTensor, LogicalArray, NumericDType, ObjectInstance, StringArray,
     StructValue, Tensor, Value,
 };
-pub(in crate::builtins::table) use runmat_filesystem::File;
 
 pub(in crate::builtins::table) use crate::builtins::common::fs::expand_user_path;
 pub(in crate::builtins::table) use crate::{

@@ -1,9 +1,14 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::common::random;
@@ -11,6 +16,75 @@ use crate::builtins::common::random_args::extract_dims;
 use crate::builtins::common::tensor;
 
 const BUILTIN_NAME: &str = "unifrnd";
+
+const INTEGER_LOWER_BOUND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "unifrnd-integer-lower-bound",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "unifrnd with a typed-integer lower bound is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UnifrndIntegerLowerBoundExtension"),
+};
+const INTEGER_UPPER_BOUND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "unifrnd-integer-upper-bound",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "unifrnd with a typed-integer upper bound is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UnifrndIntegerUpperBoundExtension"),
+};
+const INTEGER_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "unifrnd-integer-size",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "unifrnd with typed-integer size arguments is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UnifrndIntegerSizeExtension"),
+};
+pub const UNIFRND_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    INTEGER_LOWER_BOUND_EXTENSION,
+    INTEGER_UPPER_BOUND_EXTENSION,
+    INTEGER_SIZE_EXTENSION,
+];
+const INTEGER_BOUND_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "a",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double lower bounds; typed integers cross a checked binary64 sampling boundary in RunMat mode.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "b",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double upper bounds; typed integers cross a checked binary64 sampling boundary in RunMat mode.",
+    },
+];
+const INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "sz, sz1, ...",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The compatibility target documents single and double size controls; RunMat mode decodes typed integer extents exactly as structural values.",
+}];
+pub const UNIFRND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "r = unifrnd(integer_a, integer_b, ___)",
+        inputs: &INTEGER_BOUND_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each typed bound is independently gated and must be exactly representable before entering the binary64 uniform generator.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "r = unifrnd(a, b, integer_sz)",
+        inputs: &INTEGER_SIZE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed extents are extension-gated before provider access and parsed exactly without selecting the distribution computation domain.",
+    },
+];
 
 const UNIFRND_OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "r",
@@ -172,9 +246,12 @@ fn unifrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     keywords = "unifrnd,uniform,random,distribution,statistics",
     type_resolver(unifrnd_type),
     descriptor(crate::builtins::stats::random::unifrnd::UNIFRND_DESCRIPTOR),
+    extensions(crate::builtins::stats::random::unifrnd::UNIFRND_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::random::unifrnd::UNIFRND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::random::unifrnd"
 )]
 async fn unifrnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    enforce_integer_extensions(&args).await?;
     let (a, b, shape) = parse_args(args).await?;
     if a >= b {
         return Err(unifrnd_error(
@@ -191,6 +268,38 @@ async fn unifrnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(t))
 }
 
+async fn enforce_integer_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
+    if let Some(value) = args.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            value,
+            &INTEGER_LOWER_BOUND_EXTENSION,
+            BUILTIN_NAME,
+            "lower-bound",
+        )
+        .await?;
+    }
+    if let Some(value) = args.get(1) {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            value,
+            &INTEGER_UPPER_BOUND_EXTENSION,
+            BUILTIN_NAME,
+            "upper-bound",
+        )
+        .await?;
+    }
+    if args
+        .iter()
+        .skip(2)
+        .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_SIZE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
 async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<(f64, f64, Vec<usize>)> {
     if args.len() < 2 {
         return Err(unifrnd_error_with(
@@ -198,22 +307,24 @@ async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<(f64, f64, Vec<usi
             "unifrnd: requires at least two arguments (a, b)",
         ));
     }
-    let a = scalar_f64(&args[0])?;
-    let b = scalar_f64(&args[1])?;
+    let a = scalar_f64(&args[0]).await?;
+    let b = scalar_f64(&args[1]).await?;
     let shape = parse_shape_args(&args[2..]).await?;
     Ok((a, b, shape))
 }
 
-fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
-    match value {
-        Value::Num(v) => Ok(*v),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        other => Err(unifrnd_error_with(
-            &UNIFRND_ERROR_INVALID_ARGUMENT,
-            format!("unifrnd: expected scalar parameter, got {other:?}"),
-        )),
-    }
+async fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
+    tensor::scalar_f64_from_value_async(value)
+        .await
+        .map_err(|err| {
+            unifrnd_error_with(&UNIFRND_ERROR_INVALID_ARGUMENT, format!("unifrnd: {err}"))
+        })?
+        .ok_or_else(|| {
+            unifrnd_error_with(
+                &UNIFRND_ERROR_INVALID_ARGUMENT,
+                format!("unifrnd: expected scalar parameter, got {value:?}"),
+            )
+        })
 }
 
 async fn parse_shape_args(rest: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
@@ -267,6 +378,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::random;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     struct CpuOnlyProvider;
 
@@ -310,6 +422,10 @@ mod tests {
         )
     }
 
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
+    }
+
     #[test]
     fn unifrnd_scalar_deterministic() {
         let _guard = random::test_guard();
@@ -340,7 +456,10 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 4]);
-                assert!(t.data.iter().all(|&v| (0.0..10.0).contains(&v)));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&v| (0.0..10.0).contains(&v)));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -357,6 +476,68 @@ mod tests {
             Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn unifrnd_reads_typed_integer_parameters_and_size_exactly() {
+        let _guard = random::test_guard();
+        let _provider_guard = reset_cpu_path();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let a = poisoned_int_tensor(IntegerStorage::I16(vec![-2]), vec![1, 1]);
+        let b = poisoned_int_tensor(IntegerStorage::U16(vec![3]), vec![1, 1]);
+        let size = poisoned_int_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
+        let result = block_on(unifrnd_builtin(vec![
+            Value::Tensor(a),
+            Value::Tensor(b),
+            Value::Tensor(size),
+        ]))
+        .expect("unifrnd");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 3]);
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&v| (-2.0..3.0).contains(&v)));
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unifrnd_typed_integer_roles_are_gated_and_wide_bounds_must_be_exact() {
+        let _guard = random::test_lock().lock().unwrap();
+        let _provider_guard = reset_cpu_path();
+        let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
+        let bound_error = block_on(unifrnd_builtin(vec![
+            Value::Int(runmat_value::IntValue::I16(0)),
+            Value::Num(2.0),
+        ]))
+        .expect_err("typed lower bound must be gated");
+        assert_eq!(
+            bound_error.identifier(),
+            INTEGER_LOWER_BOUND_EXTENSION.error_identifier
+        );
+        let size_error = block_on(unifrnd_builtin(vec![
+            Value::Num(0.0),
+            Value::Num(2.0),
+            Value::Int(runmat_value::IntValue::U8(2)),
+        ]))
+        .expect_err("typed size must be gated");
+        assert_eq!(
+            size_error.identifier(),
+            INTEGER_SIZE_EXTENSION.error_identifier
+        );
+        drop(compatibility);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let lossy = block_on(unifrnd_builtin(vec![
+            Value::Num(0.0),
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+        ]))
+        .expect_err("lossy upper bound must reject");
+        assert!(lossy.message().contains("exactly representable"));
+        drop(extensions);
     }
 
     #[test]
@@ -394,7 +575,7 @@ mod tests {
         ];
         let result = block_on(unifrnd_builtin(args)).expect("unifrnd");
         let data = match result {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         };
         assert!(

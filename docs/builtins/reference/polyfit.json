@@ -32,6 +32,7 @@
   },
   "description": "`polyfit(x, y, n)` returns coefficients of an `n`-th degree least-squares polynomial fit. Coefficient ordering, centering/scaling outputs, and diagnostics follow MATLAB semantics.",
   "behaviors": [
+    "Typed-integer `x`, `y`, and weight arrays are independent RunMat-mode extensions and must be exactly representable in double before fitting; the integer-valued degree remains a structural control.",
     "`x` and `y` must contain the same number of finite numeric elements. They can be row vectors, column vectors, or N-D arrays; RunMat flattens them column-major (MATLAB order).",
     "The optional fourth argument provides weights: `polyfit(x, y, n, w)` minimises `||sqrt(w) .* (y - polyval(p, x))||_2`. All weights must be real, non-negative, and match the shape of `x`.",
     "`polyfit` applies centring and scaling to the independent variable for numerical stability. It returns the vector `mu = [mean(x), std(x)]`, and the polynomial fits `(x - mu(1)) / mu(2)`. Use `polyval(p, x, [], mu)` to evaluate with the same scaling.",

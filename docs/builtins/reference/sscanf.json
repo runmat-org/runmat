@@ -61,7 +61,9 @@
   ],
   "behaviors": [
     "Parse formatted values from text.",
-    "Supports repeated literal/whitespace-aware scan formats for %f/%e/%g, %d/%i/%u, %s, %c, field widths, assignment suppression, optional size truncation, and requested outputs for count, errmsg, and nextindex.",
+    "Supports repeated literal/whitespace-aware scan formats for %f/%e/%g, %d/%i/%u/%o/%x, %s, %c, field widths, assignment suppression, optional size truncation, and requested outputs for count, errmsg, and nextindex.",
+    "A format containing only %ld or %li conversions returns native int64 storage, and a format containing only %lu, %lo, or %lx conversions returns native uint64 storage. Mixed numeric formats return double.",
+    "The optional size argument accepts single, double, and all eight integer classes as a scalar or two-element vector and affects output shape without converting typed dimensions through double.",
     "String and character scan specifiers return character code values in the numeric output array."
   ],
   "examples": [

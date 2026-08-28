@@ -1,7 +1,7 @@
 //! Garbage collection behavior tests
 
-use runmat_builtins::Value;
 use runmat_gc::*;
+use runmat_value::Value;
 use std::sync::atomic::Ordering;
 
 #[test]

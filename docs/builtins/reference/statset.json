@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Options are host metadata. gpuArray option values are gathered before validation."
+    "notes": "Options are host metadata. Automatically resident admitted values gather through their owning provider after compatibility admission and before field-specific validation."
   },
   "fusion": {
     "elementwise": false,
@@ -29,7 +29,7 @@
     "unit": "builtins::stats::options::tests",
     "integration": "crates/runmat-vm/tests/stats_ml.rs"
   },
-  "description": "`statset` builds MATLAB-style statistics options structs for functions such as `kmeans`, `tsne`, `bootstrp`, `lasso`, and distribution fitting routines.",
+  "description": "`statset` creates, updates, or merges statistics options structures used by fitting, clustering, resampling, and related routines. Numeric option fields follow the documented `single`/`double` surface and parallel flags use logical values in MATLAB-compatible mode. RunMat mode additionally accepts all eight native integer classes as option values, validates them in their field-specific role, and then normalizes scalar counts or tolerances to ordinary option metadata while retaining typed vector payloads such as `DerivStep`.",
   "behaviors": [
     "`statset()` returns a struct with canonical statistics option fields initialized to empty values.",
     "`statset(statfun)` returns common defaults for recognized statistics functions. RunMat includes defaults for widely used fitting, clustering, resampling, and parallel-capable routines.",
@@ -38,7 +38,9 @@
     "Option names are case-insensitive and support unique leading prefixes, matching MATLAB-style option lookup.",
     "Recognized fields include `Display`, `MaxFunEvals`, `MaxIter`, `TolBnd`, `TolFun`, `TolTypeFun`, `TolX`, `TolTypeX`, `GradObj`, `Jacobian`, `DerivStep`, `FunValCheck`, `Robust`, `RobustWgtFun`, `WgtFun`, `Tune`, `UseParallel`, `UseSubstreams`, `Streams`, and `OutputFcn`.",
     "Numeric tolerance fields must be finite positive scalars, iteration fields must be positive integers, and enum fields such as `Display`, `TolTypeFun`, and `FunValCheck` are validated.",
-    "Callback, stream, and robust-weight payload fields preserve function handles and metadata values so consuming builtins can interpret them."
+    "Callback, stream, and robust-weight payload fields preserve function handles and metadata values so consuming builtins can interpret them.",
+    "Native integer option values are a named RunMat extension. MATLAB-compatible mode rejects them before recursive gather; invalid integer values in non-option roles still receive the ordinary argument error rather than being misclassified as an extension.",
+    "Integer iteration counts are decoded exactly before range checks, logical-style fields normalize zero/nonzero values to logical in RunMat mode, and integer `DerivStep` arrays retain authoritative typed storage."
   ],
   "examples": [
     {

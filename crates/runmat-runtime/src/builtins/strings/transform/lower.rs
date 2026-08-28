@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -103,6 +104,12 @@ pub const LOWER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &LOWER_ERRORS,
 };
 
+pub const LOWER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "lower accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access.",
+};
+
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -130,9 +137,13 @@ fn lower_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     accel = "sink",
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::transform::lower::LOWER_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::lower::LOWER_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::lower"
 )]
 async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
+    if crate::dispatcher::value_contains_gpu(&value) {
+        return Err(lower_error(&LOWER_ERROR_INVALID_INPUT));
+    }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text))),
@@ -156,9 +167,19 @@ fn lower_string_array(array: StringArray) -> BuiltinResult<Value> {
 }
 
 fn lower_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     if rows == 0 || cols == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut lowered_rows = Vec::with_capacity(rows);

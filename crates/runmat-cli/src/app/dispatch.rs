@@ -2,7 +2,9 @@ use anyhow::Result;
 use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
-use crate::commands::{accel, benchmark, check, config, gc, repl, script, version};
+use crate::commands::{
+    accel, batch, benchmark, check, compile, config, gc, job, package, repl, script, test, version,
+};
 use crate::remote;
 
 pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
@@ -28,7 +30,7 @@ pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
         (None, Some(script_path)) => {
             script::execute_script(script_path, emit_bytecode, cli, config).await
         }
-        (None, None) => repl::execute_repl(config).await,
+        (None, None) => repl::execute_repl(config, cli).await,
         (Some(_), Some(_)) => {
             log::error!("Cannot specify both command and script file");
             std::process::exit(1);
@@ -41,7 +43,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
         Commands::Repl { verbose } => {
             let mut repl_config = config.clone();
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
-            repl::execute_repl(&repl_config).await
+            repl::execute_repl(&repl_config, cli).await
         }
         Commands::Run { file, json, args } => {
             script::execute_script_with_args(
@@ -51,6 +53,34 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
                 cli,
                 config,
                 json,
+            )
+            .await
+        }
+        Commands::Compile {
+            file,
+            output,
+            optimization,
+            policy,
+            explain_link,
+            link_plan_json,
+            linker,
+            keep_temps,
+            force,
+        } => {
+            compile::execute(
+                compile::CompileRequest {
+                    file,
+                    output,
+                    optimization,
+                    policy,
+                    explain_link,
+                    link_plan_json,
+                    linker,
+                    keep_temps,
+                    force,
+                },
+                cli,
+                config,
             )
             .await
         }
@@ -78,7 +108,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             file,
             iterations,
             jit,
-        } => benchmark::execute_benchmark(file, iterations, jit, config).await,
+        } => benchmark::execute_benchmark(file, iterations, jit, cli, config).await,
         Commands::Config { config_command } => {
             config::execute_config_command(config_command, config).await
         }
@@ -98,6 +128,13 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             remote::execute_project_command(project_command).await
         }
         Commands::Fs { fs_command } => remote::execute_fs_command(fs_command).await,
+        Commands::Package { package_command } => package::execute(package_command, cli).await,
+        Commands::Test(args) => test::execute(*args, cli, config).await,
+        Commands::Batch { batch_command } => batch::execute(batch_command).await,
+        Commands::Cluster { cluster_command } => {
+            remote::execute_cluster_command(cluster_command).await
+        }
+        Commands::Job { job_command } => job::execute(job_command, cli, config).await,
         Commands::Remote { remote_command } => {
             remote::execute_remote_command(remote_command, cli, config).await
         }

@@ -3,16 +3,19 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    char_row_to_string_slice, contains_resident_text_input, is_missing_string,
+};
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
@@ -136,6 +139,12 @@ pub const STRREP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRREP_ERRORS,
 };
 
+pub const STRREP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "strrep accepts text in the subject, old-pattern, and replacement roles. Numeric, integer, and provider-resident values reject before provider access and are never interpreted as character codes.",
+};
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PatternKind {
     String,
@@ -169,6 +178,7 @@ fn strrep_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     accel = "sink",
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::transform::strrep::STRREP_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::strrep::STRREP_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::strrep"
 )]
 async fn strrep_builtin(
@@ -176,6 +186,12 @@ async fn strrep_builtin(
     old_value: Value,
     new_value: Value,
 ) -> BuiltinResult<Value> {
+    if contains_resident_text_input(&str_value)
+        || contains_resident_text_input(&old_value)
+        || contains_resident_text_input(&new_value)
+    {
+        return Err(strrep_error(&STRREP_ERROR_INVALID_INPUT));
+    }
     let gathered_str = gather_if_needed_async(&str_value).await.map_err(map_flow)?;
     let gathered_old = gather_if_needed_async(&old_value).await.map_err(map_flow)?;
     let gathered_new = gather_if_needed_async(&new_value).await.map_err(map_flow)?;
@@ -244,9 +260,19 @@ fn strrep_string_array(array: StringArray, old: &str, new: &str) -> BuiltinResul
 }
 
 fn strrep_char_array(array: CharArray, old: &str, new: &str) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     if rows == 0 || cols == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut replaced_rows = Vec::with_capacity(rows);
@@ -613,12 +639,12 @@ pub(crate) mod tests {
             return;
         }
         let result = run_strrep(
-            Value::String("Turbine Engine".into()),
+            Value::String("Native Engine".into()),
             Value::String("Engine".into()),
             Value::String("JIT".into()),
         )
         .expect("strrep");
-        assert_eq!(result, Value::String("Turbine JIT".into()));
+        assert_eq!(result, Value::String("Native JIT".into()));
     }
 
     #[test]

@@ -1,13 +1,15 @@
 //! MATLAB-compatible `uiputfile` builtin.
 
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use std::path::PathBuf;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem::{SaveFileDialogRequest, SaveFileDialogSelection};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::file_dialog::{default_filters, parse_filter_spec, scalar_text, selected_path_parts};
 use crate::builtins::common::spec::{
@@ -183,6 +185,13 @@ pub const UIPUTFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &UIPUTFILE_ERRORS,
 };
 
+pub const UIPUTFILE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "uiputfile accepts textual filter, title, and default-name inputs. Its filter-index output is an integer-valued double scalar, not a native integer-class input boundary.",
+    };
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::uiputfile")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
@@ -267,15 +276,37 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(crate::builtins::io::type_resolvers::uiputfile_type),
     descriptor(crate::builtins::io::repl_fs::uiputfile::UIPUTFILE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::uiputfile::UIPUTFILE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::uiputfile"
 )]
 async fn uiputfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(value_contains_resident_numeric) {
+        return Err(invalid_argument(
+            "filter, title, and defaultName must be text; provider-resident numeric values are invalid"
+                .to_string(),
+        ));
+    }
     let gathered = gather_arguments(&args).await?;
     let options = parse_options(&gathered)?;
     let selection = runmat_filesystem::select_file_save_async(&options.request)
         .await
         .map_err(|err| host_error(err.to_string()))?;
     outputs_for_selection(selection, &options)
+}
+
+fn value_contains_resident_numeric(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(value) => value.data.iter().any(value_contains_resident_numeric),
+        Value::Struct(value) => value.fields.values().any(value_contains_resident_numeric),
+        Value::Object(value) => value
+            .properties
+            .values()
+            .any(value_contains_resident_numeric),
+        Value::Closure(value) => value.captures.iter().any(value_contains_resident_numeric),
+        Value::OutputList(values) => values.iter().any(value_contains_resident_numeric),
+        _ => false,
+    }
 }
 
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
@@ -360,8 +391,8 @@ fn selected_outputs(
 
     let selected = selected_path_parts(&selection.path, invalid_selection)?;
     Ok(vec![
-        Value::CharArray(runmat_builtins::CharArray::new_row(&selected.file_name)),
-        Value::CharArray(runmat_builtins::CharArray::new_row(&selected.directory)),
+        Value::CharArray(runmat_value::CharArray::new_row(&selected.file_name)),
+        Value::CharArray(runmat_value::CharArray::new_row(&selected.directory)),
         Value::Num(filter_index as f64),
     ])
 }
@@ -370,8 +401,8 @@ fn selected_outputs(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use runmat_builtins::{CharArray, Tensor};
     use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
+    use runmat_value::{CharArray, Tensor};
     use std::io::{self, ErrorKind};
     use std::path::Path;
     use std::sync::{Arc, Mutex};

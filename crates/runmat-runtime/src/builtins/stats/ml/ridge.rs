@@ -2,11 +2,16 @@
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -101,6 +106,94 @@ pub const RIDGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const RIDGE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ridge-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ridge accepts typed-integer response and predictor data as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RidgeIntegerDataExtension"),
+};
+const RIDGE_INTEGER_K_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ridge-integer-k",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ridge accepts typed-integer regularization parameters as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RidgeIntegerKExtension"),
+};
+const RIDGE_INTEGER_SCALED_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ridge-integer-scaled",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ridge accepts a typed-integer scaled flag as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RidgeIntegerScaledExtension"),
+};
+pub const RIDGE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    RIDGE_INTEGER_DATA_EXTENSION,
+    RIDGE_INTEGER_K_EXTENSION,
+    RIDGE_INTEGER_SCALED_EXTENSION,
+];
+const RIDGE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double response data; typed integers require exact binary64 conversion.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double predictors; typed integers require the same checked conversion.",
+    },
+];
+const RIDGE_INTEGER_K_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed regularization parameters are a RunMat extension and enter the floating solver only after exactness and range checks.",
+    }];
+const RIDGE_INTEGER_SCALED_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "scaled",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents scaled as numeric 0 or 1 but not a typed integer class; RunMat gates that convenience form independently.",
+    }];
+pub const RIDGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ridge(integer_y, integer_X, k [, scaled])",
+        inputs: &RIDGE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The authoritative integer samples are checked before transparent gather and intentional binary64 standardization/SVD.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ridge(y, X, integer_k [, scaled])",
+        inputs: &RIDGE_INTEGER_K_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Regularization parameters are checked exactly before entering the binary64 solver.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ridge(y, X, k, integer_scaled)",
+        inputs: &RIDGE_INTEGER_SCALED_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Only exact typed values zero and one are accepted after the compatibility gate.",
+    },
+];
+
 fn ridge_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Tensor {
         shape: Some(vec![None, None]),
@@ -145,6 +238,8 @@ struct PreparedRidge {
     keywords = "ridge,regression,regularization,statistics,machine learning",
     type_resolver(ridge_type),
     descriptor(crate::builtins::stats::ml::ridge::RIDGE_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::ridge::RIDGE_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::ridge::RIDGE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::ridge"
 )]
 async fn ridge_builtin(y: Value, x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -152,6 +247,35 @@ async fn ridge_builtin(y: Value, x: Value, k: Value, rest: Vec<Value>) -> Builti
         return Err(invalid_argument(
             "ridge: accepts at most one scaled argument",
         ));
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &y,
+        &RIDGE_INTEGER_DATA_EXTENSION,
+        NAME,
+        "response",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &RIDGE_INTEGER_DATA_EXTENSION,
+        NAME,
+        "predictor",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &k,
+        &RIDGE_INTEGER_K_EXTENSION,
+        NAME,
+        "regularization parameter",
+    )
+    .await?;
+    if let Some(value) = rest.first() {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RIDGE_INTEGER_SCALED_EXTENSION,
+                NAME,
+            )?;
+        }
     }
     let y = value_to_tensor(y).await?;
     let x = value_to_tensor(x).await?;
@@ -180,7 +304,16 @@ async fn parse_scaled(value: &Value) -> BuiltinResult<bool> {
         Value::Bool(value) => return Ok(value),
         Value::Num(value) => value,
         Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) => {
+            let values = tensor::tensor_values_f64(&tensor);
+            if values.len() != 1 {
+                return Err(invalid_argument(format!(
+                    "ridge: scaled must be 0, 1, false, or true, got {:?}",
+                    Value::Tensor(tensor)
+                )));
+            }
+            values[0]
+        }
         other => {
             return Err(invalid_argument(format!(
                 "ridge: scaled must be 0, 1, false, or true, got {other:?}"
@@ -250,7 +383,7 @@ fn vector_values(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.len() > 2 || !(tensor.rows == 1 || tensor.cols == 1) {
         return Err(invalid_argument(format!("ridge: {label} must be a vector")));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn ridge_parameters(tensor: &Tensor) -> BuiltinResult<Vec<f64>> {
@@ -273,13 +406,14 @@ fn ridge_parameters(tensor: &Tensor) -> BuiltinResult<Vec<f64>> {
 fn prepare_data(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedRidge> {
     let rows = x.rows;
     let cols = x.cols;
+    let x_values = tensor::tensor_values_f64_cow(x);
     let mut clean_rows = Vec::with_capacity(rows);
     for row in 0..rows {
         let y_value = y[row];
         let mut has_nan = y_value.is_nan();
         let mut has_nonfinite = y_value.is_infinite();
         for col in 0..cols {
-            let value = x_value(x, row, col);
+            let value = x_value(&x_values, rows, row, col);
             has_nan |= value.is_nan();
             has_nonfinite |= value.is_infinite();
         }
@@ -303,7 +437,7 @@ fn prepare_data(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedRidge> {
     for &row in &clean_rows {
         y_mean += y[row];
         for (col, mean) in x_means.iter_mut().enumerate().take(cols) {
-            *mean += x_value(x, row, col);
+            *mean += x_value(&x_values, rows, row, col);
         }
     }
     y_mean /= n as f64;
@@ -313,7 +447,7 @@ fn prepare_data(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedRidge> {
     let mut x_stds = vec![0.0; cols];
     for &row in &clean_rows {
         for (col, std) in x_stds.iter_mut().enumerate().take(cols) {
-            let diff = x_value(x, row, col) - x_means[col];
+            let diff = x_value(&x_values, rows, row, col) - x_means[col];
             *std += diff * diff;
         }
     }
@@ -332,7 +466,7 @@ fn prepare_data(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedRidge> {
         .map_err(|_| internal_error("ridge: standardized design matrix allocation failed"))?;
     for col in 0..cols {
         for &row in &clean_rows {
-            z_data.push((x_value(x, row, col) - x_means[col]) / x_stds[col]);
+            z_data.push((x_value(&x_values, rows, row, col) - x_means[col]) / x_stds[col]);
         }
     }
     let y_centered = clean_rows
@@ -381,17 +515,28 @@ fn solve_ridge(data: &PreparedRidge, lambda: f64) -> BuiltinResult<DVector<f64>>
     Ok(beta)
 }
 
-fn x_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor.data[col * tensor.rows + row]
+fn x_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
+    values[col * rows + row]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(
+        storage: IntegerStorage,
+        rows: usize,
+        cols: usize,
+        _poison: f64,
+    ) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn tensor_out(value: Value) -> Tensor {
@@ -408,8 +553,22 @@ mod tests {
         let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
         let out = tensor_out(out);
         assert_eq!(out.shape, vec![2, 1]);
-        assert!((out.data[0] - 1.0).abs() < 1.0e-10);
-        assert!((out.data[1] - 2.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn ridge_accepts_typed_integer_response_design_and_k() {
+        let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+        let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, f64::NAN);
+        let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1, f64::NAN);
+        let k = poisoned_int_tensor(IntegerStorage::U8(vec![0, 1]), 1, 2, f64::NAN);
+        let scaled = poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1, 1.0);
+        let out = block_on(ridge_builtin(y, x, k, vec![scaled])).unwrap();
+        let out = tensor_out(out);
+        assert_eq!(out.shape, vec![2, 2]);
+        assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -425,8 +584,8 @@ mod tests {
         .unwrap();
         let out = tensor_out(out);
         assert_eq!(out.shape, vec![1, 2]);
-        assert!(out.data[0] > out.data[1]);
-        assert!((out.data[0] - 2.581_988_897).abs() < 1.0e-8);
+        assert!(out.materialize_f64()[0] > out.materialize_f64()[1]);
+        assert!((out.materialize_f64()[0] - 2.581_988_897).abs() < 1.0e-8);
     }
 
     #[test]
@@ -435,8 +594,8 @@ mod tests {
         let x = tensor(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
         let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
         let out = tensor_out(out);
-        assert!((out.data[0] - 1.0).abs() < 1.0e-10);
-        assert!((out.data[1] - 2.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -460,8 +619,8 @@ mod tests {
         let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
         let out = tensor_out(out);
         assert_eq!(out.shape, vec![3, 1]);
-        assert!(out.data[0].abs() < 1.0e-10);
-        assert!((out.data[1] - 1.0).abs() < 1.0e-10);
-        assert!((out.data[2] - 0.5).abs() < 1.0e-10);
+        assert!(out.materialize_f64()[0].abs() < 1.0e-10);
+        assert!((out.materialize_f64()[1] - 1.0).abs() < 1.0e-10);
+        assert!((out.materialize_f64()[2] - 0.5).abs() < 1.0e-10);
     }
 }

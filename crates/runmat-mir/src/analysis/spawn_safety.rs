@@ -3,7 +3,8 @@ use crate::{
     MirIndexComponent, MirIndexing, MirLocal, MirLocalId, MirLocalKind, MirOperand, MirPlace,
     MirRvalue, MirStmtKind, MirTerminatorKind, SpawnBoundary,
 };
-use runmat_hir::{BindingId, FunctionId, Span, SpawnSafetyFact, SpawnSafetyReason};
+use runmat_hir::{BindingId, FunctionId, Span};
+use runmat_types::{SpawnSafetyFact, SpawnSafetyReason};
 use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +56,33 @@ fn analyze_capture_facts(body: &MirBody) -> CaptureFacts {
                 scan_rvalue(body, iterable, &mut reads_captures);
                 scan_local_write(body, *binding, &mut writes_captures);
             }
+            MirTerminatorKind::ParFor {
+                binding,
+                iterable,
+                maximum_workers,
+                ..
+            } => {
+                scan_rvalue(body, iterable, &mut reads_captures);
+                if let Some(workers) = maximum_workers.as_deref() {
+                    scan_rvalue(body, workers, &mut reads_captures);
+                }
+                scan_local_write(body, *binding, &mut writes_captures);
+            }
+            MirTerminatorKind::Spmd { header, .. } => match header.as_ref() {
+                crate::parallel::MirSpmdHeader::Default => {}
+                crate::parallel::MirSpmdHeader::One(value) => {
+                    scan_rvalue(body, value, &mut reads_captures);
+                }
+                crate::parallel::MirSpmdHeader::Two(first, second) => {
+                    scan_rvalue(body, first, &mut reads_captures);
+                    scan_rvalue(body, second, &mut reads_captures);
+                }
+                crate::parallel::MirSpmdHeader::Three(first, second, third) => {
+                    scan_rvalue(body, first, &mut reads_captures);
+                    scan_rvalue(body, second, &mut reads_captures);
+                    scan_rvalue(body, third, &mut reads_captures);
+                }
+            },
             MirTerminatorKind::Return(return_outputs) => {
                 for output in return_outputs {
                     scan_operand(body, output, &mut reads_captures);
@@ -151,6 +179,24 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
         MirRvalue::Spawn(future) => {
             scan_operand(body, future, reads_captures);
         }
+        MirRvalue::Distributed(operation) => {
+            if let crate::parallel::MirDistributedOp::Create { input, .. } = operation {
+                scan_operand(body, input, reads_captures);
+            }
+        }
+        MirRvalue::Collective(operation) => match operation {
+            crate::parallel::MirCollectiveOp::Broadcast { input, .. }
+            | crate::parallel::MirCollectiveOp::Gather { input, .. }
+            | crate::parallel::MirCollectiveOp::Scatter { input, .. }
+            | crate::parallel::MirCollectiveOp::AllGather { input, .. }
+            | crate::parallel::MirCollectiveOp::Reduce { input, .. }
+            | crate::parallel::MirCollectiveOp::AllReduce { input, .. }
+            | crate::parallel::MirCollectiveOp::Send { input, .. } => {
+                scan_operand(body, input, reads_captures);
+            }
+            crate::parallel::MirCollectiveOp::Barrier { .. }
+            | crate::parallel::MirCollectiveOp::Receive { .. } => {}
+        },
     }
 }
 
@@ -342,7 +388,7 @@ pub(super) fn diagnose_spawn_safety(boundaries: &[SpawnBoundary]) -> Vec<MirDiag
         .iter()
         .filter_map(|boundary| match &boundary.safety {
             SpawnSafetyFact::NotSpawnSafe { reason } => {
-                Some(spawn_safety_diagnostic(reason.clone(), boundary.span))
+                Some(spawn_safety_diagnostic(*reason, boundary.span))
             }
             SpawnSafetyFact::SpawnSafe | SpawnSafetyFact::RequiresIsolation => None,
         })
@@ -433,6 +479,16 @@ fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
             .chain(std::iter::once(*otherwise))
             .collect(),
         MirTerminatorKind::For {
+            body_block,
+            exit_block,
+            ..
+        } => vec![*body_block, *exit_block],
+        MirTerminatorKind::ParFor {
+            body_block,
+            exit_block,
+            ..
+        }
+        | MirTerminatorKind::Spmd {
             body_block,
             exit_block,
             ..

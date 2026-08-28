@@ -1,4 +1,5 @@
 //! MATLAB-compatible dynamic property support for handle objects.
+use runmat_types::MemberAccess;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -6,16 +7,31 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value};
 use std::collections::HashMap;
 
 pub const DYNAMICPROPS_CLASS: &str = "dynamicprops";
 pub const DYNAMIC_PROPERTY_CLASS: &str = "matlab.metadata.DynamicProperty";
 pub const STATIC_PROPERTY_METADATA_CLASS: &str = "matlab.metadata.Property";
+
+pub const FINDPROP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "findprop accepts a scalar object or handle object and a textual property name. All eight integer classes, logical and complex values, and resident numeric handles are invalid targets and are never converted into object metadata.",
+    };
+
+pub const DYNAMIC_PROPERTY_DELETE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "matlab.metadata.DynamicProperty.delete accepts only a dynamic-property metadata handle. Integer scalars, arrays, nested payloads, and resident numeric handles have no data, control, output-class, or backend role and reject without conversion or provider access.",
+    };
 
 const TARGET_FIELD: &str = "__runmat_dynamic_property_target__";
 const VALID_FIELD: &str = "__runmat_dynamic_property_valid__";
@@ -172,6 +188,12 @@ pub const ADDPROP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DYNAMIC_ERRORS,
 };
 
+pub const ADDPROP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "addprop accepts only a dynamicprops object receiver and a character-vector or string-scalar property name, then returns metadata. It does not accept an initial property value; values assigned through later object-property operations have their own class semantics.",
+};
+
 pub const FINDPROP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FINDPROP_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -249,18 +271,15 @@ fn metadata_bool(value: &Value, field: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::Num(number) if *number == 0.0 || *number == 1.0 => Ok(*number != 0.0),
-        Value::Int(int) => {
-            let value = int.to_i64();
-            if value == 0 || value == 1 {
-                Ok(value != 0)
-            } else {
-                Err(dynamic_error(
-                    DYNAMIC_PROPERTY_CLASS,
-                    &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
-                    format!("dynamic property metadata field '{field}' requires logical scalar"),
-                ))
-            }
-        }
+        Value::Int(int) => match int.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(dynamic_error(
+                DYNAMIC_PROPERTY_CLASS,
+                &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
+                format!("dynamic property metadata field '{field}' requires logical scalar"),
+            )),
+        },
         _ => Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -269,11 +288,11 @@ fn metadata_bool(value: &Value, field: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn metadata_access(value: &Value, field: &str) -> BuiltinResult<Access> {
+fn metadata_access(value: &Value, field: &str) -> BuiltinResult<MemberAccess> {
     match metadata_string(value, field)?.to_ascii_lowercase().as_str() {
-        "public" => Ok(Access::Public),
-        "private" => Ok(Access::Private),
-        "protected" => Ok(Access::Protected),
+        "public" => Ok(MemberAccess::Public),
+        "private" => Ok(MemberAccess::Private),
+        "protected" => Ok(MemberAccess::Protected),
         other => Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -282,11 +301,11 @@ fn metadata_access(value: &Value, field: &str) -> BuiltinResult<Access> {
     }
 }
 
-fn access_value(access: &Access) -> Value {
+fn access_value(access: &MemberAccess) -> Value {
     let text = match access {
-        Access::Public => "public",
-        Access::Private => "private",
-        Access::Protected => "protected",
+        MemberAccess::Public => "public",
+        MemberAccess::Private => "private",
+        MemberAccess::Protected => "protected",
     };
     Value::String(text.to_string())
 }
@@ -346,11 +365,11 @@ fn dynamic_def_to_metadata_object(
 
 fn dynamic_def_from_class_property(
     class_name: &str,
-    prop: &runmat_builtins::PropertyDef,
+    prop: &crate::class_registry::RuntimeProperty,
 ) -> DynamicPropertyDef {
     let mut def = DynamicPropertyDef::new(prop.name.clone(), class_name.to_string());
-    def.get_access = prop.get_access.clone();
-    def.set_access = prop.set_access.clone();
+    def.get_access = prop.get_access;
+    def.set_access = prop.set_access;
     def.dependent = prop.is_dependent;
     def
 }
@@ -378,7 +397,7 @@ fn dynamic_property_handle_from_gc(target: runmat_gc::GcHandle) -> Value {
 }
 
 fn require_dynamicprops_target(class_name: &str) -> BuiltinResult<()> {
-    if runmat_builtins::is_class_or_subclass(class_name, DYNAMICPROPS_CLASS) {
+    if crate::class_registry::is_class_or_subclass(class_name, DYNAMICPROPS_CLASS) {
         Ok(())
     } else {
         Err(dynamic_error(
@@ -452,7 +471,7 @@ pub fn dynamic_property_assign(
     let Some(def) = obj.dynamic_property(name) else {
         return Ok(false);
     };
-    if def.set_access == Access::Private {
+    if def.set_access == MemberAccess::Private {
         return Err(dynamic_error(
             "setfield",
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -467,7 +486,7 @@ pub fn dynamic_property_read(obj: &ObjectInstance, name: &str) -> BuiltinResult<
     let Some((def, value)) = dynamic_property_get(obj, name) else {
         return Ok(None);
     };
-    if def.get_access == Access::Private {
+    if def.get_access == MemberAccess::Private {
         return Err(dynamic_error(
             "getfield",
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -588,6 +607,7 @@ fn remove_dynamic_property(target: &HandleRef, name: &str) -> BuiltinResult<()> 
     keywords = "dynamicprops,addprop,dynamic property,handle object,meta.DynamicProperty",
     sink = true,
     descriptor(crate::builtins::introspection::dynamicprops::ADDPROP_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::dynamicprops::ADDPROP_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::dynamicprops"
 )]
 async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value> {
@@ -616,7 +636,7 @@ async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<
             ));
         };
         require_dynamicprops_target(&obj.class_name)?;
-        if runmat_builtins::lookup_property(&obj.class_name, &property_name).is_some()
+        if crate::class_registry::lookup_property(&obj.class_name, &property_name).is_some()
             || obj.has_dynamic_property(&property_name)
         {
             return Err(dynamic_error(
@@ -664,6 +684,7 @@ async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<
     category = "introspection",
     summary = "Find class-defined or dynamic property metadata on an object.",
     keywords = "dynamicprops,findprop,property metadata,meta.property,meta.DynamicProperty",
+    integer_audit(crate::builtins::introspection::dynamicprops::FINDPROP_INTEGER_AUDIT),
     descriptor(crate::builtins::introspection::dynamicprops::FINDPROP_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::dynamicprops"
 )]
@@ -702,7 +723,7 @@ fn findprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value
                 )?));
             }
             if let Some((prop, owner)) =
-                runmat_builtins::lookup_property(&obj.class_name, &property_name)
+                crate::class_registry::lookup_property(&obj.class_name, &property_name)
             {
                 let def = dynamic_def_from_class_property(&owner, &prop);
                 return Ok(Value::Object(dynamic_def_to_metadata_object(
@@ -722,7 +743,7 @@ fn findprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value
                 )));
             }
             if let Some((prop, owner)) =
-                runmat_builtins::lookup_property(&obj.class_name, &property_name)
+                crate::class_registry::lookup_property(&obj.class_name, &property_name)
             {
                 let def = dynamic_def_from_class_property(&owner, &prop);
                 return Ok(Value::Object(dynamic_def_to_metadata_object(
@@ -749,6 +770,9 @@ fn findprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_DELETE_DESCRIPTOR),
+    integer_audit(
+        crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_DELETE_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::introspection::dynamicprops"
 )]
 async fn dynamic_property_delete_builtin(prop: Value) -> BuiltinResult<Value> {
@@ -828,6 +852,35 @@ pub fn dynamic_property_metadata_struct(def: &DynamicPropertyDef) -> Value {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntValue;
+
+    #[test]
+    fn addprop_descriptor_is_integer_inapplicable() {
+        assert_eq!(
+            ADDPROP_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(ADDPROP_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
+    #[test]
+    fn dynamic_property_delete_is_integer_inapplicable() {
+        assert_eq!(
+            DYNAMIC_PROPERTY_DELETE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(DYNAMIC_PROPERTY_DELETE_INTEGER_AUDIT
+            .canonical_builtin
+            .is_none());
+    }
+
+    #[test]
+    fn metadata_bool_accepts_only_exact_typed_logical_values() {
+        assert!(metadata_bool(&Value::Int(IntValue::U64(1)), "Hidden").expect("logical one"));
+        assert!(!metadata_bool(&Value::Int(IntValue::U64(0)), "Hidden").expect("logical zero"));
+        assert!(metadata_bool(&Value::Int(IntValue::U64(u64::MAX)), "Hidden").is_err());
+        assert!(metadata_bool(&Value::Int(IntValue::I64(-1)), "Hidden").is_err());
+    }
 
     fn target_handle(class_name: &str) -> (Value, runmat_gc::ExplicitRoot) {
         let obj = ObjectInstance::new(class_name.to_string());
@@ -841,7 +894,7 @@ mod tests {
     }
 
     fn dynamic_target_handle(class_name: &str) -> (Value, runmat_gc::ExplicitRoot) {
-        runmat_builtins::register_class(runmat_builtins::ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: class_name.to_string(),
             parent: Some(DYNAMICPROPS_CLASS.to_string()),
             properties: HashMap::new(),
@@ -892,6 +945,7 @@ mod tests {
 
     #[test]
     fn dynamic_property_supports_value_access_and_metadata_mutation() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         {
             let (target, _target_root) = dynamic_target_handle("DynTarget");
             let prop =
@@ -941,7 +995,7 @@ mod tests {
     #[test]
     fn addprop_rejects_handle_classes_without_dynamicprops_parent() {
         {
-            runmat_builtins::register_class(runmat_builtins::ClassDef {
+            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
                 name: "PlainHandleForDynamicProps".to_string(),
                 parent: Some("handle".to_string()),
                 properties: HashMap::new(),
@@ -955,6 +1009,16 @@ mod tests {
                 "unexpected error: {err}"
             );
         }
+    }
+
+    #[test]
+    fn addprop_rejects_integer_receiver_instead_of_treating_it_as_property_data() {
+        let err = block_on(addprop_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            "gain".to_string(),
+        ))
+        .expect_err("integer is not a dynamicprops receiver");
+        assert_eq!(err.identifier(), Some("RunMat:dynamicprops:InvalidTarget"));
     }
 
     #[test]
@@ -982,5 +1046,36 @@ mod tests {
             };
             assert!(!metadata_obj.properties.contains_key(TARGET_FIELD));
         }
+    }
+
+    #[test]
+    fn findprop_integer_audit_rejects_every_integer_target_class() {
+        assert_eq!(
+            FINDPROP_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        for target in [
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
+        ] {
+            let error = findprop_builtin(target, "Name".into())
+                .expect_err("integer is not an object target");
+            assert_eq!(error.identifier(), DYNAMIC_ERROR_INVALID_TARGET.identifier);
+        }
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        let error = findprop_builtin(resident, "Name".into())
+            .expect_err("resident numeric value is not an object target");
+        assert_eq!(error.identifier(), DYNAMIC_ERROR_INVALID_TARGET.identifier);
     }
 }

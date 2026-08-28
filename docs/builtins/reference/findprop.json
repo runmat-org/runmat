@@ -30,6 +30,7 @@
   "description": "`prop = findprop(obj, name)` returns property metadata for class-defined or dynamic properties. Dynamic properties on handle objects return a `matlab.metadata.DynamicProperty` handle; class-defined properties return a `matlab.metadata.Property` object. Missing properties return an empty double.",
   "behaviors": [
     "The target must be an object or valid handle object.",
+    "Numeric, logical, complex, and provider-resident values are not object targets; all integer classes reject without conversion into metadata.",
     "Dynamic property lookup on handle objects returns a metadata handle that can later be passed to `delete`.",
     "Class-defined property lookup returns metadata fields including `Name`, `DefiningClass`, `GetAccess`, `SetAccess`, and `Dependent`.",
     "Missing properties return `[]`.",

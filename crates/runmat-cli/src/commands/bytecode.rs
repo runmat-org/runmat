@@ -16,8 +16,15 @@ pub fn emit_bytecode(
     source_name: Option<&str>,
 ) -> Result<String> {
     let source_catalog = discover_source_catalog(source_name);
+    emit_bytecode_with_catalog(source, config, source_catalog.as_ref())
+}
+
+pub fn emit_bytecode_with_catalog(
+    source: &str,
+    config: &RunMatRuntimeConfig,
+    source_catalog: Option<&runmat_package::DiscoveredSourceSymbols>,
+) -> Result<String> {
     let known_project_symbols = source_catalog
-        .as_ref()
         .map(|catalog| catalog.symbols.clone())
         .unwrap_or_default();
     let lowering_context =
@@ -26,7 +33,7 @@ pub fn emit_bytecode(
         source,
         parser_compat(config.language.compat),
         &lowering_context,
-        source_catalog.as_ref(),
+        source_catalog,
     );
     let bytecode = analysis.bytecode.ok_or_else(|| {
         let detail = analysis
@@ -41,12 +48,12 @@ pub fn emit_bytecode(
 
 fn discover_source_catalog(
     source_name: Option<&str>,
-) -> Option<runmat_config::project::DiscoveredSourceSymbols> {
+) -> Option<runmat_package::DiscoveredSourceSymbols> {
     let source_name = source_name?;
     let Ok(cwd) = std::env::current_dir() else {
         return None;
     };
-    runmat_config::project::discover_source_symbols_from_source_name(source_name, &cwd)
+    runmat_package::discover_source_symbols_from_source_name(source_name, &cwd)
         .ok()
         .flatten()
 }

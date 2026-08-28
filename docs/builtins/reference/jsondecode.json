@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "jsondecode gathers GPU-resident text operands to host memory before parsing and executes entirely on the CPU."
+    "notes": "jsondecode accepts host character vectors and string scalars only. Resident numeric handles reject from metadata before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -139,8 +139,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/json/jsondecode.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsondecode.rs"
   },
-  "gpu_residency": "You rarely need to manage residency manually. The auto-offload planner gathers GPU-resident text for `jsondecode` automatically. For MATLAB compatibility, you can still call `gather` yourself, but it is not required, and fusion graphs terminate at `jsondecode` so downstream results always live on the host.",
+  "gpu_residency": "`jsondecode` is a host-text parser. RunMat does not represent text in numeric GPU buffers, so resident numeric handles are invalid input and reject before provider access; ordinary host text always produces host values.",
   "gpu_behavior": [
-    "`jsondecode` does not execute on the GPU. Because the builtin registers as `accel = \"sink\"` and uses `ResidencyPolicy::GatherImmediately`, any `gpuArray` input is synchronously gathered to host memory through the active provider before parsing. Providers do not expose specialised hooks for JSON parsing, so all work stays on the CPU."
+    "`jsondecode` does not execute on the GPU and has no provider hook. A numeric `gpuArray` is not JSON text and is rejected without downloading its payload."
   ]
 }

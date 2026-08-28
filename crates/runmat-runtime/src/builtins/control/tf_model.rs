@@ -1,14 +1,11 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
+use runmat_types::MemberAccess;
 
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use nalgebra::DMatrix;
 use num_complex::Complex64;
-use runmat_builtins::{
-    Access, CharArray, ClassDef, ComplexTensor, MethodDef, ObjectInstance, PropertyDef, Tensor,
-    Value,
-};
+use runmat_value::{CharArray, ComplexTensor, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
@@ -19,9 +16,8 @@ pub const DEFAULT_CONTINUOUS_VARIABLE: &str = "s";
 pub const DEFAULT_DISCRETE_VARIABLE: &str = "z";
 pub const EPS: f64 = 1.0e-12;
 
-thread_local! {
-    static TF_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
-}
+static TF_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(TF_CLASS);
 
 #[derive(Clone, Debug)]
 pub struct TfModel {
@@ -69,10 +65,7 @@ pub fn control_error(
 }
 
 pub fn ensure_tf_class_registered() {
-    TF_CLASS_REGISTERED.with(|registered| {
-        if registered.get() {
-            return;
-        }
+    TF_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in [
             "Numerator",
@@ -84,13 +77,13 @@ pub fn ensure_tf_class_registered() {
         ] {
             properties.insert(
                 name.to_string(),
-                PropertyDef {
+                crate::class_registry::RuntimeProperty {
                     name: name.to_string(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
-                    get_access: Access::Public,
-                    set_access: Access::Public,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Public,
                     default_value: None,
                 },
             );
@@ -103,25 +96,24 @@ pub fn ensure_tf_class_registered() {
         ] {
             methods.insert(
                 method_name.to_string(),
-                MethodDef {
+                crate::class_registry::RuntimeMethod {
                     name: method_name.to_string(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
-                    access: Access::Public,
+                    access: MemberAccess::Public,
                     function_name: format!("{TF_CLASS}.{method_name}"),
                     implicit_class_argument: None,
                 },
             );
         }
 
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: TF_CLASS.to_string(),
             parent: None,
             properties,
             methods,
         });
-        registered.set(true);
     });
 }
 
@@ -426,7 +418,12 @@ impl TfModel {
             if num.norm() <= EPS {
                 Ok(Complex64::new(f64::NAN, f64::NAN))
             } else {
-                Ok(num / Complex64::new(0.0, 0.0))
+                // Direct division by a zero complex denominator produces a spurious NaN
+                // component. Factor the pole so the infinite result retains the local
+                // signed/complex-axis direction of the positive-real approach to the DC point.
+                let local_denominator =
+                    first_nonzero_local_polynomial_coefficient(&self.denominator, point);
+                Ok(complex_infinity_in_direction(num / local_denominator))
             }
         } else {
             Ok(num / den)
@@ -550,19 +547,14 @@ pub async fn parse_coefficients(
     let coeffs = match gathered {
         Value::Tensor(tensor) => {
             ensure_vector_shape(label, &tensor.shape, builtin)?;
-            tensor
-                .data
+            tensor::tensor_values_f64(&tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
                 .collect()
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(label, &tensor.shape, builtin)?;
-            tensor
-                .data
-                .into_iter()
-                .map(|(re, im)| Complex64::new(re, im))
-                .collect()
+            tensor::complex_tensor_into_values_complex64(tensor)
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(|err| {
@@ -573,8 +565,7 @@ pub async fn parse_coefficients(
                 )
             })?;
             ensure_vector_shape(label, &tensor.shape, builtin)?;
-            tensor
-                .data
+            tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
                 .collect()
@@ -666,7 +657,9 @@ pub fn scalar_f64(value: &Value, context: &str, builtin: &'static str) -> Builti
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] == 0 { 0.0 } else { 1.0 })
         }
@@ -684,10 +677,11 @@ pub fn scalar_complex(value: &Value, builtin: &'static str) -> BuiltinResult<Com
         Value::Int(i) => Ok(Complex64::new(i.to_f64(), 0.0)),
         Value::Bool(b) => Ok(Complex64::new(if *b { 1.0 } else { 0.0 }, 0.0)),
         Value::Complex(re, im) => Ok(Complex64::new(*re, *im)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(Complex64::new(tensor.data[0], 0.0)),
-        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
-            let (re, im) = tensor.data[0];
-            Ok(Complex64::new(re, im))
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(Complex64::new(tensor::tensor_value_f64(tensor, 0), 0.0))
+        }
+        Value::ComplexTensor(tensor) if tensor::is_scalar_complex_tensor(tensor) => {
+            Ok(tensor::complex_tensor_value_complex64(tensor, 0))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => Ok(Complex64::new(
             if logical.data[0] == 0 { 0.0 } else { 1.0 },
@@ -723,7 +717,7 @@ pub fn validate_variable_domain(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     let discrete_variable = is_discrete_variable(variable);
-    if discrete_variable && sample_time <= 0.0 {
+    if discrete_variable && sample_time != -1.0 && sample_time <= 0.0 {
         return Err(control_error(
             builtin,
             "RunMat:tf:InvalidSampleTime",
@@ -732,7 +726,7 @@ pub fn validate_variable_domain(
             ),
         ));
     }
-    if !discrete_variable && sample_time > 0.0 {
+    if !discrete_variable && sample_time != 0.0 {
         return Err(control_error(
             builtin,
             "RunMat:tf:InvalidVariable",
@@ -743,11 +737,11 @@ pub fn validate_variable_domain(
 }
 
 pub fn validate_sample_time(sample_time: f64, builtin: &'static str) -> BuiltinResult<()> {
-    if !sample_time.is_finite() || sample_time < 0.0 {
+    if !sample_time.is_finite() || (sample_time < 0.0 && sample_time != -1.0) {
         return Err(control_error(
             builtin,
             invalid_sample_time_identifier(builtin),
-            format!("{builtin}: sample time must be a finite non-negative scalar"),
+            format!("{builtin}: sample time must be -1 or a finite non-negative scalar"),
         ));
     }
     Ok(())
@@ -824,7 +818,13 @@ fn ss_state_matrix_property(
         )
     })?;
     let tensor = match value {
-        Value::Tensor(tensor) => tensor.clone(),
+        Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor.clone()).map_err(|err| {
+            control_error(
+                builtin,
+                internal_identifier(builtin),
+                format!("{builtin}: failed to normalize ss {name}: {err}"),
+            )
+        })?,
         Value::Num(n) => Tensor::new(vec![*n], vec![1, 1]).map_err(|err| {
             control_error(
                 builtin,
@@ -857,7 +857,8 @@ fn ss_state_matrix_property(
             ),
         ));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor::tensor_values_f64_cow(&tensor);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(control_error(
             builtin,
             unsupported_model_identifier(builtin),
@@ -867,7 +868,7 @@ fn ss_state_matrix_property(
     let mut matrix = DMatrix::<Complex64>::zeros(tensor.rows, tensor.cols);
     for col in 0..tensor.cols {
         for row in 0..tensor.rows {
-            matrix[(row, col)] = Complex64::new(tensor.data[row + col * tensor.rows], 0.0);
+            matrix[(row, col)] = Complex64::new(values[row + col * tensor.rows], 0.0);
         }
     }
     Ok(matrix)
@@ -916,6 +917,52 @@ pub fn poly_eval(coeffs: &[Complex64], x: Complex64) -> Complex64 {
         .fold(Complex64::new(0.0, 0.0), |acc, coeff| acc * x + *coeff)
 }
 
+fn first_nonzero_local_polynomial_coefficient(coeffs: &[Complex64], point: Complex64) -> Complex64 {
+    // Synthetic division by (x - point) removes one zero at the evaluation point per pass.
+    let mut quotient = coeffs.to_vec();
+    while quotient.len() > 1 && poly_eval(&quotient, point).norm() <= EPS {
+        let mut reduced = Vec::with_capacity(quotient.len() - 1);
+        let mut synthetic = quotient[0];
+        reduced.push(synthetic);
+        for coefficient in quotient.iter().take(quotient.len() - 1).skip(1) {
+            synthetic = *coefficient + point * synthetic;
+            reduced.push(synthetic);
+        }
+        quotient = reduced;
+    }
+    poly_eval(&quotient, point)
+}
+
+fn complex_infinity_in_direction(direction: Complex64) -> Complex64 {
+    let scale = direction.re.abs().max(direction.im.abs());
+    if scale.is_nan() {
+        return Complex64::new(f64::NAN, f64::NAN);
+    }
+    if scale.is_infinite() {
+        let component = |value: f64| {
+            if value.is_nan() {
+                f64::NAN
+            } else if value.is_infinite() {
+                f64::INFINITY.copysign(value)
+            } else {
+                0.0
+            }
+        };
+        return Complex64::new(component(direction.re), component(direction.im));
+    }
+    if scale == 0.0 {
+        return Complex64::new(f64::NAN, f64::NAN);
+    }
+    let component = |value: f64| {
+        if value.abs() <= EPS * scale {
+            0.0
+        } else {
+            f64::INFINITY.copysign(value)
+        }
+    };
+    Complex64::new(component(direction.re), component(direction.im))
+}
+
 pub fn trim_leading_real_zeros(coeffs: Vec<f64>) -> Vec<f64> {
     let first_nonzero = coeffs
         .iter()
@@ -942,19 +989,14 @@ fn coefficients_from_property(
     match value {
         Value::Tensor(tensor) => {
             ensure_vector_shape(name, &tensor.shape, builtin)?;
-            Ok(tensor
-                .data
-                .iter()
-                .map(|value| Complex64::new(*value, 0.0))
+            Ok(tensor::tensor_values_f64(tensor)
+                .into_iter()
+                .map(|value| Complex64::new(value, 0.0))
                 .collect())
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(name, &tensor.shape, builtin)?;
-            Ok(tensor
-                .data
-                .iter()
-                .map(|(re, im)| Complex64::new(*re, *im))
-                .collect())
+            Ok(tensor::complex_tensor_values_complex64(tensor))
         }
         Value::Num(n) => Ok(vec![Complex64::new(*n, 0.0)]),
         Value::Int(i) => Ok(vec![Complex64::new(i.to_f64(), 0.0)]),
@@ -1221,5 +1263,192 @@ fn internal_identifier(builtin: &str) -> &'static str {
         "pzmap" => "RunMat:pzmap:Internal",
         "isstable" => "RunMat:isstable:Internal",
         _ => "RunMat:tf:Internal",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
+
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    fn poisoned_complex_integer_tensor(
+        real: IntegerStorage,
+        imag: IntegerStorage,
+        shape: Vec<usize>,
+    ) -> Value {
+        let storage = IntegerComplexStorage::new(real, imag).expect("complex integer storage");
+        let tensor = ComplexTensor::new_integer(storage, shape).expect("complex integer tensor");
+        Value::ComplexTensor(tensor)
+    }
+
+    #[test]
+    fn dc_gain_returns_signed_infinity_for_continuous_integrators() {
+        for (numerator, denominator, expected_negative) in [
+            (
+                vec![Complex64::new(2.0, 0.0)],
+                vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+                false,
+            ),
+            (
+                vec![Complex64::new(-2.0, 0.0)],
+                vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+                true,
+            ),
+            (
+                vec![Complex64::new(2.0, 0.0)],
+                vec![Complex64::new(-1.0, 0.0), Complex64::new(0.0, 0.0)],
+                true,
+            ),
+            (
+                vec![Complex64::new(2.0, 0.0)],
+                vec![
+                    Complex64::new(1.0, 0.0),
+                    Complex64::new(0.0, 0.0),
+                    Complex64::new(0.0, 0.0),
+                ],
+                false,
+            ),
+        ] {
+            let model = TfModel::new(numerator, denominator, TfOptions::default()).unwrap();
+            let gain = model.dc_gain().unwrap();
+            assert!(gain.re.is_infinite());
+            assert_eq!(gain.re.is_sign_negative(), expected_negative);
+            assert_eq!(gain.im, 0.0);
+        }
+    }
+
+    #[test]
+    fn dc_gain_preserves_complex_axis_and_handles_discrete_integrators() {
+        let complex_model = TfModel::new(
+            vec![Complex64::new(0.0, -3.0)],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            TfOptions::default(),
+        )
+        .unwrap();
+        let complex_gain = complex_model.dc_gain().unwrap();
+        assert_eq!(complex_gain.re, 0.0);
+        assert!(complex_gain.im.is_infinite() && complex_gain.im.is_sign_negative());
+
+        let discrete_model = TfModel::new(
+            vec![Complex64::new(4.0, 0.0)],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(-1.0, 0.0)],
+            TfOptions {
+                variable: DEFAULT_DISCRETE_VARIABLE.to_string(),
+                sample_time: 0.25,
+            },
+        )
+        .unwrap();
+        let discrete_gain = discrete_model.dc_gain().unwrap();
+        assert!(discrete_gain.re.is_infinite() && discrete_gain.re.is_sign_positive());
+        assert_eq!(discrete_gain.im, 0.0);
+    }
+
+    #[test]
+    fn complex_infinity_direction_survives_overflowed_components() {
+        let finite_overflow = complex_infinity_in_direction(Complex64::new(f64::MAX, -f64::MAX));
+        assert!(finite_overflow.re.is_infinite() && finite_overflow.re.is_sign_positive());
+        assert!(finite_overflow.im.is_infinite() && finite_overflow.im.is_sign_negative());
+
+        let nonfinite =
+            complex_infinity_in_direction(Complex64::new(f64::INFINITY, -f64::INFINITY));
+        assert!(nonfinite.re.is_infinite() && nonfinite.re.is_sign_positive());
+        assert!(nonfinite.im.is_infinite() && nonfinite.im.is_sign_negative());
+
+        let axis = complex_infinity_in_direction(Complex64::new(f64::INFINITY, 1.0));
+        assert!(axis.re.is_infinite() && axis.re.is_sign_positive());
+        assert_eq!(axis.im, 0.0);
+    }
+
+    #[test]
+    fn dc_gain_keeps_exact_evaluation_point_cancellation_indeterminate() {
+        let model = TfModel::new(
+            vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            TfOptions::default(),
+        )
+        .unwrap();
+        let gain = model.dc_gain().unwrap();
+        assert!(gain.re.is_nan() && gain.im.is_nan());
+    }
+
+    #[test]
+    fn scalar_f64_reads_typed_integer_storage_exactly() {
+        let value = poisoned_integer_tensor(IntegerStorage::I16(vec![-7]), vec![1, 1]);
+        assert_eq!(scalar_f64(&value, "Ts", "tf").expect("scalar"), -7.0);
+    }
+
+    #[test]
+    fn scalar_complex_reads_typed_integer_storage_exactly() {
+        let value = poisoned_integer_tensor(IntegerStorage::U64(vec![42]), vec![1, 1]);
+        assert_eq!(
+            scalar_complex(&value, "tf").expect("scalar"),
+            Complex64::new(42.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn scalar_complex_reads_complex_typed_integer_storage_exactly() {
+        let value = poisoned_complex_integer_tensor(
+            IntegerStorage::I16(vec![3]),
+            IntegerStorage::I16(vec![-4]),
+            vec![1, 1],
+        );
+        assert_eq!(
+            scalar_complex(&value, "tf").expect("scalar"),
+            Complex64::new(3.0, -4.0)
+        );
+    }
+
+    #[test]
+    fn parse_coefficients_reads_complex_typed_integer_storage_exactly() {
+        let value = poisoned_complex_integer_tensor(
+            IntegerStorage::I16(vec![1, 3]),
+            IntegerStorage::I16(vec![2, -4]),
+            vec![1, 2],
+        );
+        assert_eq!(
+            block_on(parse_coefficients("numerator", value, "tf")).expect("coefficients"),
+            vec![Complex64::new(1.0, 2.0), Complex64::new(3.0, -4.0)]
+        );
+    }
+
+    #[test]
+    fn coefficients_from_property_reads_complex_typed_integer_storage_exactly() {
+        let mut object = ObjectInstance::new(TF_CLASS.to_string());
+        object.properties.insert(
+            "Numerator".to_string(),
+            poisoned_complex_integer_tensor(
+                IntegerStorage::I16(vec![5, 7]),
+                IntegerStorage::I16(vec![-6, 8]),
+                vec![1, 2],
+            ),
+        );
+
+        assert_eq!(
+            coefficients_from_property(&object, "Numerator", "tf").expect("coefficients"),
+            vec![Complex64::new(5.0, -6.0), Complex64::new(7.0, 8.0)]
+        );
+    }
+
+    #[test]
+    fn ss_state_matrix_property_reads_typed_integer_storage_exactly() {
+        let mut object = ObjectInstance::new(SS_CLASS.to_string());
+        object.properties.insert(
+            "A".to_string(),
+            poisoned_integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
+        );
+
+        let matrix = ss_state_matrix_property(&object, "A", "pole").expect("state matrix");
+        assert_eq!(matrix.shape(), (2, 2));
+        assert_eq!(matrix[(0, 0)], Complex64::new(1.0, 0.0));
+        assert_eq!(matrix[(1, 0)], Complex64::new(3.0, 0.0));
+        assert_eq!(matrix[(0, 1)], Complex64::new(2.0, 0.0));
+        assert_eq!(matrix[(1, 1)], Complex64::new(4.0, 0.0));
     }
 }

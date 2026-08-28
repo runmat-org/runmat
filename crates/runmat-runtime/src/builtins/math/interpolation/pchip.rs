@@ -1,11 +1,16 @@
 //! MATLAB-compatible `pchip` builtin for shape-preserving cubic interpolation.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -123,6 +128,89 @@ pub const PCHIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &PCHIP_ERRORS,
 };
 
+const PCHIP_INTEGER_SAMPLE_LOCATIONS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pchip-integer-sample-locations",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pchip accepts typed-integer sample locations as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PchipIntegerSampleLocationsExtension"),
+    };
+const PCHIP_INTEGER_SAMPLE_VALUES_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pchip-integer-sample-values",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pchip accepts typed-integer sample values as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PchipIntegerSampleValuesExtension"),
+    };
+const PCHIP_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pchip-integer-query-points",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pchip accepts typed-integer query points as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PchipIntegerQueryPointsExtension"),
+};
+pub const PCHIP_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    PCHIP_INTEGER_SAMPLE_LOCATIONS_EXTENSION,
+    PCHIP_INTEGER_SAMPLE_VALUES_EXTENSION,
+    PCHIP_INTEGER_QUERY_EXTENSION,
+];
+
+const PCHIP_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double sample locations. RunMat admits typed integers only when each value is exactly representable at the binary64 interpolation boundary.",
+    }];
+const PCHIP_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double sample values. RunMat admits typed integers only through the explicit floating interpolation boundary.",
+    }];
+const PCHIP_INTEGER_XQ_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Xq",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target documents single and double query points. RunMat admits typed integers only when exact binary64 conversion is possible.",
+    }];
+pub const PCHIP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pp = pchip(integer_X, Y) or Vq = pchip(integer_X, Y, Xq)",
+        inputs: &PCHIP_INTEGER_X_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed sample locations are independently gated before gather and cross once into the floating PCHIP coefficient domain.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pp = pchip(X, integer_Y) or Vq = pchip(X, integer_Y, Xq)",
+        inputs: &PCHIP_INTEGER_Y_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed sample values are independently gated before gather and produce floating coefficients or interpolated values.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = pchip(X, Y, integer_Xq)",
+        inputs: &PCHIP_INTEGER_XQ_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed query points are independently gated and converted only after exactness is proved.",
+    },
+];
+
 fn pchip_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -195,9 +283,16 @@ fn pchip_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     sink = true,
     type_resolver(pchip_type),
     descriptor(crate::builtins::math::interpolation::pchip::PCHIP_DESCRIPTOR),
+    extensions(crate::builtins::math::interpolation::pchip::PCHIP_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::interpolation::pchip::PCHIP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::interpolation::pchip"
 )]
 async fn pchip_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    ensure_pchip_integer_boundary(&x, &PCHIP_INTEGER_SAMPLE_LOCATIONS_EXTENSION, "X").await?;
+    ensure_pchip_integer_boundary(&y, &PCHIP_INTEGER_SAMPLE_VALUES_EXTENSION, "Y").await?;
+    if let Some(query) = rest.first() {
+        ensure_pchip_integer_boundary(query, &PCHIP_INTEGER_QUERY_EXTENSION, "Xq").await?;
+    }
     let series = series_from_values(x, y, NAME).await.map_err(|err| {
         pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INVALID_INPUT)
     })?;
@@ -222,11 +317,32 @@ async fn pchip_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRe
     }
 }
 
+async fn ensure_pchip_integer_boundary(
+    value: &Value,
+    extension: &'static BuiltinExtensionDescriptor,
+    role: &str,
+) -> crate::BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_native_integer_class,
+    };
+    if !value_has_native_integer_class(value) {
+        return Ok(());
+    }
+    crate::compatibility::ensure_builtin_extension_enabled(extension, NAME)?;
+    if !native_integer_value_is_exact_f64_async(value).await? {
+        return Err(pchip_error_with_message(
+            format!("pchip: integer {role} values must be exactly representable as double"),
+            &PCHIP_ERROR_INVALID_INPUT,
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))
@@ -243,7 +359,10 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        assert!(tensor.data.windows(2).all(|pair| pair[1] >= pair[0]));
+        assert!(tensor
+            .materialize_f64()
+            .windows(2)
+            .all(|pair| pair[1] >= pair[0]));
     }
 
     #[test]

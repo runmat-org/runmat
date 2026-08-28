@@ -80,6 +80,59 @@ result = z + 5
 }
 
 #[test]
+fn spawned_async_functions_respect_local_worker_capacity() {
+    let available_workers = std::thread::available_parallelism().map_or(1, |count| count.get());
+    let temp_dir = TempDir::new().unwrap();
+    let script_path = temp_dir.path().join("local_execution.m");
+    fs::write(
+        &script_path,
+        r#"
+async function y = delayed_square(x)
+    pause(0.4);
+    y = x * x;
+end
+tic;
+t1 = spawn(delayed_square(3));
+t2 = spawn(delayed_square(4));
+r1 = await(t1);
+r2 = await(t2);
+elapsed = toc;
+disp(r1);
+disp(r2);
+disp(elapsed);
+"#,
+    )
+    .unwrap();
+
+    let output = run_runmat(&["--no-jit", "run", script_path.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "local execution failed. stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let numbers = stdout
+        .lines()
+        .filter_map(|line| line.trim().parse::<f64>().ok())
+        .collect::<Vec<_>>();
+    assert!(numbers.len() >= 3, "unexpected output: {stdout}");
+    assert_eq!(numbers[0], 9.0);
+    assert_eq!(numbers[1], 16.0);
+    if available_workers >= 2 {
+        assert!(
+            numbers[2] < 0.7,
+            "tasks were not observably concurrent with {available_workers} available workers: {stdout}"
+        );
+    } else {
+        assert!(
+            numbers[2] < 1.5,
+            "tasks did not complete within the bounded single-worker allowance: {stdout}"
+        );
+    }
+}
+
+#[test]
 fn test_signal_compatibility_harness_cli() {
     let temp_dir = TempDir::new().unwrap();
     let script_path = temp_dir.path().join("signal_compatibility_harness.m");

@@ -13,7 +13,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`refline` creates a graphics object and does not perform numeric GPU computation."
+    "notes": "`refline` creates a graphics object and does not perform numeric GPU computation. Automatically resident coefficient inputs gather transparently at the checked graphics boundary; explicit GPU coefficients are an independently gated RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -29,7 +29,7 @@
   "description": "`refline` appends straight reference lines to the current or specified axes and returns the created line handle or handles when requested. With no coefficients it adds least-squares lines for eligible scatter-style series in the axes. With coefficients it draws `y = m*x + b` over the current x-axis span.",
   "behaviors": [
     "`refline()` and `refline(ax)` add least-squares reference lines for scatter-style series in the current or specified axes, matching MATLAB's `lsline`-style behavior.",
-    "`refline([m b])` and `refline(m,b)` draw a line with slope `m` and intercept `b`; coefficients must be finite numeric scalars.",
+    "`refline([m b])` and `refline(m,b)` draw a line with slope `m` and intercept `b`; the compatibility target documents single and double coefficients, while RunMat mode additionally accepts all eight typed-integer classes after exact binary64 representability checks and retains logical coefficients as a separately declared extension.",
     "`refline(ax,...)` targets the supplied axes handle.",
     "The line uses explicit `XLim` when present. If x-limits are automatic, RunMat derives a finite x span from the target axes' visible data bounds and falls back to `[0,1]` only when no finite span is available.",
     "As a RunMat extension, optional LineSpec and line Name/Value pairs such as `Color`, `LineStyle`, `LineWidth`, and `DisplayName` are accepted using the same parser as line plotting builtins.",

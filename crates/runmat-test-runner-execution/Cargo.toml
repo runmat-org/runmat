@@ -1,0 +1,19 @@
+[package]
+name = "runmat-test-runner-execution"
+version = "0.6.2"
+edition = "2021"
+description = "Execution-scheduler bridge for RunMat test worker backends"
+license-file = "../../LICENSE.md"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-execution-runner = { workspace = true }
+runmat-test = { workspace = true }
+runmat-test-runner = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+futures = "0.3"

@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 const CALL_BOUND_METHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -114,7 +115,7 @@ pub async fn call_bound_method_builtin(
     args.push(base);
     args.extend(rest);
     let requested_outputs = crate::current_requested_outputs();
-    if let Some((_resolved, owner)) = runmat_builtins::lookup_method(&class_name, &method) {
+    if let Some((_resolved, owner)) = crate::class_registry::lookup_method(&class_name, &method) {
         return crate::dispatch_object_external_member(owner, &method, args, requested_outputs)
             .await;
     }

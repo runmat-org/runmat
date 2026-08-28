@@ -1,8 +1,11 @@
 //! Exact MATLAB integer arithmetic shared by elementwise binary builtins.
 
-use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+use num_bigint::BigInt;
+use num_traits::{Signed, ToPrimitive};
+use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::math::elementwise::extended_precision::Extended;
 use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[derive(Clone, Copy)]
@@ -12,6 +15,252 @@ pub(crate) enum IntegerBinaryOp {
     Multiply,
     Divide,
     Power,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum IntegerRemainderOp {
+    Rem,
+    Mod,
+}
+
+/// Reject MATLAB integer/logical arithmetic before device dispatch can route
+/// the operands through floating-point provider hooks.
+pub(crate) fn reject_integer_logical_operands(
+    lhs: &Value,
+    rhs: &Value,
+    builtin: &str,
+) -> Result<(), String> {
+    let lhs_integer = value_is_integer(lhs);
+    let rhs_integer = value_is_integer(rhs);
+    let lhs_logical = value_is_logical(lhs);
+    let rhs_logical = value_is_logical(rhs);
+    if (lhs_integer && rhs_logical) || (lhs_logical && rhs_integer) {
+        return Err(format!(
+            "{builtin}: integer arrays can only be combined with scalar double values"
+        ));
+    }
+    Ok(())
+}
+
+fn value_is_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::SparseTensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
+}
+
+fn value_is_logical(value: &Value) -> bool {
+    match value {
+        Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
+        _ => false,
+    }
+}
+
+/// Applies MATLAB integer `rem`/`mod` semantics when either operand has native
+/// integer storage. Same-class integer operands stay exact; scalar doubles use
+/// the integer class's arithmetic rules.
+pub(crate) fn try_integer_remainder(
+    lhs: &Value,
+    rhs: &Value,
+    operation: IntegerRemainderOp,
+    builtin: &str,
+) -> Result<Option<Value>, String> {
+    let left = integer_operand(lhs);
+    let right = integer_operand(rhs);
+    match (left, right) {
+        (None, None) => Ok(None),
+        (Some(integer), None) => {
+            apply_integer_remainder_scalar(integer, rhs, true, operation, builtin)
+        }
+        (None, Some(integer)) => {
+            apply_integer_remainder_scalar(integer, lhs, false, operation, builtin)
+        }
+        (Some(left), Some(right)) => {
+            if left.target != right.target {
+                return Err(format!(
+                    "{builtin}: integer operands must have the same integer class"
+                ));
+            }
+            let plan = BroadcastPlan::new(&left.shape, &right.shape)?;
+            let mut values = Vec::with_capacity(plan.len());
+            for (_, left_index, right_index) in plan.iter() {
+                values.push(exact_integer_remainder(
+                    left.storage.value_at(left_index),
+                    right.storage.value_at(right_index),
+                    operation,
+                ));
+            }
+            integer_values_into_value(left.target, values, plan.output_shape().to_vec()).map(Some)
+        }
+    }
+}
+
+fn apply_integer_remainder_scalar(
+    integer: IntegerOperand<'_>,
+    other: &Value,
+    integer_is_left: bool,
+    operation: IntegerRemainderOp,
+    builtin: &str,
+) -> Result<Option<Value>, String> {
+    let Some(scalar) = real_scalar(other) else {
+        return Err(format!(
+            "{builtin}: integer arrays can only be combined with scalar double values"
+        ));
+    };
+    let exact_scalar = exact_integer_scalar(integer.target, scalar);
+    let mut values = Vec::with_capacity(integer.storage.len());
+    for index in 0..integer.storage.len() {
+        let value = integer.storage.value_at(index);
+        values.push(if let Some(scalar) = exact_scalar.clone() {
+            if integer_is_left {
+                exact_integer_remainder(value, scalar, operation)
+            } else {
+                exact_integer_remainder(scalar, value, operation)
+            }
+        } else if integer.target.uses_extended_scalar_precision() {
+            extended_integer_remainder(value, scalar, integer_is_left, operation)?
+        } else if integer_is_left {
+            integer
+                .target
+                .cast_scalar(float_remainder(value.to_f64(), scalar, operation))
+        } else {
+            integer
+                .target
+                .cast_scalar(float_remainder(scalar, value.to_f64(), operation))
+        });
+    }
+    integer_values_into_value(integer.target, values, integer.shape).map(Some)
+}
+
+fn extended_integer_remainder(
+    integer: IntValue,
+    scalar: f64,
+    integer_is_left: bool,
+    operation: IntegerRemainderOp,
+) -> Result<IntValue, String> {
+    let Some(scalar) = Extended::from_f64(scalar) else {
+        return Ok(nonfinite_integer_remainder(
+            integer,
+            scalar,
+            integer_is_left,
+            operation,
+        ));
+    };
+    let integer_extended = extended_from_int_value(&integer);
+    let (dividend, divisor) = if integer_is_left {
+        (integer_extended, scalar)
+    } else {
+        (scalar, integer_extended)
+    };
+    if divisor.is_zero() {
+        return Ok(match operation {
+            IntegerRemainderOp::Rem => integer_target_zero(&integer),
+            IntegerRemainderOp::Mod => integer,
+        });
+    }
+    let quotient = dividend.divide(&divisor).expect("nonzero extended divisor");
+    let mut quotient_integer = quotient.trunc_to_bigint();
+    let mut remainder =
+        dividend.subtract(&divisor.multiply(&extended_from_bigint(&quotient_integer)));
+    if matches!(operation, IntegerRemainderOp::Mod)
+        && !remainder.is_zero()
+        && remainder.is_negative() != divisor.is_negative()
+    {
+        quotient_integer -= 1;
+        remainder = dividend.subtract(&divisor.multiply(&extended_from_bigint(&quotient_integer)));
+    }
+    extended_to_integer_like(remainder, &integer)
+}
+
+fn nonfinite_integer_remainder(
+    integer: IntValue,
+    scalar: f64,
+    integer_is_left: bool,
+    operation: IntegerRemainderOp,
+) -> IntValue {
+    let target = IntegerTarget::from_int_value(&integer);
+    if scalar.is_nan() || !integer_is_left {
+        return target.cast_scalar(f64::NAN);
+    }
+
+    match operation {
+        IntegerRemainderOp::Rem => integer,
+        IntegerRemainderOp::Mod
+            if integer_is_zero(&integer)
+                || integer_is_negative(&integer) == scalar.is_sign_negative() =>
+        {
+            integer
+        }
+        IntegerRemainderOp::Mod => target.cast_scalar(scalar),
+    }
+}
+
+fn integer_is_zero(value: &IntValue) -> bool {
+    match value {
+        IntValue::I8(value) => *value == 0,
+        IntValue::I16(value) => *value == 0,
+        IntValue::I32(value) => *value == 0,
+        IntValue::I64(value) => *value == 0,
+        IntValue::U8(value) => *value == 0,
+        IntValue::U16(value) => *value == 0,
+        IntValue::U32(value) => *value == 0,
+        IntValue::U64(value) => *value == 0,
+    }
+}
+
+fn integer_is_negative(value: &IntValue) -> bool {
+    match value {
+        IntValue::I8(value) => *value < 0,
+        IntValue::I16(value) => *value < 0,
+        IntValue::I32(value) => *value < 0,
+        IntValue::I64(value) => *value < 0,
+        IntValue::U8(_) | IntValue::U16(_) | IntValue::U32(_) | IntValue::U64(_) => false,
+    }
+}
+
+fn extended_from_int_value(value: &IntValue) -> Extended {
+    match value {
+        IntValue::I64(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::U64(value) => Extended::from_u64(*value),
+        _ => unreachable!("extended arithmetic only handles 64-bit integer values"),
+    }
+}
+
+fn extended_from_bigint(value: &BigInt) -> Extended {
+    Extended::from_bigint(value.clone())
+}
+
+fn integer_target_zero(prototype: &IntValue) -> IntValue {
+    match prototype {
+        IntValue::I64(_) => IntValue::I64(0),
+        IntValue::U64(_) => IntValue::U64(0),
+        _ => unreachable!("extended arithmetic only handles 64-bit integer values"),
+    }
+}
+
+fn extended_to_integer_like(value: Extended, prototype: &IntValue) -> Result<IntValue, String> {
+    let rounded = value.round_away_to_bigint();
+    Ok(match prototype {
+        IntValue::I64(_) => IntValue::I64(rounded.to_i64().unwrap_or_else(|| {
+            if rounded.is_negative() {
+                i64::MIN
+            } else {
+                i64::MAX
+            }
+        })),
+        IntValue::U64(_) => IntValue::U64(rounded.to_u64().unwrap_or_else(|| {
+            if rounded.is_negative() {
+                0
+            } else {
+                u64::MAX
+            }
+        })),
+        _ => return Err("extended arithmetic only handles 64-bit integer values".into()),
+    })
 }
 
 /// Applies a MATLAB integer binary operation when either operand is integer
@@ -36,6 +285,9 @@ pub(crate) fn try_integer_binary(
                     "{builtin}: integer operands must have the same integer class"
                 ));
             }
+            if matches!(operation, IntegerBinaryOp::Power) {
+                validate_integer_exponent_storage(&right.storage, builtin)?;
+            }
             return apply_exact_integer_pair(&left, &right, operation)
                 .map(Some)
                 .map_err(|error| format!("{builtin}: {error}"));
@@ -47,12 +299,42 @@ pub(crate) fn try_integer_binary(
 
     let Some(scalar) = real_scalar(other) else {
         return Err(format!(
-            "{builtin}: integer arrays can only be combined with scalar double or logical values"
+            "{builtin}: integer arrays can only be combined with scalar double values"
         ));
     };
+    if matches!(operation, IntegerBinaryOp::Power) {
+        if integer_is_left {
+            if !nonnegative_integer_exponent(scalar) {
+                return Err(invalid_integer_exponent_error(builtin));
+            }
+        } else {
+            validate_integer_exponent_storage(&integer.storage, builtin)?;
+        }
+    }
     apply_integer_scalar(&integer, scalar, integer_is_left, operation)
         .map(Some)
         .map_err(|error| format!("{builtin}: {error}"))
+}
+
+/// Applies an integer binary operation to scalar inputs and returns the exact
+/// integer result. Structural callers such as `kron` use this to share the
+/// elementwise integer class, scalar-double, rounding, and saturation rules
+/// without inheriting elementwise broadcast semantics.
+pub(crate) fn integer_binary_scalar(
+    lhs: &Value,
+    rhs: &Value,
+    operation: IntegerBinaryOp,
+    builtin: &str,
+) -> Result<IntValue, String> {
+    match try_integer_binary(lhs, rhs, operation, builtin)? {
+        Some(Value::Int(value)) => Ok(value),
+        Some(_) => Err(format!(
+            "{builtin}: internal integer scalar operation returned a non-scalar result"
+        )),
+        None => Err(format!(
+            "{builtin}: internal integer scalar operation requires an integer operand"
+        )),
+    }
 }
 
 struct IntegerOperand<'a> {
@@ -101,13 +383,7 @@ fn integer_operand(value: &Value) -> Option<IntegerOperand<'_>> {
 fn real_scalar(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
-        Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.integer_storage().is_none() && tensor.data.len() == 1 => {
-            tensor.data.first().copied()
-        }
-        Value::LogicalArray(array) if array.data.len() == 1 => {
-            Some(if array.data[0] == 0 { 0.0 } else { 1.0 })
-        }
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor.as_f64_slice()?.first().copied(),
         _ => None,
     }
 }
@@ -136,23 +412,32 @@ fn apply_integer_scalar(
     operation: IntegerBinaryOp,
 ) -> Result<Value, String> {
     let mut values = Vec::with_capacity(integer.storage.len());
+    let exact_scalar = exact_integer_scalar(integer.target, scalar);
     for index in 0..integer.storage.len() {
         let integer_value = integer.storage.value_at(index);
-        if matches!(operation, IntegerBinaryOp::Divide) {
-            if let Some(scalar_value) = exact_integer_scalar(integer.target, scalar) {
-                values.push(if integer_is_left {
-                    exact_integer_divide(integer_value, scalar_value)
-                } else {
-                    exact_integer_divide(scalar_value, integer_value)
-                });
-                continue;
-            }
+        if matches!(operation, IntegerBinaryOp::Power) && integer_is_left {
+            values.push(exact_integer_power_from_f64(integer_value, scalar));
+            continue;
         }
-        if matches!(operation, IntegerBinaryOp::Power)
-            && integer_is_left
-            && nonnegative_integer_exponent(scalar)
+        if let Some(scalar_value) = exact_scalar.clone() {
+            values.push(if integer_is_left {
+                apply_exact(integer_value, scalar_value, operation)
+            } else {
+                apply_exact(scalar_value, integer_value, operation)
+            });
+            continue;
+        }
+        if integer.target.uses_extended_scalar_precision()
+            && scalar.is_finite()
+            && scalar != 0.0
+            && !matches!(operation, IntegerBinaryOp::Power)
         {
-            values.push(exact_integer_power(integer_value, scalar as u64));
+            values.push(extended_integer_binary(
+                integer_value,
+                scalar,
+                integer_is_left,
+                operation,
+            )?);
             continue;
         }
         let integer_value = integer_value.to_f64();
@@ -164,6 +449,31 @@ fn apply_integer_scalar(
         values.push(integer.target.cast_scalar(result));
     }
     integer_values_into_value(integer.target, values, integer.shape.clone())
+}
+
+fn extended_integer_binary(
+    integer: IntValue,
+    scalar: f64,
+    integer_is_left: bool,
+    operation: IntegerBinaryOp,
+) -> Result<IntValue, String> {
+    let scalar = Extended::from_f64(scalar).expect("finite scalar is checked by caller");
+    let integer_extended = extended_from_int_value(&integer);
+    let (lhs, rhs) = if integer_is_left {
+        (integer_extended, scalar)
+    } else {
+        (scalar, integer_extended)
+    };
+    let result = match operation {
+        IntegerBinaryOp::Add => lhs.add(&rhs),
+        IntegerBinaryOp::Subtract => lhs.subtract(&rhs),
+        IntegerBinaryOp::Multiply => lhs.multiply(&rhs),
+        IntegerBinaryOp::Divide => lhs
+            .divide(&rhs)
+            .expect("nonzero scalar is checked by caller"),
+        IntegerBinaryOp::Power => unreachable!("power retains its dedicated scalar path"),
+    };
+    extended_to_integer_like(result, &integer)
 }
 
 fn exact_integer_scalar(target: IntegerTarget, value: f64) -> Option<IntValue> {
@@ -181,6 +491,33 @@ fn exact_integer_scalar(target: IntegerTarget, value: f64) -> Option<IntValue> {
         IntegerTarget::U64 => (0.0..18_446_744_073_709_551_616.0).contains(&value),
     };
     in_range.then(|| target.cast_scalar(value))
+}
+
+fn float_remainder(lhs: f64, rhs: f64, operation: IntegerRemainderOp) -> f64 {
+    if lhs.is_nan() || rhs.is_nan() {
+        return f64::NAN;
+    }
+    if rhs == 0.0 {
+        return match operation {
+            IntegerRemainderOp::Rem => f64::NAN,
+            IntegerRemainderOp::Mod => lhs,
+        };
+    }
+    if !lhs.is_finite() && rhs.is_finite() {
+        return f64::NAN;
+    }
+    if rhs.is_infinite() && lhs.is_finite() {
+        return match operation {
+            IntegerRemainderOp::Rem => lhs,
+            IntegerRemainderOp::Mod if lhs == 0.0 || lhs.signum() == rhs.signum() => lhs,
+            IntegerRemainderOp::Mod => rhs,
+        };
+    }
+    let quotient = match operation {
+        IntegerRemainderOp::Rem => (lhs / rhs).trunc(),
+        IntegerRemainderOp::Mod => (lhs / rhs).floor(),
+    };
+    lhs - rhs * quotient
 }
 
 fn apply_float(lhs: f64, rhs: f64, operation: IntegerBinaryOp) -> f64 {
@@ -224,11 +561,30 @@ fn apply_exact(lhs: IntValue, rhs: IntValue, operation: IntegerBinaryOp) -> IntV
     }
 }
 
+/// Subtracts two values from the same MATLAB integer class with the
+/// saturating semantics used by integer array arithmetic.
+pub(crate) fn same_class_saturating_subtract(lhs: IntValue, rhs: IntValue) -> IntValue {
+    apply_exact(lhs, rhs, IntegerBinaryOp::Subtract)
+}
+
 fn nonnegative_integer_exponent(value: f64) -> bool {
-    value.is_finite()
-        && value >= 0.0
-        && value.fract() == 0.0
-        && value < 18_446_744_073_709_551_616.0
+    value.is_finite() && value >= 0.0 && value.fract() == 0.0
+}
+
+fn validate_integer_exponent_storage(
+    storage: &IntegerStorageRef<'_>,
+    builtin: &str,
+) -> Result<(), String> {
+    for index in 0..storage.len() {
+        if integer_is_negative(&storage.value_at(index)) {
+            return Err(invalid_integer_exponent_error(builtin));
+        }
+    }
+    Ok(())
+}
+
+fn invalid_integer_exponent_error(builtin: &str) -> String {
+    format!("{builtin}: integer exponents must be finite, nonnegative integer values")
 }
 
 fn exact_integer_power_pair(base: IntValue, exponent: IntValue) -> IntValue {
@@ -304,23 +660,79 @@ fn exact_integer_power(base: IntValue, exponent: u64) -> IntValue {
     }
 }
 
-fn signed_integer_power(base: i128, exponent: i128, min: i128, max: i128) -> i128 {
-    if exponent < 0 {
-        return signed_negative_integer_power(base, exponent.unsigned_abs(), max);
+fn exact_integer_power_from_f64(base: IntValue, exponent: f64) -> IntValue {
+    if exponent < 18_446_744_073_709_551_616.0 {
+        return exact_integer_power(base, exponent as u64);
     }
-    saturated_signed_power(base, exponent as u128, min, max)
+    let even = exponent.rem_euclid(2.0) == 0.0;
+    match base {
+        IntValue::I8(base) => IntValue::I8(large_signed_integer_power(
+            i128::from(base),
+            even,
+            i128::from(i8::MIN),
+            i128::from(i8::MAX),
+        ) as i8),
+        IntValue::I16(base) => IntValue::I16(large_signed_integer_power(
+            i128::from(base),
+            even,
+            i128::from(i16::MIN),
+            i128::from(i16::MAX),
+        ) as i16),
+        IntValue::I32(base) => IntValue::I32(large_signed_integer_power(
+            i128::from(base),
+            even,
+            i128::from(i32::MIN),
+            i128::from(i32::MAX),
+        ) as i32),
+        IntValue::I64(base) => IntValue::I64(large_signed_integer_power(
+            i128::from(base),
+            even,
+            i128::from(i64::MIN),
+            i128::from(i64::MAX),
+        ) as i64),
+        IntValue::U8(base) => {
+            IntValue::U8(large_unsigned_integer_power(u128::from(base), u128::from(u8::MAX)) as u8)
+        }
+        IntValue::U16(base) => IntValue::U16(large_unsigned_integer_power(
+            u128::from(base),
+            u128::from(u16::MAX),
+        ) as u16),
+        IntValue::U32(base) => IntValue::U32(large_unsigned_integer_power(
+            u128::from(base),
+            u128::from(u32::MAX),
+        ) as u32),
+        IntValue::U64(base) => IntValue::U64(large_unsigned_integer_power(
+            u128::from(base),
+            u128::from(u64::MAX),
+        ) as u64),
+    }
 }
 
-fn signed_negative_integer_power(base: i128, exponent: u128, max: i128) -> i128 {
+fn large_signed_integer_power(base: i128, even: bool, min: i128, max: i128) -> i128 {
     match base {
-        0 => max,
+        0 => 0,
         1 => 1,
-        -1 if exponent.is_multiple_of(2) => 1,
+        -1 if even => 1,
         -1 => -1,
-        2 if exponent == 1 => 1,
-        -2 if exponent == 1 => -1,
-        _ => 0,
+        value if value < 0 && !even => min,
+        _ => max,
     }
+}
+
+fn large_unsigned_integer_power(base: u128, max: u128) -> u128 {
+    match base {
+        0 => 0,
+        1 => 1,
+        _ => max,
+    }
+}
+
+fn signed_integer_power(base: i128, exponent: i128, min: i128, max: i128) -> i128 {
+    debug_assert!(
+        exponent >= 0,
+        "integer exponent validated before evaluation"
+    );
+    saturated_signed_power(base, exponent as u128, min, max)
 }
 
 fn saturated_signed_power(mut base: i128, mut exponent: u128, min: i128, max: i128) -> i128 {
@@ -380,6 +792,63 @@ fn exact_integer_divide(lhs: IntValue, rhs: IntValue) -> IntValue {
         (IntValue::U64(lhs), IntValue::U64(rhs)) => unsigned!(lhs, rhs, U64, u64::MAX),
         _ => unreachable!("integer class compatibility was checked before applying"),
     }
+}
+
+fn exact_integer_remainder(
+    lhs: IntValue,
+    rhs: IntValue,
+    operation: IntegerRemainderOp,
+) -> IntValue {
+    macro_rules! signed {
+        ($lhs:expr, $rhs:expr, $variant:ident) => {
+            IntValue::$variant(signed_integer_remainder($lhs as i128, $rhs as i128, operation) as _)
+        };
+    }
+    macro_rules! unsigned {
+        ($lhs:expr, $rhs:expr, $variant:ident) => {
+            IntValue::$variant(
+                unsigned_integer_remainder($lhs as u128, $rhs as u128, operation) as _,
+            )
+        };
+    }
+    match (lhs, rhs) {
+        (IntValue::I8(lhs), IntValue::I8(rhs)) => signed!(lhs, rhs, I8),
+        (IntValue::I16(lhs), IntValue::I16(rhs)) => signed!(lhs, rhs, I16),
+        (IntValue::I32(lhs), IntValue::I32(rhs)) => signed!(lhs, rhs, I32),
+        (IntValue::I64(lhs), IntValue::I64(rhs)) => signed!(lhs, rhs, I64),
+        (IntValue::U8(lhs), IntValue::U8(rhs)) => unsigned!(lhs, rhs, U8),
+        (IntValue::U16(lhs), IntValue::U16(rhs)) => unsigned!(lhs, rhs, U16),
+        (IntValue::U32(lhs), IntValue::U32(rhs)) => unsigned!(lhs, rhs, U32),
+        (IntValue::U64(lhs), IntValue::U64(rhs)) => unsigned!(lhs, rhs, U64),
+        _ => unreachable!("integer class compatibility was checked before applying"),
+    }
+}
+
+fn signed_integer_remainder(lhs: i128, rhs: i128, operation: IntegerRemainderOp) -> i128 {
+    if rhs == 0 {
+        return match operation {
+            IntegerRemainderOp::Rem => 0,
+            IntegerRemainderOp::Mod => lhs,
+        };
+    }
+    let remainder = lhs % rhs;
+    match operation {
+        IntegerRemainderOp::Rem => remainder,
+        IntegerRemainderOp::Mod if remainder != 0 && remainder.signum() != rhs.signum() => {
+            remainder + rhs
+        }
+        IntegerRemainderOp::Mod => remainder,
+    }
+}
+
+fn unsigned_integer_remainder(lhs: u128, rhs: u128, operation: IntegerRemainderOp) -> u128 {
+    if rhs == 0 {
+        return match operation {
+            IntegerRemainderOp::Rem => 0,
+            IntegerRemainderOp::Mod => lhs,
+        };
+    }
+    lhs % rhs
 }
 
 fn rounded_signed_divide(lhs: i128, rhs: i128, min: i128, max: i128) -> i128 {
@@ -446,9 +915,61 @@ fn integer_values_into_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_value::LogicalArray;
 
     fn integer(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
+    fn integer_class_cases() -> [(IntValue, IntegerStorage); 8] {
+        [
+            (IntValue::I8(2), IntegerStorage::I8(vec![2, 3])),
+            (IntValue::I16(2), IntegerStorage::I16(vec![2, 3])),
+            (IntValue::I32(2), IntegerStorage::I32(vec![2, 3])),
+            (IntValue::I64(2), IntegerStorage::I64(vec![2, 3])),
+            (IntValue::U8(2), IntegerStorage::U8(vec![2, 3])),
+            (IntValue::U16(2), IntegerStorage::U16(vec![2, 3])),
+            (IntValue::U32(2), IntegerStorage::U32(vec![2, 3])),
+            (IntValue::U64(2), IntegerStorage::U64(vec![2, 3])),
+        ]
+    }
+
+    #[test]
+    fn every_integer_class_rejects_ordered_logical_scalar_and_array_arithmetic() {
+        let logical_array =
+            Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).expect("logical scalar"));
+        for (scalar, storage) in integer_class_cases() {
+            let scalar = Value::Int(scalar);
+            let array = integer(storage, vec![1, 2]);
+            let logical_scalar = Value::Bool(true);
+            for (lhs, rhs) in [
+                (&scalar, &logical_scalar),
+                (&logical_scalar, &scalar),
+                (&array, &logical_array),
+                (&logical_array, &array),
+            ] {
+                let binary =
+                    try_integer_binary(lhs, rhs, IntegerBinaryOp::Add, "plus").unwrap_err();
+                assert!(binary.contains("scalar double"));
+                let remainder =
+                    try_integer_remainder(lhs, rhs, IntegerRemainderOp::Rem, "rem").unwrap_err();
+                assert!(remainder.contains("scalar double"));
+            }
+        }
+    }
+
+    #[test]
+    fn integer_arithmetic_rejects_scalar_single_tensor_partner() {
+        let single = Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap());
+        let error = try_integer_binary(
+            &Value::Int(IntValue::I16(2)),
+            &single,
+            IntegerBinaryOp::Add,
+            "plus",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("scalar double"));
     }
 
     #[test]
@@ -575,19 +1096,58 @@ mod tests {
     }
 
     #[test]
-    fn signed_integer_power_handles_negative_exponents_and_zero_base() {
-        let result = try_integer_binary(
+    fn signed_integer_power_rejects_negative_exponents() {
+        let error = try_integer_binary(
             &integer(IntegerStorage::I8(vec![-2, 2, 0, -1]), vec![1, 4]),
             &integer(IntegerStorage::I8(vec![-1, -1, -1, -3]), vec![1, 4]),
             IntegerBinaryOp::Power,
             "power",
         )
-        .expect("integer operation")
-        .expect("integer path");
-        assert_eq!(
-            result,
-            integer(IntegerStorage::I8(vec![-1, 1, i8::MAX, -1]), vec![1, 4])
-        );
+        .expect_err("negative integer exponents must be rejected");
+        assert!(error.contains("nonnegative integer values"));
+    }
+
+    #[test]
+    fn every_integer_base_class_rejects_invalid_scalar_double_exponents() {
+        for (base, _) in integer_class_cases() {
+            for exponent in [-1.0, 0.5, f64::INFINITY, f64::NAN] {
+                let error = try_integer_binary(
+                    &Value::Int(base.clone()),
+                    &Value::Num(exponent),
+                    IntegerBinaryOp::Power,
+                    "power",
+                )
+                .expect_err("invalid scalar-double integer exponent");
+                assert!(error.contains("nonnegative integer values"));
+            }
+        }
+    }
+
+    #[test]
+    fn every_signed_integer_exponent_class_rejects_negative_values() {
+        let cases = [
+            (
+                Value::Int(IntValue::I8(2)),
+                integer(IntegerStorage::I8(vec![2, -1]), vec![1, 2]),
+            ),
+            (
+                Value::Int(IntValue::I16(2)),
+                integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]),
+            ),
+            (
+                Value::Int(IntValue::I32(2)),
+                integer(IntegerStorage::I32(vec![2, -1]), vec![1, 2]),
+            ),
+            (
+                Value::Int(IntValue::I64(2)),
+                integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]),
+            ),
+        ];
+        for (base, exponent) in cases {
+            let error = try_integer_binary(&base, &exponent, IntegerBinaryOp::Power, "power")
+                .expect_err("negative signed integer exponent");
+            assert!(error.contains("nonnegative integer values"));
+        }
     }
 
     #[test]
@@ -601,6 +1161,29 @@ mod tests {
         .expect("integer operation")
         .expect("integer path");
         assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
+    }
+
+    #[test]
+    fn large_integral_scalar_double_exponents_remain_valid_and_saturate_exactly() {
+        let exponent = Value::Num(1.0e20);
+        let cases = [
+            (Value::Int(IntValue::I8(0)), Value::Int(IntValue::I8(0))),
+            (Value::Int(IntValue::I16(1)), Value::Int(IntValue::I16(1))),
+            (Value::Int(IntValue::I32(-1)), Value::Int(IntValue::I32(1))),
+            (
+                Value::Int(IntValue::I64(2)),
+                Value::Int(IntValue::I64(i64::MAX)),
+            ),
+            (
+                Value::Int(IntValue::U64(2)),
+                Value::Int(IntValue::U64(u64::MAX)),
+            ),
+        ];
+        for (base, expected) in cases {
+            let result =
+                try_integer_binary(&base, &exponent, IntegerBinaryOp::Power, "power").unwrap();
+            assert_eq!(result, Some(expected));
+        }
     }
 
     #[test]
@@ -627,5 +1210,389 @@ mod tests {
         .expect("integer operation")
         .expect("integer path");
         assert_eq!(result, integer(IntegerStorage::U64(vec![0, 1]), vec![1, 2]));
+    }
+
+    #[test]
+    fn integral_scalar_arithmetic_preserves_int64_and_uint64_bits() {
+        let uint64 = Value::Int(IntValue::U64((1_u64 << 63) + 1));
+        let uint64_add =
+            try_integer_binary(&uint64, &Value::Num(1.0), IntegerBinaryOp::Add, "plus")
+                .expect("integer operation")
+                .expect("integer path");
+        assert_eq!(uint64_add, Value::Int(IntValue::U64((1_u64 << 63) + 2)));
+
+        let uint64_subtract = try_integer_binary(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Num(1.0),
+            IntegerBinaryOp::Subtract,
+            "minus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(uint64_subtract, Value::Int(IntValue::U64(u64::MAX - 1)));
+
+        let uint64_multiply = try_integer_binary(
+            &uint64,
+            &Value::Num(1.0),
+            IntegerBinaryOp::Multiply,
+            "times",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(uint64_multiply, uint64);
+
+        let int64_add = try_integer_binary(
+            &Value::Int(IntValue::I64(i64::MIN)),
+            &Value::Num(1.0),
+            IntegerBinaryOp::Add,
+            "plus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(int64_add, Value::Int(IntValue::I64(i64::MIN + 1)));
+
+        let int64_reverse_subtract = try_integer_binary(
+            &Value::Num(1.0),
+            &Value::Int(IntValue::I64(i64::MIN)),
+            IntegerBinaryOp::Subtract,
+            "minus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(int64_reverse_subtract, Value::Int(IntValue::I64(i64::MAX)));
+    }
+
+    #[test]
+    fn nonintegral_scalar_double_arithmetic_uses_extended_precision_for_64_bit_storage() {
+        let base = (1_u64 << 53) + 1;
+        let sum = try_integer_binary(
+            &Value::Int(IntValue::U64(base)),
+            &Value::Num(0.5),
+            IntegerBinaryOp::Add,
+            "plus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(sum, Value::Int(IntValue::U64(base + 1)));
+
+        let product = try_integer_binary(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Num(0.5),
+            IntegerBinaryOp::Multiply,
+            "times",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(product, Value::Int(IntValue::U64(1_u64 << 63)));
+
+        let quotient = try_integer_binary(
+            &Value::Int(IntValue::I64(7)),
+            &Value::Num(2.5),
+            IntegerBinaryOp::Divide,
+            "rdivide",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(quotient, Value::Int(IntValue::I64(3)));
+
+        let reverse_subtract = try_integer_binary(
+            &Value::Num(0.5),
+            &Value::Int(IntValue::U64(base)),
+            IntegerBinaryOp::Subtract,
+            "minus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        assert_eq!(reverse_subtract, Value::Int(IntValue::U64(0)));
+    }
+
+    #[test]
+    fn exact_remainder_preserves_integer_classes_and_matlab_sign_rules() {
+        let rem = try_integer_remainder(
+            &Value::Int(IntValue::I64(-7)),
+            &Value::Int(IntValue::I64(4)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem, Value::Int(IntValue::I64(-3)));
+
+        let modulus = try_integer_remainder(
+            &Value::Int(IntValue::I64(-7)),
+            &Value::Int(IntValue::I64(4)),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(modulus, Value::Int(IntValue::I64(1)));
+
+        let uint64 = try_integer_remainder(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Int(IntValue::U64(3)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(uint64, Value::Int(IntValue::U64(0)));
+    }
+
+    #[test]
+    fn exact_remainder_handles_zero_divisors_broadcasting_and_class_errors() {
+        let rem_zero = try_integer_remainder(
+            &Value::Int(IntValue::I8(-7)),
+            &Value::Int(IntValue::I8(0)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem_zero, Value::Int(IntValue::I8(0)));
+
+        let mod_zero = try_integer_remainder(
+            &Value::Int(IntValue::I8(-7)),
+            &Value::Int(IntValue::I8(0)),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(mod_zero, Value::Int(IntValue::I8(-7)));
+
+        let broadcast = try_integer_remainder(
+            &integer(IntegerStorage::U64(vec![u64::MAX, 8]), vec![1, 2]),
+            &Value::Int(IntValue::U64(3)),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(
+            broadcast,
+            integer(IntegerStorage::U64(vec![0, 2]), vec![1, 2])
+        );
+
+        let error = try_integer_remainder(
+            &Value::Int(IntValue::I8(1)),
+            &Value::Int(IntValue::U8(1)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect_err("mixed classes must fail");
+        assert!(error.contains("same integer class"));
+    }
+
+    #[test]
+    fn exact_remainder_supports_integral_scalar_double_without_64_bit_loss() {
+        let rem = try_integer_remainder(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Num(2.0),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem, Value::Int(IntValue::U64(1)));
+
+        let modulus = try_integer_remainder(
+            &Value::Num(4.0),
+            &integer(IntegerStorage::I64(vec![-7, 7]), vec![1, 2]),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(
+            modulus,
+            integer(IntegerStorage::I64(vec![-3, 4]), vec![1, 2])
+        );
+
+        let nonscalar = try_integer_remainder(
+            &Value::Int(IntValue::I8(1)),
+            &Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("double tensor")),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect_err("integer with nonscalar double must fail");
+        assert!(nonscalar.contains("scalar double"));
+    }
+
+    #[test]
+    fn nonintegral_scalar_double_remainders_keep_smaller_integer_classes() {
+        let rem = try_integer_remainder(
+            &Value::Int(IntValue::I8(-7)),
+            &Value::Num(2.5),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem, Value::Int(IntValue::I8(-2)));
+
+        let modulus = try_integer_remainder(
+            &Value::Int(IntValue::I8(-7)),
+            &Value::Num(2.5),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(modulus, Value::Int(IntValue::I8(1)));
+
+        let reverse = try_integer_remainder(
+            &Value::Num(2.5),
+            &Value::Int(IntValue::U16(2)),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(reverse, Value::Int(IntValue::U16(1)));
+
+        let rem_zero = try_integer_remainder(
+            &Value::Int(IntValue::I8(7)),
+            &Value::Num(0.0),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem_zero, Value::Int(IntValue::I8(0)));
+
+        let mod_zero = try_integer_remainder(
+            &Value::Int(IntValue::I8(7)),
+            &Value::Num(0.0),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(mod_zero, Value::Int(IntValue::I8(7)));
+    }
+
+    #[test]
+    fn nonfinite_scalar_double_remainders_keep_64_bit_integer_paths() {
+        let rem_infinity = try_integer_remainder(
+            &Value::Int(IntValue::I64(i64::MAX)),
+            &Value::Num(f64::INFINITY),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(rem_infinity, Value::Int(IntValue::I64(i64::MAX)));
+
+        let mod_infinity = try_integer_remainder(
+            &Value::Int(IntValue::U64(u64::MAX)),
+            &Value::Num(f64::INFINITY),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(mod_infinity, Value::Int(IntValue::U64(u64::MAX)));
+
+        let opposite_sign_modulus = try_integer_remainder(
+            &Value::Int(IntValue::I64(-3)),
+            &Value::Num(f64::INFINITY),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(opposite_sign_modulus, Value::Int(IntValue::I64(i64::MAX)));
+
+        let nan_remainder = try_integer_remainder(
+            &Value::Int(IntValue::I64(3)),
+            &Value::Num(f64::NAN),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(nan_remainder, Value::Int(IntValue::I64(0)));
+
+        let reverse_infinity = try_integer_remainder(
+            &Value::Num(f64::INFINITY),
+            &Value::Int(IntValue::U64(3)),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(reverse_infinity, Value::Int(IntValue::U64(0)));
+    }
+
+    #[test]
+    fn nonintegral_scalar_double_remainders_use_extended_precision_for_64_bit_storage() {
+        let remainder = try_integer_remainder(
+            &Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+            &Value::Num(2.5),
+            IntegerRemainderOp::Rem,
+            "rem",
+        )
+        .expect("integer remainder")
+        .expect("integer path");
+        assert_eq!(remainder, Value::Int(IntValue::U64(1)));
+
+        let modulus = try_integer_remainder(
+            &Value::Int(IntValue::I64(-7)),
+            &Value::Num(2.5),
+            IntegerRemainderOp::Mod,
+            "mod",
+        )
+        .expect("integer modulus")
+        .expect("integer path");
+        assert_eq!(modulus, Value::Int(IntValue::I64(1)));
+    }
+
+    #[test]
+    fn invalid_scalar_double_integer_exponents_are_rejected() {
+        let square_root = try_integer_binary(
+            &Value::Int(IntValue::I8(2)),
+            &Value::Num(0.5),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect_err("fractional exponent must be rejected");
+        assert!(square_root.contains("nonnegative integer values"));
+
+        let fractional = try_integer_binary(
+            &Value::Int(IntValue::I64(7)),
+            &Value::Num(2.5),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect_err("fractional exponent must be rejected");
+        assert!(fractional.contains("nonnegative integer values"));
+
+        let complex_required = try_integer_binary(
+            &Value::Int(IntValue::I8(-1)),
+            &Value::Num(0.5),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect_err("fractional exponent must be rejected");
+        assert!(complex_required.contains("nonnegative integer values"));
+
+        let inverse = try_integer_binary(
+            &Value::Int(IntValue::U64(7)),
+            &Value::Num(-1.0),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect_err("negative exponent must be rejected");
+        assert!(inverse.contains("nonnegative integer values"));
+
+        let integer_exponent = try_integer_binary(
+            &Value::Num(0.5),
+            &Value::Int(IntValue::I16(-2)),
+            IntegerBinaryOp::Power,
+            "power",
+        )
+        .expect_err("negative integer exponent must be rejected");
+        assert!(integer_exponent.contains("nonnegative integer values"));
     }
 }

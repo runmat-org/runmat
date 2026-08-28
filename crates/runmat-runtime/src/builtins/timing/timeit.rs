@@ -3,19 +3,28 @@
 //! Measures the execution time of zero-input function handles by running them
 //! repeatedly and returning the median per-invocation runtime in seconds.
 
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_time::Instant;
 use std::cmp::Ordering;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
+use crate::builtins::common::gpu_helpers::gather_value_async;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::timing::type_resolvers::timeit_type;
 
 const TARGET_BATCH_SECONDS: f64 = 0.005;
@@ -24,6 +33,43 @@ const LOOP_COUNT_LIMIT: usize = 1 << 20;
 const MIN_SAMPLE_COUNT: usize = 7;
 const MAX_SAMPLE_COUNT: usize = 21;
 const BUILTIN_NAME: &str = "timeit";
+
+const INTEGER_NUM_OUTPUTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timeit-typed-integer-num-outputs",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "timeit with a typed-integer numOutputs value is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TimeitIntegerNumOutputsExtension"),
+};
+const EXPLICIT_GPU_NUM_OUTPUTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timeit-explicit-gpu-num-outputs",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "timeit with an explicit gpuArray numOutputs value is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TimeitExplicitGpuNumOutputsExtension"),
+};
+pub const TIMEIT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    INTEGER_NUM_OUTPUTS_EXTENSION,
+    EXPLICIT_GPU_NUM_OUTPUTS_EXTENSION,
+];
+
+const TIMEIT_INTEGER_NUM_OUTPUTS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "numOutputs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public contract specifies an integer-valued output count without publishing native integer classes; ordinary integer-valued double input remains the compatibility form.",
+    }];
+pub const TIMEIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "t = timeit(f, typed_integer_numOutputs)",
+        inputs: &TIMEIT_INTEGER_NUM_OUTPUTS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Admitted native integers are decoded exactly as a nonnegative platform output count. Automatic residency gathers transparently; explicit gpuArray intent is independently gated.",
+    }];
 
 const TIMEIT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "t",
@@ -199,10 +245,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "helper",
     type_resolver(timeit_type),
     descriptor(crate::builtins::timing::timeit::TIMEIT_DESCRIPTOR),
+    extensions(crate::builtins::timing::timeit::TIMEIT_EXTENSIONS),
+    integer_capabilities(crate::builtins::timing::timeit::TIMEIT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::timing::timeit"
 )]
 async fn timeit_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let requested_outputs = parse_num_outputs(&rest)?;
+    let requested_outputs = parse_num_outputs(&rest).await?;
     let callable = prepare_callable(func, requested_outputs)?;
 
     // Warm-up once to catch early errors and pay one-time JIT costs.
@@ -217,10 +265,28 @@ async fn timeit_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
     Ok(Value::Num(compute_median(samples)))
 }
 
-fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeError> {
+async fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeError> {
     match rest.len() {
         0 => Ok(None),
-        1 => parse_non_negative_integer(&rest[0]).map(Some),
+        1 => {
+            let value = &rest[0];
+            if crate::builtins::common::validation::value_contains_explicit_gpu(value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &EXPLICIT_GPU_NUM_OUTPUTS_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            if crate::builtins::common::validation::value_contains_native_integer_class(value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_NUM_OUTPUTS_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            let value = gather_value_async(value).await.map_err(|error| {
+                timeit_error_with_message(error.message(), &TIMEIT_ERROR_NUM_OUTPUTS_SCALAR)
+            })?;
+            parse_non_negative_integer(&value).map(Some)
+        }
         _ => Err(timeit_error_with_message(
             TIMEIT_ERROR_TOO_MANY_INPUTS.message,
             &TIMEIT_ERROR_TOO_MANY_INPUTS,
@@ -229,18 +295,15 @@ fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeErro
 }
 
 fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeError> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            timeit_error_with_message(
+                TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
+                &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
+            )
+        });
+    }
     match value {
-        Value::Int(iv) => {
-            let raw = iv.to_i64();
-            if raw < 0 {
-                Err(timeit_error_with_message(
-                    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
-                    &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
-                ))
-            } else {
-                Ok(raw as usize)
-            }
-        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(timeit_error_with_message(
@@ -261,6 +324,12 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
                     &TIMEIT_ERROR_NUM_OUTPUTS_INTEGER,
                 ));
             }
+            if !fits_platform_usize(rounded) {
+                return Err(timeit_error_with_message(
+                    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
+                    &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
+                ));
+            }
             Ok(rounded as usize)
         }
         _ => Err(timeit_error_with_message(
@@ -268,6 +337,10 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
             &TIMEIT_ERROR_NUM_OUTPUTS_SCALAR,
         )),
     }
+}
+
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
 async fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::RuntimeError> {
@@ -489,8 +562,43 @@ fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn output_count_preserves_representable_uint64() {
+        assert_eq!(
+            parse_non_negative_integer(&Value::Int(IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_non_negative_integer(&Value::Int(IntValue::I64(-1))).is_err());
+    }
+
+    #[test]
+    fn output_count_reads_typed_integer_scalar_storage_exactly() {
+        let count = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
+            .expect("typed output count");
+
+        assert_eq!(
+            parse_non_negative_integer(&Value::Tensor(count)).unwrap(),
+            2
+        );
+
+        let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative output count");
+        assert!(parse_non_negative_integer(&Value::Tensor(negative)).is_err());
+    }
+
+    #[test]
+    fn output_count_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_non_negative_integer(&Value::Num(boundary)).is_err());
+    }
+
     use futures::executor::block_on;
-    use runmat_builtins::{Closure, IntValue};
+    use runmat_value::{Closure, IntValue, IntegerStorage, Tensor};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -605,6 +713,14 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn timeit_declares_integer_output_count_compatibility_metadata() {
+        let builtin = runmat_builtins::builtin_function_by_name("timeit").unwrap();
+        assert_eq!(builtin.integer_capabilities.len(), 1);
+        assert_eq!(builtin.extensions.len(), 2);
+        assert_eq!(builtin.integer_capabilities[0].inputs[0].classes.len(), 8);
+    }
+
+    #[test]
     fn timeit_accepts_external_function_handle() {
         let callable = prepare_callable(
             Value::ExternalFunctionHandle("pkg.callback".to_string()),
@@ -711,7 +827,7 @@ pub(crate) mod tests {
                 (name == "__timeit_helper_counter_default").then_some(88)
             })));
         let callable = prepare_callable(
-            Value::CharArray(runmat_builtins::CharArray::new_row(
+            Value::CharArray(runmat_value::CharArray::new_row(
                 "@__timeit_helper_counter_default",
             )),
             None,
@@ -826,6 +942,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_measures_time() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         COUNTER_DEFAULT.store(0, Ordering::SeqCst);
         let result = block_on(timeit_builtin(default_handle(), Vec::new())).expect("timeit");
         match result {
@@ -842,6 +959,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_accepts_num_outputs_argument() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         COUNTER_NUM_OUTPUTS.store(0, Ordering::SeqCst);
         let args = vec![Value::Int(IntValue::I32(3))];
         let _ = block_on(timeit_builtin(outputs_handle(), args)).expect("timeit numOutputs");
@@ -855,6 +973,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_supports_zero_outputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         COUNTER_ZERO_OUTPUTS.store(0, Ordering::SeqCst);
         let args = vec![Value::Int(IntValue::I32(0))];
         let _ = block_on(timeit_builtin(zero_outputs_handle(), args)).expect("timeit zero outputs");
@@ -869,6 +988,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn timeit_runs_with_wgpu_provider_registered() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -896,6 +1016,35 @@ pub(crate) mod tests {
         assert_timeit_error_contains(&err, "nonnegative");
         assert_timeit_error_identifier(&err, TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.identifier.unwrap());
         assert_eq!(COUNTER_INVALID.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn timeit_gates_typed_integer_output_counts_before_invoking_the_callback() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        COUNTER_NUM_OUTPUTS.store(0, Ordering::SeqCst);
+        let err = block_on(timeit_builtin(
+            outputs_handle(),
+            vec![Value::Int(IntValue::I32(3))],
+        ))
+        .expect_err("strict compatibility must reject native integer output counts");
+        assert_eq!(
+            err.identifier(),
+            INTEGER_NUM_OUTPUTS_EXTENSION.error_identifier
+        );
+        assert_eq!(COUNTER_NUM_OUTPUTS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn timeit_decodes_typed_integer_output_counts_without_an_f64_boundary() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        assert_eq!(
+            block_on(parse_num_outputs(&[Value::Int(IntValue::U64(
+                usize::MAX as u64
+            ))]))
+            .expect("platform-sized integer should decode exactly"),
+            Some(usize::MAX)
+        );
+        assert!(block_on(parse_num_outputs(&[Value::Int(IntValue::I64(-1))])).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

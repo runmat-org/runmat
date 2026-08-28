@@ -1,10 +1,3 @@
----
-title: "Benchmarking"
-category: "Development"
-section: "14.4"
-last_updated: "May 28, 2026"
----
-
 # Benchmarking
 
 RunMat has two benchmarking utilities in this repo. The CLI `benchmark` command measures one MATLAB script through the normal session engine. The `benchmarks/` harness compares RunMat against other implementations across representative workloads and records telemetry for performance analysis.
@@ -96,13 +89,14 @@ Use telemetry when deciding whether a benchmark is measuring the intended execut
 Some performance checks live as Rust tests. They are not a replacement for benchmark runs, but they catch severe regressions in JIT, residency, and GPU dispatch behavior.
 
 ```bash
-cargo test -p runmat-turbine --test performance
+cargo test -p runmat-jit
+cargo test -p runmat-core native_tiering
 cargo test -p runmat-runtime-integration-tests --test bench_residency_smoke
 cargo test -p runmat-accelerate --features wgpu --test matmul_residency
 cargo test -p runmat-vm --test fusion_gpu
 ```
 
-The Turbine performance tests check basic compile time, execution time, cache behavior, repeated execution, and scalability expectations. Residency tests check that GPU values remain on device across representative operation chains.
+The JIT and Core tiering tests check bounded warmup, publication and cache reuse, exact-profile specialization, loop feedback and OSR, transactional interactive execution, and steady-state compilation counts. Residency tests check that GPU values remain on device across representative operation chains.
 
 ## WGPU Profiling
 

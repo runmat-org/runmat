@@ -1,13 +1,17 @@
 //! MATLAB-compatible `addpath` builtin for manipulating the RunMat search path.
 
-#[cfg(test)]
-use runmat_builtins::CellArray;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::CellArray;
+use runmat_value::{CharArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::builtins::common::path_state::{
@@ -17,6 +21,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::io::repl_fs::tensor_char_codes_to_string;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
@@ -51,6 +56,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "addpath";
+
+const NUMERIC_CHARACTER_CODES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "addpath-numeric-character-codes",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "addpath with a numeric character-code tensor is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AddpathNumericCharacterCodesExtension"),
+};
+pub const ADDPATH_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [NUMERIC_CHARACTER_CODES_EXTENSION];
 
 const ADDPATH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "oldpath",
@@ -189,7 +202,7 @@ const ADDPATH_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
 const ADDPATH_ERROR_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ADDPATH.ARG_TYPE",
     identifier: None,
-    when: "Folder arguments are not character vectors, string scalars/arrays, tensors of character codes, or cell arrays containing those forms.",
+    when: "Folder arguments are not character vectors, string scalars/arrays, cell arrays containing those forms, or mode-admitted numeric character-code tensors.",
     message:
         "addpath: folder names must be character vectors, string scalars, string arrays, or cell arrays of character vectors",
 };
@@ -244,6 +257,25 @@ pub const ADDPATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ADDPATH_ERRORS,
 };
+const ADDPATH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "folder",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A dense one-row integer tensor may encode Unicode scalar values for one folder name in RunMat mode; MATLAB-compatible modes accept documented character vectors and string scalars instead.",
+    }];
+pub const ADDPATH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "oldpath = addpath(integer_character_codes, options)",
+        inputs: &ADDPATH_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer code points are decoded exactly without an f64 intermediary, invalid Unicode values reject, path mutation is host-only, and resident numeric tensors are classified before gather. The output remains the previous path as a character vector.",
+    }];
 
 fn addpath_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     addpath_error_with_message(error.message, error)
@@ -299,6 +331,8 @@ struct AddPathSpec {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::addpath_type),
     descriptor(crate::builtins::io::repl_fs::addpath::ADDPATH_DESCRIPTOR),
+    extensions(crate::builtins::io::repl_fs::addpath::ADDPATH_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::repl_fs::addpath::ADDPATH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::repl_fs::addpath"
 )]
 async fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -306,11 +340,25 @@ async fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return Err(addpath_error(&ADDPATH_ERROR_TOO_FEW_ARGS));
     }
 
+    if args.iter().any(value_contains_numeric_character_codes) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &NUMERIC_CHARACTER_CODES_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let gathered = gather_arguments(&args).await?;
     let previous = current_path_string();
     let spec = parse_arguments(&gathered).await?;
     apply_addpath(spec).await?;
     Ok(char_array_value(&previous))
+}
+
+fn value_contains_numeric_character_codes(value: &Value) -> bool {
+    match value {
+        Value::Tensor(_) | Value::GpuTensor(_) => true,
+        Value::Cell(cell) => cell.data.iter().any(value_contains_numeric_character_codes),
+        _ => false,
+    }
 }
 
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
@@ -567,24 +615,7 @@ fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     if tensor.rows() > 1 {
         return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
     }
-    let mut text = String::with_capacity(tensor.data.len());
-    for &code in &tensor.data {
-        if !code.is_finite() {
-            return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
-        }
-        let rounded = code.round();
-        if (code - rounded).abs() > 1e-6 {
-            return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
-        }
-        let int_code = rounded as i64;
-        if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
-        }
-        let ch = char::from_u32(int_code as u32)
-            .ok_or_else(|| addpath_error(&ADDPATH_ERROR_ARG_TYPE))?;
-        text.push(ch);
-    }
-    Ok(text)
+    tensor_char_codes_to_string(tensor).ok_or_else(|| addpath_error(&ADDPATH_ERROR_ARG_TYPE))
 }
 
 fn path_identity(path: &str) -> String {
@@ -619,6 +650,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::path_state::set_path_string;
     use crate::builtins::common::path_state::{current_path_segments, PATH_LIST_SEPARATOR};
+    use runmat_value::IntegerStorage;
     use std::convert::TryFrom;
     use std::fs;
     use tempfile::tempdir;
@@ -640,6 +672,8 @@ pub(crate) mod tests {
         assert!(labels.contains(&"oldpath = addpath(folder1, ..., position)"));
         assert!(labels.contains(&"oldpath = addpath(folder1, ..., \"-frozen\")"));
         assert!(labels.contains(&"oldpath = addpath(folder1, ..., position, \"-frozen\")"));
+        assert_eq!(ADDPATH_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(ADDPATH_EXTENSIONS[0].id, "addpath-numeric-character-codes");
     }
 
     struct PathGuard {
@@ -922,5 +956,60 @@ pub(crate) mod tests {
         addpath_builtin(vec![Value::StringArray(string_array)]).expect("addpath");
         let current = current_path_string();
         assert_eq!(current, canonical(&cwd));
+    }
+
+    #[test]
+    fn addpath_integer_character_codes_are_mode_gated_and_exact() {
+        let _lock = REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = PathGuard::new();
+        let directory = tempdir().expect("directory");
+        let path = directory.path().to_string_lossy();
+        let codes = path.chars().map(u32::from).collect::<Vec<_>>();
+        let storages = [
+            IntegerStorage::I8(codes.iter().map(|value| *value as i8).collect()),
+            IntegerStorage::I16(codes.iter().map(|value| *value as i16).collect()),
+            IntegerStorage::I32(codes.iter().map(|value| *value as i32).collect()),
+            IntegerStorage::I64(codes.iter().map(|value| i64::from(*value)).collect()),
+            IntegerStorage::U8(codes.iter().map(|value| *value as u8).collect()),
+            IntegerStorage::U16(codes.iter().map(|value| *value as u16).collect()),
+            IntegerStorage::U32(codes.clone()),
+            IntegerStorage::U64(codes.iter().map(|value| u64::from(*value)).collect()),
+        ];
+
+        let first = Value::Tensor(
+            Tensor::new_integer(storages[0].clone(), vec![1, codes.len()]).expect("integer path"),
+        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = addpath_builtin(vec![first]).expect_err("MATLAB mode rejects integer path");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:AddpathNumericCharacterCodesExtension")
+            );
+            let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, codes.len()],
+                device_id: 0,
+                buffer_id: 9_343_001,
+                descriptor: Default::default(),
+            });
+            let err =
+                addpath_builtin(vec![resident]).expect_err("resident form rejects before gather");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:AddpathNumericCharacterCodesExtension")
+            );
+        }
+
+        for storage in storages {
+            set_path_string("");
+            let value = Value::Tensor(
+                Tensor::new_integer(storage, vec![1, codes.len()]).expect("integer path"),
+            );
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            addpath_builtin(vec![value]).expect("RunMat mode accepts integer path");
+            assert_eq!(current_path_segments(), vec![canonical(directory.path())]);
+        }
     }
 }

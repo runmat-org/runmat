@@ -1,10 +1,3 @@
----
-title: "Filesystem Abstraction"
-category: "Filesystem"
-section: "13.0"
-last_updated: "May 28, 2026"
----
-
 # Filesystem Abstraction
 
 `runmat-filesystem` gives the runtime one filesystem API across native CLI execution, sandboxed hosts, WASM hosts, and the remote project filesystem. Runtime code calls the same provider-neutral functions for `load`, `save`, `fopen`, `dir`, `which`, plotting exports, replay artifacts, datasets, and source loading.

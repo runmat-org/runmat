@@ -5,8 +5,9 @@ use std::sync::Arc;
 use crate::core::analysis::{
     analyze_document_with_compat_and_source, completion_at, definition_locations_at,
     diagnostics_for_document, document_symbols, formatting_edits, function_definitions_in_document,
-    function_references_in_document, hover_at, references_locations_at, semantic_tokens_full,
-    semantic_tokens_legend, signature_help_at, CompatMode, DocumentAnalysis,
+    function_references_in_document, hover_at, quick_information_at, references_locations_at,
+    semantic_document_facts, semantic_tokens_full, semantic_tokens_legend, signature_help_at,
+    CompatMode, DocumentAnalysis,
 };
 use crate::core::position::position_to_offset;
 use crate::core::project::ProjectContext;
@@ -26,8 +27,9 @@ use tower_lsp::lsp_types::{
     MessageType, OneOf, PositionEncodingKind, ReferenceParams, SemanticTokensOptions,
     SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
     ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    TextDocumentContentChangeEvent, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit,
-    Url, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentPositionParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
+    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
 // Cargo substitutes this at compile time so we can surface the precise build version in logs.
@@ -64,6 +66,8 @@ struct CachedProjectDoc {
 #[derive(Clone)]
 struct ProjectCache {
     manifest_path: PathBuf,
+    graph_digest: runmat_package::ContentDigest,
+    source_revision: runmat_package::ContentDigest,
     compat_mode: CompatMode,
     files: HashMap<PathBuf, CachedProjectDoc>,
 }
@@ -87,11 +91,55 @@ impl RunMatLanguageServer {
             client,
             state: Arc::new(RwLock::new(AnalyzerState {
                 documents: HashMap::new(),
-                compat_mode: CompatMode::Matlab,
+                compat_mode: CompatMode::RunMat,
                 workspace_roots: Vec::new(),
                 project_cache: None,
             })),
         }
+    }
+
+    /// Revision-bound semantic test discovery. The request carries the exact
+    /// frozen sources, including any intentionally selected editor overlays;
+    /// the language server never re-resolves the project for this operation.
+    pub async fn discover_tests(
+        &self,
+        snapshot: runmat_test::discovery::FrozenTestRunSnapshot,
+    ) -> RpcResult<runmat_test::discovery::TestDiscovery> {
+        let compat = self.state.read().await.compat_mode;
+        Ok(runmat_static_analysis::testing::discover_frozen_tests(
+            &snapshot, compat,
+        ))
+    }
+
+    pub async fn quick_information(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> RpcResult<Option<runmat_static_analysis::semantic::SemanticQuickInformation>> {
+        let state = self.state.read().await;
+        let Some(document) = state.documents.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        let Some(analysis) = document.analysis.as_ref() else {
+            return Ok(None);
+        };
+        Ok(quick_information_at(
+            &document.text,
+            analysis,
+            &params.position,
+        ))
+    }
+
+    pub async fn semantic_facts(
+        &self,
+        params: TextDocumentIdentifier,
+    ) -> RpcResult<Option<runmat_static_analysis::semantic::SemanticDocumentFacts>> {
+        let state = self.state.read().await;
+        Ok(state
+            .documents
+            .get(&params.uri)
+            .and_then(|document| document.analysis.as_ref())
+            .and_then(semantic_document_facts)
+            .cloned())
     }
 
     async fn update_document(&self, uri: Url, text: String, version: Option<i32>) {
@@ -283,6 +331,8 @@ impl RunMatLanguageServer {
 
         let context = ProjectContext::discover_from_source_name(start_hint.as_deref())?;
         let manifest_path = context.manifest_path().to_path_buf();
+        let graph_digest = context.graph_digest().clone();
+        let source_revision = context.source_revision().clone();
 
         let existing = {
             let state = self.state.read().await;
@@ -290,7 +340,11 @@ impl RunMatLanguageServer {
         };
 
         if let Some(cache) = existing {
-            if cache.manifest_path == manifest_path && cache.compat_mode == compat_mode {
+            if cache.manifest_path == manifest_path
+                && cache.graph_digest == graph_digest
+                && cache.source_revision == source_revision
+                && cache.compat_mode == compat_mode
+            {
                 let mut updated = cache;
                 for (uri, text, analysis) in open_docs {
                     if let Ok(path) = uri.to_file_path() {
@@ -320,7 +374,7 @@ impl RunMatLanguageServer {
             })
             .collect::<HashMap<_, _>>();
 
-        for source_file in context.all_source_files() {
+        for source_file in context.visible_source_files() {
             if let Some((uri, text, analysis)) = open_doc_by_path.get(source_file) {
                 files.insert(
                     source_file.clone(),
@@ -332,16 +386,12 @@ impl RunMatLanguageServer {
                 );
                 continue;
             }
-            let Ok(text) =
+            let text =
                 futures::executor::block_on(runmat_filesystem::read_to_string_async(source_file))
-            else {
-                continue;
-            };
+                    .ok()?;
             let source_name = source_file.to_str();
             let analysis = analyze_document_with_compat_and_source(&text, compat_mode, source_name);
-            let Ok(uri) = Url::from_file_path(source_file) else {
-                continue;
-            };
+            let uri = Url::from_file_path(source_file).ok()?;
             files.insert(
                 source_file.clone(),
                 CachedProjectDoc {
@@ -354,6 +404,8 @@ impl RunMatLanguageServer {
 
         let cache = ProjectCache {
             manifest_path,
+            graph_digest,
+            source_revision,
             compat_mode,
             files,
         };
@@ -801,6 +853,19 @@ impl LanguageServer for RunMatLanguageServer {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        let Some(mode) = parse_compat_mode(&params.settings) else {
+            debug!("Ignoring configuration update without a valid language.compat value");
+            return;
+        };
+        let uris = {
+            let mut state = self.state.write().await;
+            state.compat_mode = parser_compat(mode);
+            state.project_cache = None;
+            state.documents.keys().cloned().collect::<Vec<_>>()
+        };
+        for uri in uris {
+            self.reanalyze(&uri).await;
+        }
         debug!("Configuration updated: {:?}", params.settings);
         self.client
             .log_message(MessageType::INFO, "RunMat configuration updated")
@@ -869,6 +934,17 @@ mod tests {
     use std::collections::HashSet;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn default_and_configured_compat_modes_preserve_runmat() {
+        assert_eq!(LanguageCompatMode::default(), LanguageCompatMode::RunMat);
+        assert_eq!(
+            parse_compat_mode(&serde_json::json!({
+                "language": { "compat": "runmat" }
+            })),
+            Some(LanguageCompatMode::RunMat)
+        );
+    }
 
     #[test]
     fn dependent_selection_targets_only_docs_referencing_changed_symbols() {

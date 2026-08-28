@@ -1,0 +1,20 @@
+{
+  "title": "fea.field",
+  "category": "fea",
+  "keywords": ["fea", "field", "results", "post-processing"],
+  "summary": "Extract one field from RunMat FEA results.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_results_field", "integration": null },
+  "description": "`fea.field(resultsOrRun, fieldId)` resolves one named field from a RunMat FEA result object and returns a typed `fea.Field` object.",
+  "behaviors": [
+    "Exactly one result or run object and one text field identifier are required.",
+    "An exact field id wins; a unique dotted-name suffix is also accepted, while absent or ambiguous fields fail.",
+    "Host field values are exposed as binary64 tensors. A device field reference remains provider metadata and is not silently gathered.",
+    "Shape, component-count, element-count, and size metadata are structural integer outputs and remain integer typed; they are not physical field values.",
+    "Integer input arrays have no role and are rejected before result lookup."
+  ],
+  "examples": [{ "description": "Extract stress results", "input": "stress = fea.field(results, \"structural.von_mises\");" }],
+  "faqs": [{ "question": "Are shape and element count field data?", "answer": "No. They are exact structural metadata; the `values` property contains the binary64 physical field data." }],
+  "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

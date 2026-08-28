@@ -1,6 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
-use bytemuck::bytes_of;
-use runmat_accelerate_api::GpuTensorHandle;
+use bytemuck::{bytes_of, Pod, Zeroable};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_time::Instant;
 use std::sync::Arc;
 
@@ -28,6 +28,174 @@ use crate::backend::wgpu::shaders::logical::{
 use crate::backend::wgpu::types::NumericPrecision;
 
 impl WgpuProvider {
+    fn integer_comparison_exec(
+        &self,
+        operation: u32,
+        operation_name: &str,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = self.get_entry_raw(a)?;
+        let entry_b = self.get_entry_raw(b)?;
+        let integer_type = entry_a
+            .integer_type()
+            .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
+        ensure!(
+            entry_b.integer_type() == Some(integer_type),
+            "{operation_name}: integer operands must have the same class"
+        );
+        ensure!(
+            entry_a.storage == runmat_accelerate_api::GpuTensorStorage::Real
+                && entry_b.storage == runmat_accelerate_api::GpuTensorStorage::Real,
+            "{operation_name}: complex integer gpuArray comparison is not supported"
+        );
+        let broadcast = super::integer::integer_broadcast_plan(
+            operation_name,
+            &entry_a.shape,
+            entry_a.len,
+            &entry_b.shape,
+            entry_b.len,
+        )?;
+        let len = broadcast.len;
+        if len == 0 {
+            let out = self.create_storage_buffer(0, "runmat-integer-compare-empty");
+            let handle = self.register_existing_buffer(out, broadcast.output_shape, 0);
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            return Ok(handle);
+        }
+        if len > u32::MAX as usize {
+            return Err(gpu_dispatch_length_limit_error(operation_name, len));
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct Params {
+            len: u32,
+            op: u32,
+            offset: u32,
+            total: u32,
+            integer_type: u32,
+            rank: u32,
+            _pad0: u32,
+            _pad1: u32,
+            out_shape: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            a_shape: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            b_shape: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            a_strides: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+            b_strides: [crate::backend::wgpu::params::AlignedU32;
+                crate::backend::wgpu::params::BCAST_MAX_RANK],
+        }
+
+        let scalar_type = match self.precision {
+            NumericPrecision::F64 => "f64",
+            NumericPrecision::F32 => "f32",
+        };
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let shader =
+            crate::backend::wgpu::shaders::integer::comparison_shader(scalar_type, workgroup_size);
+        let bind_group_layout =
+            self.device_ref()
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("runmat-integer-compare-bgl"),
+                    entries: &[
+                        crate::backend::wgpu::bindings::storage_read_entry(0),
+                        crate::backend::wgpu::bindings::storage_read_entry(1),
+                        crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                        crate::backend::wgpu::bindings::uniform_entry(3),
+                    ],
+                });
+        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+            self.device_ref(),
+            "runmat-integer-compare-pl",
+            &bind_group_layout,
+        );
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-integer-compare-module",
+            &shader,
+        );
+        let key = self.compute_pipeline_hash_bytes(
+            shader.as_bytes(),
+            "runmat-integer-compare-bgl",
+            Some(workgroup_size),
+        );
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-integer-compare",
+            Some(shader.as_bytes()),
+            Some("runmat-integer-compare-bgl"),
+            Some(workgroup_size),
+        );
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-integer-compare-out")?;
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * workgroup_size as usize;
+        let mut offset = 0usize;
+        while offset < len {
+            let chunk_len = (len - offset).min(chunk_capacity);
+            let params = Params {
+                len: chunk_len as u32,
+                op: operation,
+                offset: offset as u32,
+                total: len as u32,
+                integer_type: super::integer::integer_type_code(integer_type),
+                rank: broadcast.rank,
+                _pad0: 0,
+                _pad1: 0,
+                out_shape: broadcast.out_shape,
+                a_shape: broadcast.a_shape,
+                b_shape: broadcast.b_shape,
+                a_strides: broadcast.a_strides,
+                b_strides: broadcast.b_strides,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-integer-compare-params");
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-integer-compare-bg"),
+                    layout: &bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry_a.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: entry_b.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_len as u32,
+                workgroup_size,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &bind_group,
+                groups,
+            );
+            offset += chunk_len;
+        }
+        let handle = self.register_existing_buffer(out_buffer, broadcast.output_shape, len);
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+        Ok(handle)
+    }
+
     fn effective_storage_for_entry(
         &self,
         handle: &GpuTensorHandle,
@@ -85,17 +253,13 @@ impl WgpuProvider {
             )
         } else {
             let shader = complex_from_real_shader(self.precision);
-            let out = self.fused_elementwise_with_telemetry_exec(
+            self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
                 std::slice::from_ref(real),
                 &entry.shape,
                 out_len,
-            )?;
-            runmat_accelerate_api::set_handle_storage(
-                &out,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-            out
+            )?
         };
         Ok(handle)
     }
@@ -145,17 +309,13 @@ impl WgpuProvider {
             )
         } else {
             let shader = complex_from_real_imag_shader(self.precision, real_scalar, imag_scalar);
-            let out = self.fused_elementwise_with_telemetry_exec(
+            self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
                 &[real.clone(), imag.clone()],
                 &out_shape,
                 out_len,
-            )?;
-            runmat_accelerate_api::set_handle_storage(
-                &out,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-            out
+            )?
         };
         Ok(handle)
     }
@@ -302,18 +462,18 @@ impl WgpuProvider {
             entry.len / 2
         };
         let shader = complex_unary_shader(op, self.precision);
-        let out = self.fused_elementwise_with_telemetry_exec(
+        let output_storage = if output_complex {
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        } else {
+            runmat_accelerate_api::GpuTensorStorage::Real
+        };
+        let out = self.fused_elementwise_with_telemetry_and_storage_exec(
             &shader,
             std::slice::from_ref(a),
             &entry.shape,
             len,
+            output_storage,
         )?;
-        if output_complex {
-            runmat_accelerate_api::set_handle_storage(
-                &out,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-        }
         if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
             runmat_accelerate_api::record_handle_transpose(&out, info.base_rows, info.base_cols);
         }
@@ -341,14 +501,17 @@ impl WgpuProvider {
         let input_is_complex = runmat_accelerate_api::handle_storage(a)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         if len == 0 {
-            let out = self.register_existing_buffer(out_buffer, entry.shape, entry.len);
-            if input_is_complex {
-                runmat_accelerate_api::set_handle_storage(
-                    &out,
-                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-                );
-            }
-            return Ok(out);
+            let storage = if input_is_complex {
+                GpuTensorStorage::ComplexInterleaved
+            } else {
+                GpuTensorStorage::Real
+            };
+            return Ok(self.register_existing_buffer_with_storage(
+                out_buffer,
+                entry.shape,
+                entry.len,
+                storage,
+            ));
         }
         if len > (u32::MAX as usize) {
             return Err(gpu_dispatch_length_limit_error("round_digits", len));
@@ -441,13 +604,12 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        let out = self.register_existing_buffer(out_buffer, entry.shape, len);
-        if input_is_complex {
-            runmat_accelerate_api::set_handle_storage(
-                &out,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-        }
+        let storage = if input_is_complex {
+            GpuTensorStorage::ComplexInterleaved
+        } else {
+            GpuTensorStorage::Real
+        };
+        let out = self.register_existing_buffer_with_storage(out_buffer, entry.shape, len, storage);
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(out)
@@ -477,6 +639,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
+        {
+            return self.integer_comparison_exec(0, "elem_eq", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -507,6 +674,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
+        {
+            return self.integer_comparison_exec(1, "elem_ne", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -536,6 +708,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
+        {
+            return self.integer_comparison_exec(2, "elem_lt", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -566,6 +743,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
+        {
+            return self.integer_comparison_exec(3, "elem_le", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -596,6 +778,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
+        {
+            return self.integer_comparison_exec(4, "elem_gt", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -626,6 +813,11 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
+        {
+            return self.integer_comparison_exec(5, "elem_ge", a, b);
+        }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
@@ -836,114 +1028,19 @@ impl WgpuProvider {
             return Err(anyhow!("unary ops disabled via RUNMAT_DISABLE_UNARY"));
         }
         let entry_a = self.get_entry(a)?;
+        ensure!(
+            self.effective_storage_for_entry(a, &entry_a)
+                != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            "real unary operation does not support complex-interleaved buffers"
+        );
         let len = entry_a.len;
-        let out_buffer = self.create_storage_buffer_checked(len, "runmat-unary-out")?;
-        if len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
-        }
-        if len > (u32::MAX as usize) {
-            return Err(gpu_dispatch_length_limit_error("unary_op", len));
-        }
         let shader = real_unary_shader(op, self.precision);
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-unary-specialized-shader",
+        self.fused_elementwise_with_telemetry_exec(
             &shader,
-        );
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-unary-specialized-pipeline-layout",
-            &self.pipelines.unary.layout,
-        );
-        let layout_tag = format!("runmat-unary-op-{}", op as u32);
-        let shader_hash = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            &layout_tag,
-            Some(crate::backend::wgpu::config::effective_workgroup_size()),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            shader_hash,
-            &pipeline_layout,
-            &module,
-            "runmat-unary-specialized-pipeline",
-            Some(shader.as_bytes()),
-            Some(&layout_tag),
-            Some(crate::backend::wgpu::config::effective_workgroup_size()),
-        );
-        let start = Instant::now();
-        {
-            let mut enc =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-unary-noop"),
-                    });
-            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-unary-noop-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&pipeline);
-            drop(pass);
-            self.submit(enc);
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-unary-flush-gap"),
-                });
-            self.submit(enc);
-        }
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let mut offset = 0usize;
-        while offset < len {
-            let remaining = len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = crate::backend::wgpu::params::LenOpParams {
-                len: chunk_len as u32,
-                op: op as u32,
-                offset: offset as u32,
-                total: len as u32,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-unary-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-unary-bind"),
-                    layout: &self.pipelines.unary.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry_a.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::elementwise::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-                &bind_group,
-                groups,
-            );
-            offset += chunk_len;
-        }
-        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
-        self.telemetry
-            .record_fused_elementwise_duration(start.elapsed());
-        Ok(handle)
+            std::slice::from_ref(a),
+            &entry_a.shape,
+            len,
+        )
     }
     pub(crate) fn scalar_op_exec(
         &self,
@@ -1104,6 +1201,36 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         if std::env::var("RUNMAT_DISABLE_BINARY").is_ok() {
             return Err(anyhow!("binary ops disabled via RUNMAT_DISABLE_BINARY"));
+        }
+        if self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some()
+        {
+            return match op {
+                crate::backend::wgpu::types::BinaryOpCode::Add => {
+                    self.integer_arithmetic_exec(0, "elem_add", a, b)
+                }
+                crate::backend::wgpu::types::BinaryOpCode::Sub => {
+                    self.integer_arithmetic_exec(1, "elem_sub", a, b)
+                }
+                crate::backend::wgpu::types::BinaryOpCode::Mul => {
+                    self.integer_arithmetic_exec(2, "elem_mul", a, b)
+                }
+                crate::backend::wgpu::types::BinaryOpCode::Div => {
+                    self.integer_arithmetic_exec(3, "elem_div", a, b)
+                }
+                crate::backend::wgpu::types::BinaryOpCode::Pow => {
+                    self.integer_arithmetic_exec(4, "elem_pow", a, b)
+                }
+                crate::backend::wgpu::types::BinaryOpCode::Min => {
+                    self.integer_minmax_exec(true, "elem_min", a, b)
+                }
+                crate::backend::wgpu::types::BinaryOpCode::Max => {
+                    self.integer_minmax_exec(false, "elem_max", a, b)
+                }
+                _ => Err(anyhow!(
+                    "native integer gpuArray arithmetic requires a dedicated integer provider kernel"
+                )),
+            };
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
@@ -1273,17 +1400,13 @@ impl WgpuProvider {
         } else {
             let shader =
                 complex_binary_shader(complex_op, self.precision, lhs_complex, rhs_complex);
-            let out = self.fused_elementwise_with_telemetry_exec(
+            self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
                 &[a.clone(), b.clone()],
                 &entry_a.shape,
                 out_len,
-            )?;
-            runmat_accelerate_api::set_handle_storage(
-                &out,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-            out
+            )?
         };
         Ok(handle)
     }
@@ -1305,39 +1428,13 @@ impl WgpuProvider {
         let rhs_complex = self.effective_storage_for_entry(b, entry_b)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
 
-        let mut shape_a = entry_a.shape.clone();
-        let mut shape_b = entry_b.shape.clone();
-        let rank = shape_a.len().max(shape_b.len());
-        if rank > BCAST_MAX_RANK {
-            return Err(anyhow!("complex broadcast rank exceeds limit"));
-        }
-        if shape_a.len() < rank {
-            let pad = rank - shape_a.len();
-            let mut v = vec![1usize; pad];
-            v.extend_from_slice(&shape_a);
-            shape_a = v;
-        }
-        if shape_b.len() < rank {
-            let pad = rank - shape_b.len();
-            let mut v = vec![1usize; pad];
-            v.extend_from_slice(&shape_b);
-            shape_b = v;
-        }
-
-        let mut out_shape = vec![1usize; rank];
-        for i in 0..rank {
-            let da = shape_a[i];
-            let db = shape_b[i];
-            if da == db {
-                out_shape[i] = da;
-            } else if da == 1 {
-                out_shape[i] = db;
-            } else if db == 1 {
-                out_shape[i] = da;
-            } else {
-                return Err(anyhow!("shape mismatch for complex broadcast"));
-            }
-        }
+        let (shape_a, shape_b, out_shape) = super::backend_shared::matlab_broadcast_shapes(
+            "complex broadcast",
+            &entry_a.shape,
+            &entry_b.shape,
+            BCAST_MAX_RANK,
+        )?;
+        let rank = out_shape.len();
 
         let logical_len = out_shape
             .iter()
@@ -1404,12 +1501,13 @@ impl WgpuProvider {
 
         let shader =
             complex_binary_broadcast_shader(complex_op, self.precision, lhs_complex, rhs_complex);
-        let handle =
-            self.fused_elementwise_exec(&shader, &[a.clone(), b.clone()], &out_shape, out_len)?;
-        runmat_accelerate_api::set_handle_storage(
-            &handle,
+        let handle = self.fused_elementwise_exec(
+            &shader,
+            &[a.clone(), b.clone()],
+            &out_shape,
+            out_len,
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        );
+        )?;
         Ok(handle)
     }
 
@@ -1423,38 +1521,13 @@ impl WgpuProvider {
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         // Compute broadcasted output shape
-        let mut shape_a = entry_a.shape.clone();
-        let mut shape_b = entry_b.shape.clone();
-        let rank = shape_a.len().max(shape_b.len());
-        if rank > BCAST_MAX_RANK {
-            return Err(anyhow!("broadcast rank exceeds limit"));
-        }
-        if shape_a.len() < rank {
-            let pad = rank - shape_a.len();
-            let mut v = vec![1usize; pad];
-            v.extend_from_slice(&shape_a);
-            shape_a = v;
-        }
-        if shape_b.len() < rank {
-            let pad = rank - shape_b.len();
-            let mut v = vec![1usize; pad];
-            v.extend_from_slice(&shape_b);
-            shape_b = v;
-        }
-        let mut out_shape: Vec<usize> = vec![1; rank];
-        for i in 0..rank {
-            let da = shape_a[i];
-            let db = shape_b[i];
-            if da == db {
-                out_shape[i] = da;
-            } else if da == 1 {
-                out_shape[i] = db;
-            } else if db == 1 {
-                out_shape[i] = da;
-            } else {
-                return Err(anyhow!("shape mismatch for broadcast"));
-            }
-        }
+        let (shape_a, shape_b, out_shape) = super::backend_shared::matlab_broadcast_shapes(
+            "binary operation",
+            &entry_a.shape,
+            &entry_b.shape,
+            BCAST_MAX_RANK,
+        )?;
+        let rank = out_shape.len();
         let len: usize = out_shape
             .iter()
             .copied()
@@ -1570,6 +1643,7 @@ impl WgpuProvider {
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         len: usize,
+        output_storage: GpuTensorStorage,
     ) -> Result<GpuTensorHandle> {
         if inputs.is_empty() {
             return Err(anyhow!("fused_elementwise: no inputs"));
@@ -1678,13 +1752,12 @@ impl WgpuProvider {
             let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
             write_packed_array(&mut bytes, &out_shape_u32);
             for entry in &entries {
-                let mut shape = entry.shape.clone();
-                if shape.len() < rank {
-                    let pad = rank - shape.len();
-                    let mut v = vec![1usize; pad];
-                    v.extend_from_slice(&shape);
-                    shape = v;
-                }
+                let mut shape = if rank >= 2 {
+                    super::backend_shared::canonical_matrix_shape(&entry.shape)
+                } else {
+                    entry.shape.clone()
+                };
+                shape.resize(rank, 1);
                 let shape_u32: Vec<u32> = shape.iter().map(|&d| d as u32).collect();
                 write_packed_array(&mut bytes, &shape_u32);
                 let mut strides: Vec<u32> = vec![0; rank];
@@ -1827,10 +1900,11 @@ impl WgpuProvider {
             offset_elems += chunk_len;
             chunk_index += 1;
         }
-        let handle = self.register_existing_buffer_with_usage(
+        let handle = self.register_existing_buffer_with_usage_and_storage(
             output_buffer,
             output_shape.to_vec(),
             len,
+            output_storage,
             BufferUsageClass::FusionOut,
         );
         log::trace!(
@@ -1975,13 +2049,12 @@ impl WgpuProvider {
         let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
         write_packed_array(&mut bytes, &out_shape_u32);
         for entry in &entries {
-            let mut shape = entry.shape.clone();
-            if shape.len() < rank {
-                let pad = rank - shape.len();
-                let mut v = vec![1usize; pad];
-                v.extend_from_slice(&shape);
-                shape = v;
-            }
+            let mut shape = if rank >= 2 {
+                super::backend_shared::canonical_matrix_shape(&entry.shape)
+            } else {
+                entry.shape.clone()
+            };
+            shape.resize(rank, 1);
             let shape_u32: Vec<u32> = shape.iter().map(|&d| d as u32).collect();
             write_packed_array(&mut bytes, &shape_u32);
             let mut strides: Vec<u32> = vec![0; rank];
@@ -2089,10 +2162,13 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView};
+    use runmat_accelerate_api::{
+        AccelProvider, GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView,
+        HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
 
     async fn complex_pair(
-        provider: &'static dyn AccelProvider,
+        provider: &dyn AccelProvider,
         real: &[f64],
         imag: &[f64],
         shape: &[usize],
@@ -2140,14 +2216,1017 @@ mod tests {
         }
     }
 
-    fn register_wgpu_provider_for_test(
-    ) -> Option<&'static crate::backend::wgpu::provider::WgpuProvider> {
-        match crate::backend::wgpu::provider::register_wgpu_provider(
+    fn assert_close_scaled(actual: &[f64], expected: &[f64], tol: f64) {
+        assert_eq!(actual.len(), expected.len());
+        for (idx, (&actual, &expected)) in actual.iter().zip(expected.iter()).enumerate() {
+            let scale = expected.abs().max(1.0);
+            assert!(
+                (actual - expected).abs() <= tol * scale,
+                "lane {idx}: expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    fn register_wgpu_provider_for_test() -> Option<crate::backend::wgpu::provider::WgpuTestSession>
+    {
+        match crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) {
             Ok(provider) => Some(provider),
             Err(err) if err.to_string() == "wgpu: no compatible adapter found" => None,
             Err(err) => panic!("register wgpu provider failed: {err:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_comparisons_preserve_all_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [3, 1];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[i8::MIN, 0, i8::MAX]),
+                HostIntegerDataView::I8(&[i8::MIN + 1, 0, i8::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::I16(&[i16::MIN, 0, i16::MAX]),
+                HostIntegerDataView::I16(&[i16::MIN + 1, 0, i16::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::I32(&[i32::MIN, 0, i32::MAX]),
+                HostIntegerDataView::I32(&[i32::MIN + 1, 0, i32::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::I64(&[i64::MIN, 0, i64::MAX]),
+                HostIntegerDataView::I64(&[i64::MIN + 1, 0, i64::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::U8(&[0, 1, u8::MAX]),
+                HostIntegerDataView::U8(&[1, 1, u8::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::U16(&[0, 1, u16::MAX]),
+                HostIntegerDataView::U16(&[1, 1, u16::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::U32(&[0, 1, u32::MAX]),
+                HostIntegerDataView::U32(&[1, 1, u32::MAX - 1]),
+            ),
+            (
+                HostIntegerDataView::U64(&[0, 1, u64::MAX]),
+                HostIntegerDataView::U64(&[1, 1, u64::MAX - 1]),
+            ),
+        ];
+
+        for (left, right) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload integer lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload integer rhs");
+            let equal = provider.elem_eq(&lhs, &rhs).await.expect("integer eq");
+            let not_equal = provider.elem_ne(&lhs, &rhs).await.expect("integer ne");
+            let less = provider.elem_lt(&lhs, &rhs).await.expect("integer lt");
+            let less_equal = provider.elem_le(&lhs, &rhs).await.expect("integer le");
+            let greater = provider.elem_gt(&lhs, &rhs).await.expect("integer gt");
+            let greater_equal = provider.elem_ge(&lhs, &rhs).await.expect("integer ge");
+            for handle in [
+                &equal,
+                &not_equal,
+                &less,
+                &less_equal,
+                &greater,
+                &greater_equal,
+            ] {
+                assert!(runmat_accelerate_api::handle_is_logical(handle));
+            }
+            assert_eq!(
+                provider.download(&equal).await.expect("download eq").data,
+                vec![0.0, 1.0, 0.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&not_equal)
+                    .await
+                    .expect("download ne")
+                    .data,
+                vec![1.0, 0.0, 1.0]
+            );
+            assert_eq!(
+                provider.download(&less).await.expect("download lt").data,
+                vec![1.0, 0.0, 0.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&less_equal)
+                    .await
+                    .expect("download le")
+                    .data,
+                vec![1.0, 1.0, 0.0]
+            );
+            assert_eq!(
+                provider.download(&greater).await.expect("download gt").data,
+                vec![0.0, 0.0, 1.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&greater_equal)
+                    .await
+                    .expect("download ge")
+                    .data,
+                vec![0.0, 1.0, 1.0]
+            );
+            for handle in [
+                &lhs,
+                &rhs,
+                &equal,
+                &not_equal,
+                &less,
+                &less_equal,
+                &greater,
+                &greater_equal,
+            ] {
+                provider.free(handle).expect("free comparison handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_comparisons_reject_mixed_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 1];
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&[1]),
+                shape: &shape,
+            })
+            .expect("upload signed integer");
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U8(&[1]),
+                shape: &shape,
+            })
+            .expect("upload unsigned integer");
+        let error = provider
+            .elem_eq(&signed, &unsigned)
+            .await
+            .expect_err("mixed native integer classes must not use an implicit promotion");
+        assert!(error.to_string().contains("same class"));
+        provider.free(&signed).expect("free signed handle");
+        provider.free(&unsigned).expect("free unsigned handle");
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_minmax_preserves_all_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [3, 1];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[i8::MIN, 0, i8::MAX]),
+                HostIntegerDataView::I8(&[i8::MIN + 1, 0, i8::MAX - 1]),
+                HostIntegerDataOwned::I8(vec![i8::MIN, 0, i8::MAX - 1]),
+                HostIntegerDataOwned::I8(vec![i8::MIN + 1, 0, i8::MAX]),
+            ),
+            (
+                HostIntegerDataView::I16(&[i16::MIN, 0, i16::MAX]),
+                HostIntegerDataView::I16(&[i16::MIN + 1, 0, i16::MAX - 1]),
+                HostIntegerDataOwned::I16(vec![i16::MIN, 0, i16::MAX - 1]),
+                HostIntegerDataOwned::I16(vec![i16::MIN + 1, 0, i16::MAX]),
+            ),
+            (
+                HostIntegerDataView::I32(&[i32::MIN, 0, i32::MAX]),
+                HostIntegerDataView::I32(&[i32::MIN + 1, 0, i32::MAX - 1]),
+                HostIntegerDataOwned::I32(vec![i32::MIN, 0, i32::MAX - 1]),
+                HostIntegerDataOwned::I32(vec![i32::MIN + 1, 0, i32::MAX]),
+            ),
+            (
+                HostIntegerDataView::I64(&[i64::MIN, 0, i64::MAX]),
+                HostIntegerDataView::I64(&[i64::MIN + 1, 0, i64::MAX - 1]),
+                HostIntegerDataOwned::I64(vec![i64::MIN, 0, i64::MAX - 1]),
+                HostIntegerDataOwned::I64(vec![i64::MIN + 1, 0, i64::MAX]),
+            ),
+            (
+                HostIntegerDataView::U8(&[0, 1, u8::MAX]),
+                HostIntegerDataView::U8(&[1, 1, u8::MAX - 1]),
+                HostIntegerDataOwned::U8(vec![0, 1, u8::MAX - 1]),
+                HostIntegerDataOwned::U8(vec![1, 1, u8::MAX]),
+            ),
+            (
+                HostIntegerDataView::U16(&[0, 1, u16::MAX]),
+                HostIntegerDataView::U16(&[1, 1, u16::MAX - 1]),
+                HostIntegerDataOwned::U16(vec![0, 1, u16::MAX - 1]),
+                HostIntegerDataOwned::U16(vec![1, 1, u16::MAX]),
+            ),
+            (
+                HostIntegerDataView::U32(&[0, 1, u32::MAX]),
+                HostIntegerDataView::U32(&[1, 1, u32::MAX - 1]),
+                HostIntegerDataOwned::U32(vec![0, 1, u32::MAX - 1]),
+                HostIntegerDataOwned::U32(vec![1, 1, u32::MAX]),
+            ),
+            (
+                HostIntegerDataView::U64(&[0, 1, u64::MAX]),
+                HostIntegerDataView::U64(&[1, 1, u64::MAX - 1]),
+                HostIntegerDataOwned::U64(vec![0, 1, u64::MAX - 1]),
+                HostIntegerDataOwned::U64(vec![1, 1, u64::MAX]),
+            ),
+        ];
+
+        for (left, right, expected_min, expected_max) in cases {
+            let integer_type = left.element_type();
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload integer lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload integer rhs");
+            let minimum = provider.elem_min(&lhs, &rhs).await.expect("integer min");
+            let maximum = provider.elem_max(&lhs, &rhs).await.expect("integer max");
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&minimum),
+                Some(integer_type)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&maximum),
+                Some(integer_type)
+            );
+            assert_eq!(
+                provider
+                    .download_integer(&minimum)
+                    .await
+                    .expect("download min")
+                    .data,
+                expected_min
+            );
+            assert_eq!(
+                provider
+                    .download_integer(&maximum)
+                    .await
+                    .expect("download max")
+                    .data,
+                expected_max
+            );
+            for handle in [&lhs, &rhs, &minimum, &maximum] {
+                provider.free(handle).expect("free minmax handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_arithmetic_preserves_all_classes_and_saturates() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [5, 1];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[i8::MAX, i8::MIN, 12, -3, i8::MIN]),
+                HostIntegerDataView::I8(&[1, 1, -120, 7, -1]),
+                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN + 1, -108, 4, i8::MIN]),
+                HostIntegerDataOwned::I8(vec![i8::MAX - 1, i8::MIN, i8::MAX, -10, i8::MIN + 1]),
+                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN, i8::MIN, -21, i8::MAX]),
+            ),
+            (
+                HostIntegerDataView::I16(&[i16::MAX, i16::MIN, 12, -3, i16::MIN]),
+                HostIntegerDataView::I16(&[1, 1, -32_760, 7, -1]),
+                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN + 1, -32_748, 4, i16::MIN]),
+                HostIntegerDataOwned::I16(vec![
+                    i16::MAX - 1,
+                    i16::MIN,
+                    i16::MAX,
+                    -10,
+                    i16::MIN + 1,
+                ]),
+                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN, i16::MIN, -21, i16::MAX]),
+            ),
+            (
+                HostIntegerDataView::I32(&[i32::MAX, i32::MIN, 12, -3, i32::MIN]),
+                HostIntegerDataView::I32(&[1, 1, -2_147_483_640, 7, -1]),
+                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN + 1, i32::MIN + 20, 4, i32::MIN]),
+                HostIntegerDataOwned::I32(vec![
+                    i32::MAX - 1,
+                    i32::MIN,
+                    i32::MAX,
+                    -10,
+                    i32::MIN + 1,
+                ]),
+                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN, i32::MIN, -21, i32::MAX]),
+            ),
+            (
+                HostIntegerDataView::I64(&[i64::MAX, i64::MIN, 12, -3, i64::MIN]),
+                HostIntegerDataView::I64(&[1, 1, i64::MIN + 8, 7, -1]),
+                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN + 1, i64::MIN + 20, 4, i64::MIN]),
+                HostIntegerDataOwned::I64(vec![
+                    i64::MAX - 1,
+                    i64::MIN,
+                    i64::MAX,
+                    -10,
+                    i64::MIN + 1,
+                ]),
+                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN, i64::MIN, -21, i64::MAX]),
+            ),
+            (
+                HostIntegerDataView::U8(&[u8::MAX, 0, 10, 3, 0]),
+                HostIntegerDataView::U8(&[1, 1, 250, 7, 1]),
+                HostIntegerDataOwned::U8(vec![u8::MAX, 1, u8::MAX, 10, 1]),
+                HostIntegerDataOwned::U8(vec![u8::MAX - 1, 0, 0, 0, 0]),
+                HostIntegerDataOwned::U8(vec![u8::MAX, 0, u8::MAX, 21, 0]),
+            ),
+            (
+                HostIntegerDataView::U16(&[u16::MAX, 0, 10, 3, 0]),
+                HostIntegerDataView::U16(&[1, 1, u16::MAX - 5, 7, 1]),
+                HostIntegerDataOwned::U16(vec![u16::MAX, 1, u16::MAX, 10, 1]),
+                HostIntegerDataOwned::U16(vec![u16::MAX - 1, 0, 0, 0, 0]),
+                HostIntegerDataOwned::U16(vec![u16::MAX, 0, u16::MAX, 21, 0]),
+            ),
+            (
+                HostIntegerDataView::U32(&[u32::MAX, 0, 10, 3, 0]),
+                HostIntegerDataView::U32(&[1, 1, u32::MAX - 5, 7, 1]),
+                HostIntegerDataOwned::U32(vec![u32::MAX, 1, u32::MAX, 10, 1]),
+                HostIntegerDataOwned::U32(vec![u32::MAX - 1, 0, 0, 0, 0]),
+                HostIntegerDataOwned::U32(vec![u32::MAX, 0, u32::MAX, 21, 0]),
+            ),
+            (
+                HostIntegerDataView::U64(&[u64::MAX, 0, 10, 0x0000_0001_0000_0001, 0]),
+                HostIntegerDataView::U64(&[1, 1, u64::MAX - 5, 2, 1]),
+                HostIntegerDataOwned::U64(vec![u64::MAX, 1, u64::MAX, 0x0000_0001_0000_0003, 1]),
+                HostIntegerDataOwned::U64(vec![u64::MAX - 1, 0, 0, 0x0000_0000_ffff_ffff, 0]),
+                HostIntegerDataOwned::U64(vec![u64::MAX, 0, u64::MAX, 0x0000_0002_0000_0002, 0]),
+            ),
+        ];
+
+        for (left, right, expected_add, expected_subtract, expected_multiply) in cases {
+            let integer_type = left.element_type();
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload integer lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload integer rhs");
+            let add = provider.elem_add(&lhs, &rhs).await.expect("integer add");
+            let subtract = provider
+                .elem_sub(&lhs, &rhs)
+                .await
+                .expect("integer subtract");
+            let multiply = provider
+                .elem_mul(&lhs, &rhs)
+                .await
+                .expect("integer multiply");
+            let divide = provider.elem_div(&lhs, &rhs).await.expect("integer divide");
+            for handle in [&add, &subtract, &multiply, &divide] {
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(handle),
+                    Some(integer_type)
+                );
+            }
+            assert_eq!(
+                provider
+                    .download_integer(&add)
+                    .await
+                    .expect("download add")
+                    .data,
+                expected_add
+            );
+            assert_eq!(
+                provider
+                    .download_integer(&subtract)
+                    .await
+                    .expect("download subtract")
+                    .data,
+                expected_subtract
+            );
+            assert_eq!(
+                provider
+                    .download_integer(&multiply)
+                    .await
+                    .expect("download multiply")
+                    .data,
+                expected_multiply
+            );
+            let expected_divide = match integer_type {
+                IntegerElementType::I8 => HostIntegerDataOwned::I8(vec![127, -128, 0, 0, 127]),
+                IntegerElementType::I16 => {
+                    HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN, 0, 0, i16::MAX])
+                }
+                IntegerElementType::I32 => {
+                    HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN, 0, 0, i32::MAX])
+                }
+                IntegerElementType::I64 => {
+                    HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN, 0, 0, i64::MAX])
+                }
+                IntegerElementType::U8 => HostIntegerDataOwned::U8(vec![u8::MAX, 0, 0, 0, 0]),
+                IntegerElementType::U16 => HostIntegerDataOwned::U16(vec![u16::MAX, 0, 0, 0, 0]),
+                IntegerElementType::U32 => HostIntegerDataOwned::U32(vec![u32::MAX, 0, 0, 0, 0]),
+                IntegerElementType::U64 => {
+                    HostIntegerDataOwned::U64(vec![u64::MAX, 0, 0, 0x0000_0000_8000_0001, 0])
+                }
+            };
+            assert_eq!(
+                provider
+                    .download_integer(&divide)
+                    .await
+                    .expect("download divide")
+                    .data,
+                expected_divide
+            );
+            for handle in [&lhs, &rhs, &add, &subtract, &multiply, &divide] {
+                provider.free(handle).expect("free arithmetic handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_arithmetic_rejects_mixed_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 1];
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&[1]),
+                shape: &shape,
+            })
+            .expect("upload signed integer");
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U8(&[1]),
+                shape: &shape,
+            })
+            .expect("upload unsigned integer");
+        let error = provider
+            .elem_mul(&signed, &unsigned)
+            .await
+            .expect_err("mixed native integer classes must not use an implicit promotion");
+        assert!(error.to_string().contains("same class"));
+        provider.free(&signed).expect("free signed handle");
+        provider.free(&unsigned).expect("free unsigned handle");
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_division_rounds_and_saturates_boundaries() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 4];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[3, -3, 5, i8::MIN]),
+                HostIntegerDataView::I8(&[2, 2, 0, -1]),
+                HostIntegerDataOwned::I8(vec![2, -2, i8::MAX, i8::MAX]),
+            ),
+            (
+                HostIntegerDataView::I64(&[3, -3, 5, i64::MIN]),
+                HostIntegerDataView::I64(&[2, 2, 0, -1]),
+                HostIntegerDataOwned::I64(vec![2, -2, i64::MAX, i64::MAX]),
+            ),
+            (
+                HostIntegerDataView::U8(&[3, 5, 0, u8::MAX]),
+                HostIntegerDataView::U8(&[2, 0, 0, 0]),
+                HostIntegerDataOwned::U8(vec![2, u8::MAX, 0, u8::MAX]),
+            ),
+            (
+                HostIntegerDataView::U64(&[3, 5, 0, u64::MAX]),
+                HostIntegerDataView::U64(&[2, 0, 0, 0]),
+                HostIntegerDataOwned::U64(vec![2, u64::MAX, 0, u64::MAX]),
+            ),
+        ];
+
+        for (left, right, expected) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload rhs");
+            let quotient = provider
+                .elem_div(&lhs, &rhs)
+                .await
+                .expect("integer division");
+            let downloaded = provider
+                .download_integer(&quotient)
+                .await
+                .expect("download integer division");
+            assert_eq!(downloaded.shape, vec![1, 4]);
+            assert_eq!(downloaded.data, expected);
+            for handle in [&lhs, &rhs, &quotient] {
+                provider.free(handle).expect("free division handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_power_preserves_all_classes_and_rejects_negative_exponents() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 4];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[2, -2, 0, -1]),
+                HostIntegerDataView::I8(&[7, 7, 0, 3]),
+                HostIntegerDataOwned::I8(vec![i8::MAX, i8::MIN, 1, -1]),
+            ),
+            (
+                HostIntegerDataView::I16(&[2, -2, 0, -1]),
+                HostIntegerDataView::I16(&[15, 15, 0, 3]),
+                HostIntegerDataOwned::I16(vec![i16::MAX, i16::MIN, 1, -1]),
+            ),
+            (
+                HostIntegerDataView::I32(&[2, -2, 0, -1]),
+                HostIntegerDataView::I32(&[31, 31, 0, 3]),
+                HostIntegerDataOwned::I32(vec![i32::MAX, i32::MIN, 1, -1]),
+            ),
+            (
+                HostIntegerDataView::I64(&[2, -2, 0, -1]),
+                HostIntegerDataView::I64(&[63, 63, 0, 3]),
+                HostIntegerDataOwned::I64(vec![i64::MAX, i64::MIN, 1, -1]),
+            ),
+            (
+                HostIntegerDataView::U8(&[2, u8::MAX, 0, 1]),
+                HostIntegerDataView::U8(&[8, 2, 0, 7]),
+                HostIntegerDataOwned::U8(vec![u8::MAX, u8::MAX, 1, 1]),
+            ),
+            (
+                HostIntegerDataView::U16(&[2, u16::MAX, 0, 1]),
+                HostIntegerDataView::U16(&[16, 2, 0, 7]),
+                HostIntegerDataOwned::U16(vec![u16::MAX, u16::MAX, 1, 1]),
+            ),
+            (
+                HostIntegerDataView::U32(&[2, u32::MAX, 0, 1]),
+                HostIntegerDataView::U32(&[32, 2, 0, 7]),
+                HostIntegerDataOwned::U32(vec![u32::MAX, u32::MAX, 1, 1]),
+            ),
+            (
+                HostIntegerDataView::U64(&[2, u64::MAX, 0, 1]),
+                HostIntegerDataView::U64(&[64, 2, 0, 7]),
+                HostIntegerDataOwned::U64(vec![u64::MAX, u64::MAX, 1, 1]),
+            ),
+        ];
+        for (base, exponent, expected) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: base,
+                    shape: &shape,
+                })
+                .expect("upload power base");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: exponent,
+                    shape: &shape,
+                })
+                .expect("upload power exponent");
+            let value = provider.elem_pow(&lhs, &rhs).await.expect("integer power");
+            assert_eq!(
+                provider
+                    .download_integer(&value)
+                    .await
+                    .expect("download integer power")
+                    .data,
+                expected
+            );
+            for handle in [&lhs, &rhs, &value] {
+                provider.free(handle).expect("free power handle");
+            }
+        }
+
+        let base = [2_i8];
+        let exponent = [-1_i8];
+        let lhs = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&base),
+                shape: &[1, 1],
+            })
+            .expect("upload negative-exponent base");
+        let rhs = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&exponent),
+                shape: &[1, 1],
+            })
+            .expect("upload negative exponent");
+        let error = provider
+            .elem_pow(&lhs, &rhs)
+            .await
+            .expect_err("negative integer exponent must reject");
+        assert!(error.to_string().contains("must be nonnegative"));
+        for handle in [&lhs, &rhs] {
+            provider.free(handle).expect("free rejection handle");
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_remainder_and_modulus_preserve_all_classes() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 4];
+        let signed = [
+            (
+                HostIntegerDataView::I8(&[-7, 7, -7, 5]),
+                HostIntegerDataView::I8(&[4, -4, 0, 0]),
+                HostIntegerDataOwned::I8(vec![-3, 3, 0, 0]),
+                HostIntegerDataOwned::I8(vec![1, -1, -7, 5]),
+            ),
+            (
+                HostIntegerDataView::I16(&[-7, 7, -7, 5]),
+                HostIntegerDataView::I16(&[4, -4, 0, 0]),
+                HostIntegerDataOwned::I16(vec![-3, 3, 0, 0]),
+                HostIntegerDataOwned::I16(vec![1, -1, -7, 5]),
+            ),
+            (
+                HostIntegerDataView::I32(&[-7, 7, -7, 5]),
+                HostIntegerDataView::I32(&[4, -4, 0, 0]),
+                HostIntegerDataOwned::I32(vec![-3, 3, 0, 0]),
+                HostIntegerDataOwned::I32(vec![1, -1, -7, 5]),
+            ),
+            (
+                HostIntegerDataView::I64(&[-7, 7, -7, 5]),
+                HostIntegerDataView::I64(&[4, -4, 0, 0]),
+                HostIntegerDataOwned::I64(vec![-3, 3, 0, 0]),
+                HostIntegerDataOwned::I64(vec![1, -1, -7, 5]),
+            ),
+        ];
+        let unsigned = [
+            (
+                HostIntegerDataView::U8(&[7, 8, 7, 0]),
+                HostIntegerDataView::U8(&[4, 3, 0, 0]),
+                HostIntegerDataOwned::U8(vec![3, 2, 0, 0]),
+                HostIntegerDataOwned::U8(vec![3, 2, 7, 0]),
+            ),
+            (
+                HostIntegerDataView::U16(&[7, 8, 7, 0]),
+                HostIntegerDataView::U16(&[4, 3, 0, 0]),
+                HostIntegerDataOwned::U16(vec![3, 2, 0, 0]),
+                HostIntegerDataOwned::U16(vec![3, 2, 7, 0]),
+            ),
+            (
+                HostIntegerDataView::U32(&[7, 8, 7, 0]),
+                HostIntegerDataView::U32(&[4, 3, 0, 0]),
+                HostIntegerDataOwned::U32(vec![3, 2, 0, 0]),
+                HostIntegerDataOwned::U32(vec![3, 2, 7, 0]),
+            ),
+            (
+                HostIntegerDataView::U64(&[7, 8, 7, 0]),
+                HostIntegerDataView::U64(&[4, 3, 0, 0]),
+                HostIntegerDataOwned::U64(vec![3, 2, 0, 0]),
+                HostIntegerDataOwned::U64(vec![3, 2, 7, 0]),
+            ),
+        ];
+        for (left, right, expected_rem, expected_mod) in signed.into_iter().chain(unsigned) {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &shape,
+                })
+                .expect("upload remainder lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &shape,
+                })
+                .expect("upload remainder rhs");
+            let remainder = provider.elem_rem(&lhs, &rhs).await.expect("integer rem");
+            let modulus = provider.elem_mod(&lhs, &rhs).await.expect("integer mod");
+            assert_eq!(
+                provider
+                    .download_integer(&remainder)
+                    .await
+                    .expect("download rem")
+                    .data,
+                expected_rem
+            );
+            assert_eq!(
+                provider
+                    .download_integer(&modulus)
+                    .await
+                    .expect("download mod")
+                    .data,
+                expected_mod
+            );
+            for handle in [&lhs, &rhs, &remainder, &modulus] {
+                provider.free(handle).expect("free remainder handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_remainder_and_modulus_broadcast_column_major() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let lhs = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[-7, 7]),
+                shape: &[2, 1],
+            })
+            .expect("upload lhs");
+        let rhs = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[4, -4, 3]),
+                shape: &[1, 3],
+            })
+            .expect("upload rhs");
+        let rem = provider.elem_rem(&lhs, &rhs).await.expect("broadcast rem");
+        let modulus = provider.elem_mod(&lhs, &rhs).await.expect("broadcast mod");
+        assert_eq!(
+            provider
+                .download_integer(&rem)
+                .await
+                .expect("download rem")
+                .data,
+            HostIntegerDataOwned::I64(vec![-3, 3, -3, 3, -1, 1])
+        );
+        assert_eq!(
+            provider
+                .download_integer(&modulus)
+                .await
+                .expect("download mod")
+                .data,
+            HostIntegerDataOwned::I64(vec![1, 3, -3, -1, 2, 1])
+        );
+        for handle in [&lhs, &rhs, &rem, &modulus] {
+            provider.free(handle).expect("free handle");
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_arithmetic_broadcasts_all_classes_column_major() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let lhs_shape = [2, 1];
+        let rhs_shape = [1, 3];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[2, -2]),
+                HostIntegerDataView::I8(&[1, 2, 3]),
+                HostIntegerDataOwned::I8(vec![3, -1, 4, 0, 5, 1]),
+                HostIntegerDataOwned::I8(vec![1, -3, 0, -4, -1, -5]),
+                HostIntegerDataOwned::I8(vec![2, -2, 4, -4, 6, -6]),
+            ),
+            (
+                HostIntegerDataView::I16(&[2, -2]),
+                HostIntegerDataView::I16(&[1, 2, 3]),
+                HostIntegerDataOwned::I16(vec![3, -1, 4, 0, 5, 1]),
+                HostIntegerDataOwned::I16(vec![1, -3, 0, -4, -1, -5]),
+                HostIntegerDataOwned::I16(vec![2, -2, 4, -4, 6, -6]),
+            ),
+            (
+                HostIntegerDataView::I32(&[2, -2]),
+                HostIntegerDataView::I32(&[1, 2, 3]),
+                HostIntegerDataOwned::I32(vec![3, -1, 4, 0, 5, 1]),
+                HostIntegerDataOwned::I32(vec![1, -3, 0, -4, -1, -5]),
+                HostIntegerDataOwned::I32(vec![2, -2, 4, -4, 6, -6]),
+            ),
+            (
+                HostIntegerDataView::I64(&[2, -2]),
+                HostIntegerDataView::I64(&[1, 2, 3]),
+                HostIntegerDataOwned::I64(vec![3, -1, 4, 0, 5, 1]),
+                HostIntegerDataOwned::I64(vec![1, -3, 0, -4, -1, -5]),
+                HostIntegerDataOwned::I64(vec![2, -2, 4, -4, 6, -6]),
+            ),
+            (
+                HostIntegerDataView::U8(&[2, 4]),
+                HostIntegerDataView::U8(&[1, 2, 3]),
+                HostIntegerDataOwned::U8(vec![3, 5, 4, 6, 5, 7]),
+                HostIntegerDataOwned::U8(vec![1, 3, 0, 2, 0, 1]),
+                HostIntegerDataOwned::U8(vec![2, 4, 4, 8, 6, 12]),
+            ),
+            (
+                HostIntegerDataView::U16(&[2, 4]),
+                HostIntegerDataView::U16(&[1, 2, 3]),
+                HostIntegerDataOwned::U16(vec![3, 5, 4, 6, 5, 7]),
+                HostIntegerDataOwned::U16(vec![1, 3, 0, 2, 0, 1]),
+                HostIntegerDataOwned::U16(vec![2, 4, 4, 8, 6, 12]),
+            ),
+            (
+                HostIntegerDataView::U32(&[2, 4]),
+                HostIntegerDataView::U32(&[1, 2, 3]),
+                HostIntegerDataOwned::U32(vec![3, 5, 4, 6, 5, 7]),
+                HostIntegerDataOwned::U32(vec![1, 3, 0, 2, 0, 1]),
+                HostIntegerDataOwned::U32(vec![2, 4, 4, 8, 6, 12]),
+            ),
+            (
+                HostIntegerDataView::U64(&[2, 4]),
+                HostIntegerDataView::U64(&[1, 2, 3]),
+                HostIntegerDataOwned::U64(vec![3, 5, 4, 6, 5, 7]),
+                HostIntegerDataOwned::U64(vec![1, 3, 0, 2, 0, 1]),
+                HostIntegerDataOwned::U64(vec![2, 4, 4, 8, 6, 12]),
+            ),
+        ];
+
+        for (left, right, expected_add, expected_subtract, expected_multiply) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &lhs_shape,
+                })
+                .expect("upload lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &rhs_shape,
+                })
+                .expect("upload rhs");
+            let add = provider.elem_add(&lhs, &rhs).await.expect("broadcast add");
+            let subtract = provider
+                .elem_sub(&lhs, &rhs)
+                .await
+                .expect("broadcast subtract");
+            let multiply = provider
+                .elem_mul(&lhs, &rhs)
+                .await
+                .expect("broadcast multiply");
+            let divide = provider
+                .elem_div(&lhs, &rhs)
+                .await
+                .expect("broadcast divide");
+            let expected_divide = match left.element_type() {
+                IntegerElementType::I8 => HostIntegerDataOwned::I8(vec![2, -2, 1, -1, 1, -1]),
+                IntegerElementType::I16 => HostIntegerDataOwned::I16(vec![2, -2, 1, -1, 1, -1]),
+                IntegerElementType::I32 => HostIntegerDataOwned::I32(vec![2, -2, 1, -1, 1, -1]),
+                IntegerElementType::I64 => HostIntegerDataOwned::I64(vec![2, -2, 1, -1, 1, -1]),
+                IntegerElementType::U8 => HostIntegerDataOwned::U8(vec![2, 4, 1, 2, 1, 1]),
+                IntegerElementType::U16 => HostIntegerDataOwned::U16(vec![2, 4, 1, 2, 1, 1]),
+                IntegerElementType::U32 => HostIntegerDataOwned::U32(vec![2, 4, 1, 2, 1, 1]),
+                IntegerElementType::U64 => HostIntegerDataOwned::U64(vec![2, 4, 1, 2, 1, 1]),
+            };
+            for (handle, expected) in [
+                (&add, expected_add),
+                (&subtract, expected_subtract),
+                (&multiply, expected_multiply),
+                (&divide, expected_divide),
+            ] {
+                let downloaded = provider
+                    .download_integer(handle)
+                    .await
+                    .expect("download broadcast result");
+                assert_eq!(downloaded.shape, vec![2, 3]);
+                assert_eq!(downloaded.data, expected);
+            }
+            for handle in [&lhs, &rhs, &add, &subtract, &multiply, &divide] {
+                provider.free(handle).expect("free broadcast handle");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn wgpu_native_integer_comparison_and_minmax_broadcast_all_classes_column_major() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let lhs_shape = [2, 1];
+        let rhs_shape = [1, 3];
+        let cases = [
+            (
+                HostIntegerDataView::I8(&[2, -2]),
+                HostIntegerDataView::I8(&[1, 2, 3]),
+                HostIntegerDataOwned::I8(vec![1, -2, 2, -2, 2, -2]),
+                HostIntegerDataOwned::I8(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::I16(&[2, -2]),
+                HostIntegerDataView::I16(&[1, 2, 3]),
+                HostIntegerDataOwned::I16(vec![1, -2, 2, -2, 2, -2]),
+                HostIntegerDataOwned::I16(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::I32(&[2, -2]),
+                HostIntegerDataView::I32(&[1, 2, 3]),
+                HostIntegerDataOwned::I32(vec![1, -2, 2, -2, 2, -2]),
+                HostIntegerDataOwned::I32(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::I64(&[2, -2]),
+                HostIntegerDataView::I64(&[1, 2, 3]),
+                HostIntegerDataOwned::I64(vec![1, -2, 2, -2, 2, -2]),
+                HostIntegerDataOwned::I64(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::U8(&[2, 0]),
+                HostIntegerDataView::U8(&[1, 2, 3]),
+                HostIntegerDataOwned::U8(vec![1, 0, 2, 0, 2, 0]),
+                HostIntegerDataOwned::U8(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::U16(&[2, 0]),
+                HostIntegerDataView::U16(&[1, 2, 3]),
+                HostIntegerDataOwned::U16(vec![1, 0, 2, 0, 2, 0]),
+                HostIntegerDataOwned::U16(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::U32(&[2, 0]),
+                HostIntegerDataView::U32(&[1, 2, 3]),
+                HostIntegerDataOwned::U32(vec![1, 0, 2, 0, 2, 0]),
+                HostIntegerDataOwned::U32(vec![2, 1, 2, 2, 3, 3]),
+            ),
+            (
+                HostIntegerDataView::U64(&[2, 0]),
+                HostIntegerDataView::U64(&[1, 2, 3]),
+                HostIntegerDataOwned::U64(vec![1, 0, 2, 0, 2, 0]),
+                HostIntegerDataOwned::U64(vec![2, 1, 2, 2, 3, 3]),
+            ),
+        ];
+
+        for (left, right, expected_minimum, expected_maximum) in cases {
+            let lhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: left,
+                    shape: &lhs_shape,
+                })
+                .expect("upload lhs");
+            let rhs = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: right,
+                    shape: &rhs_shape,
+                })
+                .expect("upload rhs");
+            let equal = provider.elem_eq(&lhs, &rhs).await.expect("broadcast eq");
+            let not_equal = provider.elem_ne(&lhs, &rhs).await.expect("broadcast ne");
+            let less = provider.elem_lt(&lhs, &rhs).await.expect("broadcast lt");
+            let greater_equal = provider.elem_ge(&lhs, &rhs).await.expect("broadcast ge");
+            let minimum = provider.elem_min(&lhs, &rhs).await.expect("broadcast min");
+            let maximum = provider.elem_max(&lhs, &rhs).await.expect("broadcast max");
+            for handle in [&equal, &not_equal, &less, &greater_equal] {
+                assert!(runmat_accelerate_api::handle_is_logical(handle));
+                let downloaded = provider
+                    .download(handle)
+                    .await
+                    .expect("download comparison");
+                assert_eq!(downloaded.shape, vec![2, 3]);
+            }
+            assert_eq!(
+                provider.download(&equal).await.expect("download eq").data,
+                vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&not_equal)
+                    .await
+                    .expect("download ne")
+                    .data,
+                vec![1.0, 1.0, 0.0, 1.0, 1.0, 1.0]
+            );
+            assert_eq!(
+                provider.download(&less).await.expect("download lt").data,
+                vec![0.0, 1.0, 0.0, 1.0, 1.0, 1.0]
+            );
+            assert_eq!(
+                provider
+                    .download(&greater_equal)
+                    .await
+                    .expect("download ge")
+                    .data,
+                vec![1.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+            );
+            for (handle, expected) in [(&minimum, expected_minimum), (&maximum, expected_maximum)] {
+                let downloaded = provider
+                    .download_integer(handle)
+                    .await
+                    .expect("download minmax");
+                assert_eq!(downloaded.shape, vec![2, 3]);
+                assert_eq!(downloaded.data, expected);
+            }
+            for handle in [
+                &lhs,
+                &rhs,
+                &equal,
+                &not_equal,
+                &less,
+                &greater_equal,
+                &minimum,
+                &maximum,
+            ] {
+                provider.free(handle).expect("free broadcast handle");
+            }
         }
     }
 
@@ -2168,18 +3247,20 @@ mod tests {
             })
             .expect("upload unary");
         let erf = provider.unary_erf(&unary_input).await.expect("erf");
+        let erf_host = provider.download(&erf).await.expect("download erf");
+        let gamma = provider.unary_gamma(&unary_input).await.expect("gamma");
+        let gamma_host = provider.download(&gamma).await.expect("download gamma");
         let gammaln = provider.unary_gammaln(&unary_input).await.expect("gammaln");
+        let gammaln_host = provider.download(&gammaln).await.expect("download gammaln");
         let realsqrt = provider
             .unary_sqrt(&unary_input)
             .await
             .expect("realsqrt provider sqrt");
-        let erf_host = provider.download(&erf).await.expect("download erf");
-        let gammaln_host = provider.download(&gammaln).await.expect("download gammaln");
         let realsqrt_host = provider
             .download(&realsqrt)
             .await
             .expect("download realsqrt");
-        for host in [&erf_host, &gammaln_host, &realsqrt_host] {
+        for host in [&erf_host, &gamma_host, &gammaln_host, &realsqrt_host] {
             assert_eq!(host.shape, vec![4, 1]);
             assert_eq!(host.storage, GpuTensorStorage::Real);
         }
@@ -2190,6 +3271,16 @@ mod tests {
                 libm::erf(0.5),
                 libm::erf(1.0),
                 libm::erf(1.5),
+            ],
+            tol,
+        );
+        assert_close(
+            &gamma_host.data,
+            &[
+                libm::tgamma(0.25),
+                libm::tgamma(0.5),
+                libm::tgamma(1.0),
+                libm::tgamma(1.5),
             ],
             tol,
         );
@@ -2243,7 +3334,7 @@ mod tests {
         );
         assert_close(&mul_host.data, &[10.0, 20.0, 60.0, 80.0, 150.0, 180.0], tol);
         assert_close(&div_host.data, &[0.1, 0.2, 0.15, 0.2, 5.0 / 30.0, 0.2], tol);
-        assert_close(
+        assert_close_scaled(
             &pow_host.data,
             &[
                 1.0_f64.powf(10.0),
@@ -2253,7 +3344,7 @@ mod tests {
                 5.0_f64.powf(30.0),
                 6.0_f64.powf(30.0),
             ],
-            tol * 1.0e6,
+            tol,
         );
     }
 
@@ -2275,7 +3366,7 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_erfcinv_matches_erfc_inverse() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
@@ -2320,7 +3411,7 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_round_ops_match_cpu() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
@@ -2365,17 +3456,7 @@ mod tests {
             tol,
         );
         let expected = [-2.5, -0.2, 0.5, 1.23, 150.0, 98800.0];
-        for (idx, (actual, expected)) in significant_host
-            .data
-            .iter()
-            .zip(expected.iter())
-            .enumerate()
-        {
-            assert!(
-                (actual - expected).abs() < tol * expected.abs().max(1.0),
-                "significant lane {idx}: expected {expected}, got {actual}"
-            );
-        }
+        assert_close_scaled(&significant_host.data, &expected, tol);
     }
 
     #[tokio::test]
@@ -2385,14 +3466,14 @@ mod tests {
         };
         let shape = [2, 2];
         let a = complex_pair(
-            provider,
+            provider.provider(),
             &[1.0, -2.0, 3.5, 0.5],
             &[0.5, 4.0, -1.0, -2.5],
             &shape,
         )
         .await;
         let b = complex_pair(
-            provider,
+            provider.provider(),
             &[2.0, 0.25, -1.0, 4.0],
             &[-1.0, 0.75, 2.0, -0.5],
             &shape,
@@ -2405,6 +3486,10 @@ mod tests {
         let div = provider.elem_div(&a, &b).await.expect("complex div");
 
         for handle in [&add, &sub, &mul, &div] {
+            assert_eq!(
+                handle.descriptor.storage,
+                Some(GpuTensorStorage::ComplexInterleaved)
+            );
             assert_eq!(
                 runmat_accelerate_api::handle_storage(handle),
                 GpuTensorStorage::ComplexInterleaved
@@ -2452,7 +3537,7 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_unary_trig_ops_match_cpu() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
@@ -2460,13 +3545,17 @@ mod tests {
         let input = [(0.5, 0.75), (2.0, -0.25), (-0.75, 0.5)];
         let real = input.iter().map(|&(re, _)| re).collect::<Vec<_>>();
         let imag = input.iter().map(|&(_, im)| im).collect::<Vec<_>>();
-        let handle = complex_pair(provider, &real, &imag, &[3, 1]).await;
+        let handle = complex_pair(provider.provider(), &real, &imag, &[3, 1]).await;
 
         let sin = provider.unary_sin(&handle).await.expect("complex sin");
         let cos = provider.unary_cos(&handle).await.expect("complex cos");
         let tan = provider.unary_tan(&handle).await.expect("complex tan");
 
         for handle in [&sin, &cos, &tan] {
+            assert_eq!(
+                handle.descriptor.storage,
+                Some(GpuTensorStorage::ComplexInterleaved)
+            );
             assert_eq!(
                 runmat_accelerate_api::handle_storage(handle),
                 GpuTensorStorage::ComplexInterleaved
@@ -2499,7 +3588,7 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_unary_trig_large_imag_edges_are_not_nan() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
@@ -2518,7 +3607,7 @@ mod tests {
         let real = input.iter().map(|&(re, _)| re).collect::<Vec<_>>();
         let imag = input.iter().map(|&(_, im)| im).collect::<Vec<_>>();
         let shape = [input.len(), 1];
-        let handle = complex_pair(provider, &real, &imag, &shape).await;
+        let handle = complex_pair(provider.provider(), &real, &imag, &shape).await;
 
         let sin = provider.unary_sin(&handle).await.expect("complex sin");
         let sinc = provider.unary_sinc(&handle).await.expect("complex sinc");
@@ -2598,7 +3687,13 @@ mod tests {
             return;
         };
         let shape = [3, 1];
-        let complex = complex_pair(provider, &[1.0, -2.0, 4.0], &[0.5, 3.0, -1.5], &shape).await;
+        let complex = complex_pair(
+            provider.provider(),
+            &[1.0, -2.0, 4.0],
+            &[0.5, 3.0, -1.5],
+            &shape,
+        )
+        .await;
         let real = provider
             .upload(&HostTensorView {
                 data: &[2.0, -1.0, 0.25],
@@ -2634,12 +3729,12 @@ mod tests {
 
     #[tokio::test]
     async fn wgpu_complex_repmat_preserves_interleaved_storage() {
-        let Ok(provider) = crate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = crate::backend::wgpu::provider::register_test_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) else {
             return;
         };
-        let scalar = complex_pair(provider, &[2.0], &[-3.0], &[1, 1]).await;
+        let scalar = complex_pair(provider.provider(), &[2.0], &[-3.0], &[1, 1]).await;
         let tiled = provider.repmat(&scalar, &[3, 1]).expect("complex repmat");
 
         assert_eq!(tiled.shape, vec![3, 1]);
@@ -2650,5 +3745,31 @@ mod tests {
         let host = provider.download(&tiled).await.expect("download tiled");
         assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
         assert_interleaved_close(&host.data, &[(2.0, -3.0), (2.0, -3.0), (2.0, -3.0)]);
+    }
+
+    #[tokio::test]
+    async fn wgpu_precise_expm1_and_exp_hooks_reject_complex_interleaved_storage() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 1];
+        let real = provider
+            .upload(&HostTensorView {
+                data: &[1.0e-7],
+                shape: &shape,
+            })
+            .expect("upload real");
+        let output = provider.unary_expm1(&real).await.expect("expm1");
+        let host = provider.download(&output).await.expect("download expm1");
+        let expected = 1.0e-7_f64.exp_m1();
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-14,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-7,
+        };
+        assert!((host.data[0] - expected).abs() <= tolerance);
+
+        let complex = complex_pair(provider.provider(), &[1.0], &[2.0], &shape).await;
+        assert!(provider.unary_exp(&complex).await.is_err());
+        assert!(provider.unary_expm1(&complex).await.is_err());
     }
 }

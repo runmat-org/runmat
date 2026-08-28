@@ -15,7 +15,7 @@
   "description": "`parula` returns MATLAB's default colormap as an m-by-3 numeric RGB array with values in [0, 1]. With no argument, it uses the current colormap length, or 256 when no figure colormap length is active.",
   "behaviors": [
     "`parula()` returns an m-by-3 RGB matrix.",
-    "`parula(m)` returns exactly `m` rows, where `m` must be a nonnegative integer.",
+    "`parula(m)` returns exactly `m` rows, where `m` can be `single`, `double`, or any of the eight built-in integer classes and must be a nonnegative integer value; the result is always double.",
     "The result can be passed directly to `colormap`, including command forms such as `colormap(parula)`."
   ],
   "examples": [

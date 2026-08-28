@@ -2,9 +2,15 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Value};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -13,6 +19,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
 use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -99,6 +106,27 @@ pub const STRNCMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRNCMP_ERRORS,
 };
 
+const STRNCMP_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "N accepts double, single, and every built-in integer class. Negative values are treated as zero, while values beyond the host count domain reject without rounding.",
+    }];
+
+pub const STRNCMP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = strncmp(A, B, N)",
+        inputs: &STRNCMP_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "N limits a host text comparison and is parsed directly from authoritative integer storage. Unsupported numeric A or B inputs return scalar logical false before provider access.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "strncmp",
@@ -153,9 +181,13 @@ fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(logical_text_match_type),
     descriptor(crate::builtins::strings::core::strncmp::STRNCMP_DESCRIPTOR),
+    integer_capabilities(crate::builtins::strings::core::strncmp::STRNCMP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::strncmp"
 )]
 async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
+    if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
+        return Ok(Value::Bool(false));
+    }
     let a = gather_if_needed_async(&a)
         .await
         .map_err(remap_strncmp_flow)?;
@@ -240,20 +272,20 @@ fn prefix_equal(lhs: &str, rhs: &str, limit: usize) -> bool {
 
 fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
-            }
-            Ok(raw as usize)
-        }
+        Value::Int(i) => parse_prefix_length_from_integer(&i),
         Value::Num(n) => parse_prefix_length_from_float(n),
         Value::Bool(b) => Ok(if b { 1 } else { 0 }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if tensor::tensor_element_len(&tensor) != 1 {
                 return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
             }
-            parse_prefix_length_from_float(tensor.data[0])
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return parse_prefix_length_from_integer(&value);
+            }
+            parse_prefix_length_from_float(tensor::tensor_value_f64(&tensor, 0))
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
@@ -265,18 +297,27 @@ fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
     }
 }
 
+fn parse_prefix_length_from_integer(value: &IntValue) -> BuiltinResult<usize> {
+    if value.try_to_i64().is_some_and(|value| value < 0) {
+        return Ok(0);
+    }
+    value
+        .try_to_usize()
+        .ok_or_else(|| strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH))
+}
+
 fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     if value < 0.0 {
-        return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
+        return Ok(0);
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
-    if rounded > (usize::MAX as f64) {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     Ok(rounded as usize)
@@ -287,8 +328,9 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{
-        CellArray, CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor,
     };
 
     fn strncmp_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> {
@@ -388,6 +430,20 @@ pub(crate) mod tests {
     #[test]
     fn strncmp_prefix_length_tensor_scalar_double() {
         let limit = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+        let result = strncmp_builtin(
+            Value::String("gamma".into()),
+            Value::String("gamut".into()),
+            Value::Tensor(limit),
+        )
+        .expect("strncmp");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strncmp_prefix_length_typed_integer_tensor_reads_exact_storage() {
+        let limit =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer tensor");
         let result = strncmp_builtin(
             Value::String("gamma".into()),
             Value::String("gamut".into()),
@@ -529,16 +585,45 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn strncmp_negative_length_errors() {
+    fn strncmp_negative_length_is_treated_as_zero() {
+        let result = strncmp_builtin(
+            Value::String("abc".into()),
+            Value::String("xyz".into()),
+            Value::Num(-1.0),
+        )
+        .expect("negative length becomes zero");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn strncmp_prefix_length_treats_negative_typed_integer_tensor_as_zero() {
+        let limit =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("integer tensor");
+        let result = strncmp_builtin(
+            Value::String("abc".into()),
+            Value::String("xyz".into()),
+            Value::Tensor(limit),
+        )
+        .expect("negative length becomes zero");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn strncmp_prefix_length_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
         let err = error_message(
             strncmp_builtin(
                 Value::String("abc".into()),
                 Value::String("abc".into()),
-                Value::Num(-1.0),
+                Value::Num(boundary),
             )
-            .expect_err("negative length"),
+            .expect_err("unrepresentable prefix length"),
         );
-        assert!(err.to_ascii_lowercase().contains("nonnegative"));
+        assert!(err.to_ascii_lowercase().contains("prefix length"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -556,7 +641,7 @@ pub(crate) mod tests {
         };
         let tensor = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload prefix length to GPU");

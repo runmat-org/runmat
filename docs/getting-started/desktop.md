@@ -1,10 +1,3 @@
----
-title: "Desktop"
-category: "Getting Started"
-section: "1.2"
-last_updated: "May 29, 2026"
----
-
 # RunMat Desktop
 
 RunMat Desktop is the full local RunMat experience: an editor, file tree, console, plots, variable inspector, notebooks, and project settings in a high-performance native app. 

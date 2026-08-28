@@ -1,5 +1,5 @@
 use runmat_analysis_fea::ComputeBackend;
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 use crate::analysis::{
     analysis_author_study_op, AnalysisCreateModelProfile, AnalysisRunKind,
@@ -277,7 +277,7 @@ fn vector3_from_value(builtin: &'static str, value: &Value, key: &str) -> Builti
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::{Tensor, Value};
+    use runmat_value::{Tensor, Value};
 
     use super::super::{
         fea_run_builtin, fea_validate_builtin, serializable_to_object, ERROR_INTERNAL,

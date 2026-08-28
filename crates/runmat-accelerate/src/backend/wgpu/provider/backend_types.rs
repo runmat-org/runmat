@@ -19,6 +19,32 @@ pub(super) type MomentsKey = (u64, Vec<usize>);
 pub(super) type MomentsValue = (GpuTensorHandle, GpuTensorHandle);
 pub(super) type MomentsCache = HashMap<MomentsKey, MomentsValue>;
 
+/// Immutable GPU resources cached for the lifetime of a physical device.
+///
+/// Logical runtime sessions share these resources because they are created for
+/// a specific `wgpu::Device`, while buffer-backed bind groups and handle tables
+/// remain session-local on `WgpuProvider`.
+pub(super) struct WgpuDeviceCaches {
+    pub(super) fused_pipelines: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
+    pub(super) bind_group_layouts: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
+    pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
+    pub(super) image_norm_pipelines:
+        Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
+    pub(super) fft_twiddles: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>,
+}
+
+impl Default for WgpuDeviceCaches {
+    fn default() -> Self {
+        Self {
+            fused_pipelines: Mutex::new(HashMap::new()),
+            bind_group_layouts: Mutex::new(HashMap::new()),
+            bind_group_layout_tags: Mutex::new(HashMap::new()),
+            image_norm_pipelines: Mutex::new(HashMap::new()),
+            fft_twiddles: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
     pub(super) instance: Arc<wgpu::Instance>,
@@ -29,17 +55,17 @@ pub struct WgpuProvider {
     pub(super) adapter_limits: wgpu::Limits,
     pub(super) workgroup_config: WorkgroupConfig,
     pub(super) buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
-    pub(super) buffer_residency: BufferResidency,
+    /// Physical storage allocation pool shared by logical sessions on this
+    /// device. Handle ownership remains session-local in `buffers`.
+    pub(super) buffer_residency: Arc<BufferResidency>,
     pub(super) buffer_residency_max_poolable_bytes: u64,
     pub(super) next_id: AtomicU64,
-    pub(super) pipelines: WgpuPipelines,
+    pub(super) pipelines: Arc<WgpuPipelines>,
     pub(super) runtime_device_id: u32,
     pub(super) cache_device_id: u32,
     pub(super) precision: NumericPrecision,
     pub(super) element_size: usize,
-    pub(super) fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
-    pub(super) bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
-    pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
+    pub(super) device_caches: Arc<WgpuDeviceCaches>,
     pub(super) bind_group_cache: BindGroupCache,
     pub(super) kernel_resources: KernelResourceRegistry,
     pub(super) metrics: crate::backend::wgpu::metrics::WgpuMetrics,
@@ -50,8 +76,6 @@ pub struct WgpuProvider {
     pub(super) pipeline_cache_dir: Option<std::path::PathBuf>,
     pub(super) reduction_autotune: AutotuneController<ReductionAutotuneKey, ReductionTuning>,
     pub(super) image_norm_autotune: AutotuneController<ImageNormalizeKey, ImageNormalizeTuning>,
-    pub(super) image_norm_pipeline_cache:
-        Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
     #[allow(dead_code)]
     pub(super) autotune_base_dir: Option<PathBuf>,
     #[allow(dead_code)]
@@ -59,7 +83,12 @@ pub struct WgpuProvider {
     // Optimization caches
     pub(super) pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
     pub(super) moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
-    pub(super) fft_twiddle_cache: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>, // (len, mode) -> twiddle buffer
+}
+
+impl Drop for WgpuProvider {
+    fn drop(&mut self) {
+        self.recycle_session_buffers();
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -73,9 +102,30 @@ pub(super) struct BufferEntry {
     pub(super) len: usize,
     pub(super) shape: Vec<usize>,
     pub(super) storage: GpuTensorStorage,
+    /// Physical numeric element type stored in the buffer. This is the single
+    /// authority for floating precision and native integer class.
+    pub(super) element_type: runmat_accelerate_api::NumericElementType,
+    /// Floating shader ABI selected for this provider. Integer kernels use
+    /// this only when they produce or consume a floating result.
     pub(super) precision: NumericPrecision,
+    pub(super) allocated_bytes: u64,
     pub(super) usage: BufferUsageClass,
     pub(super) last_submission_id: Option<u32>,
+}
+
+impl BufferEntry {
+    pub(super) const fn integer_type(&self) -> Option<runmat_accelerate_api::IntegerElementType> {
+        self.element_type.integer_type()
+    }
+}
+
+pub(super) struct NumericBufferRegistration {
+    pub(super) shape: Vec<usize>,
+    pub(super) len: usize,
+    pub(super) physical_element_type: runmat_accelerate_api::NumericElementType,
+    pub(super) storage: GpuTensorStorage,
+    pub(super) allocated_bytes: u64,
+    pub(super) usage: BufferUsageClass,
 }
 
 #[derive(Clone, Copy)]
@@ -225,7 +275,10 @@ impl WorkgroupConfig {
                 break;
             }
         }
-        tuning.batch_tile = tuning.batch_tile.clamp(1, batches.max(1));
+        // Image normalization assigns one batch to each workgroup. Keeping this
+        // invariant in the sanitizer also upgrades persisted autotune entries
+        // created by the former cross-batch vectorized kernel.
+        tuning.batch_tile = 1;
         if tuning != original {
             debug!(
                 "sanitize_image_normalize_tuning batches={} lane {} -> {} spatial {} -> {} values/thread {} -> {} batch_tile {} -> {} (max_invocations={}, limits=({}, {}, {}))",

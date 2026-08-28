@@ -7,8 +7,8 @@ use crate::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, StructValue, Value,
 };
+use runmat_value::{ObjectInstance, StructValue, Value};
 
 const POINT_MOVE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
@@ -121,7 +121,7 @@ pub const POINT_ORIGIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn point_origin_method() -> crate::BuiltinResult<Value> {
-    let mut o = runmat_builtins::ObjectInstance::new("Point".to_string());
+    let mut o = runmat_value::ObjectInstance::new("Point".to_string());
     o.properties.insert("x".to_string(), Value::Num(0.0));
     o.properties.insert("y".to_string(), Value::Num(0.0));
     Ok(Value::Object(o))
@@ -263,7 +263,7 @@ pub const CTOR_CTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 pub(crate) async fn ctor_ctor_method(x: f64) -> crate::BuiltinResult<Value> {
     // Construct object with property 'x' initialized
-    let mut o = runmat_builtins::ObjectInstance::new("Ctor".to_string());
+    let mut o = runmat_value::ObjectInstance::new("Ctor".to_string());
     o.properties.insert("x".to_string(), Value::Num(x));
     Ok(Value::Object(o))
 }
@@ -707,7 +707,7 @@ pub(crate) async fn overidx_loadobj(payload: Value) -> crate::BuiltinResult<Valu
 fn overidx_expect_object(
     obj: Value,
     method: &str,
-) -> crate::BuiltinResult<runmat_builtins::ObjectInstance> {
+) -> crate::BuiltinResult<runmat_value::ObjectInstance> {
     match obj {
         Value::Object(o) => Ok(o),
         other => Err(runtime_descriptor_error_with_detail(

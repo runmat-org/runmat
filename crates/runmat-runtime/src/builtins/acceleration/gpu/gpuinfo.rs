@@ -10,9 +10,9 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, StructValue, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuinfo")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

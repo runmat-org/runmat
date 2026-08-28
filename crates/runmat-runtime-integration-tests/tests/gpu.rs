@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 #[test]
 fn gpuarray_gather_roundtrip() {
@@ -6,7 +6,7 @@ fn gpuarray_gather_roundtrip() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
 
     // Create a small tensor and upload via gpuArray
-    let t = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let t = runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let v = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t.clone())]).unwrap();
     match v {
         Value::GpuTensor(h) => {
@@ -15,7 +15,7 @@ fn gpuarray_gather_roundtrip() {
             if let Value::Tensor(tt) = g {
                 assert_eq!(tt.rows(), 2);
                 assert_eq!(tt.cols(), 2);
-                assert_eq!(tt.data, t.data);
+                assert_eq!(tt.materialize_f64(), t.materialize_f64());
             } else {
                 panic!("expected tensor from gather");
             }
@@ -28,8 +28,8 @@ fn gpuarray_gather_roundtrip() {
 fn elementwise_add_on_gpu_handles() {
     // Ensure provider registered
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let t1 = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-    let t2 = runmat_builtins::Tensor::new_2d(vec![5.0, 6.0, 7.0, 8.0], 2, 2).unwrap();
+    let t1 = runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let t2 = runmat_value::Tensor::new_2d(vec![5.0, 6.0, 7.0, 8.0], 2, 2).unwrap();
     let v1 = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t1.clone())]).unwrap();
     let v2 = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t2.clone())]).unwrap();
     let sum = runmat_runtime::call_builtin("plus", &[v1, v2]).unwrap();
@@ -37,7 +37,7 @@ fn elementwise_add_on_gpu_handles() {
     if let Value::Tensor(tt) = gathered {
         assert_eq!(tt.rows(), 2);
         assert_eq!(tt.cols(), 2);
-        assert_eq!(tt.data, vec![6.0, 8.0, 10.0, 12.0]);
+        assert_eq!(tt.materialize_f64(), vec![6.0, 8.0, 10.0, 12.0]);
     } else {
         panic!("expected tensor from gather");
     }
@@ -46,14 +46,14 @@ fn elementwise_add_on_gpu_handles() {
 #[test]
 fn elementwise_mul_on_gpu_handles() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let t1 = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-    let t2 = runmat_builtins::Tensor::new_2d(vec![5.0, 6.0, 7.0, 8.0], 2, 2).unwrap();
+    let t1 = runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let t2 = runmat_value::Tensor::new_2d(vec![5.0, 6.0, 7.0, 8.0], 2, 2).unwrap();
     let v1 = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t1.clone())]).unwrap();
     let v2 = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t2.clone())]).unwrap();
     let prod = runmat_runtime::call_builtin("times", &[v1, v2]).unwrap();
     let gathered = runmat_runtime::call_builtin("gather", &[prod]).unwrap();
     if let Value::Tensor(tt) = gathered {
-        assert_eq!(tt.data, vec![5.0, 12.0, 21.0, 32.0]);
+        assert_eq!(tt.materialize_f64(), vec![5.0, 12.0, 21.0, 32.0]);
     } else {
         panic!("expected tensor from gather");
     }
@@ -61,6 +61,7 @@ fn elementwise_mul_on_gpu_handles() {
 
 #[test]
 fn gpu_device_returns_struct() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     runmat_accelerate::simple_provider::register_inprocess_provider();
     let info = runmat_runtime::call_builtin("gpuDevice", &[]).unwrap();
     match info {
@@ -91,7 +92,7 @@ fn gpu_info_returns_string() {
 #[test]
 fn unary_ops_on_gpu_handles() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let t = runmat_builtins::Tensor::new_2d(vec![0.0, 1.0, 4.0, 9.0], 2, 2).unwrap();
+    let t = runmat_value::Tensor::new_2d(vec![0.0, 1.0, 4.0, 9.0], 2, 2).unwrap();
     let g = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t.clone())]).unwrap();
 
     // sin
@@ -106,28 +107,28 @@ fn unary_ops_on_gpu_handles() {
     let a = runmat_runtime::call_builtin("abs", std::slice::from_ref(&g)).unwrap();
     let a = runmat_runtime::call_builtin("gather", &[a]).unwrap();
     if let Value::Tensor(ta) = a {
-        assert_eq!(ta.data, vec![0.0, 1.0, 4.0, 9.0]);
+        assert_eq!(ta.materialize_f64(), vec![0.0, 1.0, 4.0, 9.0]);
     }
 
     // exp
     let e = runmat_runtime::call_builtin("exp", std::slice::from_ref(&g)).unwrap();
     let e = runmat_runtime::call_builtin("gather", &[e]).unwrap();
     if let Value::Tensor(te) = e {
-        assert!((te.data[1] - std::f64::consts::E).abs() < 1e-12);
+        assert!((te.materialize_f64()[1] - std::f64::consts::E).abs() < 1e-12);
     }
 
     // sqrt
     let q = runmat_runtime::call_builtin("sqrt", &[g]).unwrap();
     let q = runmat_runtime::call_builtin("gather", &[q]).unwrap();
     if let Value::Tensor(tq) = q {
-        assert_eq!(tq.data, vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(tq.materialize_f64(), vec![0.0, 1.0, 2.0, 3.0]);
     }
 }
 
 #[test]
 fn gpu_scalar_elementwise_and_sum_remain_on_device() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let t = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let t = runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let g = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t)]).unwrap();
 
     // G + 2 stays on device
@@ -149,7 +150,7 @@ fn gpu_scalar_elementwise_and_sum_remain_on_device() {
     let gsum = runmat_runtime::call_builtin("gather", &[s]).unwrap();
     if let Value::Tensor(ts) = gsum {
         assert_eq!(ts.shape, vec![1, 2]);
-        assert_eq!(ts.data, vec![7.0, 11.0]);
+        assert_eq!(ts.materialize_f64(), vec![7.0, 11.0]);
     } else {
         panic!("expected tensor");
     }
@@ -165,7 +166,7 @@ fn gpu_scalar_elementwise_and_sum_remain_on_device() {
 #[test]
 fn left_scalar_and_transpose_on_device() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let t = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let t = runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let g = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t)]).unwrap();
 
     // s - G
@@ -176,7 +177,7 @@ fn left_scalar_and_transpose_on_device() {
     }
     let r_host = runmat_runtime::call_builtin("gather", &[r]).unwrap();
     if let Value::Tensor(tr) = r_host {
-        assert_eq!(tr.data, vec![9.0, 8.0, 7.0, 6.0]);
+        assert_eq!(tr.materialize_f64(), vec![9.0, 8.0, 7.0, 6.0]);
     }
 
     // s ./ G
@@ -201,7 +202,7 @@ fn left_scalar_and_transpose_on_device() {
 #[test]
 fn reductions_mean_min_max_on_device() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let t = runmat_builtins::Tensor::new_2d(vec![3.0, 1.0, 4.0, 2.0], 2, 2).unwrap();
+    let t = runmat_value::Tensor::new_2d(vec![3.0, 1.0, 4.0, 2.0], 2, 2).unwrap();
     let g = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t)]).unwrap();
 
     // mean(G) -> gpu handle, then gather ~ column means [ (3+1)/2, (4+2)/2 ] = [2, 3]
@@ -212,7 +213,7 @@ fn reductions_mean_min_max_on_device() {
     }
     let m_host = runmat_runtime::call_builtin("gather", &[m]).unwrap();
     if let Value::Tensor(tm) = m_host {
-        assert_eq!(tm.data, vec![2.0, 3.0]);
+        assert_eq!(tm.materialize_f64(), vec![2.0, 3.0]);
     }
 
     // max(G) and min(G)
@@ -233,14 +234,14 @@ fn reductions_mean_min_max_on_device() {
 #[test]
 fn elementwise_sub_on_gpu_handles() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let t1 = runmat_builtins::Tensor::new_2d(vec![10.0, 20.0, 30.0, 40.0], 2, 2).unwrap();
-    let t2 = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let t1 = runmat_value::Tensor::new_2d(vec![10.0, 20.0, 30.0, 40.0], 2, 2).unwrap();
+    let t2 = runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let v1 = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t1.clone())]).unwrap();
     let v2 = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t2.clone())]).unwrap();
     let res = runmat_runtime::call_builtin("minus", &[v1, v2]).unwrap();
     let gathered = runmat_runtime::call_builtin("gather", &[res]).unwrap();
     if let Value::Tensor(tt) = gathered {
-        assert_eq!(tt.data, vec![9.0, 18.0, 27.0, 36.0]);
+        assert_eq!(tt.materialize_f64(), vec![9.0, 18.0, 27.0, 36.0]);
     } else {
         panic!("expected tensor");
     }
@@ -249,14 +250,14 @@ fn elementwise_sub_on_gpu_handles() {
 #[test]
 fn elementwise_div_on_gpu_handles() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let t1 = runmat_builtins::Tensor::new_2d(vec![10.0, 20.0, 30.0, 40.0], 2, 2).unwrap();
-    let t2 = runmat_builtins::Tensor::new_2d(vec![2.0, 4.0, 5.0, 8.0], 2, 2).unwrap();
+    let t1 = runmat_value::Tensor::new_2d(vec![10.0, 20.0, 30.0, 40.0], 2, 2).unwrap();
+    let t2 = runmat_value::Tensor::new_2d(vec![2.0, 4.0, 5.0, 8.0], 2, 2).unwrap();
     let v1 = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t1.clone())]).unwrap();
     let v2 = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(t2.clone())]).unwrap();
     let res = runmat_runtime::call_builtin("rdivide", &[v1, v2]).unwrap();
     let gathered = runmat_runtime::call_builtin("gather", &[res]).unwrap();
     if let Value::Tensor(tt) = gathered {
-        assert_eq!(tt.data, vec![5.0, 5.0, 6.0, 5.0]);
+        assert_eq!(tt.materialize_f64(), vec![5.0, 5.0, 6.0, 5.0]);
     } else {
         panic!("expected tensor");
     }
@@ -265,15 +266,15 @@ fn elementwise_div_on_gpu_handles() {
 #[test]
 fn matmul_on_gpu_handles_or_fallback() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let a = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-    let b = runmat_builtins::Tensor::new_2d(vec![5.0, 6.0, 7.0, 8.0], 2, 2).unwrap();
+    let a = runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+    let b = runmat_value::Tensor::new_2d(vec![5.0, 6.0, 7.0, 8.0], 2, 2).unwrap();
     let ga = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(a.clone())]).unwrap();
     let gb = runmat_runtime::call_builtin("gpuArray", &[Value::Tensor(b.clone())]).unwrap();
     let res = runmat_runtime::call_builtin("mtimes", &[ga, gb]).unwrap();
     let gathered = runmat_runtime::call_builtin("gather", &[res]).unwrap();
     if let Value::Tensor(tt) = gathered {
         // Column-major for A*B: first column [23,34], second [31,46]
-        assert_eq!(tt.data, vec![23.0, 34.0, 31.0, 46.0]);
+        assert_eq!(tt.materialize_f64(), vec![23.0, 34.0, 31.0, 46.0]);
     } else {
         panic!("expected tensor");
     }

@@ -1,11 +1,18 @@
 //! MATLAB-compatible `string` builtin with GPU-aware conversion semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, SparseTensor, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray,
+    Tensor, Value,
+};
 
 use crate::builtins::common::format::{complex_to_string, format_variadic, number_to_string};
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -102,6 +109,74 @@ pub const STRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &STRING_ERRORS,
 };
 
+const STRING_FORMAT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "string-format-spec",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "string(formatSpec, A...) printf-style formatting is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StringFormatSpecExtension"),
+};
+
+const STRING_ENCODING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "string-encoding",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "string(X, encoding) character-encoding selection is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StringEncodingExtension"),
+};
+
+const STRING_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "string-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "string with explicit gpuArray numeric input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StringExplicitGpuInputExtension"),
+};
+
+pub const STRING_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    STRING_FORMAT_EXTENSION,
+    STRING_ENCODING_EXTENSION,
+    STRING_EXPLICIT_GPU_EXTENSION,
+];
+
+const STRING_VALUE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every built-in integer class converts element by element to decimal text from authoritative storage, preserving input shape and exact wide values.",
+    }];
+
+const STRING_FORMAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat printf-style format arguments accept every integer class and retain exact typed scalars until the selected formatter consumes them.",
+    }];
+
+pub const STRING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "str = string(A)",
+        inputs: &STRING_VALUE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host and automatically resident integer arrays convert exactly to host strings, including wide integer values. Explicit gpuArray input is independently mode-gated because the compatibility target does not document interactive GPU-array input for string.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "str = string(formatSpec, A...)",
+        inputs: &STRING_FORMAT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "This printf-style formatting form is a mode-gated RunMat extension and does not redefine the documented string(A) conversion surface.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::string")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "string",
@@ -138,9 +213,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(string_array_type),
     descriptor(crate::builtins::strings::core::string::STRING_DESCRIPTOR),
+    extensions(crate::builtins::strings::core::string::STRING_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::core::string::STRING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::string"
 )]
 async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRING_EXPLICIT_GPU_EXTENSION,
+            "string",
+        )?;
+    }
+    if !rest.is_empty() {
+        let extension = if rest.len() == 1 && is_encoding_call_shape(&value, &rest[0]) {
+            &STRING_ENCODING_EXTENSION
+        } else {
+            &STRING_FORMAT_EXTENSION
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(extension, "string")?;
+    }
     if rest.is_empty() {
         let gathered = gather_if_needed_async(&value)
             .await
@@ -177,6 +272,22 @@ async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     }
     let formatted = format_from_spec(format_value, gathered_args).await?;
     Ok(Value::StringArray(formatted))
+}
+
+fn is_encoding_call_shape(first: &Value, candidate: &Value) -> bool {
+    if !matches!(
+        first,
+        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) | Value::Cell(_)
+    ) || has_format_placeholders(first)
+    {
+        return false;
+    }
+    if let Value::Cell(cell) = first {
+        if !cell_contains_only_text_scalars(cell) {
+            return false;
+        }
+    }
+    value_to_scalar_text(candidate).is_some()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -219,7 +330,7 @@ fn parse_encoding_text(raw: &str) -> BuiltinResult<StringEncoding> {
     }
 }
 
-fn cell_contains_only_text_scalars(cell: &runmat_builtins::CellArray) -> bool {
+fn cell_contains_only_text_scalars(cell: &runmat_value::CellArray) -> bool {
     cell.data.iter().all(|ptr| match &ptr {
         Value::String(_) => true,
         Value::StringArray(sa) => sa.data.len() <= 1,
@@ -553,17 +664,22 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             values: vec![Value::Num(if b { 1.0 } else { 0.0 })],
             shape: vec![1, 1],
         }),
-        Value::Tensor(t) => Ok(ArgumentData {
-            values: t.data.into_iter().map(Value::Num).collect(),
-            shape: t.shape,
-        }),
+        Value::Tensor(tensor) => tensor_into_argument_data(tensor),
         Value::SparseTensor(s) => {
             ensure_sparse_dense_conversion(&s, "format argument")?;
-            let dense = s.to_dense().map_err(string_flow)?;
-            Ok(ArgumentData {
-                values: dense.data.into_iter().map(Value::Num).collect(),
-                shape: dense.shape,
-            })
+            if s.is_logical() {
+                let logical = s.to_dense_logical().map_err(string_flow)?;
+                Ok(ArgumentData {
+                    values: logical
+                        .data
+                        .into_iter()
+                        .map(|value| Value::Num(f64::from(value)))
+                        .collect(),
+                    shape: logical.shape,
+                })
+            } else {
+                tensor_into_argument_data(s.to_dense().map_err(string_flow)?)
+            }
         }
         Value::Complex(re, im) => Ok(ArgumentData {
             values: vec![Value::String(complex_to_string(re, im))],
@@ -571,7 +687,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         }),
         Value::ComplexTensor(t) => Ok(ArgumentData {
             values: t
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Value::String(complex_to_string(re, im)))
                 .collect(),
@@ -616,12 +732,12 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                         Value::Int(i) => Value::Int(i),
                         Value::Bool(b) => Value::Num(if b { 1.0 } else { 0.0 }),
                         Value::Tensor(t) => {
-                            if t.data.len() != 1 {
+                            if !tensor::is_scalar_tensor(&t) {
                                 return Err(string_flow(
                                     "string: cell format arguments must contain scalar values",
                                 ));
                             }
-                            Value::Num(t.data[0])
+                            Value::Num(tensor::tensor_value_f64(&t, 0))
                         }
                         Value::LogicalArray(la) => {
                             if la.data.len() != 1 {
@@ -634,13 +750,12 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                         Value::Complex(re, im) => Value::String(complex_to_string(re, im)),
                         Value::Symbolic(expr) => Value::String(expr.to_string()),
                         Value::ComplexTensor(t) => {
-                            if t.data.len() != 1 {
+                            if !complex_tensor_is_scalar(&t) {
                                 return Err(string_flow(
                                     "string: cell format arguments must contain scalar values",
                                 ));
                             }
-                            let (re, im) = t.data[0];
-                            Value::String(complex_to_string(re, im))
+                            Value::String(t.format_element(0))
                         }
                         other => {
                             return Err(string_flow(format!(
@@ -664,10 +779,16 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         }
         Value::MException(_)
         | Value::HandleObject(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::Listener(_)
         | Value::Struct(_)
-        | Value::OutputList(_) => Err(string_flow("string: unsupported format argument type")),
+        | Value::OutputList(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Foreign(_) => Err(string_flow("string: unsupported format argument type")),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -705,7 +826,11 @@ async fn convert_to_string_array(
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
         Value::SparseTensor(sparse) => {
             ensure_sparse_dense_conversion(&sparse, "dense string array")?;
-            tensor_to_string_array(sparse.to_dense().map_err(string_flow)?)
+            if sparse.is_logical() {
+                logical_array_to_string_array(sparse.to_dense_logical().map_err(string_flow)?)
+            } else {
+                tensor_to_string_array(sparse.to_dense().map_err(string_flow)?)
+            }
         }
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),
@@ -721,7 +846,7 @@ async fn convert_to_string_array(
                 .map_err(|flow| remap_string_flow(flow))?;
             convert_to_string_array(gathered, encoding).await
         }
-        Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) => Err(string_flow(
+        Value::ObjectArray(_) | Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) => Err(string_flow(
             "string: unsupported conversion from handle-based objects. Use class-specific formatters.",
         )),
         Value::Struct(_) => Err(string_flow(
@@ -731,6 +856,11 @@ async fn convert_to_string_array(
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+            | Value::Future(_)
+            | Value::Task(_)
+            | Value::Pool(_)
+            | Value::Job(_)
+            | Value::Foreign(_)
         | Value::OutputList(_) => Err(
             string_flow("string: unsupported conversion for function or exception handles"),
         ),
@@ -771,17 +901,60 @@ fn char_array_to_string_array(
 }
 
 fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
-    let mut strings = Vec::with_capacity(tensor.data.len());
-    for &value in &tensor.data {
-        strings.push(number_to_string(value));
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(string_flow)?;
+    let mut strings = Vec::with_capacity(storage.len());
+    for idx in 0..storage.len() {
+        let value = storage
+            .value_at(idx)
+            .ok_or_else(|| string_flow("string: numeric tensor storage is inconsistent"))?;
+        strings.push(numeric_scalar_to_string(value));
     }
-    StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
+    StringArray::new(strings, shape).map_err(|e| string_flow(format!("string: {e}")))
+}
+
+fn tensor_into_argument_data(tensor: Tensor) -> BuiltinResult<ArgumentData> {
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(string_flow)?;
+    let mut values = Vec::with_capacity(storage.len());
+    for idx in 0..storage.len() {
+        let value = storage
+            .value_at(idx)
+            .ok_or_else(|| string_flow("string: numeric tensor storage is inconsistent"))?;
+        values.push(numeric_scalar_to_value(value));
+    }
+    Ok(ArgumentData { values, shape })
+}
+
+fn numeric_scalar_to_value(value: NumericScalar) -> Value {
+    match value {
+        NumericScalar::F64(value) => Value::Num(value),
+        NumericScalar::F32(value) => Value::Num(f64::from(value)),
+        integer => Value::Int(
+            integer
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer"),
+        ),
+    }
+}
+
+fn numeric_scalar_to_string(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => number_to_string(value),
+        NumericScalar::F32(value) => number_to_string(f64::from(value)),
+        integer => int_value_to_string(
+            &integer
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer"),
+        ),
+    }
 }
 
 fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<StringArray> {
-    let mut strings = Vec::with_capacity(tensor.data.len());
-    for &(re, im) in &tensor.data {
-        strings.push(complex_to_string(re, im));
+    let len = tensor::complex_tensor_element_len(&tensor);
+    let mut strings = Vec::with_capacity(len);
+    for idx in 0..len {
+        strings.push(tensor.format_element(idx));
     }
     StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
@@ -795,7 +968,7 @@ fn logical_array_to_string_array(logical: LogicalArray) -> BuiltinResult<StringA
 }
 
 async fn cell_array_to_string_array(
-    cell: runmat_builtins::CellArray,
+    cell: runmat_value::CellArray,
     _encoding: StringEncoding,
 ) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(cell.data.len());
@@ -862,17 +1035,20 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
             }
         }
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                Ok(number_to_string(t.data[0]))
+            if tensor::is_scalar_tensor(t) {
+                if let Some(value) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                    Ok(int_value_to_string(&value))
+                } else {
+                    Ok(number_to_string(tensor::tensor_value_f64(t, 0)))
+                }
             } else {
                 Err(string_flow("string: cell numeric values must be scalar"))
             }
         }
         Value::Complex(re, im) => Ok(complex_to_string(*re, *im)),
         Value::ComplexTensor(t) => {
-            if t.data.len() == 1 {
-                let (re, im) = t.data[0];
-                Ok(complex_to_string(re, im))
+            if complex_tensor_is_scalar(t) {
+                Ok(t.format_element(0))
             } else {
                 Err(string_flow("string: cell complex values must be scalar"))
             }
@@ -882,6 +1058,10 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
             other
         ))),
     }
+}
+
+fn complex_tensor_is_scalar(tensor: &ComplexTensor) -> bool {
+    tensor.shape.iter().product::<usize>() == 1
 }
 
 fn ensure_sparse_dense_conversion(sparse: &SparseTensor, target: &str) -> BuiltinResult<()> {
@@ -926,9 +1106,13 @@ fn int_value_to_string(value: &IntValue) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, IntValue, ResolveContext, StringArray, StructValue, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        CellArray, IntValue, IntegerComplexStorage, IntegerStorage, StringArray, StructValue,
+    };
 
     fn string_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         futures::executor::block_on(super::string_builtin(value, rest))
     }
 
@@ -958,6 +1142,86 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(sa.data, vec!["1", "2", "3", "4"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_from_logical_sparse_uses_boolean_text() {
+        let sparse =
+            SparseTensor::new_logical(2, 2, vec![0, 1, 2], vec![1, 0]).expect("logical sparse");
+        let out = string_builtin(Value::SparseTensor(sparse), Vec::new()).expect("string");
+        let Value::StringArray(out) = out else {
+            panic!("expected string array");
+        };
+        assert_eq!(out.shape, vec![2, 2]);
+        assert_eq!(out.data, vec!["false", "true", "true", "false"]);
+    }
+
+    #[test]
+    fn string_from_native_single_tensor_uses_authoritative_values() {
+        let tensor = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).expect("native single tensor");
+        let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![1, 2]);
+                assert_eq!(array.data, vec!["1.25", "-2.5"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_integer_tensor_preserves_exact_storage_values() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+        let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 2]);
+                assert_eq!(sa.data, vec!["18446744073709551615", "9007199254740993"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_signed_integer_tensor_preserves_exact_storage_values() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, -9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+        let out = string_builtin(Value::Tensor(tensor), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 2]);
+                assert_eq!(sa.data, vec!["-9223372036854775808", "-9007199254740993"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_complex_integer_tensor_preserves_exact_storage_values() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching integer complex storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer");
+        let out = string_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 2]);
+                assert_eq!(sa.data, vec!["18446744073709551615+7i", "9007199254740993"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1025,6 +1289,45 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(sa.data, vec!["1", "3", "2", "4"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_cell_scalar_integer_tensor_uses_exact_storage() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("integer tensor");
+        let cell = CellArray::new(vec![Value::Tensor(tensor)], 1, 1)
+            .expect("cell with scalar integer tensor");
+        let out = string_builtin(Value::Cell(cell), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 1]);
+                assert_eq!(sa.data, vec!["9007199254740993"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_from_cell_scalar_complex_integer_tensor_uses_exact_storage() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::I64(vec![i64::MIN]),
+        )
+        .expect("matching integer complex storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex integer");
+        let cell = CellArray::new(vec![Value::ComplexTensor(tensor)], 1, 1)
+            .expect("cell with scalar complex integer tensor");
+        let out = string_builtin(Value::Cell(cell), Vec::new()).expect("string");
+        match out {
+            Value::StringArray(sa) => {
+                assert_eq!(sa.shape, vec![1, 1]);
+                assert_eq!(sa.data, vec![format!("1-{}i", i64::MIN.unsigned_abs())]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1214,6 +1517,26 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn string_format_integer_tensor_preserves_wide_values() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+        let out = string_builtin(Value::from("%u"), vec![Value::Tensor(tensor)]).expect("string");
+        match out {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![1, 2]);
+                assert_eq!(
+                    array.data,
+                    vec![u64::MAX.to_string(), "9007199254740993".to_string()]
+                );
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_format_string_array_spec_alignment() {
@@ -1259,8 +1582,9 @@ pub(crate) mod tests {
     fn string_gpu_numeric_tensor() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap();
+            let data = tensor.as_f64_slice().expect("double tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data,
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1278,6 +1602,28 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn string_strict_mode_gates_explicit_gpu_before_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 452,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = futures::executor::block_on(super::string_builtin(
+            Value::GpuTensor(handle),
+            Vec::new(),
+        ))
+        .expect_err("strict mode rejects explicit GPU input before gather");
+        assert_eq!(
+            error.identifier(),
+            STRING_EXPLICIT_GPU_EXTENSION.error_identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn string_wgpu_numeric_tensor_matches_cpu() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -1286,8 +1632,9 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![4.0, 5.0, 6.0], vec![1, 3]).unwrap();
         let cpu = string_builtin(Value::Tensor(tensor.clone()), Vec::new())
             .expect("cpu string conversion");
+        let data = tensor.as_f64_slice().expect("double tensor");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data,
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()

@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "Host-side text and filesystem operation; numeric resident inputs are rejected before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -23,13 +23,30 @@
     "unit": "builtins::io::filetext::lines::tests",
     "integration": null
   },
-  "description": "Write text lines to a file.",
+  "description": "`writelines(lines, filename)` writes each supplied text value as a line in a host file.",
   "behaviors": [
-    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
-    "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
-    "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
+    "`lines` may be a string scalar, string array, character vector, or cell array of scalar text. String-array and cell elements are written in linear order.",
+    "`filename` must be scalar host text. Native integer and resident numeric inputs are rejected rather than converted to text.",
+    "RunMat writes a line ending after every input element, including the last. The `LineEnding` option accepts `\"unix\"`, `\"windows\"`, `\"pc\"`, or `\"mac\"`.",
+    "The current implementation overwrites the destination file. `WriteMode` and `Encoding` options are not yet implemented."
   ],
-  "examples": [],
-  "faqs": [],
-  "links": []
+  "examples": [
+    {
+      "description": "Write a string array as separate lines",
+      "input": "lines = [\"alpha\"; \"beta\"];\nwritelines(lines, \"names.txt\")",
+      "output": "`names.txt` contains `alpha` and `beta` on separate lines."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `writelines` gather GPU values?",
+      "answer": "No. Its inputs are text and filesystem options, so numeric resident values are rejected before provider access."
+    }
+  ],
+  "links": [
+    {
+      "label": "readlines",
+      "url": "./readlines"
+    }
+  ]
 }

@@ -2,24 +2,32 @@
 //!
 //! These operate on the active figure/axes state (grid/axis/cla/colormap/shading/colorbar).
 
-use runmat_builtins::Value;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
-use super::colormap_arrays::parse_rgb_colormap_tensor;
+use super::colormap_arrays::{colormap_tensor, parse_rgb_colormap_tensor};
 use super::op_common::cmd_parsing::{as_lower_str, parse_on_off};
 use super::state::{
-    axes_metadata_snapshot, clear_current_axes, current_axes_state, current_figure_handle,
-    set_axis_equal, set_axis_equal_and_limits, set_axis_limits, set_box_enabled,
-    set_colorbar_enabled, set_colormap, set_colormap_with_length, set_grid_and_minor_grid_enabled,
-    set_hidden_line_removal_for_axes, set_surface_shading, set_z_limits, toggle_box,
-    toggle_colorbar, toggle_grid, toggle_minor_grid,
+    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, clear_current_axes,
+    clone_figure, color_limits_snapshot, colormap_length_for_axes, current_axes_state,
+    current_colormap_length, current_figure_handle, set_axes_style_for_axes, set_axis_equal,
+    set_axis_equal_and_limits, set_axis_limits, set_box_enabled, set_color_limits_runtime,
+    set_colorbar_enabled, set_colormap_for_axes_with_length, set_colormap_with_length,
+    set_grid_and_minor_grid_enabled, set_hidden_line_removal_for_axes, set_surface_shading,
+    set_z_limits, toggle_box, toggle_colorbar, toggle_grid, toggle_minor_grid, z_limits_snapshot,
+    FigureHandle,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
-use crate::builtins::plotting::type_resolvers::bool_type;
+use crate::builtins::plotting::type_resolvers::{axis_type, bool_type, get_type};
 use crate::{build_runtime_error, RuntimeError};
 
 const GRID_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -110,20 +118,28 @@ pub const BOX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &BOX_ERRORS,
 };
 
-const AXIS_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ok",
-    ty: BuiltinParamType::LogicalArray,
+const AXIS_OUTPUT_LIMITS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "lim",
+    ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "True on success.",
+    description: "Current x/y limits, with z limits included for a configured 3-D view.",
 }];
+const AXIS_OUTPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 const AXIS_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const AXIS_INPUTS_TARGET: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ax",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Existing axes handle whose limits are queried.",
+}];
 const AXIS_INPUTS_LIMITS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "limits",
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Axis limits vector [xmin xmax ymin ymax] or [xmin xmax ymin ymax zmin zmax].",
+    description: "Four-, six-, or eight-element x/y, x/y/z, or x/y/z/color limits vector.",
 }];
 const AXIS_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "mode",
@@ -132,21 +148,38 @@ const AXIS_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Mode token: 'equal'|'image'|'auto'|'tight'|'manual'|'ij'|'xy'|'on'|'off'.",
 }];
-const AXIS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+const AXIS_INPUTS_VISIBILITY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "visibility",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Axes visibility as on/off, logical true/false, or numeric 1/0.",
+}];
+const AXIS_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
-        label: "ok = axis()",
+        label: "lim = axis()",
         inputs: &AXIS_INPUTS_NONE,
-        outputs: &AXIS_OUTPUT_OK,
+        outputs: &AXIS_OUTPUT_LIMITS,
     },
     BuiltinSignatureDescriptor {
-        label: "ok = axis([xmin xmax ymin ymax | ... zmin zmax])",
+        label: "lim = axis(ax)",
+        inputs: &AXIS_INPUTS_TARGET,
+        outputs: &AXIS_OUTPUT_LIMITS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "axis([xmin xmax ymin ymax | ... cmin cmax])",
         inputs: &AXIS_INPUTS_LIMITS,
-        outputs: &AXIS_OUTPUT_OK,
+        outputs: &AXIS_OUTPUTS_NONE,
     },
     BuiltinSignatureDescriptor {
-        label: "ok = axis(mode)",
+        label: "axis(mode)",
         inputs: &AXIS_INPUTS_MODE,
-        outputs: &AXIS_OUTPUT_OK,
+        outputs: &AXIS_OUTPUTS_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "axis(visibility)",
+        inputs: &AXIS_INPUTS_VISIBILITY,
+        outputs: &AXIS_OUTPUTS_NONE,
     },
 ];
 const AXIS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -162,6 +195,45 @@ pub const AXIS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &AXIS_ERRORS,
 };
+
+const AXIS_LIMIT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "limits",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Four-, six-, and eight-element limit vectors accept every built-in integer class.",
+    }];
+const AXIS_VISIBILITY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "visibility",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Current numeric visibility syntax accepts scalar zero or one; logical false/true is the noninteger counterpart.",
+    }];
+pub const AXIS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "axis(integer_limits)",
+        inputs: &AXIS_LIMIT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Authoritative integer storage is shape- and order-validated before one conversion into host f64 graphics limits; the separate query form returns double limits.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "axis(integer_visibility)",
+        inputs: &AXIS_VISIBILITY_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Only exact scalar zero and one are accepted, without provider dispatch or integer output.",
+    },
+];
 
 const CLA_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ok",
@@ -184,13 +256,15 @@ pub const CLA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CLA_ERRORS,
 };
 
-const COLORMAP_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ok",
-    ty: BuiltinParamType::LogicalArray,
+const COLORMAP_OUTPUT_MAP: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "cmap",
+    ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "True on successful colormap update.",
+    description: "Current colormap as an m-by-3 normalized double RGB matrix.",
 }];
+const COLORMAP_OUTPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const COLORMAP_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 const COLORMAP_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "name",
     ty: BuiltinParamType::StringScalar,
@@ -203,18 +277,56 @@ const COLORMAP_INPUTS_RGB: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "m-by-3 RGB colormap array with values in [0, 1].",
+    description: "m-by-3 single/double RGB map in [0,1], or uint8 RGB map in [0,255].",
 }];
-const COLORMAP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const COLORMAP_INPUTS_TARGET: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "target",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Target figure or axes handle.",
+}];
+const COLORMAP_INPUTS_TARGET_MAP: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "target",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target figure or axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "map",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Colormap name or m-by-3 numeric RGB map.",
+    },
+];
+const COLORMAP_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
-        label: "ok = colormap(name)",
-        inputs: &COLORMAP_INPUTS_NAME,
-        outputs: &COLORMAP_OUTPUT_OK,
+        label: "cmap = colormap()",
+        inputs: &COLORMAP_INPUTS_NONE,
+        outputs: &COLORMAP_OUTPUT_MAP,
     },
     BuiltinSignatureDescriptor {
-        label: "ok = colormap(map)",
+        label: "cmap = colormap(target)",
+        inputs: &COLORMAP_INPUTS_TARGET,
+        outputs: &COLORMAP_OUTPUT_MAP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "colormap(name)",
+        inputs: &COLORMAP_INPUTS_NAME,
+        outputs: &COLORMAP_OUTPUTS_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "colormap(map)",
         inputs: &COLORMAP_INPUTS_RGB,
-        outputs: &COLORMAP_OUTPUT_OK,
+        outputs: &COLORMAP_OUTPUTS_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "colormap(target, map)",
+        inputs: &COLORMAP_INPUTS_TARGET_MAP,
+        outputs: &COLORMAP_OUTPUTS_NONE,
     },
 ];
 const COLORMAP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -230,6 +342,66 @@ pub const COLORMAP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &COLORMAP_ERRORS,
 };
+
+pub(crate) const COLORMAP_NON_UINT8_INTEGER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "colormap-non-uint8-integer-map",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "colormap with an integer RGB map other than uint8 is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ColormapNonUint8IntegerMapExtension"),
+    };
+
+pub const COLORMAP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [COLORMAP_NON_UINT8_INTEGER_EXTENSION];
+
+const COLORMAP_UINT8_CLASSES: [BuiltinIntegerClass; 1] = [BuiltinIntegerClass::Uint8];
+const COLORMAP_NON_UINT8_CLASSES: [BuiltinIntegerClass; 7] = [
+    BuiltinIntegerClass::Int8,
+    BuiltinIntegerClass::Int16,
+    BuiltinIntegerClass::Int32,
+    BuiltinIntegerClass::Int64,
+    BuiltinIntegerClass::Uint16,
+    BuiltinIntegerClass::Uint32,
+    BuiltinIntegerClass::Uint64,
+];
+const COLORMAP_UINT8_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "map",
+    classes: &COLORMAP_UINT8_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Public uint8 RGB maps use the full [0,255] channel range and are normalized to [0,1].",
+}];
+const COLORMAP_NON_UINT8_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "map",
+        classes: &COLORMAP_NON_UINT8_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode admits the other seven integer classes only when every RGB component is exactly 0 or 1.",
+    }];
+
+pub const COLORMAP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "colormap(uint8_map)",
+        inputs: &COLORMAP_UINT8_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Authoritative uint8 channels are divided by 255 at the explicit host graphics-state boundary; the applied map is stored as normalized double and resident inputs remain unsupported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "colormap(non_uint8_integer_map)",
+        inputs: &COLORMAP_NON_UINT8_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "This useful RunMat-only form validates exact native 0/1 components before conversion to normalized host graphics metadata; resident inputs reject without provider access.",
+    },
+];
 
 const SHADING_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ok",
@@ -491,98 +663,94 @@ pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
 #[runtime_builtin(
     name = "axis",
     category = "plotting",
-    summary = "Set axis limits and aspect behavior.",
+    summary = "Query or set axis limits, visibility, and aspect behavior.",
     keywords = "axis,plotting",
     suppress_auto_output = true,
-    type_resolver(bool_type),
+    type_resolver(axis_type),
     descriptor(crate::builtins::plotting::cmds::AXIS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::cmds::AXIS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Ok(true);
+        return axis_query_value(None);
+    }
+    if args.len() != 1 {
+        return Err(axis_invalid_argument());
     }
 
-    // Numeric form: axis([xmin xmax ymin ymax]) or axis([xmin xmax ymin ymax zmin zmax])
     if let Value::Tensor(t) = &args[0] {
-        if t.data.len() == 4 {
-            let xmin = t.data[0];
-            let xmax = t.data[1];
-            let ymin = t.data[2];
-            let ymax = t.data[3];
-            if !(xmin.is_finite() && xmax.is_finite() && ymin.is_finite() && ymax.is_finite()) {
-                return Err(cmd_error_with_message(
-                    "axis",
-                    AXIS_ERROR_INVALID_ARGUMENT.message,
-                    &AXIS_ERROR_INVALID_ARGUMENT,
-                ));
+        if matches!(tensor_utils::tensor_element_len(t), 4 | 6 | 8) {
+            let values = tensor_utils::tensor_values_f64(t);
+            let state = current_axes_state();
+            let bounds = axis_display_bounds_snapshot_for_axes(state.handle, state.active_index)
+                .ok()
+                .flatten()
+                .unwrap_or((0.0, 1.0, 0.0, 1.0));
+            let x = axis_limit_pair(values[0], values[1], bounds.0, bounds.1)?;
+            let y = axis_limit_pair(values[2], values[3], bounds.2, bounds.3)?;
+            set_axis_limits(Some(x), Some(y));
+            if values.len() >= 6 {
+                let z_auto = z_limits_snapshot().unwrap_or((0.0, 1.0));
+                set_z_limits(Some(axis_limit_pair(
+                    values[4], values[5], z_auto.0, z_auto.1,
+                )?));
             }
-            set_axis_limits(Some((xmin, xmax)), Some((ymin, ymax)));
-            return Ok(true);
+            if values.len() == 8 {
+                let c_auto = color_limits_snapshot().unwrap_or((0.0, 1.0));
+                set_color_limits_runtime(Some(axis_limit_pair(
+                    values[6], values[7], c_auto.0, c_auto.1,
+                )?));
+            }
+            return Ok(Value::Bool(true));
         }
-        if t.data.len() == 6 {
-            let xmin = t.data[0];
-            let xmax = t.data[1];
-            let ymin = t.data[2];
-            let ymax = t.data[3];
-            let zmin = t.data[4];
-            let zmax = t.data[5];
-            if !(xmin.is_finite()
-                && xmax.is_finite()
-                && ymin.is_finite()
-                && ymax.is_finite()
-                && zmin.is_finite()
-                && zmax.is_finite())
-            {
-                return Err(cmd_error_with_message(
-                    "axis",
-                    AXIS_ERROR_INVALID_ARGUMENT.message,
-                    &AXIS_ERROR_INVALID_ARGUMENT,
-                ));
-            }
-            if xmax < xmin || ymax < ymin || zmax < zmin {
-                return Err(cmd_error_with_message(
-                    "axis",
-                    AXIS_ERROR_INVALID_ARGUMENT.message,
-                    &AXIS_ERROR_INVALID_ARGUMENT,
-                ));
-            }
-            set_axis_limits(Some((xmin, xmax)), Some((ymin, ymax)));
-            set_z_limits(Some((zmin, zmax)));
-            return Ok(true);
-        }
+    }
+
+    if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(&args[0], "axis") {
+        return axis_query_value(Some((handle, axes_index)));
+    }
+
+    if let Some(visible) = axis_visibility_value(&args[0])? {
+        set_current_axis_visibility(visible)?;
+        return Ok(Value::Bool(true));
     }
 
     let Some(mode) = as_lower_str(&args[0]) else {
-        return Err(cmd_error_with_message(
-            "axis",
-            AXIS_ERROR_INVALID_ARGUMENT.message,
-            &AXIS_ERROR_INVALID_ARGUMENT,
-        ));
+        return Err(axis_invalid_argument());
     };
     match mode.trim() {
         "equal" => {
             set_axis_equal(true);
-            Ok(true)
+            Ok(Value::Bool(true))
         }
         "auto" => {
             set_axis_equal_and_limits(false, None, None);
-            Ok(true)
+            set_z_limits(None);
+            Ok(Value::Bool(true))
         }
         "tight" => {
             // Treat as auto; camera fit uses data bounds.
             set_axis_limits(None, None);
-            Ok(true)
+            set_z_limits(None);
+            Ok(Value::Bool(true))
         }
         "image" => {
             set_axis_equal_and_limits(true, None, None);
-            Ok(true)
+            Ok(Value::Bool(true))
         }
-        "manual" | "ij" | "xy" | "on" | "off" => {
+        "on" => {
+            set_current_axis_visibility(true)?;
+            Ok(Value::Bool(true))
+        }
+        "off" => {
+            set_current_axis_visibility(false)?;
+            Ok(Value::Bool(true))
+        }
+        "manual" | "ij" | "xy" => {
             // These MATLAB axis modes are accepted as command tokens for compatibility.
-            // The current plot scene model does not yet track axis visibility, direction,
-            // or manual limit-lock state separately from concrete limits.
-            Ok(true)
+            // The current plot scene model does not yet track direction or manual
+            // limit-lock state separately from concrete limits.
+            Ok(Value::Bool(true))
         }
         other => Err(cmd_error_with_message(
             "axis",
@@ -593,6 +761,87 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
             &AXIS_ERROR_INVALID_ARGUMENT,
         )),
     }
+}
+
+fn axis_invalid_argument() -> RuntimeError {
+    cmd_error_with_message(
+        "axis",
+        AXIS_ERROR_INVALID_ARGUMENT.message,
+        &AXIS_ERROR_INVALID_ARGUMENT,
+    )
+}
+
+fn axis_limit_pair(
+    lower: f64,
+    upper: f64,
+    automatic_lower: f64,
+    automatic_upper: f64,
+) -> crate::BuiltinResult<(f64, f64)> {
+    let lower = if lower == f64::NEG_INFINITY {
+        automatic_lower
+    } else if lower.is_finite() {
+        lower
+    } else {
+        return Err(axis_invalid_argument());
+    };
+    let upper = if upper == f64::INFINITY {
+        automatic_upper
+    } else if upper.is_finite() {
+        upper
+    } else {
+        return Err(axis_invalid_argument());
+    };
+    if upper <= lower {
+        return Err(axis_invalid_argument());
+    }
+    Ok((lower, upper))
+}
+
+fn axis_visibility_value(value: &Value) -> crate::BuiltinResult<Option<bool>> {
+    let scalar = match value {
+        Value::Bool(value) => return Ok(Some(*value)),
+        Value::Num(value) => Some(*value),
+        Value::Int(value) => Some(value.to_f64()),
+        Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) == 1 => {
+            Some(tensor_utils::tensor_values_f64(tensor)[0])
+        }
+        _ => None,
+    };
+    match scalar {
+        Some(0.0) => Ok(Some(false)),
+        Some(1.0) => Ok(Some(true)),
+        Some(_) => Err(axis_invalid_argument()),
+        None => Ok(None),
+    }
+}
+
+fn set_current_axis_visibility(visible: bool) -> crate::BuiltinResult<()> {
+    let state = current_axes_state();
+    let mut style = axes_metadata_snapshot(state.handle, state.active_index)
+        .map_err(|_| axis_invalid_argument())?
+        .axes_style;
+    style.visible = visible;
+    set_axes_style_for_axes(state.handle, state.active_index, style)
+        .map_err(|_| axis_invalid_argument())
+}
+
+fn axis_query_value(target: Option<(FigureHandle, usize)>) -> crate::BuiltinResult<Value> {
+    let state = current_axes_state();
+    let (handle, axes_index) = target.unwrap_or((state.handle, state.active_index));
+    let meta = axes_metadata_snapshot(handle, axes_index).map_err(|_| axis_invalid_argument())?;
+    let bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
+        .map_err(|_| axis_invalid_argument())?
+        .unwrap_or((0.0, 1.0, 0.0, 1.0));
+    let x = meta.x_limits.unwrap_or((bounds.0, bounds.1));
+    let y = meta.y_limits.unwrap_or((bounds.2, bounds.3));
+    let mut values = vec![x.0, x.1, y.0, y.1];
+    if let Some(z) = meta.z_limits {
+        values.extend_from_slice(&[z.0, z.1]);
+    }
+    let len = values.len();
+    Ok(Value::Tensor(
+        Tensor::new(values, vec![1, len]).expect("axis query row"),
+    ))
 }
 
 #[runtime_builtin(
@@ -616,19 +865,117 @@ pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<bool> {
     summary = "Set the active colormap.",
     keywords = "colormap,plotting",
     suppress_auto_output = true,
-    type_resolver(bool_type),
+    type_resolver(get_type),
     descriptor(crate::builtins::plotting::cmds::COLORMAP_DESCRIPTOR),
+    extensions(crate::builtins::plotting::cmds::COLORMAP_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::cmds::COLORMAP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
-    let [arg] = args.as_slice() else {
-        return Err(cmd_error_with_message(
-            "colormap",
-            COLORMAP_ERROR_INVALID_ARGUMENT.message,
-            &COLORMAP_ERROR_INVALID_ARGUMENT,
-        ));
-    };
+pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if args.is_empty() {
+        let state = current_axes_state();
+        return colormap_query(state.handle, state.active_index);
+    }
+    if args.len() == 1 {
+        let typed_integer_map = matches!(&args[0], Value::Int(_))
+            || matches!(&args[0], Value::Tensor(tensor) if tensor.integer_storage().is_some());
+        if !typed_integer_map {
+            if let Ok(target) = resolve_plot_handle(&args[0], "colormap") {
+                return match target {
+                    PlotHandle::Axes(handle, axes) => colormap_query(handle, axes),
+                    PlotHandle::Figure(handle) => {
+                        let axes = clone_figure(handle)
+                            .map(|figure| figure.active_axes_index)
+                            .unwrap_or(0);
+                        colormap_query(handle, axes)
+                    }
+                    _ => Err(cmd_error_with_message(
+                        "colormap",
+                        "target must be a figure or axes handle",
+                        &COLORMAP_ERROR_INVALID_ARGUMENT,
+                    )),
+                };
+            }
+        }
+        let (cmap, len) = colormap_parse_map(&args[0])?;
+        let output = Value::Tensor(colormap_tensor(cmap.clone(), len));
+        set_colormap_with_length(cmap, len);
+        return Ok(output);
+    }
+    if args.len() == 2 {
+        if matches!(&args[0], Value::Int(_))
+            || matches!(&args[0], Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        {
+            return Err(cmd_error_with_message(
+                "colormap",
+                "target must be a figure or axes graphics handle, not a typed integer",
+                &COLORMAP_ERROR_INVALID_ARGUMENT,
+            ));
+        }
+        let target = resolve_plot_handle(&args[0], "colormap")?;
+        let (cmap, len) = colormap_parse_map(&args[1])?;
+        let output = Value::Tensor(colormap_tensor(cmap.clone(), len));
+        match target {
+            PlotHandle::Axes(handle, axes) => {
+                set_colormap_for_axes_with_length(handle, axes, cmap, len).map_err(|err| {
+                    cmd_error_with_message(
+                        "colormap",
+                        format!("{}: {err}", COLORMAP_ERROR_INVALID_ARGUMENT.message),
+                        &COLORMAP_ERROR_INVALID_ARGUMENT,
+                    )
+                })?;
+            }
+            PlotHandle::Figure(handle) => {
+                let count = clone_figure(handle)
+                    .map(|figure| figure.axes_count())
+                    .unwrap_or(1)
+                    .max(1);
+                for axes in 0..count {
+                    set_colormap_for_axes_with_length(handle, axes, cmap.clone(), len).map_err(
+                        |err| {
+                            cmd_error_with_message(
+                                "colormap",
+                                format!("{}: {err}", COLORMAP_ERROR_INVALID_ARGUMENT.message),
+                                &COLORMAP_ERROR_INVALID_ARGUMENT,
+                            )
+                        },
+                    )?;
+                }
+            }
+            _ => {
+                return Err(cmd_error_with_message(
+                    "colormap",
+                    "target must be a figure or axes handle",
+                    &COLORMAP_ERROR_INVALID_ARGUMENT,
+                ))
+            }
+        }
+        return Ok(output);
+    }
+    Err(cmd_error_with_message(
+        "colormap",
+        "expected colormap(), colormap(map), colormap(target), or colormap(target, map)",
+        &COLORMAP_ERROR_INVALID_ARGUMENT,
+    ))
+}
 
+fn colormap_query(handle: FigureHandle, axes: usize) -> crate::BuiltinResult<Value> {
+    let metadata = axes_metadata_snapshot(handle, axes).map_err(|err| {
+        cmd_error_with_message(
+            "colormap",
+            format!("{}: {err}", COLORMAP_ERROR_INVALID_ARGUMENT.message),
+            &COLORMAP_ERROR_INVALID_ARGUMENT,
+        )
+    })?;
+    Ok(Value::Tensor(colormap_tensor(
+        metadata.colormap,
+        colormap_length_for_axes(handle, axes),
+    )))
+}
+
+fn colormap_parse_map(
+    arg: &Value,
+) -> crate::BuiltinResult<(runmat_plot::plots::surface::ColorMap, usize)> {
     if let Some(name) = as_lower_str(arg) {
         let Some(cmap) = runmat_plot::plots::surface::ColorMap::from_name(&name) else {
             let other = name.trim();
@@ -641,14 +988,18 @@ pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
                 &COLORMAP_ERROR_INVALID_ARGUMENT,
             ));
         };
-        set_colormap(cmap);
-        return Ok(true);
+        let len = current_colormap_length();
+        return Ok((cmap, len));
     }
 
     if let Value::Tensor(tensor) = arg {
-        let (cmap, len) = parse_rgb_colormap_tensor(tensor, "colormap")?;
-        set_colormap_with_length(cmap, len);
-        return Ok(true);
+        if tensor.integer_storage().is_some() && tensor.numeric_dtype() != NumericDType::U8 {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &COLORMAP_NON_UINT8_INTEGER_EXTENSION,
+                "colormap",
+            )?;
+        }
+        return parse_rgb_colormap_tensor(tensor, "colormap");
     };
 
     Err(cmd_error_with_message(
@@ -812,7 +1163,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -832,18 +1183,135 @@ mod tests {
         )
         .unwrap();
 
-        axis_builtin(vec![Value::Tensor(Tensor {
-            rows: 1,
-            cols: 6,
-            shape: vec![1, 6],
-            data: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })])
+        axis_builtin(vec![Value::Tensor(
+            Tensor::new(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0], vec![1, 6])
+                .expect("six-element axis limits"),
+        )])
         .unwrap();
         let zlim = get_builtin(vec![Value::Num(ax), Value::String("ZLim".into())]).unwrap();
         let zlim = Tensor::try_from(&zlim).unwrap();
-        assert_eq!(zlim.data, vec![4.0, 5.0]);
+        assert_eq!(zlim.materialize_f64(), vec![4.0, 5.0]);
+    }
+
+    #[test]
+    fn axis_limits_read_typed_integer_storage_exactly() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
+        let limits = Tensor::new_integer(
+            runmat_value::IntegerStorage::I16(vec![0, 10, -2, 2, 4, 5]),
+            vec![1, 6],
+        )
+        .expect("typed limits");
+
+        axis_builtin(vec![Value::Tensor(limits)]).unwrap();
+
+        let xlim =
+            Tensor::try_from(&get_builtin(vec![ax.clone(), Value::String("XLim".into())]).unwrap())
+                .unwrap();
+        let ylim =
+            Tensor::try_from(&get_builtin(vec![ax.clone(), Value::String("YLim".into())]).unwrap())
+                .unwrap();
+        let zlim = Tensor::try_from(&get_builtin(vec![ax, Value::String("ZLim".into())]).unwrap())
+            .unwrap();
+        assert_eq!(xlim.materialize_f64(), vec![0.0, 10.0]);
+        assert_eq!(ylim.materialize_f64(), vec![-2.0, 2.0]);
+        assert_eq!(zlim.materialize_f64(), vec![4.0, 5.0]);
+    }
+
+    #[test]
+    fn axis_limits_accept_all_integer_classes_and_query_double_graphics_state() {
+        let _guard = setup();
+        let storages = [
+            IntegerStorage::I8(vec![0, 10, 1, 2]),
+            IntegerStorage::I16(vec![0, 10, 1, 2]),
+            IntegerStorage::I32(vec![0, 10, 1, 2]),
+            IntegerStorage::I64(vec![0, 10, 1, 2]),
+            IntegerStorage::U8(vec![0, 10, 1, 2]),
+            IntegerStorage::U16(vec![0, 10, 1, 2]),
+            IntegerStorage::U32(vec![0, 10, 1, 2]),
+            IntegerStorage::U64(vec![0, 10, 1, 2]),
+        ];
+        for storage in storages {
+            let limits = Tensor::new_integer(storage, vec![1, 4]).expect("limits");
+            assert_eq!(
+                axis_builtin(vec![Value::Tensor(limits)]).expect("set limits"),
+                Value::Bool(true)
+            );
+            let Value::Tensor(actual) = axis_builtin(Vec::new()).expect("query limits") else {
+                panic!("expected limit tensor");
+            };
+            assert_eq!(actual.materialize_f64(), vec![0.0, 10.0, 1.0, 2.0]);
+            assert_eq!(actual.numeric_dtype(), runmat_value::NumericDType::F64);
+        }
+    }
+
+    #[test]
+    fn axis_supports_eight_limits_semiautomatic_endpoints_and_strict_ordering() {
+        let _guard = setup();
+        axis_builtin(vec![Value::Tensor(
+            Tensor::new(
+                vec![f64::NEG_INFINITY, 10.0, 0.0, f64::INFINITY],
+                vec![1, 4],
+            )
+            .expect("semiautomatic limits"),
+        )])
+        .expect("semiautomatic axis");
+        axis_builtin(vec![Value::Tensor(
+            Tensor::new(vec![0.0, 10.0, 0.0, 20.0, 0.0, 30.0, 2.0, 8.0], vec![1, 8])
+                .expect("eight limits"),
+        )])
+        .expect("eight-element axis");
+        assert_eq!(color_limits_snapshot(), Some((2.0, 8.0)));
+
+        let equal = Tensor::new(vec![0.0, 0.0, 0.0, 1.0], vec![1, 4]).expect("equal");
+        assert!(axis_builtin(vec![Value::Tensor(equal)]).is_err());
+    }
+
+    #[test]
+    fn axis_visibility_accepts_logical_and_all_integer_scalar_classes() {
+        let _guard = setup();
+        let state = current_axes_state();
+        let zeros = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+        for storage in zeros {
+            let scalar = Tensor::new_integer(storage, vec![1, 1]).expect("visibility");
+            axis_builtin(vec![Value::Tensor(scalar)]).expect("axis off");
+            assert!(
+                !axes_metadata_snapshot(state.handle, state.active_index)
+                    .expect("metadata")
+                    .axes_style
+                    .visible
+            );
+        }
+        axis_builtin(vec![Value::Bool(true)]).expect("axis on");
+        assert!(
+            axes_metadata_snapshot(state.handle, state.active_index)
+                .expect("metadata")
+                .axes_style
+                .visible
+        );
+    }
+
+    #[test]
+    fn axis_rejects_resident_limits_before_provider_access() {
+        let _guard = setup();
+        let resident = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 4],
+            device_id: 0,
+            buffer_id: 9_361_001,
+            descriptor: Default::default(),
+        };
+        let error = axis_builtin(vec![Value::GpuTensor(resident)])
+            .expect_err("resident graphics limits must reject");
+        assert_eq!(error.identifier(), Some("RunMat:axis:InvalidArgument"));
     }
 
     #[test]
@@ -862,14 +1330,9 @@ mod tests {
         let _guard = setup();
         let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
 
-        axis_builtin(vec![Value::Tensor(Tensor {
-            rows: 1,
-            cols: 4,
-            shape: vec![1, 4],
-            data: vec![0.0, 10.0, -2.0, 2.0],
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })])
+        axis_builtin(vec![Value::Tensor(
+            Tensor::new(vec![0.0, 10.0, -2.0, 2.0], vec![1, 4]).expect("four-element axis limits"),
+        )])
         .unwrap();
         axis_builtin(vec![Value::String("image".into())]).unwrap();
 
@@ -881,8 +1344,8 @@ mod tests {
         let ylim = get_builtin(vec![ax, Value::String("YLim".into())]).unwrap();
         let xlim = Tensor::try_from(&xlim).unwrap();
         let ylim = Tensor::try_from(&ylim).unwrap();
-        assert!(xlim.data.iter().all(|value| value.is_nan()));
-        assert!(ylim.data.iter().all(|value| value.is_nan()));
+        assert!(xlim.materialize_f64().iter().all(|value| value.is_nan()));
+        assert!(ylim.materialize_f64().iter().all(|value| value.is_nan()));
     }
 
     #[test]
@@ -1038,14 +1501,9 @@ mod tests {
     #[test]
     fn colormap_accepts_rgb_matrix_lookup_tables() {
         let _guard = setup();
-        colormap_builtin(vec![Value::Tensor(Tensor {
-            rows: 2,
-            cols: 3,
-            shape: vec![2, 3],
-            data: vec![0.2, 0.8, 0.4, 0.1, 0.6, 0.0],
-            integer_data: None,
-            dtype: NumericDType::F64,
-        })])
+        colormap_builtin(vec![Value::Tensor(
+            Tensor::new(vec![0.2, 0.8, 0.4, 0.1, 0.6, 0.0], vec![2, 3]).expect("RGB colormap"),
+        )])
         .unwrap();
 
         let figure = clone_figure(current_figure_handle()).expect("current figure");
@@ -1079,6 +1537,64 @@ mod tests {
     }
 
     #[test]
+    fn colormap_integer_admission_covers_all_classes_and_uint8_scaling() {
+        let _guard = setup();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let uint8 = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 128]), vec![1, 3])
+            .expect("uint8 map");
+        let returned = colormap_builtin(vec![Value::Tensor(uint8)]).expect("public uint8 map");
+        let values = Tensor::try_from(&returned).unwrap().materialize_f64();
+        assert_eq!(values[0], 1.0);
+        assert_eq!(values[1], 0.0);
+        assert!((values[2] - 128.0 / 255.0).abs() < 1.0e-6);
+
+        let extensions = [
+            IntegerStorage::I8(vec![1, 0, 1]),
+            IntegerStorage::I16(vec![1, 0, 1]),
+            IntegerStorage::I32(vec![1, 0, 1]),
+            IntegerStorage::I64(vec![1, 0, 1]),
+            IntegerStorage::U16(vec![1, 0, 1]),
+            IntegerStorage::U32(vec![1, 0, 1]),
+            IntegerStorage::U64(vec![1, 0, 1]),
+        ];
+        for storage in extensions {
+            let map = Tensor::new_integer(storage, vec![1, 3]).unwrap();
+            let returned = colormap_builtin(vec![Value::Tensor(map)]).unwrap();
+            assert_eq!(
+                Tensor::try_from(&returned).unwrap().materialize_f64(),
+                vec![1.0, 0.0, 1.0]
+            );
+        }
+    }
+
+    #[test]
+    fn colormap_strict_mode_keeps_uint8_public_and_gates_other_integers() {
+        let _guard = setup();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let public = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 3]).unwrap();
+        colormap_builtin(vec![Value::Tensor(public)]).expect("uint8 is public");
+        let extension =
+            Tensor::new_integer(IntegerStorage::I64(vec![1, 0, 0]), vec![1, 3]).unwrap();
+        let err = colormap_builtin(vec![Value::Tensor(extension)]).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:ColormapNonUint8IntegerMapExtension")
+        );
+    }
+
+    #[test]
+    fn colormap_rejects_typed_integer_targets_without_f64_aliasing() {
+        let _guard = setup();
+        let err = colormap_builtin(vec![
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+            Value::String("parula".into()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:colormap:InvalidArgument"));
+        assert!(err.to_string().contains("not a typed integer"));
+    }
+
+    #[test]
     fn command_descriptors_cover_core_forms() {
         let grid_labels: Vec<&str> = GRID_DESCRIPTOR
             .signatures
@@ -1101,9 +1617,11 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(axis_labels.contains(&"ok = axis()"));
-        assert!(axis_labels.contains(&"ok = axis([xmin xmax ymin ymax | ... zmin zmax])"));
-        assert!(axis_labels.contains(&"ok = axis(mode)"));
+        assert!(axis_labels.contains(&"lim = axis()"));
+        assert!(axis_labels.contains(&"lim = axis(ax)"));
+        assert!(axis_labels.contains(&"axis([xmin xmax ymin ymax | ... cmin cmax])"));
+        assert!(axis_labels.contains(&"axis(mode)"));
+        assert!(axis_labels.contains(&"axis(visibility)"));
 
         let cla_labels: Vec<&str> = CLA_DESCRIPTOR
             .signatures
@@ -1117,8 +1635,11 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(colormap_labels.contains(&"ok = colormap(name)"));
-        assert!(colormap_labels.contains(&"ok = colormap(map)"));
+        assert!(colormap_labels.contains(&"cmap = colormap()"));
+        assert!(colormap_labels.contains(&"cmap = colormap(target)"));
+        assert!(colormap_labels.contains(&"colormap(name)"));
+        assert!(colormap_labels.contains(&"colormap(map)"));
+        assert!(colormap_labels.contains(&"colormap(target, map)"));
 
         let shading_labels: Vec<&str> = SHADING_DESCRIPTOR
             .signatures

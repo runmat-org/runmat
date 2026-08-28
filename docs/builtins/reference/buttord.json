@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Order selection is scalar host-side analysis. GPU-resident frequency inputs are gathered automatically."
+    "notes": "The documented API lists code generation but no interactive gpuArray overload. MATLAB-compatible mode rejects resident arguments before gather; RunMat mode gathers every design argument and returns host double outputs."
   },
   "fusion": {
     "elementwise": false,
@@ -28,11 +28,13 @@
   },
   "description": "`buttord(Wp, Ws, Rp, Rs)` computes the minimum Butterworth filter order and natural cutoff `Wn` that satisfy passband ripple `Rp` and stopband attenuation `Rs`. Digital frequencies use MATLAB's normalized convention where `1` is Nyquist; add `'s'` for analog rad/s designs.",
   "behaviors": [
-    "`[n, Wn] = buttord(Wp, Ws, Rp, Rs)` returns an integer order `n` and cutoff `Wn` for use with `butter(n, Wn)`.",
+    "`[n, Wn] = buttord(Wp, Ws, Rp, Rs)` returns a double scalar with an integral value for `n` and double cutoff `Wn` for direct use with the documented double-only `butter(n, Wn)` interface.",
     "Scalar `Wp` and `Ws` select lowpass when `Wp < Ws` and highpass when `Wp > Ws`.",
     "Two-element edge vectors select bandpass when the stopband encloses the passband and bandstop when the passband encloses the stopband.",
-    "Digital inputs must be finite, positive, and less than 1. Analog inputs must be finite and positive.",
-    "`Rs` must be greater than `Rp`, and both values are specified in decibels."
+    "Digital inputs must be finite, positive, and less than 1. RunMat currently requires analog inputs to be finite and positive.",
+    "`Rs` must be greater than `Rp`, and both values are specified in decibels.",
+    "Documented inputs are real `single` or `double`. RunMat mode additionally admits independently gated typed-integer frequency and attenuation roles, logical roles, zero-imaginary complex frequency edges, and resident arguments; all cross explicit binary64 analysis boundaries and return host double values.",
+    "MATLAB documents infinite passband or stopband edges for analog designs. RunMat's shared order-selection validator currently rejects nonfinite edges, so that non-integer compatibility gap remains open."
   ],
   "examples": [
     {
@@ -59,7 +61,7 @@
     },
     {
       "question": "Does `buttord` run on the GPU?",
-      "answer": "No. It only computes small order/cutoff parameters on the host. Those parameters can feed `butter`, and the resulting coefficients can later be used by GPU-capable filtering paths."
+      "answer": "The documented API lists code generation but no interactive gpuArray overload. In MATLAB-compatible mode RunMat rejects resident arguments before gather; RunMat mode gathers all four design roles and returns host double order/cutoff values."
     }
   ],
   "links": [

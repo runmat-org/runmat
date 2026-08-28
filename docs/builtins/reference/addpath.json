@@ -31,6 +31,7 @@
   "description": "`addpath` prepends or appends folders to the active search path used to resolve functions, scripts, classes, and data files. Changes apply immediately to the current session, with path ordering behavior matching MATLAB semantics.",
   "behaviors": [
     "Folder arguments may be character vectors, string scalars, string arrays, or cell arrays of character vectors or strings. Multi-row char arrays contribute one folder per row (trailing padding is stripped).",
+    "In `runmat` compatibility mode only, a one-row numeric tensor can encode one folder name as Unicode scalar values. MATLAB-compatible modes reject this convenience form; use a character vector or string scalar for portable code.",
     "MATLAB command form is supported for path-like arguments, including `addpath ./SourceCode`, `addpath ../lib -end`, and `addpath ./src:../shared -frozen`.",
     "Multiple folders can be passed in a single argument using the platform path separator (`:` on Linux/macOS, `;` on Windows); this is compatible with `genpath`.",
     "By default, folders are added to the top of the search path. Use `'-end'` to append or `'-begin'` to force prepending explicitly. Only one position flag is permitted.",
@@ -112,8 +113,8 @@
       "answer": "Yes. RunMat validates that every entry exists and is a directory before updating the search path."
     },
     {
-      "question": "Will `addpath` accept GPU strings?",
-      "answer": "Yes. Inputs are gathered automatically, then processed on the CPU."
+      "question": "Will `addpath` accept a GPU numeric character-code tensor?",
+      "answer": "Only in `runmat` compatibility mode. The extension is classified before gather, then the tensor is decoded and the path is updated on the CPU."
     },
     {
       "question": "Does `addpath` return the new path?",
@@ -206,8 +207,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs"
   },
-  "gpu_residency": "No. `addpath` operates entirely on CPU-side strings. Supplying `gpuArray` text inputs offers no benefit—RunMat gathers them automatically.",
+  "gpu_residency": "No. `addpath` operates entirely on CPU-side text and path state. A resident numeric character-code tensor is a mode-gated RunMat extension that gathers only after compatibility admission.",
   "gpu_behavior": [
-    "`addpath` manipulates host-side configuration. If any input value resides on the GPU, RunMat gathers it back to the host before parsing. No acceleration provider hooks or kernels are involved."
+    "`addpath` manipulates host-side configuration. Resident numeric character-code tensors are rejected in MATLAB-compatible modes before gather; admitted RunMat-extension inputs gather to the host before parsing. No acceleration provider hooks or kernels are involved."
   ]
 }

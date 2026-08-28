@@ -7,13 +7,13 @@
     "arguments block",
     "MATLAB compatibility"
   ],
-  "summary": "Validate that a MATLAB function-signature metadata payload is syntactically valid JSON.",
+  "summary": "Validate the JSON syntax of function-signature metadata text.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Validators run on host values and metadata; they throw on validation failure."
+    "notes": "This validator runs on host text. Numeric and provider-resident values are rejected before provider or metadata access."
   },
   "fusion": {
     "elementwise": false,
@@ -26,11 +26,12 @@
     "unit": "crates/runmat-runtime/src/builtins/common/validation.rs validates valid and invalid JSON payloads",
     "integration": "Registered as a callable compatibility builtin; not an arguments-block validator."
   },
-  "description": "`validateFunctionSignaturesJSON(S)` accepts RunMat text values containing JSON and throws if any payload is not syntactically valid JSON. It does not yet implement full MATLAB signature-schema semantic validation.",
+  "description": "`validateFunctionSignaturesJSON(S)` accepts text containing JSON and throws if any payload is not syntactically valid JSON. This JSON-payload signature is a RunMat language extension; the compatibility target's filename-based and no-input forms are not yet implemented.",
   "behaviors": [
     "Accepts string scalars/arrays, character row vectors, and compatible cell arrays of text.",
     "Parses each text payload as JSON and throws a structured RunMat error on syntax errors.",
-    "Returns no user-facing value when validation passes and suppresses automatic output."
+    "Returns no user-facing value when validation passes and suppresses automatic output.",
+    "Numeric values, including native integer values, are rejected before provider or metadata access."
   ],
   "examples": [
     {
@@ -42,13 +43,17 @@
   "faqs": [
     {
       "question": "Does this validate the full MATLAB signature schema?",
-      "answer": "No. RunMat currently validates JSON syntax for compatibility; full signature-schema semantic validation is not implemented."
+      "answer": "No. RunMat currently validates JSON syntax only; full signature-schema semantic validation is not implemented."
     }
   ],
   "links": [
     {
       "label": "`arguments` blocks",
       "url": "../language/arguments"
+    },
+    {
+      "label": "MATLAB Language Extensions",
+      "url": "/docs/runtime/getting-started/language-extensions"
     }
   ]
 }

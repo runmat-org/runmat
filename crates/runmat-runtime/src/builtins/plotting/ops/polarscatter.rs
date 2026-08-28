@@ -3,21 +3,27 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-    Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::AxesKind;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::line::handles_value;
 use super::op_common::polar::{
     evaluate_theta_rho_tensors, is_real_numeric_value, polar_to_cartesian, real_tensor_from_value,
-    tensor_columns, tensor_is_vector, EvaluatedPolarData,
+    tensor_is_vector, EvaluatedPolarData,
 };
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
@@ -142,6 +148,63 @@ pub const POLARSCATTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &POLARSCATTER_ERRORS,
 };
 
+const POLARSCATTER_INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "theta and rho",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly lists all eight integer classes for theta and rho coordinate arrays and permits any numeric class in selected table variables.",
+    }];
+const POLARSCATTER_INTEGER_STYLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sz and numeric c",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly lists every integer class for marker areas and numeric color data; these values enter explicit renderer metadata boundaries.",
+    }];
+const POLARSCATTER_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "thetavar, rhovar, or ColorVariable indices",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Numeric table-variable indices are documented one-based structural selectors.",
+    }];
+pub const POLARSCATTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ps = polarscatter(integer_theta,integer_rho,___)",
+        inputs: &POLARSCATTER_INTEGER_COORDINATE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Authoritative coordinates gather exactly; polar conversion and rendering are explicit floating geometry boundaries.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ps = polarscatter(theta,rho,integer_sz,integer_c,___)",
+        inputs: &POLARSCATTER_INTEGER_STYLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Marker sizing, colormap normalization, and renderer buffers are intentional floating boundaries after typed values are parsed from authoritative storage.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ps = polarscatter(tbl,integer_thetavar,integer_rhovar,___)",
+        inputs: &POLARSCATTER_INTEGER_SELECTOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Variable selection remains exact; broader table-form implementation is a general plotting surface concern.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::polarscatter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polarscatter",
@@ -182,6 +245,9 @@ fn polarscatter_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> 
     suppress_auto_output = true,
     type_resolver(polarscatter_type),
     descriptor(crate::builtins::plotting::polarscatter::POLARSCATTER_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::plotting::polarscatter::POLARSCATTER_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::plotting::polarscatter"
 )]
 pub async fn polarscatter_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -346,22 +412,21 @@ fn series_style_value(
     let Value::Tensor(tensor) = value else {
         return value.clone();
     };
-    if tensor.data.len() <= 1 || tensor_is_vector(tensor) {
+    if tensor_utils::tensor_element_len(tensor) <= 1 || tensor_is_vector(tensor) {
         return value.clone();
     }
     if tensor.rows == point_count && tensor.cols == series_count {
-        let column = tensor_columns(tensor)
-            .into_iter()
-            .nth(series_idx)
-            .unwrap_or_default();
-        return Value::Tensor(runmat_builtins::Tensor {
-            rows: point_count,
-            cols: 1,
-            shape: vec![point_count, 1],
-            data: column,
-            integer_data: None,
-            dtype: tensor.dtype,
-        });
+        let start = series_idx * point_count;
+        let indices: Vec<usize> = (start..start + point_count).collect();
+        let storage = tensor
+            .clone()
+            .into_numeric_storage()
+            .and_then(|storage| storage.gather(&indices))
+            .expect("series style column is valid native storage");
+        return Value::Tensor(
+            Tensor::from_numeric_storage(storage, vec![point_count, 1])
+                .expect("series style column shape"),
+        );
     }
     if is_color_arg && (tensor.cols == 3 || tensor.cols == 4) && tensor.rows == point_count {
         return value.clone();
@@ -416,17 +481,31 @@ mod tests {
     use crate::builtins::plotting::{
         clone_figure, current_figure_handle, reset_hold_state_for_run, reset_plot_state,
     };
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_value::{IntegerStorage, NumericDType, Tensor};
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("polar scatter tensor"))
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn series_style_value_reads_typed_integer_matrix_length_without_mirror() {
+        let value = cleared_int_tensor(IntegerStorage::U8(vec![10, 20, 30, 40]), 2, 2);
+        let series = series_style_value(&value, 1, 2, 2, false);
+
+        let Value::Tensor(tensor) = series else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.materialize_f64(), vec![30.0, 40.0]);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U8(vec![30, 40]))
+        );
     }
 
     #[test]
@@ -454,13 +533,16 @@ mod tests {
         let Value::Tensor(theta) = theta else {
             panic!("expected theta tensor");
         };
-        assert_eq!(theta.data, vec![0.0, std::f64::consts::FRAC_PI_2]);
+        assert_eq!(
+            theta.materialize_f64(),
+            vec![0.0, std::f64::consts::FRAC_PI_2]
+        );
         let r =
             get_builtin(vec![Value::Num(handle), Value::String("RData".into())]).expect("r data");
         let Value::Tensor(r) = r else {
             panic!("expected r tensor");
         };
-        assert_eq!(r.data, vec![1.0, 2.0]);
+        assert_eq!(r.materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[test]
@@ -479,7 +561,7 @@ mod tests {
         let Value::Tensor(handles) = out else {
             panic!("expected handle vector");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
         let figure = clone_figure(current_figure_handle()).expect("figure");
         assert_eq!(figure.plots().count(), 2);
         let size_vectors: Vec<Vec<f32>> = figure
@@ -578,8 +660,8 @@ mod tests {
         let Value::Tensor(y) = y else {
             panic!("expected y tensor");
         };
-        assert!(x.data[0].abs() < 1e-12);
-        assert!((y.data[0] - 2.0).abs() < 1e-12);
+        assert!(x.materialize_f64()[0].abs() < 1e-12);
+        assert!((y.materialize_f64()[0] - 2.0).abs() < 1e-12);
     }
 
     #[test]
@@ -612,7 +694,7 @@ mod tests {
         let Some(runmat_plot::plots::PlotElement::Scatter(scatter)) = figure.plots().next() else {
             panic!("expected scatter plot");
         };
-        assert_eq!(scatter.x_data.len(), 2);
+        assert_eq!(scatter.host_xy_f64().unwrap().unwrap().0.len(), 2);
         assert!(scatter.per_point_colors.is_none());
         assert!(scatter.color_values.is_none());
     }

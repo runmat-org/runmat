@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs on the CPU; if any element lives on the GPU, RunMat gathers it before converting."
+    "notes": "Text is host-only; numeric resident handles reject without implicit text conversion or provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -159,8 +159,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/transform/lower.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/lower.rs"
   },
-  "gpu_residency": "RunMat automatically keeps string data on the host for now. If text originates from GPU-based computations (for example as numeric code points stored on the device), `lower` gathers those values before applying the transformation, so you never need to call `gpuArray` explicitly for this builtin.",
+  "gpu_residency": "RunMat keeps string data on the host. Numeric GPU handles are not text and reject before provider access; convert numeric code points to host text explicitly before calling `lower`.",
   "gpu_behavior": [
-    "`lower` executes on the CPU. When the input (or any nested element) resides on the GPU, RunMat gathers it to host memory before performing the conversion so results remain identical to MATLAB. Providers do not need to implement custom kernels for this builtin."
+    "`lower` executes on host text. Numeric resident inputs reject before provider access, and no provider string kernel is required."
   ]
 }

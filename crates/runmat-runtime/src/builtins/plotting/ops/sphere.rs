@@ -2,12 +2,17 @@
 
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, ResolveContext, Tensor, Type, Value,
+    LiteralValue, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::SurfacePlot;
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -165,6 +170,33 @@ pub const SPHERE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SPHERE_ERRORS,
 };
 
+const SPHERE_TYPED_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sphere-typed-face-count",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sphere with a typed-integer face count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SphereTypedFaceCountExtension"),
+};
+pub const SPHERE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPHERE_TYPED_N_EXTENSION];
+const SPHERE_INTEGER_N_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target calls n a positive integer but does not enumerate typed storage classes. RunMat accepts every exact nonnegative integer class behind a compatibility gate; ordinary host double integer values remain documented behavior.",
+    }];
+pub const SPHERE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[X,Y,Z] = sphere(integer_n)",
+        inputs: &SPHERE_INTEGER_N_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The typed face count is a gated RunMat extension. It is decoded exactly, checked against allocation bounds, and controls only output shape; coordinate generation and statement-form plotting use host double values.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::sphere")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sphere",
@@ -261,6 +293,8 @@ fn sphere_error(
     suppress_auto_output = true,
     type_resolver(sphere_type),
     descriptor(crate::builtins::plotting::sphere::SPHERE_DESCRIPTOR),
+    extensions(crate::builtins::plotting::sphere::SPHERE_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::sphere::SPHERE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::sphere"
 )]
 async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -269,6 +303,15 @@ async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             &SPHERE_ERROR_OUTPUT_COUNT,
             "requested output count exceeds [X,Y,Z]",
         ));
+    }
+
+    if let [value] = args.as_slice() {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SPHERE_TYPED_N_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
     }
 
     let n = match args.as_slice() {
@@ -363,22 +406,26 @@ fn render_sphere_plot(x: Tensor, y: Tensor, z: Tensor) -> BuiltinResult<()> {
 fn tensor_to_plot_grid(tensor: Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
     let rows = tensor.rows;
     let cols = tensor.cols;
-    if rows == 0 || cols == 0 || tensor.data.len() != rows * cols {
+    if rows == 0 || cols == 0 || tensor.len() != rows * cols {
         return Err(sphere_error(
             &SPHERE_ERROR_INTERNAL,
             "coordinate tensor has invalid shape",
         ));
     }
+    let values = tensor.materialize_f64();
     let mut grid = vec![vec![0.0; rows]; cols];
     for (col, col_values) in grid.iter_mut().enumerate() {
         for (row, cell) in col_values.iter_mut().enumerate() {
-            *cell = tensor.data[row + rows * col];
+            *cell = values[row + rows * col];
         }
     }
     Ok(grid)
 }
 
 async fn parse_n_value(value: &Value) -> BuiltinResult<usize> {
+    if let Some(raw) = exact_integer_scalar(value) {
+        return parse_n_integer(&raw);
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|err| sphere_error(&SPHERE_ERROR_INVALID_N, err))?
@@ -396,13 +443,38 @@ fn parse_n_number(raw: f64) -> BuiltinResult<usize> {
         return Err(sphere_error(&SPHERE_ERROR_INVALID_N, "n must be finite"));
     }
     let rounded = raw.round();
-    if (rounded - raw).abs() > 1e-6 || rounded < 0.0 || rounded > usize::MAX as f64 {
+    if (rounded - raw).abs() > 1e-6
+        || rounded < 0.0
+        || rounded > usize::MAX as f64
+        || (usize::BITS == 64 && rounded == usize::MAX as f64)
+    {
         return Err(sphere_error(
             &SPHERE_ERROR_INVALID_N,
             "n must be a non-negative integer representable on this platform",
         ));
     }
     let n = rounded as usize;
+    validate_grid_size(n)?;
+    Ok(n)
+}
+
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn parse_n_integer(raw: &IntValue) -> BuiltinResult<usize> {
+    let Some(n) = raw.try_to_usize() else {
+        return Err(sphere_error(
+            &SPHERE_ERROR_INVALID_N,
+            "n must be a non-negative integer representable on this platform",
+        ));
+    };
     validate_grid_size(n)?;
     Ok(n)
 }
@@ -533,6 +605,45 @@ mod tests {
     }
 
     #[test]
+    fn sphere_n_reads_typed_integer_tensor_exactly() {
+        let n = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![42]),
+            vec![1, 1],
+        )
+        .expect("typed n");
+        assert_eq!(block_on(parse_n_value(&Value::Tensor(n))).unwrap(), 42);
+
+        let negative = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![-1]),
+            vec![1, 1],
+        )
+        .expect("negative n");
+        assert!(block_on(parse_n_value(&Value::Tensor(negative))).is_err());
+
+        let too_large = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![u64::MAX]),
+            vec![1, 1],
+        )
+        .expect("large n");
+        assert!(block_on(parse_n_value(&Value::Tensor(too_large))).is_err());
+    }
+
+    #[test]
+    fn sphere_typed_integer_dimension_is_gated_before_generation() {
+        let n = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U8(vec![4]),
+            vec![1, 1],
+        )
+        .expect("typed n");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = call(vec![Value::Tensor(n)]).expect_err("typed n must be gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:SphereTypedFaceCountExtension")
+        );
+    }
+
+    #[test]
     fn sphere_three_outputs_are_unit_sphere_coordinates() {
         let _guard = crate::output_count::push_output_count(Some(3));
         let outputs = output_tensors(call(vec![Value::Num(4.0)]).expect("sphere"));
@@ -544,9 +655,11 @@ mod tests {
         let x = &outputs[0];
         let y = &outputs[1];
         let z = &outputs[2];
-        for i in 0..x.data.len() {
-            let radius =
-                (x.data[i] * x.data[i] + y.data[i] * y.data[i] + z.data[i] * z.data[i]).sqrt();
+        for i in 0..x.materialize_f64().len() {
+            let radius = (x.materialize_f64()[i] * x.materialize_f64()[i]
+                + y.materialize_f64()[i] * y.materialize_f64()[i]
+                + z.materialize_f64()[i] * z.materialize_f64()[i])
+                .sqrt();
             assert!(
                 (radius - 1.0).abs() < 1e-12,
                 "point {i} is not on unit sphere: {radius}"
@@ -554,12 +667,12 @@ mod tests {
         }
 
         let rows = 5;
-        assert_eq!(z.data[0], -1.0);
-        assert_eq!(z.data[rows - 1], 1.0);
+        assert_eq!(z.materialize_f64()[0], -1.0);
+        assert_eq!(z.materialize_f64()[rows - 1], 1.0);
         for row in 0..rows {
-            assert!((x.data[row] - x.data[row + 4 * rows]).abs() < 1e-12);
-            assert!((y.data[row] - y.data[row + 4 * rows]).abs() < 1e-12);
-            assert!((z.data[row] - z.data[row + 4 * rows]).abs() < 1e-12);
+            assert!((x.materialize_f64()[row] - x.materialize_f64()[row + 4 * rows]).abs() < 1e-12);
+            assert!((y.materialize_f64()[row] - y.materialize_f64()[row + 4 * rows]).abs() < 1e-12);
+            assert!((z.materialize_f64()[row] - z.materialize_f64()[row + 4 * rows]).abs() < 1e-12);
         }
     }
 
@@ -577,9 +690,9 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(3));
         let outputs = output_tensors(call(vec![Value::Num(0.0)]).expect("sphere"));
         assert_eq!(outputs[0].shape, vec![1, 1]);
-        assert_eq!(outputs[0].data, vec![0.0]);
-        assert_eq!(outputs[1].data, vec![0.0]);
-        assert_eq!(outputs[2].data, vec![-1.0]);
+        assert_eq!(outputs[0].materialize_f64(), vec![0.0]);
+        assert_eq!(outputs[1].materialize_f64(), vec![0.0]);
+        assert_eq!(outputs[2].materialize_f64(), vec![-1.0]);
     }
 
     #[test]
@@ -605,6 +718,14 @@ mod tests {
         assert_eq!(err.identifier(), Some("RunMat:sphere:InvalidArgument"));
 
         let err = call(vec![Value::Num(f64::INFINITY)]).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:sphere:InvalidArgument"));
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = call(vec![Value::Num(boundary)]).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:sphere:InvalidArgument"));
     }
 

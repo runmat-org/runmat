@@ -39,7 +39,7 @@
   ],
   "examples": [
     {
-      "description": "Display The Current Working Folder In RunMat",
+      "description": "Displaying the current working folder",
       "input": "current = cd",
       "output": "% current is the absolute path to the folder where RunMat is executing"
     },

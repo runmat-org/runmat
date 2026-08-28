@@ -7,9 +7,9 @@
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
-  "description": "`table2array(T)` extracts table variables using brace-style table content semantics.",
-  "behaviors": ["All-numeric table variables concatenate into a numeric matrix.", "Heterogeneous variables produce a cell row of variable contents."],
-  "examples": [{"description": "Numeric table to matrix", "input": "A = table2array(array2table([1 3; 2 4]))", "output": "A = [1 3; 2 4]"}],
+  "description": "`table2array(T)` horizontally concatenates compatible table variables into one homogeneous array. Table row names, timetable row times, and other table properties are not included.",
+  "behaviors": ["Same-class integer variables concatenate without conversion, preserving exact signedness, width, and values above `flintmax`.", "Compatible mixed numeric variables use the table-concatenation dominant class and its assignment conversion rules. A native single variable makes an otherwise floating result single.", "If all variables are cell arrays, the result is a cell array equivalent to `table2cell(T)`. Broader heterogeneous concatenation remains limited by the currently implemented table indexing surface."],
+  "examples": [{"description": "Converting Numeric Variables To A Matrix", "input": "A = table2array(array2table([1 3; 2 4]))", "output": "A = [1 3; 2 4]"}, {"description": "Preserving Wide Integer Values", "input": "T = table(uint64([9007199254740993; 9007199254740995]));\nA = table2array(T)", "output": "A = 2x1 uint64 column with the same exact values"}],
   "links": [{"label": "array2table", "url": "./array2table"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/conversions.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/conversions.rs"}
 }

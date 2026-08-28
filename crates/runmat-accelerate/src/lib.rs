@@ -7,7 +7,7 @@
 //! - Defer actual kernel authoring to backend crates/modules; this crate defines traits and wiring.
 
 use once_cell::sync::Lazy;
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -18,6 +18,7 @@ pub mod fusion_residency;
 pub mod graph;
 mod host_lu;
 pub mod native_auto;
+pub mod placement;
 pub mod precision;
 mod reduction_meta;
 pub mod simple_provider;
@@ -36,6 +37,7 @@ pub use native_auto::{
     AutoOffloadDisposition, AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason,
     ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
 };
+pub use placement::{report as placement_report, PlacementReport};
 pub use reduction_meta::{value_is_all_keyword, ReductionAxes};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;
@@ -115,7 +117,7 @@ static API_HOOKS: Lazy<()> = Lazy::new(|| {
     runmat_accelerate_api::register_workgroup_size_hint_provider(workgroup_size_hint_bridge);
 });
 
-pub(crate) fn ensure_residency_hooks() {
+pub fn ensure_residency_hooks() {
     Lazy::force(&API_HOOKS);
 }
 
@@ -256,6 +258,16 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
             log::warn!("RunMat Accelerate: no acceleration provider registered");
         }
     }
+}
+
+/// Replace the global acceleration provider using the supplied options.
+///
+/// This is intended for long-lived hosts whose project configuration can change between runtime
+/// sessions. Clearing the default selection does not invalidate providers that own live handles;
+/// the acceleration API retains those device owners until their handles are no longer needed.
+pub fn reinitialize_acceleration_provider_with(options: &AccelerateInitOptions) {
+    runmat_accelerate_api::clear_provider();
+    initialize_acceleration_provider_with(options);
 }
 
 #[cfg(feature = "wgpu")]
@@ -476,7 +488,7 @@ impl Planner {
     /// Example decision hook: execute elementwise add on GPU if large enough.
     pub fn choose_elem_add(&self, a: &Tensor, b: &Tensor) -> ExecutionTarget {
         if let Some(bk) = &self.backend {
-            if a.data.len() >= 1 << 16 && a.rows() == b.rows() && a.cols() == b.cols() {
+            if a.len() >= 1 << 16 && a.rows() == b.rows() && a.cols() == b.cols() {
                 return ExecutionTarget::Gpu(bk.device_info());
             }
         }
@@ -547,16 +559,57 @@ impl Accelerator {
         &self,
         h: &runmat_accelerate_api::GpuTensorHandle,
     ) -> anyhow::Result<Value> {
-        if let Some(p) = runmat_accelerate_api::provider() {
-            let ht = p.download(h).await.map_err(|e| anyhow::anyhow!(e))?;
-            let t = Tensor::new(ht.data, ht.shape).map_err(|e| anyhow::anyhow!(e))?;
-            Ok(Value::Tensor(t))
-        } else {
-            // Fallback to zeros with same shape if no provider is registered
-            let shape = h.shape.clone();
-            let total: usize = shape.iter().product();
-            let zeros = Tensor::new(vec![0.0; total], shape).map_err(|e| anyhow::anyhow!(e))?;
-            Ok(Value::Tensor(zeros))
-        }
+        runmat_runtime::gather_if_needed_async(&Value::GpuTensor(h.clone()))
+            .await
+            .map_err(|error| anyhow::anyhow!(error))
+    }
+}
+
+#[cfg(test)]
+mod native_gather_tests {
+    use super::*;
+    use futures::executor::block_on;
+    use runmat_value::{ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage};
+
+    #[test]
+    fn accelerator_gather_preserves_native_complex_integer_and_source_lifetime() {
+        crate::simple_provider::register_inprocess_provider();
+        let provider = runmat_accelerate_api::provider().expect("in-process provider");
+        let expected = ComplexTensor::from_complex_storage(
+            ComplexStorage::Integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                    IntegerStorage::U64(vec![3, 4]),
+                )
+                .unwrap(),
+            ),
+            vec![1, 2],
+        )
+        .unwrap();
+        let mut handle = runmat_runtime::builtins::common::gpu_helpers::upload_complex_tensor(
+            provider, &expected,
+        )
+        .expect("native complex integer upload");
+        runmat_accelerate_api::mark_handle_automatic(&mut handle);
+        let accelerator = Accelerator::new(Planner::new(None));
+
+        let gathered = block_on(accelerator.gather_handle(&handle)).expect("native gather");
+        assert_eq!(gathered, Value::ComplexTensor(expected.clone()));
+        let gathered_again = block_on(accelerator.gather_handle(&handle)).expect("source survives");
+        assert_eq!(gathered_again, Value::ComplexTensor(expected));
+        assert_eq!(
+            runmat_accelerate_api::handle_provenance(&handle),
+            Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        );
+        provider.free(&handle).expect("free handle");
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+
+        let unowned = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        };
+        assert!(block_on(accelerator.gather_handle(&unowned)).is_err());
     }
 }

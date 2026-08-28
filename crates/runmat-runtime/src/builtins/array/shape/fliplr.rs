@@ -11,14 +11,38 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Value};
 
 const LR_DIM: [usize; 1] = [2];
 const BUILTIN_NAME: &str = "fliplr";
+
+const FLIPLR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are reordered through authoritative storage without numeric conversion.",
+    }];
+pub const FLIPLR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = fliplr(integer_A)",
+        inputs: &FLIPLR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Dimension 2 is reversed exactly; GPU fallback restores the result to the owning provider.",
+    }];
 
 fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
@@ -26,20 +50,12 @@ fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
         None => return Type::Unknown,
     };
     match input {
-        Type::Tensor { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Tensor {
-                shape: Some(vec![rows, cols]),
-            }
-        }
-        Type::Logical { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Logical {
-                shape: Some(vec![rows, cols]),
-            }
-        }
+        Type::Tensor { shape: Some(shape) } => Type::Tensor {
+            shape: Some(shape.clone()),
+        },
+        Type::Logical { shape: Some(shape) } => Type::Logical {
+            shape: Some(shape.clone()),
+        },
         Type::Tensor { shape: None } => Type::tensor(),
         Type::Logical { shape: None } => Type::logical(),
         Type::Num | Type::Int | Type::Bool => Type::tensor(),
@@ -167,6 +183,7 @@ fn remap_fliplr_error(err: RuntimeError) -> RuntimeError {
     accel = "custom",
     type_resolver(preserve_matrix_type),
     descriptor(crate::builtins::array::shape::fliplr::FLIPLR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::fliplr::FLIPLR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::fliplr"
 )]
 async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -229,11 +246,17 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Closure(_)
         | Value::SparseTensor(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::OutputList(_) => Err(fliplr_error_descriptor(&FLIPLR_ERROR_UNSUPPORTED_INPUT)),
@@ -251,7 +274,11 @@ pub(crate) mod tests {
     use crate::builtins::array::shape::flip::{flip_logical_array, flip_tensor};
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, LogicalArray, StringArray, StructValue, Tensor, Type, Value};
+    use runmat_builtins::Type;
+    use runmat_value::{
+        CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructValue,
+        Tensor, Value,
+    };
 
     #[test]
     fn fliplr_type_keeps_matrix_shape() {
@@ -269,6 +296,23 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn fliplr_type_keeps_full_nd_shape_and_integer_contract() {
+        let shape = vec![Some(2), Some(3), Some(4), Some(5)];
+        let out = preserve_matrix_type(
+            &[Type::Tensor {
+                shape: Some(shape.clone()),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Tensor { shape: Some(shape) });
+        assert_eq!(FLIPLR_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        assert_eq!(
+            FLIPLR_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fliplr_matrix_reverses_columns() {
@@ -278,7 +322,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, expected.shape);
-                assert_eq!(out.data, expected.data);
+                assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -291,7 +335,7 @@ pub(crate) mod tests {
         let expected = flip_tensor(tensor.clone(), &LR_DIM).expect("expected");
         let result = fliplr_builtin(Value::Tensor(tensor)).expect("fliplr");
         match result {
-            Value::Tensor(out) => assert_eq!(out.data, expected.data),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), expected.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -303,7 +347,7 @@ pub(crate) mod tests {
         let expected = tensor.clone();
         let result = fliplr_builtin(Value::Tensor(tensor)).expect("fliplr");
         match result {
-            Value::Tensor(out) => assert_eq!(out.data, expected.data),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), expected.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -317,7 +361,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, expected.shape);
-                assert_eq!(out.data, expected.data);
+                assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -363,6 +407,55 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fliplr_preserves_exact_integer_storage_without_f64_mirror() {
+        let exact = IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, 7]);
+        let tensor = Tensor::new_integer(exact, vec![2, 2]).expect("integer tensor");
+
+        let result = fliplr_builtin(Value::Tensor(tensor)).expect("fliplr");
+
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![
+                        9_007_199_254_740_993,
+                        7,
+                        u64::MAX,
+                        0,
+                    ]))
+                );
+            }
+            other => panic!("expected typed integer tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fliplr_preserves_typed_complex_integer_storage_without_f64_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![5, 6, 7, 8]),
+        )
+        .expect("complex integer storage");
+        let tensor =
+            ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex integer tensor");
+
+        let result = fliplr_builtin(Value::ComplexTensor(tensor)).expect("fliplr");
+
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                let storage = out.integer_storage().expect("typed complex integer output");
+                assert_eq!(storage.real, IntegerStorage::I16(vec![3, 4, 1, 2]));
+                assert_eq!(storage.imag, IntegerStorage::I16(vec![7, 8, 5, 6]));
+            }
+            other => panic!("expected typed complex integer tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn fliplr_scalar_numeric_noop() {
         let result = fliplr_builtin(Value::Num(42.0)).expect("fliplr");
         match result {
@@ -388,7 +481,7 @@ pub(crate) mod tests {
             let tensor =
                 Tensor::new((1..=12).map(|v| v as f64).collect(), vec![3, 4]).expect("tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -396,7 +489,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             let expected = flip_tensor(tensor, &LR_DIM).expect("expected");
             assert_eq!(gathered.shape, expected.shape);
-            assert_eq!(gathered.data, expected.data);
+            assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
 
@@ -421,7 +514,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new((1..=16).map(|v| v as f64).collect(), vec![4, 4]).unwrap();
         let expected = flip_tensor(tensor.clone(), &LR_DIM).expect("expected");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -429,6 +522,6 @@ pub(crate) mod tests {
         let value = fliplr_builtin(Value::GpuTensor(handle)).expect("fliplr gpu");
         let gathered = test_support::gather(value).expect("gather");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

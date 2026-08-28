@@ -2,14 +2,64 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
-## [v0.6.1](https://github.com/runmat-org/runmat/compare/v0.6.0...v0.6.1) - July 2026
+## [v0.6.2](https://github.com/runmat-org/runmat/compare/v0.6.1...v0.6.2) - August 2026
+
+_August 26, 2026_
 
 ### Runtime
 
-* Fixed `addpath` and `addpath(genpath(...))` so `.m` functions on the session search path are callable immediately and across later REPL inputs through direct calls, `feval`, function handles, and callbacks, with `which`, path precedence, `rmpath`, packages, and private functions using the same runtime resolution behavior.
+#### Added
+* Added `runmat compile` for producing standalone host-native executables. RunMat now carries its matching AOT runtime in the main CLI, compiles through verified Native IR and relocatable objects, links only the required runtime surface, rejects incompatible targets and runtime catalogs, and supports explicit optimization, linker, temporary-file, replacement, and fallback policies.
+* Added deterministic whole-program reachability and link planning for native compilation, including `runmat compile --explain-link` and `--link-plan-json` output with the retained functions, runtime families, capabilities, targets, symbols, and reasons behind each link decision.
+* Added deterministic package composition for path, Git, RunMat Server snapshot, and public or encrypted private registry dependencies, with exact locks, frozen project handoffs, provenance, transactional native and browser caches, WASM-safe validation, read-only mounts, explicit update/offline/frozen behavior, and origin-scoped authentication.
+* Added MATLAB-compatible testing across the CLI, Core, LSP, WASM/npm, browser Web Workers, and Desktop, including semantic script/function/class discovery, immutable test plans, process/worker isolation, cancellation, retries, reports, artifacts, plugins, and backend-independent interpreter/JIT/WASM coverage.
+* Added encrypted remote jobs and distributed tests across local processes, browser workers, customer-managed nodes, and hosted nodes, with exact frozen package closure, portable scheduling, resource pools, quota and billing enforcement, recovery and retention controls, and workload-content-safe relay and observability.
+* Added cluster enrollment and node-service operations to the main `runmat` executable under `runmat cluster join`, with stable JSON automation output, inventory and credential rotation, and install, status, update, and removal support for systemd, launchd, and native Windows services.
+* Added native storage and execution semantics for all eight MATLAB integer classes across scalars, dense and sparse arrays, complex values, containers, indexing, arithmetic, providers, serialization, distributed payloads, and WASM, preserving exact 64-bit values without a binary64 mirror and applying explicit compatibility gates at RunMat-only builtin boundaries.
+* Added one shared static model for value, type, shape, callable, effect, capability, and requested-output facts across the compiler, LSP, `runmat check`, JIT, AOT, placement, testing, packages, and browser products, with stable identities and conservative diagnostics at dynamic boundaries.
+
+#### Changed
+* Changed adaptive native execution to compile canonical MIR through verified Native IR with guarded specialization, exact on-stack replacement, dependency-aware invalidation, bounded code lifetime, transactional workspace publication, and shared runtime and placement semantics without replaying completed effects.
+* Unified Desktop project and runtime configuration under the canonical Rust `runmat-config` parser, validator, migration, and comment-preserving patch authority across CLI/runtime loading, Tauri, Server migration, and WASM/browser hosts; added nested artifact, run-history, script, notebook, acceleration, and figure-scene settings; made configured artifact roots authoritative throughout Desktop persistence; separated account, device, and project-local preferences; and removed the legacy TypeScript TOML parser/writer and obsolete prototype settings.
+* Changed automatic CPU/GPU placement and VM fusion to evaluate provider capability, value representation, residency, transfer and synchronization cost, preparation state, future consumers, memory pressure, queues, cancellation, and CPU budgets before execution. Placement decisions now use bounded graph planning, structured diagnostics, transactional fallback, exact invalidation, and privacy-bounded adaptive feedback.
+
+#### Fixed
+* Fixed `try`/`catch` protection across nested control flow and native execution, preserving exact catch bindings, nested-handler and `rethrow` behavior, normal exits, and canonical exception identifiers without replaying completed work.
+* Fixed native `spawn`/`await` execution so spawned work no longer blocks the awaiting runtime thread, and native suspension resumes at the exact post-`await` site without replaying completed effects.
+* Fixed Windows WGPU initialization to default to Direct3D 12 while preserving explicit backend overrides, allowing compute and native plot presentation to share the same provider-owned GPU device.
+* Fixed native OpenCascade geometry builds on Windows by using portable CXX bridge include paths instead of relying on Unix-style generated-header symlink layouts.
+
+### Desktop
+
+#### Added
+* Students and instructors can now request complimentary RunMat Academic licenses directly from the product. Approved instructors can set up courses, add instructional staff, and invite students using their granted licenses.
+* Connect RunMat projects to OpenAI ChatGPT and Codex, Anthropic Claude Code and Cowork, or any other MCP-compatible assistant. Connected assistants can synchronize project files, execute RunMat code, and return generated artifacts.
+* Added a native Windows application frame with RunMat-styled drag, minimize, maximize/restore, and close controls, replacing duplicate Windows system chrome without affecting the browser, macOS, or Linux interfaces.
+* Added interactive native Windows plot surfaces backed by the runtime's shared Direct3D 12/WGPU device, keeping presentation GPU-resident and avoiding CPU image readback and IPC transport for rendered frames.
+
+#### Changed
+* Changed organizations to use dedicated project pages with simpler switching and administration, configurable profiles and visibility, and readable organization and project URLs.
+* Expanded file and folder workflows with renaming, duplication, version history, path copying, downloads, and deletion. Cloud and Temporary Sandbox projects can also be exported as ZIP archives, including generated artifacts.
+
+#### Fixed
+* Improved language-server startup, semantic-highlighting recovery, runtime loading, failure handling, and observability so projects recover more reliably when browser workers or background services restart.
+* Fixed Windows native plots so they appear immediately, remain aligned through layout and DPI changes, and receive pointer, wheel, drag, and overlay interaction correctly.
+
+## [v0.6.1](https://github.com/runmat-org/runmat/compare/v0.6.0...v0.6.1) - August 2026
+
+_August 5, 2026_
+
+### Runtime
+
+#### Added
 * Added consistent TTY-aware ANSI styling throughout human-facing CLI diagnostics, help, logs, headings, progress, and summaries, with per-stream detection, `--color=auto|always|never`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, and `TERM=dumb` support while keeping structured, raw, and program-owned output plain.
 
+#### Fixed
+* Fixed `addpath` and `addpath(genpath(...))` so `.m` functions on the session search path are callable immediately and across later REPL inputs through direct calls, `feval`, function handles, and callbacks, with `which`, path precedence, `rmpath`, packages, and private functions using the same runtime resolution behavior.
+
 ## [v0.6.0](https://github.com/runmat-org/runmat/compare/v0.5.6...v0.6.0) - July 2026
+
+_July 28, 2026_
 
 ### Desktop
 
@@ -252,7 +302,7 @@ A major compiler and runtime revision. RunMat now resolves MATLAB language seman
 
 #### Added
 - Add runnable Agent code blocks — RunMat/MATLAB-style snippets in Agent answers now render with editor controls, can be copied, and can be sent directly to runtime execution
-- Add project-scoped Agent persistence so projects can restore Agent state through Desktop project settings such as `persist_agents` in `runmat.toml`
+- Add project-scoped Agent persistence so projects can restore Agent state automatically
 - Add local-to-cloud project conversion support for Agent and history flows that need a cloud project
 
 #### Changed

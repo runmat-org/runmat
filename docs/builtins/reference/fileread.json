@@ -8,13 +8,13 @@
     "text file",
     "character vector"
   ],
-  "summary": "Read full text files into character vectors in MATLAB and RunMat.",
+  "summary": "Read a full text file into a character vector.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs entirely on the host CPU. When the file path lives on the GPU, RunMat gathers it first; the file contents remain host-resident."
+    "notes": "Runs entirely on the host CPU. Numeric and provider-resident filename/Encoding inputs are invalid text and are rejected before gather, provider access, or filesystem reads."
   },
   "fusion": {
     "elementwise": false,
@@ -27,11 +27,11 @@
     "unit": "builtins::io::filetext::fileread::tests",
     "integration": "builtins::io::filetext::fileread::tests::fileread_reads_text_file"
   },
-  "description": "`fileread(filename)` loads an entire text file into memory and returns a 1-by-N character row vector. Newlines and byte content are preserved in the returned text, with path and encoding behavior matching MATLAB semantics.",
+  "description": "`fileread(filename)` loads an entire text file into memory and returns a 1-by-N character row vector. The documented filename and `Encoding` roles are textual, so numeric and integer inputs are inapplicable. RunMat currently supports local filesystem paths and a bounded encoding set; MATLAB search-path, URL, remote-filesystem, home-expansion, and broader encoding behavior are not yet fully implemented.",
   "behaviors": [
     "Accepts paths provided as character vectors or string scalars. String arrays must contain exactly one element.",
     "Supports an optional encoding argument: `fileread(filename, encoding)` or `fileread(filename, 'Encoding', encoding)`. Recognised values include `auto` (default), `utf-8`, `ascii`, `latin1`, and `raw`.",
-    "Resolves relative paths with respect to the current working directory of the RunMat process, just like MATLAB.",
+    "Resolves relative paths with respect to the current working directory of the RunMat process. Bare-name MATLAB search-path lookup is not yet implemented.",
     "Returns a `1×N` character array. Empty files yield a `1×0` character vector.",
     "Leaves line endings untouched (`\\r`, `\\n`, or `\\r\\n`) so scripts can inspect original formatting.",
     "When `auto` decoding detects invalid UTF-8 sequences, RunMat maps each byte to the corresponding extended-ASCII code point so that callers can recover the raw data.",
@@ -72,7 +72,7 @@
   "faqs": [
     {
       "question": "What does `fileread` return?",
-      "answer": "It returns a `1×N` character vector containing every byte from the file. Convert it to a string with `string(...)` when you prefer string scalars."
+      "answer": "It returns a `1×N` character vector containing decoded file text. Convert it to a string with `string(...)` when you prefer string scalars."
     },
     {
       "question": "Does `fileread` change line endings?",
@@ -80,7 +80,7 @@
     },
     {
       "question": "Can `fileread` read binary data?",
-      "answer": "While designed for text, `fileread` will happily return any bytes. The result is a character vector whose numeric codes match the file's bytes."
+      "answer": "The RunMat-only `raw` encoding alias maps each byte to one character code. The MATLAB-compatible contract is text-oriented."
     },
     {
       "question": "How are encodings handled?",
@@ -146,6 +146,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fileread.rs"
   },
   "gpu_behavior": [
-    "`fileread` performs synchronous host I/O and never dispatches GPU work. If the provided file name lives on the GPU (for example, produced by a GPU array that was gathered lazily), RunMat gathers that scalar first. File contents are returned as an ordinary character array that resides on the CPU. Providers do not need to implement any hooks for this builtin."
+    "`fileread` performs host I/O and never dispatches GPU work. Provider-resident inputs are rejected before provider access, and file contents are returned as an ordinary host character array."
   ]
 }

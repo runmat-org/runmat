@@ -1,10 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Span;
+use crate::{IntegerLiteral, Span};
+
+mod parallel;
+pub use parallel::SpmdHeader;
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Number(String, Span),
+    IntegerLiteral(IntegerLiteral, Span),
     String(String, Span),
     Ident(String, Span),
     EndKeyword(Span), // 'end' used in indexing contexts
@@ -52,6 +56,7 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Number(_, span)
+            | Expr::IntegerLiteral(_, span)
             | Expr::String(_, span)
             | Expr::Ident(_, span)
             | Expr::EndKeyword(span)
@@ -83,6 +88,7 @@ impl Expr {
     pub fn with_span(self, span: Span) -> Expr {
         match self {
             Expr::Number(value, _) => Expr::Number(value, span),
+            Expr::IntegerLiteral(value, _) => Expr::IntegerLiteral(value, span),
             Expr::String(value, _) => Expr::String(value, span),
             Expr::Ident(value, _) => Expr::Ident(value, span),
             Expr::EndKeyword(_) => Expr::EndKeyword(span),
@@ -197,6 +203,18 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    ParFor {
+        var: String,
+        expr: Expr,
+        maximum_workers: Option<Expr>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    Spmd {
+        header: SpmdHeader,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     Switch {
         expr: Expr,
         cases: Vec<(Expr, Vec<Stmt>)>,
@@ -260,6 +278,8 @@ impl Stmt {
             Stmt::If { span, .. }
             | Stmt::While { span, .. }
             | Stmt::For { span, .. }
+            | Stmt::ParFor { span, .. }
+            | Stmt::Spmd { span, .. }
             | Stmt::Switch { span, .. }
             | Stmt::TryCatch { span, .. }
             | Stmt::Function { span, .. }
@@ -282,12 +302,20 @@ pub enum LValue {
 pub struct Attr {
     pub name: String,
     pub value: Option<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ClassPropertyDecl {
     pub name: String,
     pub default: Option<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ClassNamedDecl {
+    pub name: String,
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -331,26 +359,40 @@ pub enum ClassMember {
     Properties {
         attributes: Vec<Attr>,
         names: Vec<ClassPropertyDecl>,
+        span: Span,
     },
     Methods {
         attributes: Vec<Attr>,
         body: Vec<Stmt>,
+        span: Span,
     },
     Events {
         attributes: Vec<Attr>,
-        names: Vec<String>,
+        names: Vec<ClassNamedDecl>,
+        span: Span,
     },
     Enumeration {
         attributes: Vec<Attr>,
-        names: Vec<String>,
+        names: Vec<ClassNamedDecl>,
+        span: Span,
     },
     Arguments {
         attributes: Vec<Attr>,
-        names: Vec<String>,
+        names: Vec<ClassNamedDecl>,
+        span: Span,
     },
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
     pub body: Vec<Stmt>,
+    pub sections: Vec<ScriptSection>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ScriptSection {
+    pub ordinal: u32,
+    pub title: String,
+    pub marker_span: Span,
+    pub body_span: Span,
 }

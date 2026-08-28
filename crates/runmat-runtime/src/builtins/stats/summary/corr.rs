@@ -3,11 +3,16 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
@@ -62,7 +67,7 @@ const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Variadic,
     default: None,
-    description: "Name-value options including Type and Rows.",
+    description: "Name-value options including Type, Rows, Tail, and Weights.",
 };
 
 const INPUTS_X: [BuiltinParamDescriptor; 1] = [PARAM_X];
@@ -116,7 +121,7 @@ const SIGNATURES_WITH_P: [BuiltinSignatureDescriptor; 8] = [
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.corr.INVALID_ARGUMENT",
     identifier: Some("RunMat:corr:InvalidArgument"),
-    when: "Inputs, row counts, Type, or Rows options are malformed or unsupported.",
+    when: "Inputs, row counts, Type, Rows, Tail, or Weights options are malformed or unsupported.",
     message: "corr: invalid argument",
 };
 
@@ -128,6 +133,64 @@ const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 };
 
 const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
+
+const CORR_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "corr-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "corr with typed-integer observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CorrIntegerDataExtension"),
+};
+
+const CORR_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "corr-integer-weights",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "corr with typed-integer observation weights is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CorrIntegerWeightsExtension"),
+};
+
+const CORR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [CORR_INTEGER_DATA_EXTENSION, CORR_INTEGER_WEIGHTS_EXTENSION];
+
+const CORR_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X_or_Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented observation domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
+    }];
+
+const CORR_INTEGER_WEIGHTS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Weights",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented observation-weight domain is single or double; RunMat mode additionally accepts exact nonnegative typed-integer column vectors.",
+    }];
+
+const CORR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[rho, pval] = corr(integer_X_or_Y, Type=type, Rows=rows, Weights=weights)",
+        inputs: &CORR_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat's integer-data extension preserves exact same-class ordering for Spearman/Kendall and exact integer differences for Pearson centering before producing double rho/p-values.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[rho, pval] = corr(X, Y, Weights=integer_weights)",
+        inputs: &CORR_INTEGER_WEIGHTS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Typed integer weights are validated exactly, then enter the documented nonnegative weighted-correlation domain; weighted p-values are NaN.",
+    },
+];
 
 pub const CORR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES_WITH_P,
@@ -188,20 +251,55 @@ struct CorrArgs {
     corr_type: CorrType,
     rows: RowsMode,
     tail: Tail,
+    weights: Option<Vec<f64>>,
 }
 
 #[runtime_builtin(
     name = "corr",
     category = "stats/summary",
     summary = "Compute pairwise linear or rank correlations between variables.",
-    keywords = "corr,correlation,pearson,spearman,kendall,statistics,rows,tail",
+    keywords = "corr,correlation,pearson,spearman,kendall,statistics,rows,tail,weights",
     type_resolver(corr_type),
     descriptor(crate::builtins::stats::summary::corr::CORR_DESCRIPTOR),
+    extensions(CORR_EXTENSIONS),
+    integer_capabilities(CORR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::corr"
 )]
 async fn corr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_corr_integer_extensions(&value, &rest)?;
     let args = parse_args(value, rest).await?;
     corr_compute(args)
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
+}
+
+fn ensure_corr_integer_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    let second_is_data = rest
+        .first()
+        .is_some_and(|candidate| keyword_of(candidate).is_none());
+    if is_typed_integer_value(value)
+        || second_is_data && rest.first().is_some_and(is_typed_integer_value)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&CORR_INTEGER_DATA_EXTENSION, NAME)?;
+    }
+    if rest.windows(2).any(|pair| {
+        keyword_of(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case("weights"))
+            && is_typed_integer_value(&pair[1])
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CORR_INTEGER_WEIGHTS_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
 }
 
 async fn parse_args(value: Value, rest: Vec<Value>) -> BuiltinResult<CorrArgs> {
@@ -210,6 +308,7 @@ async fn parse_args(value: Value, rest: Vec<Value>) -> BuiltinResult<CorrArgs> {
     let mut corr_type = CorrType::Pearson;
     let mut rows = RowsMode::All;
     let mut tail = Tail::Both;
+    let mut weights = None;
     let mut idx = 0usize;
     if let Some(first) = rest.first() {
         if keyword_of(first).is_none() {
@@ -225,27 +324,44 @@ async fn parse_args(value: Value, rest: Vec<Value>) -> BuiltinResult<CorrArgs> {
         }
         let name = keyword_of(&rest[idx])
             .ok_or_else(|| corr_error("corr: option names must be string scalars"))?;
-        let option = keyword_of(&rest[idx + 1])
-            .ok_or_else(|| corr_error("corr: option values must be string scalars"))?;
         match name.to_ascii_lowercase().as_str() {
-            "type" => match option.to_ascii_lowercase().as_str() {
-                "pearson" => corr_type = CorrType::Pearson,
-                "spearman" => corr_type = CorrType::Spearman,
-                "kendall" => corr_type = CorrType::Kendall,
-                other => return Err(corr_error(format!("corr: unsupported Type '{other}'"))),
-            },
-            "rows" => match option.to_ascii_lowercase().as_str() {
-                "all" => rows = RowsMode::All,
-                "complete" => rows = RowsMode::Complete,
-                "pairwise" => rows = RowsMode::Pairwise,
-                other => return Err(corr_error(format!("corr: unsupported Rows '{other}'"))),
-            },
-            "tail" => match option.to_ascii_lowercase().as_str() {
-                "both" => tail = Tail::Both,
-                "right" => tail = Tail::Right,
-                "left" => tail = Tail::Left,
-                other => return Err(corr_error(format!("corr: unsupported Tail '{other}'"))),
-            },
+            "type" => {
+                let option = keyword_of(&rest[idx + 1])
+                    .ok_or_else(|| corr_error("corr: Type must be a string scalar"))?;
+                match option.to_ascii_lowercase().as_str() {
+                    "pearson" => corr_type = CorrType::Pearson,
+                    "spearman" => corr_type = CorrType::Spearman,
+                    "kendall" => corr_type = CorrType::Kendall,
+                    other => return Err(corr_error(format!("corr: unsupported Type '{other}'"))),
+                }
+            }
+            "rows" => {
+                let option = keyword_of(&rest[idx + 1])
+                    .ok_or_else(|| corr_error("corr: Rows must be a string scalar"))?;
+                match option.to_ascii_lowercase().as_str() {
+                    "all" => rows = RowsMode::All,
+                    "complete" => rows = RowsMode::Complete,
+                    "pairwise" => rows = RowsMode::Pairwise,
+                    other => return Err(corr_error(format!("corr: unsupported Rows '{other}'"))),
+                }
+            }
+            "tail" => {
+                let option = keyword_of(&rest[idx + 1])
+                    .ok_or_else(|| corr_error("corr: Tail must be a string scalar"))?;
+                match option.to_ascii_lowercase().as_str() {
+                    "both" => tail = Tail::Both,
+                    "right" => tail = Tail::Right,
+                    "left" => tail = Tail::Left,
+                    other => return Err(corr_error(format!("corr: unsupported Tail '{other}'"))),
+                }
+            }
+            "weights" => {
+                if weights.is_some() {
+                    return Err(corr_error("corr: Weights can be specified only once"));
+                }
+                weights =
+                    Some(value_to_weights(rest[idx + 1].clone(), matrix_shape(&left).0).await?);
+            }
             other => return Err(corr_error(format!("corr: unsupported option '{other}'"))),
         }
         idx += 2;
@@ -256,6 +372,7 @@ async fn parse_args(value: Value, rest: Vec<Value>) -> BuiltinResult<CorrArgs> {
         corr_type,
         rows,
         tail,
+        weights,
     })
 }
 
@@ -266,18 +383,138 @@ async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
     tensor::value_into_tensor_for(NAME, gathered).map_err(|err| corr_error(format!("corr: {err}")))
 }
 
+async fn value_to_weights(value: Value, expected_rows: usize) -> BuiltinResult<Vec<f64>> {
+    let tensor = value_to_tensor(value).await?;
+    let (rows, cols) = matrix_shape(&tensor);
+    if rows != expected_rows || cols != 1 {
+        return Err(corr_error(format!(
+            "corr: Weights must be an {expected_rows}-by-1 column vector"
+        )));
+    }
+    let weights = tensor::tensor_into_values_f64(tensor);
+    if weights
+        .iter()
+        .any(|weight| !weight.is_finite() || *weight < 0.0)
+    {
+        return Err(corr_error(
+            "corr: Weights must contain finite nonnegative values",
+        ));
+    }
+    Ok(weights)
+}
+
 fn matrix_shape(tensor: &Tensor) -> (usize, usize) {
-    let shape = tensor::default_shape_for(&tensor.shape, tensor.data.len());
+    let len = tensor.len();
+    let shape = tensor::default_shape_for(&tensor.shape, len);
     match shape.as_slice() {
         [] => (1, 1),
-        [_] => (tensor.data.len(), 1),
+        [_] => (len, 1),
         [rows, cols, ..] => (*rows, *cols),
     }
 }
 
-fn column(tensor: &Tensor, rows: usize, col: usize) -> Vec<f64> {
-    let start = col * rows;
-    tensor.data[start..start + rows].to_vec()
+#[derive(Clone)]
+enum CorrColumn {
+    Floating(Vec<f64>),
+    Integer(Vec<IntValue>),
+}
+
+impl CorrColumn {
+    fn from_tensor(tensor: &Tensor, rows: usize, col: usize) -> BuiltinResult<Self> {
+        let start = col * rows;
+        let end = start + rows;
+        if let Some(storage) = tensor.integer_storage() {
+            let values = (start..end)
+                .map(|index| {
+                    storage.value_at(index).ok_or_else(|| {
+                        corr_internal(format!("corr: integer column index {index} is invalid"))
+                    })
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            Ok(Self::Integer(values))
+        } else {
+            let values = tensor::tensor_values_f64_cow(tensor);
+            Ok(Self::Floating(values[start..end].to_vec()))
+        }
+    }
+
+    fn is_nan(&self, index: usize) -> bool {
+        matches!(self, Self::Floating(values) if values[index].is_nan())
+    }
+
+    fn compare(&self, left: usize, right: usize) -> Ordering {
+        match self {
+            Self::Floating(values) => values[left]
+                .partial_cmp(&values[right])
+                .unwrap_or(Ordering::Equal),
+            Self::Integer(values) => {
+                exact_int_to_i128(&values[left]).cmp(&exact_int_to_i128(&values[right]))
+            }
+        }
+    }
+
+    fn centered_values(&self, indices: &[usize]) -> Vec<f64> {
+        match self {
+            Self::Floating(values) => indices.iter().map(|index| values[*index]).collect(),
+            Self::Integer(values) => {
+                let anchor = indices
+                    .first()
+                    .map(|index| exact_int_to_i128(&values[*index]))
+                    .unwrap_or(0);
+                indices
+                    .iter()
+                    .map(|index| (exact_int_to_i128(&values[*index]) - anchor) as f64)
+                    .collect()
+            }
+        }
+    }
+
+    fn ranks(&self, indices: &[usize], weights: Option<&[f64]>) -> Vec<f64> {
+        let mut order = (0..indices.len()).collect::<Vec<_>>();
+        order.sort_by(|left, right| self.compare(indices[*left], indices[*right]));
+        let mut ranks = vec![0.0; indices.len()];
+        let mut start = 0usize;
+        let mut cumulative_weight = 0.0;
+        while start < order.len() {
+            let mut end = start + 1;
+            while end < order.len()
+                && self.compare(indices[order[start]], indices[order[end]]) == Ordering::Equal
+            {
+                end += 1;
+            }
+            let rank = if let Some(weights) = weights {
+                let group_weight = order[start..end]
+                    .iter()
+                    .map(|position| weights[indices[*position]])
+                    .sum::<f64>();
+                let group_count = (end - start) as f64;
+                let mean_weight = group_weight / group_count;
+                let rank = cumulative_weight + (group_count + 1.0) * mean_weight / 2.0;
+                cumulative_weight += group_weight;
+                rank
+            } else {
+                (start + 1 + end) as f64 / 2.0
+            };
+            for position in &order[start..end] {
+                ranks[*position] = rank;
+            }
+            start = end;
+        }
+        ranks
+    }
+}
+
+fn exact_int_to_i128(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    }
 }
 
 fn corr_compute(args: CorrArgs) -> BuiltinResult<Value> {
@@ -299,20 +536,33 @@ fn corr_compute(args: CorrArgs) -> BuiltinResult<Value> {
     };
     let all_mask = vec![true; left_rows];
     for right_col in 0..right_cols {
-        let y = column(right, right_rows, right_col);
+        let y = CorrColumn::from_tensor(right, right_rows, right_col)?;
         for left_col in 0..left_cols {
-            let x = column(&args.left, left_rows, left_col);
+            let x = CorrColumn::from_tensor(&args.left, left_rows, left_col)?;
             let pair = match complete_mask.as_ref() {
-                Some(mask) => corr_pair_masked(&x, &y, mask, args.corr_type, RowsMode::All),
-                None => corr_pair_masked(&x, &y, &all_mask, args.corr_type, args.rows),
+                Some(mask) => corr_pair_masked(
+                    &x,
+                    &y,
+                    mask,
+                    args.corr_type,
+                    RowsMode::All,
+                    args.weights.as_deref(),
+                ),
+                None => corr_pair_masked(
+                    &x,
+                    &y,
+                    &all_mask,
+                    args.corr_type,
+                    args.rows,
+                    args.weights.as_deref(),
+                ),
             };
             rho_data.push(pair.rho);
-            p_data.push(correlation_pvalue(
-                pair.rho,
-                pair.n,
-                args.corr_type,
-                args.tail,
-            ));
+            p_data.push(if args.weights.is_some() {
+                f64::NAN
+            } else {
+                correlation_pvalue(pair.rho, pair.n, args.corr_type, args.tail)
+            });
         }
     }
     let shape = vec![left_cols, right_cols];
@@ -347,12 +597,24 @@ fn complete_rows(
     let mut mask = vec![true; rows];
     for row in 0..rows {
         for col in 0..left_cols {
-            if left.data[col * rows + row].is_nan() {
+            if matches!(
+                left.numeric_value_at(col * rows + row),
+                Some(runmat_value::NumericScalar::F64(value)) if value.is_nan()
+            ) || matches!(
+                left.numeric_value_at(col * rows + row),
+                Some(runmat_value::NumericScalar::F32(value)) if value.is_nan()
+            ) {
                 mask[row] = false;
             }
         }
         for col in 0..right_cols {
-            if right.data[col * rows + row].is_nan() {
+            if matches!(
+                right.numeric_value_at(col * rows + row),
+                Some(runmat_value::NumericScalar::F64(value)) if value.is_nan()
+            ) || matches!(
+                right.numeric_value_at(col * rows + row),
+                Some(runmat_value::NumericScalar::F32(value)) if value.is_nan()
+            ) {
                 mask[row] = false;
             }
         }
@@ -367,70 +629,110 @@ struct CorrPair {
 }
 
 fn corr_pair_masked(
-    x: &[f64],
-    y: &[f64],
+    x: &CorrColumn,
+    y: &CorrColumn,
     mask: &[bool],
     corr_type: CorrType,
     rows: RowsMode,
+    weights: Option<&[f64]>,
 ) -> CorrPair {
-    let mut xs = Vec::new();
-    let mut ys = Vec::new();
-    for idx in 0..x.len() {
+    let mut indices = Vec::new();
+    for idx in 0..mask.len() {
         if !mask[idx] {
             continue;
         }
         match rows {
-            RowsMode::All => {
-                xs.push(x[idx]);
-                ys.push(y[idx]);
-            }
+            RowsMode::All => indices.push(idx),
             RowsMode::Complete | RowsMode::Pairwise => {
-                if !x[idx].is_nan() && !y[idx].is_nan() {
-                    xs.push(x[idx]);
-                    ys.push(y[idx]);
+                if !x.is_nan(idx) && !y.is_nan(idx) {
+                    indices.push(idx);
                 }
             }
         }
     }
     if matches!(rows, RowsMode::All)
-        && (xs.iter().any(|v| v.is_nan()) || ys.iter().any(|v| v.is_nan()))
+        && indices
+            .iter()
+            .any(|index| x.is_nan(*index) || y.is_nan(*index))
     {
         return CorrPair {
             rho: f64::NAN,
-            n: xs.len(),
+            n: indices.len(),
         };
     }
-    if xs.len() < 2 {
+    if indices.len() < 2 {
         return CorrPair {
             rho: f64::NAN,
-            n: xs.len(),
+            n: indices.len(),
         };
     }
     let rho = match corr_type {
-        CorrType::Pearson => pearson(&xs, &ys),
+        CorrType::Pearson => pearson_columns(x, y, &indices, weights),
         CorrType::Spearman => {
-            let xr = tied_rank(&xs);
-            let yr = tied_rank(&ys);
-            pearson(&xr, &yr)
+            let xr = x.ranks(&indices, weights);
+            let yr = y.ranks(&indices, weights);
+            let selected_weights = weights.map(|weights| {
+                indices
+                    .iter()
+                    .map(|index| weights[*index])
+                    .collect::<Vec<_>>()
+            });
+            pearson(&xr, &yr, selected_weights.as_deref())
         }
-        CorrType::Kendall => kendall_tau_b(&xs, &ys),
+        CorrType::Kendall => kendall_tau_b(x, y, &indices, weights),
     };
-    CorrPair { rho, n: xs.len() }
+    CorrPair {
+        rho,
+        n: indices.len(),
+    }
 }
 
-fn pearson(x: &[f64], y: &[f64]) -> f64 {
-    let n = x.len() as f64;
-    let mean_x = x.iter().sum::<f64>() / n;
-    let mean_y = y.iter().sum::<f64>() / n;
+fn pearson_columns(
+    x: &CorrColumn,
+    y: &CorrColumn,
+    indices: &[usize],
+    weights: Option<&[f64]>,
+) -> f64 {
+    let xs = x.centered_values(indices);
+    let ys = y.centered_values(indices);
+    let selected_weights = weights.map(|weights| {
+        indices
+            .iter()
+            .map(|index| weights[*index])
+            .collect::<Vec<_>>()
+    });
+    pearson(&xs, &ys, selected_weights.as_deref())
+}
+
+fn pearson(x: &[f64], y: &[f64], weights: Option<&[f64]>) -> f64 {
+    let weight_sum = weights
+        .map(|weights| weights.iter().sum::<f64>())
+        .unwrap_or(x.len() as f64);
+    if weight_sum <= 0.0 {
+        return f64::NAN;
+    }
+    let mean_x = x
+        .iter()
+        .enumerate()
+        .map(|(index, value)| weights.map_or(*value, |weights| weights[index] * *value))
+        .sum::<f64>()
+        / weight_sum;
+    let mean_y = y
+        .iter()
+        .enumerate()
+        .map(|(index, value)| weights.map_or(*value, |weights| weights[index] * *value))
+        .sum::<f64>()
+        / weight_sum;
     let mut sxx = 0.0;
     let mut syy = 0.0;
     let mut sxy = 0.0;
-    for (a, b) in x.iter().zip(y.iter()) {
+    for (index, (a, b)) in x.iter().zip(y.iter()).enumerate() {
+        let weight = weights.map_or(1.0, |weights| weights[index]);
         let dx = *a - mean_x;
         let dy = *b - mean_y;
-        sxx += dx * dx;
-        syy += dy * dy;
-        sxy += dx * dy;
+        sxx += weight * dx * dx;
+        syy += weight * dy * dy;
+        sxy += weight * dx * dy;
     }
     if sxx == 0.0 || syy == 0.0 {
         f64::NAN
@@ -439,49 +741,37 @@ fn pearson(x: &[f64], y: &[f64]) -> f64 {
     }
 }
 
-fn tied_rank(values: &[f64]) -> Vec<f64> {
-    let mut indexed = values.iter().copied().enumerate().collect::<Vec<_>>();
-    indexed.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-    let mut ranks = vec![0.0; values.len()];
-    let mut start = 0usize;
-    while start < indexed.len() {
-        let mut end = start + 1;
-        while end < indexed.len() && indexed[end].1 == indexed[start].1 {
-            end += 1;
-        }
-        let rank = (start + 1 + end) as f64 / 2.0;
-        for (original, _) in &indexed[start..end] {
-            ranks[*original] = rank;
-        }
-        start = end;
-    }
-    ranks
-}
-
-fn kendall_tau_b(x: &[f64], y: &[f64]) -> f64 {
-    if x.len() != y.len() || x.len() < 2 {
+fn kendall_tau_b(
+    x: &CorrColumn,
+    y: &CorrColumn,
+    indices: &[usize],
+    weights: Option<&[f64]>,
+) -> f64 {
+    if indices.len() < 2 {
         return f64::NAN;
     }
     let mut concordant = 0.0;
     let mut discordant = 0.0;
     let mut ties_x = 0.0;
     let mut ties_y = 0.0;
-    for i in 0..x.len() {
-        for j in i + 1..x.len() {
-            let dx = compare_pair(x[i], x[j]);
-            let dy = compare_pair(y[i], y[j]);
+    for i in 0..indices.len() {
+        for j in i + 1..indices.len() {
+            let left = indices[i];
+            let right = indices[j];
+            let pair_weight = weights.map_or(1.0, |weights| weights[left] * weights[right]);
+            let dx = x.compare(left, right);
+            let dy = y.compare(left, right);
+            if dx == Ordering::Equal && dy == Ordering::Equal {
+                continue;
+            }
             if dx == Ordering::Equal {
-                ties_x += 1.0;
-            }
-            if dy == Ordering::Equal {
-                ties_y += 1.0;
-            }
-            if dx != Ordering::Equal && dy != Ordering::Equal {
-                if dx == dy {
-                    concordant += 1.0;
-                } else {
-                    discordant += 1.0;
-                }
+                ties_x += pair_weight;
+            } else if dy == Ordering::Equal {
+                ties_y += pair_weight;
+            } else if dx == dy {
+                concordant += pair_weight;
+            } else {
+                discordant += pair_weight;
             }
         }
     }
@@ -491,16 +781,6 @@ fn kendall_tau_b(x: &[f64], y: &[f64]) -> f64 {
         f64::NAN
     } else {
         (concordant - discordant) / denominator
-    }
-}
-
-fn compare_pair(a: f64, b: f64) -> Ordering {
-    if a < b {
-        Ordering::Less
-    } else if a > b {
-        Ordering::Greater
-    } else {
-        Ordering::Equal
     }
 }
 
@@ -555,9 +835,15 @@ fn tail_pvalue(cdf: f64, tail: Tail) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -570,12 +856,56 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert!((tensor.data[0] - 1.0).abs() < 1e-12);
-                assert!((tensor.data[1] - 1.0).abs() < 1e-12);
-                assert!((tensor.data[2] - 1.0).abs() < 1e-12);
-                assert!((tensor.data[3] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[1] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[2] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[3] - 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corr_accepts_typed_integer_matrix_inputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let out = block_on(corr_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2], 0.0),
+            Vec::new(),
+        ))
+        .unwrap();
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 2]);
+                assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1.0e-12);
+                assert!((tensor.materialize_f64()[3] - 1.0).abs() < 1.0e-12);
+            }
+            other => panic!("expected tensor correlation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corr_complete_rows_reads_typed_integer_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let x = poisoned_int_tensor(
+            IntegerStorage::I16(vec![1, 2, 3, 2, 4, 6]),
+            vec![3, 2],
+            f64::NAN,
+        );
+        let y = poisoned_int_tensor(IntegerStorage::U16(vec![5, 10, 15]), vec![3, 1], f64::NAN);
+
+        let out = block_on(corr_builtin(
+            x,
+            vec![y, Value::from("Rows"), Value::from("complete")],
+        ))
+        .unwrap();
+
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 1]);
+                assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1.0e-12);
+                assert!((tensor.materialize_f64()[1] - 1.0).abs() < 1.0e-12);
+            }
+            other => panic!("expected tensor correlation, got {other:?}"),
         }
     }
 
@@ -587,8 +917,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert!((tensor.data[0] - 1.0).abs() < 1e-12);
-                assert!((tensor.data[1] + 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1e-12);
+                assert!((tensor.materialize_f64()[1] + 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -651,5 +981,160 @@ mod tests {
             }
             other => panic!("expected output list, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn corr_integer_extensions_are_independently_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let data_error = block_on(corr_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1], 0.0),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            data_error.identifier(),
+            Some("RunMat:compatibility:CorrIntegerDataExtension")
+        );
+
+        let weight_error = block_on(corr_builtin(
+            tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+            vec![
+                Value::from("Weights"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1, 2, 3]), vec![3, 1], 0.0),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            weight_error.identifier(),
+            Some("RunMat:compatibility:CorrIntegerWeightsExtension")
+        );
+    }
+
+    #[test]
+    fn corr_resident_integer_data_rejects_before_gather() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let input =
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &input).unwrap();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                block_on(corr_builtin(Value::GpuTensor(handle.clone()), Vec::new())).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:CorrIntegerDataExtension")
+            );
+            let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    fn corr_supports_all_eight_integer_data_classes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 2, 3]),
+            IntegerStorage::I16(vec![1, 2, 3]),
+            IntegerStorage::I32(vec![1, 2, 3]),
+            IntegerStorage::I64(vec![1, 2, 3]),
+            IntegerStorage::U8(vec![1, 2, 3]),
+            IntegerStorage::U16(vec![1, 2, 3]),
+            IntegerStorage::U32(vec![1, 2, 3]),
+            IntegerStorage::U64(vec![1, 2, 3]),
+        ];
+        for storage in storages {
+            let class = storage.class_name();
+            let weight_storage = storage.clone();
+            let out = block_on(corr_builtin(
+                poisoned_int_tensor(storage, vec![3, 1], 0.0),
+                Vec::new(),
+            ))
+            .unwrap_or_else(|error| panic!("{class}: {error}"));
+            assert!(matches!(out, Value::Num(value) if (value - 1.0).abs() < 1.0e-12));
+
+            let weighted = block_on(corr_builtin(
+                tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
+                vec![
+                    Value::from("Weights"),
+                    poisoned_int_tensor(weight_storage, vec![3, 1], 0.0),
+                ],
+            ))
+            .unwrap_or_else(|error| panic!("{class} weights: {error}"));
+            assert!(matches!(weighted, Value::Num(value) if (value - 1.0).abs() < 1.0e-12));
+        }
+    }
+
+    #[test]
+    fn corr_wide_integer_rank_and_pearson_paths_remain_distinct() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let base = 1_u64 << 53;
+        let x = poisoned_int_tensor(
+            IntegerStorage::U64(vec![base, base + 1, base + 2]),
+            vec![3, 1],
+            0.0,
+        );
+        let y = poisoned_int_tensor(
+            IntegerStorage::U64(vec![base + 10, base + 11, base + 12]),
+            vec![3, 1],
+            0.0,
+        );
+        for method in ["Pearson", "Spearman", "Kendall"] {
+            let out = block_on(corr_builtin(
+                x.clone(),
+                vec![y.clone(), Value::from("Type"), Value::from(method)],
+            ))
+            .unwrap();
+            assert!(
+                matches!(out, Value::Num(value) if (value - 1.0).abs() < 1.0e-12),
+                "{method}: {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn corr_weights_affect_all_types_and_force_nan_pvalues() {
+        let x = tensor(vec![1.0, 2.0, 3.0], vec![3, 1]);
+        let y = tensor(vec![1.0, 4.0, 2.0], vec![3, 1]);
+        let weights = tensor(vec![1.0, 0.0, 1.0], vec![3, 1]);
+        for method in ["Pearson", "Spearman", "Kendall"] {
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let out = block_on(corr_builtin(
+                x.clone(),
+                vec![
+                    y.clone(),
+                    Value::from("Type"),
+                    Value::from(method),
+                    Value::from("Weights"),
+                    weights.clone(),
+                ],
+            ))
+            .unwrap();
+            let Value::OutputList(values) = out else {
+                panic!("{method}: expected two outputs");
+            };
+            assert!(
+                matches!(values[0], Value::Num(value) if (value - 1.0).abs() < 1.0e-12),
+                "{method}: {:?}",
+                values[0]
+            );
+            assert!(
+                matches!(values[1], Value::Num(value) if value.is_nan()),
+                "{method}: {:?}",
+                values[1]
+            );
+        }
+    }
+
+    #[test]
+    fn corr_weighted_spearman_uses_documented_weighted_midrank_formula() {
+        let column = CorrColumn::Floating(vec![1.0, 2.0, 2.0]);
+        let ranks = column.ranks(&[0, 1, 2], Some(&[1.0, 2.0, 4.0]));
+        assert_eq!(ranks, vec![1.0, 5.5, 5.5]);
+    }
+
+    #[test]
+    fn corr_kendall_excludes_joint_ties_from_tau_b_denominator() {
+        let x = CorrColumn::Integer(vec![IntValue::U64(7), IntValue::U64(7)]);
+        let y = CorrColumn::Integer(vec![IntValue::U64(9), IntValue::U64(9)]);
+        assert!(kendall_tau_b(&x, &y, &[0, 1], None).is_nan());
     }
 }

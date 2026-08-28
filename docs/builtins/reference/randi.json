@@ -35,11 +35,13 @@
     "`randi(imax)` returns a scalar double selected uniformly from `1:imax`.",
     "`randi(imax, m, n, ...)` creates dense arrays whose entries are in `1:imax`.",
     "`randi([imin imax], sz)` accepts a two-element range vector plus either a size vector or explicit dimensions.",
-    "`randi(___, 'like', A)` matches both the shape and device residency of `A`, including GPU tensors when acceleration is enabled.",
+    "`randi(___, 'like', A)` matches the class, complexity where supported, and device residency of `A`; ordinary size arguments determine the output shape, and omitting them returns a scalar.",
     "Negative lower bounds are supported so long as `imin <= imax`.",
     "`randi(___, 'double')` is accepted for MATLAB compatibility and keeps the default double output.",
-    "`randi(___, 'logical')` emits a logical array when the inclusive range stays within `[0, 1]`.",
-    "RunMat diagnoses unsupported class specifiers (e.g., `'single'`, `'uint8'`) with descriptive errors until native representations land."
+    "`randi(___, 'single')`, `randi(___, 'logical')`, and the documented integer class names through `uint32` preserve the requested output class; logical output requires the inclusive range to stay within `[0, 1]`.",
+    "All eight integer classes are documented for size controls and are decoded structurally. If sampled bounds exceed the selected output class, conversion saturates values to that class's endpoints.",
+    "`int64` and `uint64` output classes are exact RunMat extensions available only in `runmat` compatibility mode.",
+    "The bare `randi(bounds, prototype)` shorthand copies prototype shape and class only in `runmat` mode; MATLAB-compatible code uses explicit dimensions and the `like` keyword."
   ],
   "examples": [
     {
@@ -84,7 +86,7 @@
     },
     {
       "question": "Does `randi` return doubles or integer arrays?",
-      "answer": "RunMat matches MATLAB by storing results in double-precision tensors whose values are integers. Future releases will add direct integer array classes."
+      "answer": "The default result is double. A documented class name or `'like'` prototype can select native single, logical, or integer storage; `int64` and `uint64` output are additional `runmat`-mode extensions."
     },
     {
       "question": "Can I request a logical result directly?",
@@ -92,7 +94,7 @@
     },
     {
       "question": "How do I control the array shape?",
-      "answer": "Pass either explicit dimensions (`randi(9, 4, 2)`) or a size vector (`randi(9, [4 2])`). Providing a `'like'` prototype also copies the prototype's shape automatically."
+      "answer": "Pass either explicit dimensions (`randi(9, 4, 2)`) or a row size vector (`randi(9, [4 2])`). A `'like'` prototype selects class, complexity, and residency but does not copy shape; omitting dimensions returns a scalar."
     },
     {
       "question": "How does `randi` interact with `rng`?",
@@ -104,7 +106,7 @@
     },
     {
       "question": "Does `randi` support `'single'` or integer output classes?",
-      "answer": "Not yet. The `randi` builtin currently supports doubles only. Supplying `'single'` or integer class names raises a descriptive error."
+      "answer": "Yes. `single`, `int8`, `int16`, `int32`, `uint8`, `uint16`, and `uint32` are available in MATLAB-compatible modes. Exact `int64` and `uint64` output is deliberately gated to `runmat` mode."
     }
   ],
   "links": [
@@ -183,6 +185,6 @@
   },
   "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the examples above, the result of `randi` remains on the GPU whenever the planner determines that downstream work benefits from staying on device.\n\nTo preserve backwards compatibility with MathWorks MATLAB—and when you want to be explicit about residency—you can call `gpuArray` yourself to seed GPU execution.\n\nBecause MathWorks MATLAB lacks a fusion planner and ships GPU support as a separate toolbox, MATLAB users must move data manually. RunMat automates residency to streamline accelerated workflows.",
   "gpu_behavior": [
-    "When the target output or `'like'` prototype resides on the GPU, RunMat first asks the active acceleration provider for device-side generation via `random_integer_like` (shape reuse) or `random_integer_range` (explicit shape). Providers that do not expose these hooks fall back to host-side sampling followed by a single upload, ensuring correctness while still keeping the resulting tensor on the GPU."
+    "When the target output or `'like'` prototype resides on the GPU, RunMat performs the same unbiased full-width integer sampling used for host output and uploads the authoritative typed values once. The result remains provider-resident without routing integer generation through a floating-point provider RNG."
   ]
 }

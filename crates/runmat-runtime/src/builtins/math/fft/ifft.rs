@@ -2,16 +2,23 @@
 
 use super::common::{
     complex_tensor_to_real_value, default_dimension, download_provider_complex_tensor,
-    gather_gpu_complex_tensor, parse_length, parse_symflag, transform_complex_tensor,
+    ensure_wide_integer_data_exact, free_rejected_provider_fft_output, gather_gpu_complex_tensor,
+    gpu_metadata_snapshot, is_wide_integer_value, parse_length, parse_symflag,
+    provider_operation_unsupported, restore_complex_gpu_result, restore_gpu_metadata,
+    restore_real_gpu_result, same_gpu_handle, transform_complex_tensor, valid_provider_fft_output,
     value_to_complex_tensor, TransformDirection,
 };
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -50,6 +57,63 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "ifft";
+
+const IFFT_WIDE_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ifft-wide-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ifft with host int64 or uint64 data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IfftWideIntegerDataExtension"),
+};
+
+const IFFT_WIDE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ifft-wide-integer-controls",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ifft with int64 or uint64 N or DIM controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IfftWideIntegerControlExtension"),
+};
+
+pub const IFFT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [IFFT_WIDE_DATA_EXTENSION, IFFT_WIDE_CONTROL_EXTENSION];
+
+const IFFT_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes:
+        "Documented integer data enters the floating inverse-FFT domain and produces double output.",
+}];
+
+const IFFT_WIDE_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &[runmat_builtins::BuiltinIntegerClass::Int64, runmat_builtins::BuiltinIntegerClass::Uint64],
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Host wide integers are gated and must be exactly representable as double; resident wide integers reject before gather.",
+}];
+
+const IFFT_INTEGER_CONTROLS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "N or DIM",
+    classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "N and DIM are parsed as exact structural controls.",
+}];
+
+const IFFT_WIDE_INTEGER_CONTROLS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "N or DIM",
+    classes: &[runmat_builtins::BuiltinIntegerClass::Int64, runmat_builtins::BuiltinIntegerClass::Uint64],
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+    notes: "Wide structural controls are independently gated and decoded from authoritative integer storage.",
+}];
+
+pub const IFFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "Y = ifft(integer_X, ...)", inputs: &IFFT_INTEGER_DATA, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Documented integer data crosses once into double; symmetric output is real and nonsymmetric output is complex." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = ifft(X, integer_N, integer_DIM, ...)", inputs: &IFFT_INTEGER_CONTROLS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Documented controls are exact and are classified before provider access." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = ifft(int64_or_uint64_X, ...)", inputs: &IFFT_WIDE_INTEGER_DATA, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only wide data cannot silently round at the double boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = ifft(X, int64_or_uint64_N_or_DIM, ...)", inputs: &IFFT_WIDE_INTEGER_CONTROLS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only wide controls are independently gated and parsed exactly." },
+];
 
 const IFFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -254,14 +318,22 @@ const IFFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "IFFT execution or tensor shaping fails.",
     message: "ifft: internal error",
 };
+const IFFT_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFT.PROVIDER_INTEGRITY",
+    identifier: Some("RunMat:ifft:ProviderIntegrity"),
+    when:
+        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
+    message: "ifft: provider integrity error",
+};
 
-const IFFT_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const IFFT_ERRORS: [BuiltinErrorDescriptor; 7] = [
     IFFT_ERROR_ARG_COUNT,
     IFFT_ERROR_INVALID_LENGTH,
     IFFT_ERROR_INVALID_DIMENSION,
     IFFT_ERROR_INVALID_SYMFLAG,
     IFFT_ERROR_INVALID_INPUT,
     IFFT_ERROR_INTERNAL,
+    IFFT_ERROR_PROVIDER_INTEGRITY,
 ];
 
 pub const IFFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -307,6 +379,21 @@ fn ifft_error_with_message(
     builder.build()
 }
 
+fn ifft_provider_error(detail: impl AsRef<str>) -> RuntimeError {
+    build_runtime_error(format!(
+        "ifft: provider integrity error: {}",
+        detail.as_ref()
+    ))
+    .with_builtin(BUILTIN_NAME)
+    .with_identifier(
+        IFFT_ERROR_PROVIDER_INTEGRITY
+            .identifier
+            .expect("ifft provider-integrity descriptor identifier"),
+    )
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .build()
+}
+
 #[runtime_builtin(
     name = "ifft",
     category = "math/fft",
@@ -314,9 +401,25 @@ fn ifft_error_with_message(
     keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu",
     type_resolver(ifft_type),
     descriptor(crate::builtins::math::fft::ifft::IFFT_DESCRIPTOR),
+    extensions(crate::builtins::math::fft::ifft::IFFT_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::fft::ifft::IFFT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::fft::ifft"
 )]
 async fn ifft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "ifft")?;
+    if is_wide_integer_value(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IFFT_WIDE_DATA_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+        ensure_wide_integer_data_exact(&value, BUILTIN_NAME)?;
+    }
+    if rest.iter().any(is_wide_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IFFT_WIDE_CONTROL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let (length, dimension, symmetric) = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => ifft_gpu(handle, length, dimension, symmetric).await,
@@ -359,41 +462,57 @@ async fn ifft_gpu(
     let current_len = logical_shape.get(dim_index).copied().unwrap_or(0);
     let target_len = length.unwrap_or(current_len);
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if target_len != 0 {
-            if let Ok(out) = provider.ifft_dim(&handle, length, dim_index).await {
-                if !symmetric {
-                    return Ok(Value::GpuTensor(out));
+    let expected_shape = {
+        let mut shape = logical_shape.clone();
+        shape[dim_index] = target_len;
+        shape
+    };
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        let input_is_floating = runmat_accelerate_api::handle_integer_type(&handle).is_none()
+            && !runmat_accelerate_api::handle_is_logical(&handle);
+        let precision = runmat_accelerate_api::handle_precision(&handle)
+            .unwrap_or_else(|| provider.precision());
+        if target_len != 0 && input_is_floating {
+            let input_metadata = gpu_metadata_snapshot(&handle);
+            match provider.ifft_dim(&handle, length, dim_index).await {
+                Ok(out) => {
+                    if same_gpu_handle(&handle, &out) {
+                        restore_gpu_metadata(&handle, input_metadata);
+                        return Err(ifft_provider_error("ifft_dim aliased its input"));
+                    }
+                    if !valid_provider_fft_output(
+                        provider,
+                        &out,
+                        &expected_shape,
+                        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                        precision,
+                    ) {
+                        free_rejected_provider_fft_output(provider, &out, &[&handle]);
+                        return Err(ifft_provider_error("ifft_dim returned malformed metadata"));
+                    }
+                    if !symmetric {
+                        return Ok(Value::GpuTensor(out));
+                    }
+                    let complex =
+                        match download_provider_complex_tensor(provider, &out, BUILTIN_NAME, true)
+                            .await
+                        {
+                            Ok(complex) => complex,
+                            Err(error) => {
+                                return Err(ifft_provider_error(format!(
+                                    "provider result download failed: {error}"
+                                )));
+                            }
+                        };
+                    let Value::Tensor(real) = finalize_ifft_output(complex, true)? else {
+                        unreachable!("symmetric ifft produces a real tensor")
+                    };
+                    return restore_real_gpu_result(&handle, &real, BUILTIN_NAME);
                 }
-                if let Ok(real) = provider.fft_extract_real(&out).await {
-                    provider.free(&out).ok();
-                    runmat_accelerate_api::clear_residency(&out);
-                    return Ok(Value::GpuTensor(real));
-                }
-                let complex = download_provider_complex_tensor(provider, &out, BUILTIN_NAME, true)
-                    .await
-                    .map_err(|source| {
-                        ifft_error_with_source(
-                            &IFFT_ERROR_INVALID_INPUT,
-                            "provider download failed",
-                            source,
-                        )
-                    })?;
-                return finalize_ifft_output(complex, true);
+                Err(error) if provider_operation_unsupported(&error, "ifft_dim") => {}
+                Err(error) => return Err(ifft_provider_error(format!("ifft_dim failed: {error}"))),
             }
         }
-
-        let complex = download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false)
-            .await
-            .map_err(|source| {
-                ifft_error_with_source(
-                    &IFFT_ERROR_INVALID_INPUT,
-                    "provider download failed",
-                    source,
-                )
-            })?;
-        let transformed = ifft_complex_tensor(complex, length, dimension)?;
-        return finalize_ifft_output(transformed, symmetric);
     }
 
     let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME)
@@ -402,7 +521,14 @@ async fn ifft_gpu(
             ifft_error_with_source(&IFFT_ERROR_INVALID_INPUT, "gpu gather failed", source)
         })?;
     let transformed = ifft_complex_tensor(complex, length, dimension)?;
-    finalize_ifft_output(transformed, symmetric)
+    if symmetric {
+        let Value::Tensor(real) = finalize_ifft_output(transformed, true)? else {
+            unreachable!("symmetric ifft produces a real tensor")
+        };
+        restore_real_gpu_result(&handle, &real, BUILTIN_NAME)
+    } else {
+        restore_complex_gpu_result(&handle, &transformed, BUILTIN_NAME)
+    }
 }
 
 pub(super) fn ifft_complex_tensor(
@@ -537,10 +663,10 @@ pub(crate) mod tests {
     use num_complex::Complex;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{
-        builtin_function_by_name, ComplexTensor as HostComplexTensor, IntValue, ResolveContext,
-        Tensor, Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{ComplexTensor as HostComplexTensor, IntValue, Tensor};
+    #[cfg(feature = "wgpu")]
+    use runmat_value::{IntegerStorage, LogicalArray};
     use rustfft::FftPlanner;
 
     fn approx_eq((a_re, a_im): (f64, f64), (b_re, b_im): (f64, f64), tol: f64) -> bool {
@@ -565,10 +691,14 @@ pub(crate) mod tests {
                 let host = block_on(provider.download(&handle)).expect("download gpu ifft output");
                 common::host_to_complex_tensor(host, BUILTIN_NAME).expect("decode gpu complex")
             }
-            Value::Tensor(t) => {
-                HostComplexTensor::new(t.data.into_iter().map(|re| (re, 0.0)).collect(), t.shape)
-                    .unwrap()
-            }
+            Value::Tensor(t) => HostComplexTensor::new(
+                t.materialize_f64()
+                    .into_iter()
+                    .map(|re| (re, 0.0))
+                    .collect(),
+                t.shape,
+            )
+            .unwrap(),
             Value::Num(n) => HostComplexTensor::new(vec![(n, 0.0)], vec![1, 1]).unwrap(),
             Value::Int(i) => HostComplexTensor::new(vec![(i.to_f64(), 0.0)], vec![1, 1]).unwrap(),
             other => panic!("unexpected value kind {other:?}"),
@@ -621,7 +751,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![4]);
                 let expected = [(1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0)];
-                for (idx, actual) in ct.data.iter().enumerate() {
+                for (idx, actual) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*actual, expected[idx], 1e-12));
                 }
             }
@@ -642,7 +772,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected real tensor, got {other:?}"),
         }
@@ -657,7 +787,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![0]);
-                assert!(ct.data.is_empty());
+                assert!(ct.materialize_f64().is_empty());
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -667,13 +797,13 @@ pub(crate) mod tests {
     #[test]
     fn ifft_dimension_argument_recovers_matrix() {
         let original = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-        let mut spectrum = Vec::with_capacity(original.data.len());
+        let mut spectrum = Vec::with_capacity(original.materialize_f64().len());
         let rows = original.shape[0];
         let cols = original.shape[1];
         for c in 0..cols {
             let mut column = Vec::with_capacity(rows);
             for r in 0..rows {
-                column.push(Complex::new(original.data[r + c * rows], 0.0));
+                column.push(Complex::new(original.materialize_f64()[r + c * rows], 0.0));
             }
             let mut fft = column.clone();
             FftPlanner::<f64>::new()
@@ -688,8 +818,12 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 3]);
-                for (idx, (re, im)) in ct.data.iter().enumerate() {
-                    assert!(approx_eq((*re, *im), (original.data[idx], 0.0), 1e-12));
+                for (idx, (re, im)) in ct.materialize_f64().iter().enumerate() {
+                    assert!(approx_eq(
+                        (*re, *im),
+                        (original.materialize_f64()[idx], 0.0),
+                        1e-12
+                    ));
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -785,7 +919,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![4]);
-                for &(re, im) in &ct.data {
+                for &(re, im) in &ct.materialize_f64() {
                     assert!((re - 1.0).abs() < 1e-12);
                     assert!(im.abs() < 1e-12);
                 }
@@ -813,7 +947,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2]);
-                for ((re, im), expected) in ct.data.iter().zip(expected.iter()) {
+                for ((re, im), expected) in ct.materialize_f64().iter().zip(expected.iter()) {
                     assert!(approx_eq((*re, *im), (expected.re, expected.im), 1e-12));
                 }
             }
@@ -835,6 +969,109 @@ pub(crate) mod tests {
         assert!(symmetric);
     }
 
+    #[test]
+    fn ifft_declares_documented_and_wide_integer_forms() {
+        assert_eq!(IFFT_INTEGER_CAPABILITIES.len(), 4);
+        assert_eq!(IFFT_EXTENSIONS.len(), 2);
+        assert_eq!(IFFT_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 6);
+        assert_eq!(IFFT_INTEGER_CAPABILITIES[2].inputs[0].classes.len(), 2);
+        assert_eq!(
+            IFFT_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::Double
+        );
+        assert_eq!(
+            IFFT_INTEGER_CAPABILITIES[2].output_class,
+            BuiltinIntegerOutputClassRule::Double
+        );
+    }
+
+    #[test]
+    fn ifft_wide_integer_data_is_mode_gated_and_exact() {
+        let input = || {
+            Value::Tensor(
+                Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1, 2]), vec![1, 2])
+                    .unwrap(),
+            )
+        };
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error =
+            ifft_builtin(input(), Vec::new()).expect_err("strict mode must reject wide data");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:IfftWideIntegerDataExtension")
+        );
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let output = ifft_builtin(input(), Vec::new()).expect("exact wide data");
+        assert!(matches!(
+            output,
+            Value::ComplexTensor(_) | Value::Complex(_, _)
+        ));
+        let inexact = Value::Tensor(
+            Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                vec![1, 1],
+            )
+            .unwrap(),
+        );
+        let error = ifft_builtin(inexact, Vec::new()).expect_err("inexact wide data must reject");
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn ifft_documented_integer_data_returns_double_complex_storage() {
+        let input = Tensor::new_integer(
+            runmat_value::IntegerStorage::I32(vec![1, 2, 3, 4]),
+            vec![1, 4],
+        )
+        .unwrap();
+        let output = ifft_builtin(Value::Tensor(input), Vec::new()).expect("integer ifft");
+        let complex = value_as_complex_tensor(output);
+        assert_eq!(complex.numeric_dtype(), runmat_value::NumericDType::F64);
+    }
+
+    #[test]
+    fn ifft_wide_integer_controls_have_an_independent_gate() {
+        let input = || Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap());
+        let length = || Value::Int(IntValue::U64(2));
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = ifft_builtin(input(), vec![length()])
+            .expect_err("strict mode must reject wide controls");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:IfftWideIntegerControlExtension")
+        );
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        ifft_builtin(input(), vec![length()]).expect("RunMat mode accepts exact wide controls");
+    }
+
+    #[test]
+    fn ifft_preserves_single_for_complex_and_symmetric_outputs() {
+        let spectrum = || {
+            Value::ComplexTensor(
+                HostComplexTensor::from_complex_storage(
+                    runmat_value::ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0)]),
+                    vec![1, 2],
+                )
+                .unwrap(),
+            )
+        };
+        let complex = value_as_complex_tensor(
+            ifft_builtin(spectrum(), Vec::new()).expect("complex single ifft"),
+        );
+        assert_eq!(complex.numeric_dtype(), runmat_value::NumericDType::F32);
+
+        let real = ifft_builtin(spectrum(), vec![Value::from("symmetric")])
+            .expect("symmetric single ifft");
+        let Value::Tensor(real) = real else {
+            panic!("expected real tensor")
+        };
+        assert_eq!(real.numeric_dtype(), runmat_value::NumericDType::F32);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_gpu_roundtrip_matches_cpu() {
@@ -850,11 +1087,11 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..handle.descriptor
+                },
             };
-            runmat_accelerate_api::set_handle_storage(
-                &spectrum_handle,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
             let gpu =
                 ifft_builtin(Value::GpuTensor(spectrum_handle.clone()), Vec::new()).expect("ifft");
             let cpu_spectrum = HostComplexTensor::new(
@@ -866,7 +1103,11 @@ pub(crate) mod tests {
             let gpu_ct = value_as_complex_tensor(gpu);
             let cpu_ct = value_as_complex_tensor(cpu);
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
-            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+            for (a, b) in gpu_ct
+                .materialize_f64()
+                .iter()
+                .zip(cpu_ct.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, 1e-12));
             }
             provider.free(&handle).ok();
@@ -888,11 +1129,11 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..handle.descriptor
+                },
             };
-            runmat_accelerate_api::set_handle_storage(
-                &spectrum_handle,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
             let gpu = ifft_builtin(
                 Value::GpuTensor(spectrum_handle.clone()),
                 vec![Value::from("symmetric")],
@@ -901,9 +1142,9 @@ pub(crate) mod tests {
             match gpu {
                 Value::GpuTensor(_) | Value::Tensor(_) => {
                     let gathered = test_support::gather(gpu).expect("gather symmetric real");
-                    assert_eq!(gathered.data.len(), 4);
+                    assert_eq!(gathered.materialize_f64().len(), 4);
                     assert_eq!(gathered.shape.first().copied().unwrap_or(0), 4);
-                    for (idx, value) in gathered.data.iter().enumerate() {
+                    for (idx, value) in gathered.materialize_f64().iter().enumerate() {
                         assert!((*value - (idx as f64 + 1.0)).abs() < 1e-10);
                     }
                 }
@@ -931,11 +1172,11 @@ pub(crate) mod tests {
                 shape: vec![4],
                 device_id: handle.device_id,
                 buffer_id: handle.buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..handle.descriptor
+                },
             };
-            runmat_accelerate_api::set_handle_storage(
-                &spectrum_handle,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
             let gpu = ifft_builtin(Value::GpuTensor(spectrum_handle.clone()), Vec::new())
                 .expect("gpu ifft");
             let cpu_spectrum = HostComplexTensor::new(
@@ -952,10 +1193,114 @@ pub(crate) mod tests {
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
             };
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
-            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+            for (a, b) in gpu_ct
+                .materialize_f64()
+                .iter()
+                .zip(cpu_ct.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, tol), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ifft_f32_owner_returns_host_double_for_integer_and_logical_fallback() {
+        if let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
+            .expect("wgpu provider")
+        {
+            if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
+                return;
+            }
+            let integer = Tensor::new_integer(IntegerStorage::I32(vec![1, 0]), vec![1, 2])
+                .expect("integer tensor");
+            let integer_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &integer)
+                    .expect("upload integer");
+            let integer_output = ifft_builtin(Value::GpuTensor(integer_handle.clone()), Vec::new())
+                .expect("integer fallback");
+            let Value::ComplexTensor(integer_output) = integer_output else {
+                panic!("F32 owner must return host complex double for integer ifft")
+            };
+            assert_eq!(
+                integer_output.numeric_dtype(),
+                runmat_value::NumericDType::F64
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&integer_handle),
+                Some(runmat_accelerate_api::IntegerElementType::I32)
+            );
+
+            let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical array");
+            let logical_tensor = crate::builtins::common::tensor::logical_to_tensor(&logical)
+                .expect("logical tensor");
+            let logical_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &logical_tensor)
+                    .expect("upload logical");
+            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
+            let logical_output = ifft_builtin(
+                Value::GpuTensor(logical_handle.clone()),
+                vec![Value::from("symmetric")],
+            )
+            .expect("logical symmetric fallback");
+            let Value::Tensor(logical_output) = logical_output else {
+                panic!("F32 owner must return host real double for logical ifft")
+            };
+            assert_eq!(
+                logical_output.numeric_dtype(),
+                runmat_value::NumericDType::F64
+            );
+            assert!(runmat_accelerate_api::handle_is_logical(&logical_handle));
+
+            provider.free(&integer_handle).ok();
+            provider.free(&logical_handle).ok();
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ifft_wgpu_symmetric_uses_safe_real_restoration() {
+        if let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
+            .expect("wgpu provider")
+        {
+            let spectrum = [10.0, 0.0, -2.0, 2.0, -2.0, 0.0, -2.0, -2.0];
+            let uploaded = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &spectrum,
+                    shape: &[4, 2],
+                })
+                .expect("upload spectrum");
+            let input = GpuTensorHandle {
+                shape: vec![4],
+                device_id: uploaded.device_id,
+                buffer_id: uploaded.buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
+                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
+                    ..uploaded.descriptor
+                },
+            };
+            let output = ifft_builtin(
+                Value::GpuTensor(input.clone()),
+                vec![Value::from("symmetric")],
+            )
+            .expect("symmetric wgpu ifft");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("matching F32 owner should receive a resident real result")
+            };
+            assert_ne!(
+                (output_handle.device_id, output_handle.buffer_id),
+                (input.device_id, input.buffer_id)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(output_handle),
+                runmat_accelerate_api::GpuTensorStorage::Real
+            );
+            let gathered = test_support::gather(output).expect("gather symmetric output");
+            for (actual, expected) in gathered.materialize_f64().iter().zip([1.0, 2.0, 3.0, 4.0]) {
+                assert!((*actual - expected).abs() <= 1e-5, "{actual} vs {expected}");
+            }
+            provider.free(&uploaded).ok();
         }
     }
 

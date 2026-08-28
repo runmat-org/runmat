@@ -1,10 +1,3 @@
----
-title: "Host Integration"
-category: "Plotting System"
-section: "8.4"
-last_updated: "May 28, 2026"
----
-
 # Host Integration
 
 Hosts present figures through browser canvases, native windows, snapshots, and exported images. The runtime owns figure handles, axes state, property mutation, replay import/export, and figure revisions.

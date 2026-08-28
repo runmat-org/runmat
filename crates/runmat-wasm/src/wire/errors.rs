@@ -10,6 +10,7 @@ use wasm_bindgen::prelude::JsValue;
 pub(crate) enum InitErrorCode {
     InvalidOptions,
     FilesystemProvider,
+    PackageCacheProvider,
     SessionCreation,
 }
 
@@ -18,6 +19,7 @@ impl InitErrorCode {
         match self {
             InitErrorCode::InvalidOptions => "InvalidOptions",
             InitErrorCode::FilesystemProvider => "FilesystemProvider",
+            InitErrorCode::PackageCacheProvider => "PackageCacheProvider",
             InitErrorCode::SessionCreation => "SessionCreation",
         }
     }

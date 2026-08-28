@@ -16,7 +16,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Real, logical, and complex-interleaved GPU inputs use the active provider's storage-aware linear-gather path to keep the downsampled output resident."
+    "notes": "GPU inputs use a proven owning provider's storage-aware linear-gather path. RunMat requires the resolved owner to report the input device before invoking it, then validates the returned owner, device, shape, storage kind, integer or logical class, and floating-point precision before accepting the resident result."
   },
   "fusion": {
     "elementwise": false,
@@ -26,15 +26,18 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::math::signal::sample_rate::tests",
+    "unit": "downsample_row_vector_keeps_every_nth_sample, downsample_phase_offsets_first_kept_sample, downsample_preserves_all_integer_classes_exactly, downsample_typed_controls_are_separately_extension_gated, downsample_nd_input_is_extension_gated, downsample_resident_integer_preserves_owner_class_and_values, downsample_rejects_hostile_provider_results_and_falls_back_only_on_hook_error",
     "integration": "runmat-vm basics upsample_downsample_builtin_executes_for_discrete_signal_workflow"
   },
   "description": "`y = downsample(x, n)` keeps every `n`th sample of `x`, starting at the first sample, along the first non-singleton dimension. `y = downsample(x, n, phase)` starts at the zero-based `phase` offset.",
   "behaviors": [
-    "Accepts numeric, logical, integer, complex, vector, matrix, N-D tensor, and GPU tensor inputs.",
+    "The documented input surface is vectors and matrices. RunMat also accepts N-D inputs; inputs with more than two dimensions are a compatibility-gated RunMat extension.",
     "Operates along the first non-singleton dimension, matching MATLAB's column-wise behavior for matrices and row-wise behavior for row vectors.",
-    "`n` must be a finite positive integer scalar.",
-    "`phase` is optional, defaults to 0, and must be an integer scalar in the range `0 <= phase < n`.",
+    "`n` must be a finite positive integer-valued single or double scalar. Typed-integer `n` values are a separately gated RunMat extension and are parsed exactly.",
+    "`phase` is optional, defaults to 0, and must be an integer-valued single or double scalar in the range `0 <= phase < n`. Typed-integer `phase` values are a separately gated RunMat extension and are parsed exactly.",
+    "Integer input samples preserve all eight signed and unsigned integer classes and their exact element values; downsampling performs structural selection rather than floating-point conversion.",
+    "An input handle whose device has no proven owner is rejected before any provider hook or gather. For a proven owner, a provider hook error or unsupported hook triggers owner-resolved gathering and the host fallback. A provider result that violates owner, device, shape, storage, integer/logical class, or precision invariants is treated as a provider-contract error instead of silently falling back.",
+    "Malformed resident outputs are freed only when their owner can be resolved. RunMat never sends an unknown-owner handle to the input provider for cleanup.",
     "The output keeps samples at zero-based positions `phase`, `phase + n`, `phase + 2*n`, and so on.",
     "No anti-aliasing filter is applied; use filtering operations separately when decimating sampled signals."
   ],
@@ -66,7 +69,7 @@
     },
     {
       "question": "Can I pass GPU tensors?",
-      "answer": "Yes. Real, logical, and complex-interleaved GPU inputs stay resident through the provider `gather_linear` hook."
+      "answer": "Yes. Inputs stay resident through a proven owning provider's `gather_linear` hook when it returns a result with the required owner, device, shape, storage, class, and precision invariants. Unknown-device inputs reject before provider work. Unsupported hooks from a proven owner fall back through an owner-resolved host gather; malformed successful results raise a provider-contract error."
     }
   ],
   "links": [

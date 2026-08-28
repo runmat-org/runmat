@@ -1,0 +1,19 @@
+{
+  "title": "fea.sweep",
+  "category": "fea",
+  "keywords": ["fea", "sweep", "studies", "fail fast"],
+  "summary": "Create a deterministic FEA study sweep.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" },
+  "description": "`fea.sweep(id, studies, Name, Value, ...)` creates a `fea.Sweep` from one study or a cell array of studies.",
+  "behaviors": [
+    "The required inputs are a text sweep id and one `fea.Study` or cell array of `fea.Study` objects.",
+    "`FailFast` is the only option. It defaults to true and accepts a logical scalar; numeric and resident controls reject before construction.",
+    "The direct integer audit is not applicable because integers have no study/id role and `FailFast` is logical-only.",
+    "Public study counts and indexes remain exact typed integers. The constructor is host-side and does not execute providers or intrinsically require native OCCT."
+  ],
+  "examples": [{ "description": "Continue after failed studies", "input": "sweep = fea.sweep(\"variants\", {studyA, studyB}, \"FailFast\", false);" }],
+  "faqs": [{ "question": "Does creating a sweep run its studies?", "answer": "No. `fea.sweep` creates the typed definition; pass it to `fea.validate`, `fea.plan`, or `fea.run`." }],
+  "links": [{ "label": "FEA solves", "url": "../../fea/solves" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

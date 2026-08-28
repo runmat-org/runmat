@@ -36,6 +36,7 @@
     "Scalar structs describe one indexing level. Compound substruct arrays are accepted through RunMat's struct-array cell representation, where each cell element is a scalar struct with `type` and `subs` fields.",
     "Object and handle-object targets dispatch to the receiver class's `numArgumentsFromSubscript` method when it is registered. If no overload exists, RunMat falls back to default array behavior.",
     "For ordinary arrays, parentheses and dot indexing report one argument. Brace indexing reports the number of selected elements, including validated numeric vector selectors, logical selectors, `':'`, and multidimensional selector products.",
+    "All eight integer target classes and integer scalar/vector subscripts use authoritative shape or typed element storage. Wide positive `uint64` selectors are validated without binary64 conversion, and the structural result crosses to the documented double scalar only when exactly representable.",
     "`matlab.indexing.IndexingContext.Statement`, `.Expression`, and `.Assignment` are registered lazily when used through `classref`, and the legacy `matlab.mixin.util.IndexingContext` class name resolves to equivalent enum members.",
     "RunMat also accepts compatible text tokens such as `'Statement'` and `'matlab.indexing.IndexingContext.Expression'` for integration with code that constructs context values dynamically.",
     "Invalid substructs and unsupported context values raise stable `RunMat:numArgumentsFromSubscript:*` identifiers."

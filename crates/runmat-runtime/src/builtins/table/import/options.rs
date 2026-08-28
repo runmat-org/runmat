@@ -1,4 +1,6 @@
 use super::*;
+use crate::builtins::common::tensor;
+use runmat_value::NumericScalar;
 #[derive(Clone)]
 pub(in crate::builtins::table) struct ReadTableOptions {
     pub(super) file_type: ImportFileType,
@@ -50,6 +52,14 @@ impl ReadTableOptions {
         let mut idx = 0usize;
         if let Some(Value::Struct(st)) = args.first() {
             for (name, value) in &st.fields {
+                // Import-options objects use zero to mean that the variable count
+                // should be inferred. A direct readtable name-value argument still
+                // requires a positive count.
+                if name.eq_ignore_ascii_case("NumVariables")
+                    && matches!(value, Value::Num(value) if *value == 0.0)
+                {
+                    continue;
+                }
                 options.apply(name, value)?;
             }
             idx = 1;
@@ -73,12 +83,13 @@ impl ReadTableOptions {
         } else if name.eq_ignore_ascii_case("Delimiter") {
             self.delimiter = Some(Delimiter::parse(value)?);
         } else if name.eq_ignore_ascii_case("ReadVariableNames") {
-            self.read_variable_names = Some(bool_scalar(value, "ReadVariableNames")?);
+            self.read_variable_names = Some(zero_one_bool_scalar(value, "ReadVariableNames")?);
         } else if name.eq_ignore_ascii_case("ReadRowNames") {
-            self.read_row_names = bool_scalar(value, "ReadRowNames")?;
-        } else if name.eq_ignore_ascii_case("NumVariables") {
-            let count = nonnegative_usize(value, "NumVariables")?;
-            self.num_variables = (count > 0).then_some(count);
+            self.read_row_names = zero_one_bool_scalar(value, "ReadRowNames")?;
+        } else if name.eq_ignore_ascii_case("ExpectedNumVariables")
+            || name.eq_ignore_ascii_case("NumVariables")
+        {
+            self.num_variables = Some(positive_usize(value, "ExpectedNumVariables")?);
         } else if name.eq_ignore_ascii_case("VariableNames") {
             self.variable_names = optional_raw_variable_name_list(value)?;
         } else if name.eq_ignore_ascii_case("VariableTypes") {
@@ -87,10 +98,18 @@ impl ReadTableOptions {
             self.row_names = Some(string_list(value)?);
         } else if name.eq_ignore_ascii_case("NumHeaderLines") {
             self.num_header_lines = nonnegative_usize(value, "NumHeaderLines")?;
+        } else if name.eq_ignore_ascii_case("VariableNamesLine") {
+            let line = nonnegative_usize(value, "VariableNamesLine")?;
+            self.read_variable_names = Some(line != 0);
+            self.num_header_lines = line.saturating_sub(1);
         } else if name.eq_ignore_ascii_case("Range") {
             self.range = Some(RangeSpec::parse(value)?);
         } else if name.eq_ignore_ascii_case("DataRange") {
-            self.range = optional_range_spec(value)?;
+            self.range = if option_value_is_empty(value) {
+                None
+            } else {
+                Some(RangeSpec::parse_data_range(value)?)
+            };
         } else if name.eq_ignore_ascii_case("Sheet") {
             self.sheet = optional_sheet_selector(value)?;
         } else if name.eq_ignore_ascii_case("TreatAsMissing") {
@@ -99,7 +118,7 @@ impl ReadTableOptions {
                     .insert(token.trim().to_ascii_lowercase());
             }
         } else if name.eq_ignore_ascii_case("PreserveVariableNames") {
-            self.preserve_variable_names = bool_scalar(value, "PreserveVariableNames")?;
+            self.preserve_variable_names = zero_one_bool_scalar(value, "PreserveVariableNames")?;
         } else if name.eq_ignore_ascii_case("VariableNamingRule") {
             let rule = scalar_text(value, "VariableNamingRule")?;
             if rule.eq_ignore_ascii_case("preserve") {
@@ -516,9 +535,15 @@ pub(in crate::builtins::table) fn import_variable_type_label(kind: &ImportVariab
         ImportVariableType::Auto => "auto",
         ImportVariableType::Numeric(NumericDType::F64) => "double",
         ImportVariableType::Numeric(NumericDType::F32) => "single",
+        ImportVariableType::Numeric(NumericDType::I8) => "int8",
+        ImportVariableType::Numeric(NumericDType::I16) => "int16",
+        ImportVariableType::Numeric(NumericDType::I32) => "int32",
+        ImportVariableType::Numeric(NumericDType::I64) => "int64",
         ImportVariableType::Numeric(NumericDType::U8) => "uint8",
         ImportVariableType::Numeric(NumericDType::U16) => "uint16",
         ImportVariableType::Numeric(NumericDType::U32) => "uint32",
+        ImportVariableType::Numeric(NumericDType::U64) => "uint64",
+        ImportVariableType::Integer(target) => target.class_name(),
         ImportVariableType::Logical => "logical",
         ImportVariableType::Text(TextImportType::String) => "string",
         ImportVariableType::Text(TextImportType::Char) => "char",
@@ -869,6 +894,7 @@ impl SpreadsheetImportOptions {
 pub(in crate::builtins::table) enum ImportVariableType {
     Auto,
     Numeric(NumericDType),
+    Integer(crate::builtins::math::elementwise::integer_cast::IntegerTarget),
     Logical,
     Text(TextImportType),
     CellStr,
@@ -883,20 +909,35 @@ impl ImportVariableType {
             "" | "auto" => Ok(Self::Auto),
             "double" => Ok(Self::Numeric(NumericDType::F64)),
             "single" => Ok(Self::Numeric(NumericDType::F32)),
-            "uint8" => Ok(Self::Numeric(NumericDType::U8)),
-            "uint16" => Ok(Self::Numeric(NumericDType::U16)),
-            "uint32" => Ok(Self::Numeric(NumericDType::U32)),
+            "int8" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I8,
+            )),
+            "int16" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I16,
+            )),
+            "int32" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I32,
+            )),
+            "int64" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I64,
+            )),
+            "uint8" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U8,
+            )),
+            "uint16" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U16,
+            )),
+            "uint32" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U32,
+            )),
+            "uint64" => Ok(Self::Integer(
+                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U64,
+            )),
             "logical" | "bool" | "boolean" => Ok(Self::Logical),
             "string" => Ok(Self::Text(TextImportType::String)),
             "char" => Ok(Self::Text(TextImportType::Char)),
             "cellstr" => Ok(Self::CellStr),
             "categorical" => Ok(Self::Categorical),
-            "int8" | "int16" | "int32" | "int64" | "uint64" => {
-                Err(invalid_argument(format!(
-                    "readtable: unsupported VariableTypes entry '{}'; RunMat table imports currently support double, single, uint8, uint16, and uint32 numeric arrays",
-                    raw.trim()
-                )))
-            }
             "datetime" => Ok(Self::Datetime),
             "duration" => Ok(Self::Duration),
             other => Err(invalid_argument(format!(
@@ -991,12 +1032,30 @@ pub(in crate::builtins::table) enum SheetSelector {
 
 impl SheetSelector {
     pub(in crate::builtins::table) fn parse(value: &Value) -> BuiltinResult<Self> {
+        if let Some(integer) = tensor::scalar_integer_value(value) {
+            return integer
+                .try_to_usize()
+                .and_then(|index| index.checked_sub(1))
+                .map(Self::Index)
+                .ok_or_else(|| invalid_argument("readtable: Sheet must be one-based"));
+        }
+
         match value {
-            Value::Int(i) if i.to_i64() >= 1 => Ok(Self::Index(i.to_i64() as usize - 1)),
             Value::Num(n)
                 if n.is_finite() && *n >= 1.0 && (n.round() - n).abs() <= f64::EPSILON =>
             {
-                Ok(Self::Index(n.round() as usize - 1))
+                let rounded = n.round();
+                if rounded > usize::MAX.saturating_sub(1) as f64 {
+                    return Err(invalid_argument("readtable: Sheet index is too large"));
+                }
+                let parsed = rounded as usize;
+                if parsed as f64 != rounded || parsed == usize::MAX {
+                    return Err(invalid_argument("readtable: Sheet index is too large"));
+                }
+                parsed
+                    .checked_sub(1)
+                    .map(Self::Index)
+                    .ok_or_else(|| invalid_argument("readtable: Sheet must be one-based"))
             }
             _ => {
                 let text = scalar_text(value, "Sheet")?;
@@ -1051,10 +1110,25 @@ impl RangeSpec {
                 Self::parse_text(&text)
             }
             Value::StringArray(sa) if sa.data.len() == 1 => Self::parse_text(&sa.data[0]),
-            Value::Tensor(t) if t.data.len() == 2 || t.data.len() == 4 => {
-                let mut indices = Vec::with_capacity(t.data.len());
-                for value in &t.data {
-                    indices.push(one_based_to_zero(*value, usize::MAX, "Range")?);
+            Value::Tensor(t) if tensor_len(t) == 2 || tensor_len(t) == 4 => {
+                let len = tensor_len(t);
+                let mut indices = Vec::with_capacity(len);
+                for idx in 0..len {
+                    let value = t
+                        .numeric_value_at(idx)
+                        .ok_or_else(|| invalid_index("table: Range index out of bounds"))?;
+                    indices.push(match value {
+                        NumericScalar::F64(value) => one_based_to_zero(value, usize::MAX, "Range")?,
+                        NumericScalar::F32(value) => {
+                            one_based_to_zero(f64::from(value), usize::MAX, "Range")?
+                        }
+                        value => one_based_integer_to_zero(
+                            &value
+                                .into_int_value()
+                                .expect("non-floating numeric scalar is integer"),
+                            "Range",
+                        )?,
+                    });
                 }
                 Ok(Self {
                     start_row: indices[0],
@@ -1093,6 +1167,111 @@ impl RangeSpec {
             end_col: end.and_then(|item| item.1),
         })
     }
+
+    pub(in crate::builtins::table) fn parse_data_range(value: &Value) -> BuiltinResult<Self> {
+        if matches!(
+            value,
+            Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
+        ) {
+            return Self::parse(value);
+        }
+        if let Some(integer) = tensor::scalar_integer_value(value) {
+            return Ok(Self {
+                start_row: one_based_integer_to_zero(&integer, "DataRange")?,
+                start_col: 0,
+                end_row: None,
+                end_col: None,
+            });
+        }
+        if let Value::Num(value) = value {
+            return Ok(Self {
+                start_row: one_based_to_zero(*value, usize::MAX, "DataRange")?,
+                start_col: 0,
+                end_row: None,
+                end_col: None,
+            });
+        }
+        let Value::Tensor(values) = value else {
+            return Err(invalid_argument(
+                "readtable: DataRange must be a positive row or an Nx2 row-interval matrix",
+            ));
+        };
+        if crate::builtins::common::tensor::is_scalar_tensor(values) {
+            let value = values
+                .numeric_value_at(0)
+                .ok_or_else(|| invalid_argument("readtable: invalid DataRange row"))?;
+            let start_row = match value {
+                NumericScalar::F64(value) => one_based_to_zero(value, usize::MAX, "DataRange")?,
+                NumericScalar::F32(value) => {
+                    one_based_to_zero(f64::from(value), usize::MAX, "DataRange")?
+                }
+                value => one_based_integer_to_zero(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                    "DataRange",
+                )?,
+            };
+            return Ok(Self {
+                start_row,
+                start_col: 0,
+                end_row: None,
+                end_col: None,
+            });
+        }
+        if values.shape.as_slice() != [1, 2] {
+            return Err(invalid_argument(
+                "readtable: DataRange supports one 1-by-2 row interval; multiple Nx2 intervals are not yet supported",
+            ));
+        }
+        let mut rows = Vec::with_capacity(2);
+        for index in 0..2 {
+            let value = values
+                .numeric_value_at(index)
+                .ok_or_else(|| invalid_argument("readtable: invalid DataRange row"))?;
+            rows.push(match value {
+                NumericScalar::F64(value) => one_based_to_zero(value, usize::MAX, "DataRange")?,
+                NumericScalar::F32(value) => {
+                    one_based_to_zero(f64::from(value), usize::MAX, "DataRange")?
+                }
+                value => one_based_integer_to_zero(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                    "DataRange",
+                )?,
+            });
+        }
+        if rows[1] < rows[0] {
+            return Err(invalid_argument(
+                "readtable: DataRange row interval must be increasing",
+            ));
+        }
+        Ok(Self {
+            start_row: rows[0],
+            start_col: 0,
+            end_row: Some(rows[1]),
+            end_col: None,
+        })
+    }
+}
+
+fn tensor_len(tensor: &runmat_value::Tensor) -> usize {
+    tensor.len()
+}
+
+fn one_based_integer_to_zero(
+    value: &runmat_value::IntValue,
+    context: &str,
+) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| {
+            invalid_index(format!(
+                "table: {context} indices must be positive finite integers"
+            ))
+        })
 }
 
 pub(in crate::builtins::table) fn parse_cell_ref(
@@ -1138,4 +1317,150 @@ pub(in crate::builtins::table) fn parse_cell_ref(
         Some(parsed - 1)
     };
     Ok((row, col))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::IntegerStorage;
+
+    fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(values.iter().map(|&value| value as i8).collect()),
+            IntegerStorage::I16(values.iter().map(|&value| value as i16).collect()),
+            IntegerStorage::I32(values.iter().map(|&value| value as i32).collect()),
+            IntegerStorage::I64(values.iter().map(|&value| value as i64).collect()),
+            IntegerStorage::U8(values.iter().map(|&value| value as u8).collect()),
+            IntegerStorage::U16(values.iter().map(|&value| value as u16).collect()),
+            IntegerStorage::U32(values.iter().map(|&value| value as u32).collect()),
+            IntegerStorage::U64(values.to_vec()),
+        ]
+    }
+
+    #[test]
+    fn range_spec_reads_typed_integer_storage_exactly() {
+        let cases = [
+            IntegerStorage::I8(vec![2, 3, 4, 5]),
+            IntegerStorage::I16(vec![2, 3, 4, 5]),
+            IntegerStorage::I32(vec![2, 3, 4, 5]),
+            IntegerStorage::I64(vec![2, 3, 4, 5]),
+            IntegerStorage::U8(vec![2, 3, 4, 5]),
+            IntegerStorage::U16(vec![2, 3, 4, 5]),
+            IntegerStorage::U32(vec![2, 3, 4, 5]),
+            IntegerStorage::U64(vec![2, 3, 4, 5]),
+        ];
+
+        for storage in cases {
+            let range = Tensor::new_integer(storage, vec![1, 4]).expect("range");
+            let parsed = RangeSpec::parse(&Value::Tensor(range)).expect("typed range");
+            assert_eq!(parsed.start_row, 1);
+            assert_eq!(parsed.start_col, 2);
+            assert_eq!(parsed.end_row, Some(3));
+            assert_eq!(parsed.end_col, Some(4));
+        }
+    }
+
+    #[test]
+    fn range_and_sheet_parsers_ignore_poisoned_mirrors_for_every_integer_class() {
+        for storage in integer_storages(&[2, 3]) {
+            let range = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            let parsed = RangeSpec::parse(&Value::Tensor(range)).unwrap();
+            assert_eq!((parsed.start_row, parsed.start_col), (1, 2));
+        }
+        for storage in integer_storages(&[2]) {
+            let sheet = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            assert!(matches!(
+                SheetSelector::parse(&Value::Tensor(sheet)).unwrap(),
+                SheetSelector::Index(1)
+            ));
+        }
+    }
+
+    #[test]
+    fn range_spec_rejects_nonpositive_typed_integer_indices() {
+        let range = Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).unwrap();
+
+        assert!(RangeSpec::parse(&Value::Tensor(range)).is_err());
+    }
+
+    #[test]
+    fn sheet_selector_reads_typed_integer_storage_exactly() {
+        let sheet = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
+
+        match SheetSelector::parse(&Value::Tensor(sheet)).unwrap() {
+            SheetSelector::Index(index) => assert_eq!(index, 2),
+            SheetSelector::Name(name) => panic!("expected sheet index, got {name}"),
+        }
+    }
+
+    #[test]
+    fn sheet_selector_rejects_invalid_integer_and_double_values() {
+        let zero = Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).unwrap();
+        assert!(SheetSelector::parse(&Value::Tensor(zero)).is_err());
+        assert!(SheetSelector::parse(&Value::Num(1.0e300)).is_err());
+    }
+
+    #[test]
+    fn data_range_uses_documented_row_grammar_and_exact_integer_storage() {
+        for storage in integer_storages(&[2, 5]) {
+            let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 2]).unwrap());
+            let range = RangeSpec::parse_data_range(&value).unwrap();
+            assert_eq!(range.start_row, 1);
+            assert_eq!(range.start_col, 0);
+            assert_eq!(range.end_row, Some(4));
+            assert_eq!(range.end_col, None);
+        }
+        let scalar = Value::Int(runmat_value::IntValue::U64(3));
+        let range = RangeSpec::parse_data_range(&scalar).unwrap();
+        assert_eq!(range.start_row, 2);
+        assert_eq!(range.end_row, None);
+        let disjoint = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U8(vec![1, 2, 4, 5]), vec![2, 2]).unwrap(),
+        );
+        assert!(RangeSpec::parse_data_range(&disjoint).is_err());
+        let column =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![2, 1]).unwrap());
+        assert!(RangeSpec::parse_data_range(&column).is_err());
+        let floating_scalar = Value::Tensor(Tensor::new(vec![3.0], vec![1, 1]).unwrap());
+        let range = RangeSpec::parse_data_range(&floating_scalar).unwrap();
+        assert_eq!(range.start_row, 2);
+        assert_eq!(range.end_row, None);
+        let textual = RangeSpec::parse_data_range(&Value::from("A2:B5")).unwrap();
+        assert_eq!(textual.start_row, 1);
+        assert_eq!(textual.start_col, 0);
+        assert_eq!(textual.end_row, Some(4));
+        assert_eq!(textual.end_col, Some(1));
+    }
+
+    #[test]
+    fn expected_num_variables_is_positive_for_every_integer_class() {
+        for storage in integer_storages(&[2]) {
+            let mut options = ReadTableOptions::default();
+            options
+                .apply(
+                    "ExpectedNumVariables",
+                    &Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap()),
+                )
+                .unwrap();
+            assert_eq!(options.num_variables, Some(2));
+        }
+        let mut options = ReadTableOptions::default();
+        assert!(options
+            .apply(
+                "ExpectedNumVariables",
+                &Value::Int(runmat_value::IntValue::U8(0)),
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn detect_boolean_controls_require_exact_zero_or_one() {
+        for storage in integer_storages(&[1]) {
+            let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            assert!(zero_one_bool_scalar(&value, "ReadVariableNames").unwrap());
+        }
+        assert!(zero_one_bool_scalar(&Value::Int(runmat_value::IntValue::I8(-1)), "flag").is_err());
+        assert!(zero_one_bool_scalar(&Value::Num(2.0), "flag").is_err());
+        assert!(zero_one_bool_scalar(&Value::from("on"), "flag").is_err());
+    }
 }

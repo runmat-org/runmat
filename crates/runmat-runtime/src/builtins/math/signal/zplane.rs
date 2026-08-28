@@ -3,18 +3,23 @@
 use glam::Vec4;
 use num_complex::Complex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::scatter::MarkerStyle;
 use runmat_plot::plots::{LinePlot, LineStyle, ScatterPlot};
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::poly::roots;
 use crate::builtins::math::signal::common::{value_to_complex_vector, ComplexVectorInput};
 use crate::builtins::math::signal::type_resolvers::zplane_type;
@@ -28,6 +33,11 @@ const UNIT_CIRCLE_POINTS: usize = 257;
 const ZERO_COLOR: Vec4 = Vec4::new(0.10, 0.45, 0.85, 1.0);
 const POLE_COLOR: Vec4 = Vec4::new(0.85, 0.18, 0.16, 1.0);
 const GUIDE_COLOR: Vec4 = Vec4::new(0.55, 0.55, 0.55, 0.70);
+
+const ZPLANE_NONFLOATING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor { id: "zplane-nonfloating-input", mode: BuiltinExtensionMode::RunMatOnly, description: "Allow typed-integer filter coefficients, zero or pole locations, SOS entries, gain, or encoded axes aliases", error_identifier: Some("RunMat:compatibility:ZplaneNonfloatingInputExtension") };
+pub const ZPLANE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ZPLANE_NONFLOATING_EXTENSION];
+const ZPLANE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "b/a, z/p/k, sos, or encoded axes alias", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The public numeric contract is single or double; typed integers are a separately gated convenience." }];
+pub const ZPLANE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "h = zplane(integer_input, ...)", inputs: &ZPLANE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Extension mode performs one checked conversion into the floating root and graphics domain; strict mode rejects before provider or graphics state access." }];
 
 const ZPLANE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -169,6 +179,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(zplane_type),
     descriptor(crate::builtins::math::signal::zplane::ZPLANE_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::zplane::ZPLANE_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::zplane::ZPLANE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::zplane"
 )]
 async fn zplane_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -176,9 +188,21 @@ async fn zplane_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 pub async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ZPLANE_NONFLOATING_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let (axes_target, args) =
         split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_invalid_argument)?;
+    for value in &args {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
     let data = parse_zero_pole_data(args).await?;
     render_zero_pole_plot(data)
 }
@@ -336,28 +360,23 @@ async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
         })?;
     match value {
         Value::Tensor(tensor) => {
-            validate_sos_matrix_shape(&tensor.shape, tensor.data.len())?;
+            validate_sos_matrix_shape(&tensor.shape, tensor.len())?;
+            let rows = tensor.rows;
+            let cols = tensor.cols;
+            let values = tensor::tensor_into_values_f64(tensor);
             Ok(ComplexMatrixInput {
-                data: tensor
-                    .data
-                    .into_iter()
-                    .map(|re| Complex::new(re, 0.0))
-                    .collect(),
-                rows: tensor.rows,
-                cols: tensor.cols,
+                rows,
+                cols,
+                data: values.into_iter().map(|re| Complex::new(re, 0.0)).collect(),
                 is_complex: false,
             })
         }
         Value::ComplexTensor(tensor) => {
-            validate_sos_matrix_shape(&tensor.shape, tensor.data.len())?;
+            validate_sos_matrix_shape(&tensor.shape, tensor.materialize_f64().len())?;
             let rows = tensor.shape.first().copied().unwrap_or(0);
             let cols = tensor.shape.get(1).copied().unwrap_or(1);
             Ok(ComplexMatrixInput {
-                data: tensor
-                    .data
-                    .into_iter()
-                    .map(|(re, im)| Complex::new(re, im))
-                    .collect(),
+                data: tensor::complex_tensor_into_values_complex64(tensor),
                 rows,
                 cols,
                 is_complex: true,
@@ -393,9 +412,15 @@ fn validate_gain(value: &Value) -> BuiltinResult<()> {
         Value::Num(n) if n.is_finite() => Ok(()),
         Value::Int(_) | Value::Bool(_) => Ok(()),
         Value::Complex(re, im) if re.is_finite() && im.is_finite() => Ok(()),
-        Value::Tensor(t) if t.data.len() == 1 && t.data[0].is_finite() => Ok(()),
+        Value::Tensor(t)
+            if tensor::is_scalar_tensor(t) && tensor::tensor_value_f64(t, 0).is_finite() =>
+        {
+            Ok(())
+        }
         Value::ComplexTensor(t)
-            if t.data.len() == 1 && t.data[0].0.is_finite() && t.data[0].1.is_finite() =>
+            if t.materialize_f64().len() == 1
+                && t.materialize_f64()[0].0.is_finite()
+                && t.materialize_f64()[0].1.is_finite() =>
         {
             Ok(())
         }
@@ -408,16 +433,11 @@ fn validate_gain(value: &Value) -> BuiltinResult<()> {
 
 fn roots_value_to_complex(value: Value) -> BuiltinResult<Vec<Complex<f64>>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor
-            .data
+        Value::Tensor(tensor) => Ok(tensor::tensor_into_values_f64(tensor)
             .into_iter()
             .map(|re| Complex::new(re, 0.0))
             .collect()),
-        Value::ComplexTensor(tensor) => Ok(tensor
-            .data
-            .into_iter()
-            .map(|(re, im)| Complex::new(re, im))
-            .collect()),
+        Value::ComplexTensor(tensor) => Ok(tensor::complex_tensor_into_values_complex64(tensor)),
         Value::Num(n) => Ok(vec![Complex::new(n, 0.0)]),
         other => Err(zplane_error(
             &ZPLANE_ERROR_INTERNAL,
@@ -650,6 +670,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
+    use runmat_value::IntegerStorage;
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).unwrap())
@@ -700,6 +721,21 @@ mod tests {
     }
 
     #[test]
+    fn sos_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 1, 0, 1, -1, 0]), vec![1, 6])
+            .expect("integer sos");
+
+        let data = block_on(parse_zero_pole_data(vec![Value::Tensor(tensor)])).expect("sos");
+
+        assert_eq!(data.zeros.len(), 2);
+        assert_eq!(data.poles.len(), 2);
+        assert!(data
+            .poles
+            .iter()
+            .any(|z| (z.re - 1.0).abs() < 1e-10 && z.im.abs() < 1e-10));
+    }
+
+    #[test]
     fn sos_rejects_rank_greater_than_two() {
         let sos =
             Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 0.0); 12], vec![1, 6, 2]).unwrap());
@@ -715,6 +751,22 @@ mod tests {
             Value::Complex(1.0, 0.25),
         ]))
         .expect("complex gain accepted");
+        assert_eq!(data.zeros.len(), 2);
+        assert_eq!(data.poles.len(), 1);
+    }
+
+    #[test]
+    fn explicit_zpk_gain_reads_typed_integer_storage_exactly() {
+        let gain =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer gain");
+
+        let data = block_on(parse_zero_pole_data(vec![
+            col(&[0.2, 0.4]),
+            col(&[0.8]),
+            Value::Tensor(gain),
+        ]))
+        .expect("integer gain accepted");
+
         assert_eq!(data.zeros.len(), 2);
         assert_eq!(data.poles.len(), 1);
     }
@@ -739,7 +791,10 @@ mod tests {
             panic!("expected handle tensor");
         };
         assert_eq!(handles.shape, vec![1, 4]);
-        assert!(handles.data.iter().all(|handle| handle.is_finite()));
+        assert!(handles
+            .materialize_f64()
+            .iter()
+            .all(|handle| handle.is_finite()));
     }
 
     #[test]
@@ -752,5 +807,19 @@ mod tests {
             panic!("expected output list");
         };
         assert!(values.is_empty());
+    }
+
+    #[test]
+    fn zplane_integer_extension_rejects_before_plot_state() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let coefficients = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("coefficients"),
+        );
+        let error =
+            block_on(evaluate(vec![coefficients, row(&[1.0, -0.8])])).expect_err("strict gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:ZplaneNonfloatingInputExtension")
+        );
     }
 }

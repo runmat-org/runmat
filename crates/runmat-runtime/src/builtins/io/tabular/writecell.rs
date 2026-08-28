@@ -7,18 +7,23 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 
 use futures::lock::Mutex as AsyncMutex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, Value,
 };
 use runmat_filesystem::{File, OpenOptions};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, IntValue, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "writecell";
@@ -28,13 +33,7 @@ pub(super) type WriteLock = Arc<AsyncMutex<()>>;
 type WeakWriteLock = Weak<AsyncMutex<()>>;
 static WRITE_LOCKS: OnceLock<StdMutex<HashMap<String, WeakWriteLock>>> = OnceLock::new();
 
-const WRITECELL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bytesWritten",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of bytes written to the destination file.",
-}];
+const WRITECELL_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
 const WRITECELL_INPUTS_CELL_FILENAME: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "C",
@@ -106,19 +105,19 @@ const WRITECELL_INPUTS_NAME_VALUE_PAIRS: [BuiltinParamDescriptor; 3] = [
 ];
 const WRITECELL_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
-        label: "bytesWritten = writecell(C, filename)",
+        label: "writecell(C, filename)",
         inputs: &WRITECELL_INPUTS_CELL_FILENAME,
-        outputs: &WRITECELL_OUTPUT,
+        outputs: &WRITECELL_NO_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "bytesWritten = writecell(C, filename, name, optionValue)",
+        label: "writecell(C, filename, name, optionValue)",
         inputs: &WRITECELL_INPUTS_NAME_VALUE,
-        outputs: &WRITECELL_OUTPUT,
+        outputs: &WRITECELL_NO_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "bytesWritten = writecell(C, filename, nameValuePairs...)",
+        label: "writecell(C, filename, nameValuePairs...)",
         inputs: &WRITECELL_INPUTS_NAME_VALUE_PAIRS,
-        outputs: &WRITECELL_OUTPUT,
+        outputs: &WRITECELL_NO_OUTPUT,
     },
 ];
 
@@ -174,6 +173,62 @@ pub const WRITECELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &WRITECELL_ERRORS,
 };
 
+const WRITECELL_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "writecell-explicit-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "writecell with explicit gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:WritecellExplicitGpuInputExtension"),
+};
+const WRITECELL_BYTES_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "writecell-bytes-written-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "Request a bytes-written output from writecell",
+    error_identifier: Some("RunMat:compatibility:WritecellBytesOutputExtension"),
+};
+pub const WRITECELL_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    WRITECELL_EXPLICIT_GPU_EXTENSION,
+    WRITECELL_BYTES_OUTPUT_EXTENSION,
+];
+
+const WRITECELL_INTEGER_CONTENT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer scalar cell contents",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Cell arrays may contain scalar values from every native integer class. RunMat reads authoritative integer storage when formatting delimited text or spreadsheet cells.",
+    }];
+const WRITECELL_INTEGER_SHEET_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Sheet",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A numeric sheet selector may use any native integer class. RunMat decodes it exactly as a positive one-based structural index.",
+    }];
+pub const WRITECELL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "writecell(cell_with_integer_scalars, filename, ___)",
+        inputs: &WRITECELL_INTEGER_CONTENT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer cells retain their decimal value through text and spreadsheet serialization without an intermediate floating conversion.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "writecell(C, filename, 'Sheet', integer_index)",
+        inputs: &WRITECELL_INTEGER_SHEET_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The exact selector is range-checked before conversion to the host index used by the spreadsheet writer.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::writecell")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "writecell",
@@ -187,8 +242,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Runs entirely on the host; gpuArray values inside cells are gathered before serialisation.",
+    notes: "Runs entirely on the host. Automatically resident values gather transparently; explicit gpuArray input is accepted only in RunMat mode.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::writecell")]
@@ -254,11 +308,36 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::tabular::writecell::WRITECELL_DESCRIPTOR),
+    extensions(crate::builtins::io::tabular::writecell::WRITECELL_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::tabular::writecell::WRITECELL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::tabular::writecell"
 )]
 async fn writecell_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(writecell_error(&WRITECELL_ERROR_ARG_CONFIG));
+    }
+    let requested_outputs = crate::output_count::current_output_count();
+    if requested_outputs.is_some_and(|count| count > 1) {
+        return Err(writecell_error_with(
+            &WRITECELL_ERROR_ARG_CONFIG,
+            "writecell: too many output arguments",
+        ));
+    }
+    if requested_outputs.is_some_and(|count| count > 0) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITECELL_BYTES_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&data)
+        || rest
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITECELL_EXPLICIT_GPU_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
 
     let filename_value = gather_if_needed_async(&rest[0])
@@ -551,10 +630,38 @@ fn parse_file_type(value: &Value) -> BuiltinResult<OutputFileType> {
 
 fn parse_sheet(value: &Value) -> BuiltinResult<SheetSelector> {
     match value {
-        Value::Num(n) if n.is_finite() && *n >= 1.0 && n.fract() == 0.0 => {
+        Value::Num(n)
+            if n.is_finite() && *n >= 1.0 && n.fract() == 0.0 && *n < usize::MAX as f64 =>
+        {
             Ok(SheetSelector::Index(*n as usize))
         }
-        Value::Int(i) if i.to_i64() >= 1 => Ok(SheetSelector::Index(i.to_i64() as usize)),
+        Value::Int(i) => i
+            .try_to_usize()
+            .filter(|index| *index >= 1)
+            .map(SheetSelector::Index)
+            .ok_or_else(|| {
+                writecell_error_with(
+                    &WRITECELL_ERROR_OPTION,
+                    "writecell: Sheet must be a name or one-based numeric index",
+                )
+            }),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                value
+                    .try_to_usize()
+                    .filter(|index| *index >= 1)
+                    .map(SheetSelector::Index)
+                    .ok_or_else(|| {
+                        writecell_error_with(
+                            &WRITECELL_ERROR_OPTION,
+                            "writecell: Sheet must be a name or one-based numeric index",
+                        )
+                    })
+            } else {
+                parse_sheet(&Value::Num(tensor::tensor_value_f64(tensor, 0)))
+            }
+        }
         _ => {
             let text = string_scalar_from_value(value, "Sheet")
                 .map_err(|message| writecell_error_with(&WRITECELL_ERROR_OPTION, message))?;
@@ -617,6 +724,7 @@ fn parse_a1_cell(value: &str) -> Option<RangeStart> {
 pub(super) enum CellValue {
     Empty,
     Number(f64),
+    Integer(IntValue),
     Boolean(bool),
     Text(String),
 }
@@ -697,14 +805,16 @@ fn ensure_cell_shape(cell: &CellArray) -> BuiltinResult<()> {
 fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
     match value {
         Value::Num(n) => Ok(CellValue::Number(n)),
-        Value::Int(i) => Ok(CellValue::Number(i.to_f64())),
+        Value::Int(i) => Ok(CellValue::Integer(i)),
         Value::Bool(b) => Ok(CellValue::Boolean(b)),
         Value::String(s) => Ok(CellValue::Text(s)),
         Value::CharArray(ca) if ca.rows == 1 => Ok(CellValue::Text(ca.data.iter().collect())),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(CellValue::Text(sa.data[0].clone())),
         Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(CellValue::Number(tensor.data[0])),
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            scalar_tensor_cell_value(&tensor)
+        }
+        Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
         }
@@ -721,6 +831,15 @@ fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
             &WRITECELL_ERROR_DATA,
             format!("writecell: unsupported cell value {other:?}"),
         )),
+    }
+}
+
+pub(super) fn scalar_tensor_cell_value(tensor: &runmat_value::Tensor) -> BuiltinResult<CellValue> {
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage.value_at(0).expect("one-element integer storage");
+        Ok(CellValue::Integer(value))
+    } else {
+        Ok(CellValue::Number(tensor::tensor_value_f64(tensor, 0)))
     }
 }
 
@@ -1148,6 +1267,12 @@ pub(super) fn build_sheet_xml(table: &CellTable, start: RangeStart) -> String {
                         format_numeric(*value)
                     ));
                 }
+                CellValue::Integer(value) => {
+                    xml.push_str(&format!(
+                        "      <c r=\"{reference}\"><v>{}</v></c>\n",
+                        value.decimal_string()
+                    ));
+                }
                 CellValue::Boolean(value) => {
                     xml.push_str(&format!(
                         "      <c r=\"{reference}\" t=\"b\"><v>{}</v></c>\n",
@@ -1172,6 +1297,7 @@ fn format_cell_for_text(cell: &CellValue, options: &WriteCellOptions, delimiter:
     match cell {
         CellValue::Empty => String::new(),
         CellValue::Number(value) => format_numeric(*value),
+        CellValue::Integer(value) => value.decimal_string(),
         CellValue::Boolean(value) => {
             if *value {
                 "1".to_string()
@@ -1387,7 +1513,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::time::Duration;
 
-    use runmat_builtins::{CharArray, LogicalArray, Tensor};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, LogicalArray, Tensor};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -1417,9 +1543,9 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"bytesWritten = writecell(C, filename)"));
-        assert!(labels.contains(&"bytesWritten = writecell(C, filename, name, optionValue)"));
-        assert!(labels.contains(&"bytesWritten = writecell(C, filename, nameValuePairs...)"));
+        assert!(labels.contains(&"writecell(C, filename)"));
+        assert!(labels.contains(&"writecell(C, filename, name, optionValue)"));
+        assert!(labels.contains(&"writecell(C, filename, nameValuePairs...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1611,10 +1737,12 @@ mod tests {
     fn writecell_accepts_scalar_char_tensor_and_logical_cells() {
         let path = temp_path("csv");
         let filename = path.to_string_lossy().into_owned();
+        let typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed scalar tensor");
         let values = cell(
             vec![
                 Value::CharArray(CharArray::new_row("name")),
-                Value::Tensor(Tensor::new(vec![42.0], vec![1, 1]).expect("scalar tensor")),
+                Value::Tensor(typed),
                 Value::LogicalArray(LogicalArray::new(vec![0], vec![1, 1]).expect("logical")),
             ],
             1,
@@ -1624,8 +1752,82 @@ mod tests {
         block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("writecell");
 
         let contents = fs::read_to_string(&path).expect("read contents");
-        assert_eq!(contents, "\"name\",42,0\n");
+        assert_eq!(contents, "\"name\",2026,0\n");
         let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn writecell_preserves_integer_cell_text_exactly() {
+        let path = temp_path("csv");
+        let filename = path.to_string_lossy().into_owned();
+        let wide = (1_u64 << 53) + 1;
+        let typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
+        let values = cell(
+            vec![Value::Int(IntValue::U64(u64::MAX)), Value::Tensor(typed)],
+            1,
+            2,
+        );
+
+        block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("writecell");
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        assert_eq!(contents, "18446744073709551615,9007199254740993\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn writecell_sheet_parser_rejects_unrepresentable_double_boundary() {
+        assert!(parse_sheet(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_sheet(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+
+        let typed = Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+            .expect("typed sheet");
+        let parsed = parse_sheet(&Value::Tensor(typed));
+        match usize::try_from((1_u64 << 53) + 1) {
+            Ok(expected) => {
+                assert!(matches!(parsed, Ok(SheetSelector::Index(actual)) if actual == expected))
+            }
+            Err(_) => assert!(parsed.is_err()),
+        }
+    }
+
+    #[test]
+    fn writecell_explicit_gpu_input_is_gated_before_filesystem_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 469,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let data = cell(vec![Value::GpuTensor(handle)], 1, 1);
+
+        let error = block_on(writecell_builtin(data, vec![Value::from("unused.csv")]))
+            .expect_err("strict mode rejects explicit GPU input before gather or file access");
+        assert_eq!(
+            error.identifier(),
+            WRITECELL_EXPLICIT_GPU_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn writecell_bytes_output_is_gated_before_filesystem_access() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let _outputs = crate::output_count::push_output_count(Some(1));
+        let data = cell(vec![Value::Num(1.0)], 1, 1);
+
+        let error = block_on(writecell_builtin(
+            data,
+            vec![Value::from("definitely/missing/out.csv")],
+        ))
+        .expect_err("strict mode rejects the bytes-written output before file access");
+        assert_eq!(
+            error.identifier(),
+            WRITECELL_BYTES_OUTPUT_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

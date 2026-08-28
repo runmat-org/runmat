@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
-use runmat_builtins::{Type, Value as BuiltinValue};
+use runmat_builtins::Type;
+use runmat_value::Value as BuiltinValue;
 
 pub type NodeId = u32;
 pub type ValueId = u32;

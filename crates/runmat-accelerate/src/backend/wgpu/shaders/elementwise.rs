@@ -1,4 +1,404 @@
 use crate::backend::wgpu::types::NumericPrecision;
+use crate::backend::wgpu::types::UnaryOpCode;
+
+fn wgsl_function(source: &str, name: &str) -> String {
+    let marker = format!("fn {name}(");
+    let start = source
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing unary WGSL helper {name}"));
+    let open = source[start..]
+        .find('{')
+        .map(|offset| start + offset)
+        .unwrap_or_else(|| panic!("missing body for unary WGSL helper {name}"));
+    let mut depth = 0usize;
+    for (offset, byte) in source.as_bytes()[open..].iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return source[start..=open + offset].to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated unary WGSL helper {name}");
+}
+
+fn wgsl_switch_case(source: &str, op: UnaryOpCode) -> String {
+    let marker = format!("case {}u:", op as u32);
+    let start = source
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing unary WGSL case {}", op as u32));
+    let open = source[start..]
+        .find('{')
+        .map(|offset| start + offset)
+        .unwrap_or_else(|| panic!("missing body for unary WGSL case {}", op as u32));
+    let mut depth = 0usize;
+    for (offset, byte) in source.as_bytes()[open..].iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return source[open + 1..open + offset].trim().to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated unary WGSL case {}", op as u32);
+}
+
+fn unary_helper_names(op: UnaryOpCode, precision: NumericPrecision) -> &'static [&'static str] {
+    match op {
+        UnaryOpCode::Expm1 => &["expm1_precise"],
+        UnaryOpCode::Log1p => &["log1p_precise"],
+        UnaryOpCode::Gamma => match precision {
+            NumericPrecision::F64 => &[
+                "lanczos_gamma",
+                "is_non_positive_integer",
+                "is_nan64",
+                "pos_inf_f64",
+                "neg_inf_f64",
+                "nan_f64",
+                "is_inf64",
+                "gamma_real",
+            ],
+            NumericPrecision::F32 => &[
+                "lanczos_gamma",
+                "is_non_positive_integer",
+                "is_nan32",
+                "pos_inf_f32",
+                "neg_inf_f32",
+                "nan_f32",
+                "is_inf32",
+                "gamma_real",
+            ],
+        },
+        UnaryOpCode::Factorial => match precision {
+            NumericPrecision::F64 => &[
+                "is_nan64",
+                "pos_inf_f64",
+                "neg_inf_f64",
+                "nan_f64",
+                "is_inf64",
+                "factorial_real",
+            ],
+            NumericPrecision::F32 => &[
+                "is_nan32",
+                "pos_inf_f32",
+                "neg_inf_f32",
+                "nan_f32",
+                "is_inf32",
+                "factorial_real",
+            ],
+        },
+        UnaryOpCode::Sinc => match precision {
+            NumericPrecision::F64 => &[
+                "is_nan64",
+                "pos_inf_f64",
+                "neg_inf_f64",
+                "is_inf64",
+                "sinc_real",
+            ],
+            NumericPrecision::F32 => &[
+                "is_nan32",
+                "pos_inf_f32",
+                "neg_inf_f32",
+                "is_inf32",
+                "sinc_real",
+            ],
+        },
+        UnaryOpCode::Heaviside => match precision {
+            NumericPrecision::F64 => &["is_nan64", "heaviside_real"],
+            NumericPrecision::F32 => &["is_nan32", "heaviside_real"],
+        },
+        UnaryOpCode::Round => match precision {
+            NumericPrecision::F64 => &["is_nan64", "pos_inf_f64", "neg_inf_f64", "is_inf64"],
+            NumericPrecision::F32 => &["is_nan32", "pos_inf_f32", "neg_inf_f32", "is_inf32"],
+        },
+        UnaryOpCode::Erf => match precision {
+            NumericPrecision::F64 => &[
+                "is_nan64",
+                "pos_inf_f64",
+                "neg_inf_f64",
+                "is_inf64",
+                "erf_real",
+            ],
+            NumericPrecision::F32 => &[
+                "is_nan32",
+                "pos_inf_f32",
+                "neg_inf_f32",
+                "is_inf32",
+                "erf_real",
+            ],
+        },
+        UnaryOpCode::Gammaln => match precision {
+            NumericPrecision::F64 => {
+                &["lanczos_gammaln", "is_nan64", "pos_inf_f64", "gammaln_real"]
+            }
+            NumericPrecision::F32 => {
+                &["lanczos_gammaln", "is_nan32", "pos_inf_f32", "gammaln_real"]
+            }
+        },
+        UnaryOpCode::Erfcinv => match precision {
+            NumericPrecision::F64 => &[
+                "is_nan64",
+                "pos_inf_f64",
+                "neg_inf_f64",
+                "is_inf64",
+                "erf_real",
+                "erfc_positive_tail_real",
+                "erfcinv_positive_tail_real",
+                "erfcinv_real",
+            ],
+            NumericPrecision::F32 => &[
+                "is_nan32",
+                "pos_inf_f32",
+                "neg_inf_f32",
+                "is_inf32",
+                "erf_real",
+                "erfc_positive_tail_real",
+                "erfcinv_positive_tail_real",
+                "erfcinv_real",
+            ],
+        },
+        _ => &[],
+    }
+}
+
+fn inline_gammaln_body(precision: NumericPrecision) -> String {
+    let (ty, max_finite, small_cutoff, epsilon) = match precision {
+        NumericPrecision::F64 => ("f64", "1.7976931348623157e308", "1.0e-305", "1.0e-12"),
+        NumericPrecision::F32 => ("f32", "3.4028234663852886e38", "1.0e-30", "1.0e-5"),
+    };
+    format!(
+        r#"
+if a != a {{ return a; }}
+if a == {ty}(0.0) || a > {ty}({max_finite}) {{ return {ty}(1.0) / {ty}(0.0); }}
+if a < {ty}(0.0) {{ return {ty}(0.0) / {ty}(0.0); }}
+if a < {ty}({small_cutoff}) {{ return -log(a); }}
+var z = a;
+if a < {ty}(0.5) {{ z = {ty}(1.0) - a; }}
+let z_minus_one = z - {ty}(1.0);
+var sum: {ty} = {ty}(0.99999999999980993);
+sum = sum + {ty}(676.5203681218851) / (z_minus_one + {ty}(1.0));
+sum = sum + {ty}(-1259.1392167224028) / (z_minus_one + {ty}(2.0));
+sum = sum + {ty}(771.3234287776531) / (z_minus_one + {ty}(3.0));
+sum = sum + {ty}(-176.6150291621406) / (z_minus_one + {ty}(4.0));
+sum = sum + {ty}(12.507343278686905) / (z_minus_one + {ty}(5.0));
+sum = sum + {ty}(-0.13857109526572012) / (z_minus_one + {ty}(6.0));
+sum = sum + {ty}(0.000009984369578019572) / (z_minus_one + {ty}(7.0));
+sum = sum + {ty}(0.00000015056327351493116) / (z_minus_one + {ty}(8.0));
+let t = z_minus_one + {ty}(7.5);
+let value = {ty}(0.9189385332046727) + (z_minus_one + {ty}(0.5)) * log(t) - t + log(sum);
+if a < {ty}(0.5) {{
+    let sin_term = sin({ty}(3.141592653589793) * a);
+    if abs(sin_term) <= {ty}({epsilon}) {{ return {ty}(1.0) / {ty}(0.0); }}
+    return log({ty}(3.141592653589793)) - log(sin_term) - value;
+}}
+return value;
+"#
+    )
+}
+
+fn inline_erfcinv_body(precision: NumericPrecision) -> String {
+    // Some D3D12 drivers reject kernels that construct non-finite floating-point
+    // values in shader arithmetic. Construct their IEEE representations with
+    // typed bitcast helpers while preserving the floating-point storage ABI.
+    let (ty, positive_infinity, negative_infinity, nan) = match precision {
+        NumericPrecision::F64 => ("f64", "pos_inf_f64", "neg_inf_f64", "nan_f64"),
+        NumericPrecision::F32 => ("f32", "pos_inf_f32", "neg_inf_f32", "nan_f32"),
+    };
+    format!(
+        r#"
+var safe_a = {ty}(1.0);
+if a > {ty}(0.0) && a < {ty}(2.0) {{ safe_a = a; }}
+let p = safe_a * {ty}(0.5);
+var normal: {ty};
+if p < {ty}(0.02425) {{
+    let q = sqrt(-{ty}(2.0) * log(p));
+    var numerator = {ty}(-0.007784894002430293);
+    numerator = numerator * q + {ty}(-0.3223964580411365);
+    numerator = numerator * q + {ty}(-2.400758277161838);
+    numerator = numerator * q + {ty}(-2.549732539343734);
+    numerator = numerator * q + {ty}(4.374664141464968);
+    numerator = numerator * q + {ty}(2.938163982698783);
+    var denominator = {ty}(0.007784695709041462);
+    denominator = denominator * q + {ty}(0.3224671290700398);
+    denominator = denominator * q + {ty}(2.445134137142996);
+    denominator = denominator * q + {ty}(3.754408661907416);
+    denominator = denominator * q + {ty}(1.0);
+    normal = numerator / denominator;
+}} else if p > {ty}(0.97575) {{
+    let q = sqrt(-{ty}(2.0) * log({ty}(1.0) - p));
+    var numerator = {ty}(-0.007784894002430293);
+    numerator = numerator * q + {ty}(-0.3223964580411365);
+    numerator = numerator * q + {ty}(-2.400758277161838);
+    numerator = numerator * q + {ty}(-2.549732539343734);
+    numerator = numerator * q + {ty}(4.374664141464968);
+    numerator = numerator * q + {ty}(2.938163982698783);
+    var denominator = {ty}(0.007784695709041462);
+    denominator = denominator * q + {ty}(0.3224671290700398);
+    denominator = denominator * q + {ty}(2.445134137142996);
+    denominator = denominator * q + {ty}(3.754408661907416);
+    denominator = denominator * q + {ty}(1.0);
+    normal = -(numerator / denominator);
+}} else {{
+    let q = p - {ty}(0.5);
+    let r = q * q;
+    var numerator = {ty}(-39.69683028665376);
+    numerator = numerator * r + {ty}(220.9460984245205);
+    numerator = numerator * r + {ty}(-275.9285104469687);
+    numerator = numerator * r + {ty}(138.3577518672690);
+    numerator = numerator * r + {ty}(-30.66479806614716);
+    numerator = numerator * r + {ty}(2.506628277459239);
+    var denominator = {ty}(-54.47609879822406);
+    denominator = denominator * r + {ty}(161.5858368580409);
+    denominator = denominator * r + {ty}(-155.6989798598866);
+    denominator = denominator * r + {ty}(66.80131188771972);
+    denominator = denominator * r + {ty}(-13.28068155288572);
+    denominator = denominator * r + {ty}(1.0);
+    normal = (numerator * q) / denominator;
+}}
+var result = -normal * {ty}(0.7071067811865476);
+if a != a {{ result = a; }}
+if a < {ty}(0.0) || a > {ty}(2.0) {{ result = {nan}(); }}
+if a == {ty}(0.0) {{ result = {positive_infinity}(); }}
+if a == {ty}(2.0) {{ result = {negative_infinity}(); }}
+return result;
+"#
+    )
+}
+
+pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) -> String {
+    let (template, ty) = match precision {
+        NumericPrecision::F64 => (UNARY_SHADER_F64, "f64"),
+        NumericPrecision::F32 => (UNARY_SHADER_F32, "f32"),
+    };
+    let constants_start = template
+        .find("const PI:")
+        .expect("unary WGSL constants must start with PI");
+    let constants_end = template[constants_start..]
+        .find("fn expm1_precise")
+        .map(|offset| constants_start + offset)
+        .expect("unary WGSL constants must precede expm1");
+    let constants = &template[constants_start..constants_end];
+    let helper_names: &[&str] = if matches!(op, UnaryOpCode::Gammaln | UnaryOpCode::Erfcinv) {
+        match (op, precision) {
+            (UnaryOpCode::Erfcinv, NumericPrecision::F64) => {
+                &["pos_inf_f64", "neg_inf_f64", "nan_f64"]
+            }
+            (UnaryOpCode::Erfcinv, NumericPrecision::F32) => {
+                &["pos_inf_f32", "neg_inf_f32", "nan_f32"]
+            }
+            _ => &[],
+        }
+    } else {
+        unary_helper_names(op, precision)
+    };
+    let helpers = helper_names
+        .iter()
+        .map(|name| wgsl_function(template, name))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let case_body = if matches!(op, UnaryOpCode::Gammaln) {
+        inline_gammaln_body(precision)
+    } else if matches!(op, UnaryOpCode::Erfcinv) {
+        inline_erfcinv_body(precision)
+    } else {
+        wgsl_switch_case(template, op)
+    };
+    format!(
+        "struct InputTensor {{ data: array<{ty}> }};\nstruct OutputTensor {{ data: array<{ty}> }};\nstruct Params {{ len: u32, offset: u32, _pad1: u32, _pad2: u32 }};\n{constants}\n@group(0) @binding(0) var<storage, read> A: InputTensor;\n@group(0) @binding(1) var<storage, read_write> Out: OutputTensor;\n@group(0) @binding(2) var<uniform> params: Params;\n{helpers}\nfn apply(a: {ty}) -> {ty} {{ {case_body} }}\n@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let local = gid.x;\n    if local >= params.len {{ return; }}\n    let idx = params.offset + local;\n    Out.data[idx] = apply(A.data[idx]);\n}}\n"
+    )
+}
+
+#[cfg(test)]
+mod real_unary_tests {
+    use super::*;
+
+    const OPS: [UnaryOpCode; 39] = [
+        UnaryOpCode::Sin,
+        UnaryOpCode::Cos,
+        UnaryOpCode::Abs,
+        UnaryOpCode::Exp,
+        UnaryOpCode::Log,
+        UnaryOpCode::Sqrt,
+        UnaryOpCode::Sign,
+        UnaryOpCode::Real,
+        UnaryOpCode::Imag,
+        UnaryOpCode::Conj,
+        UnaryOpCode::Angle,
+        UnaryOpCode::Expm1,
+        UnaryOpCode::Log1p,
+        UnaryOpCode::Log10,
+        UnaryOpCode::Log2,
+        UnaryOpCode::Pow2,
+        UnaryOpCode::Floor,
+        UnaryOpCode::Ceil,
+        UnaryOpCode::Fix,
+        UnaryOpCode::Tan,
+        UnaryOpCode::Asin,
+        UnaryOpCode::Acos,
+        UnaryOpCode::Atan,
+        UnaryOpCode::Sinh,
+        UnaryOpCode::Cosh,
+        UnaryOpCode::Tanh,
+        UnaryOpCode::Asinh,
+        UnaryOpCode::Acosh,
+        UnaryOpCode::Atanh,
+        UnaryOpCode::Gamma,
+        UnaryOpCode::Factorial,
+        UnaryOpCode::Single,
+        UnaryOpCode::NextPow2,
+        UnaryOpCode::Sinc,
+        UnaryOpCode::Heaviside,
+        UnaryOpCode::Erf,
+        UnaryOpCode::Gammaln,
+        UnaryOpCode::Round,
+        UnaryOpCode::Erfcinv,
+    ];
+
+    #[test]
+    fn every_real_unary_opcode_specializes_for_both_precisions() {
+        for precision in [NumericPrecision::F32, NumericPrecision::F64] {
+            for op in OPS {
+                let shader = real_unary_shader(op, precision);
+                assert!(shader.contains("fn apply("));
+                assert!(shader.contains("@workgroup_size(@WG@)"));
+                assert!(!shader.contains("switch params.op"));
+            }
+        }
+    }
+
+    #[test]
+    fn simple_real_unary_shader_excludes_special_function_helpers() {
+        let shader = real_unary_shader(UnaryOpCode::Abs, NumericPrecision::F32);
+        assert!(!shader.contains("fn lanczos_"));
+        assert!(!shader.contains("fn erf_real"));
+        assert!(!shader.contains("fn factorial_real"));
+    }
+
+    #[test]
+    fn erfcinv_shader_preserves_typed_storage_with_portable_ieee_values() {
+        let f32_shader = real_unary_shader(UnaryOpCode::Erfcinv, NumericPrecision::F32);
+        assert!(f32_shader.contains("struct OutputTensor { data: array<f32> }"));
+        assert!(f32_shader.contains("fn pos_inf_f32() -> f32"));
+        assert!(f32_shader.contains("fn neg_inf_f32() -> f32"));
+        assert!(f32_shader.contains("fn nan_f32() -> f32"));
+        assert!(f32_shader.find("let p = safe_a").unwrap() < f32_shader.find("if a != a").unwrap());
+
+        let f64_shader = real_unary_shader(UnaryOpCode::Erfcinv, NumericPrecision::F64);
+        assert!(f64_shader.contains("struct OutputTensor { data: array<f64> }"));
+        assert!(f64_shader.contains("fn pos_inf_f64() -> f64"));
+        assert!(f64_shader.contains("fn neg_inf_f64() -> f64"));
+        assert!(f64_shader.contains("fn nan_f64() -> f64"));
+        assert!(f64_shader.find("let p = safe_a").unwrap() < f64_shader.find("if a != a").unwrap());
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ComplexUnaryOp {
@@ -714,7 +1114,7 @@ fn apply(a: f64, b: f64) -> f64 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return atan2(a, b); }
+        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u64>(b) == 0x8000000000000000u), (a == 0.0) && (b == 0.0)); }
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }
@@ -764,7 +1164,7 @@ fn apply(a: f32, b: f32) -> f32 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return atan2(a, b); }
+        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u32>(b) == 0x80000000u), (a == 0.0) && (b == 0.0)); }
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }
@@ -827,7 +1227,7 @@ fn apply(a: f64, b: f64) -> f64 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return atan2(a, b); }
+        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u64>(b) == 0x8000000000000000u), (a == 0.0) && (b == 0.0)); }
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }
@@ -912,7 +1312,7 @@ fn apply(a: f32, b: f32) -> f32 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return atan2(a, b); }
+        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u32>(b) == 0x80000000u), (a == 0.0) && (b == 0.0)); }
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }
@@ -954,175 +1354,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Out.data[idx] = apply(A.data[ia], B.data[ib]);
 }
 "#;
-
-fn wgsl_function<'a>(source: &'a str, name: &str) -> &'a str {
-    let signature = format!("fn {name}(");
-    let start = source
-        .find(&signature)
-        .unwrap_or_else(|| panic!("unary WGSL helper `{name}` is missing"));
-    let open = source[start..]
-        .find('{')
-        .map(|offset| start + offset)
-        .expect("unary WGSL helper has no body");
-    let mut depth = 0usize;
-    for (offset, byte) in source.as_bytes()[open..].iter().enumerate() {
-        match byte {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return &source[start..=open + offset];
-                }
-            }
-            _ => {}
-        }
-    }
-    panic!("unary WGSL helper `{name}` has an unterminated body")
-}
-
-pub(crate) fn real_unary_shader(
-    op: crate::backend::wgpu::types::UnaryOpCode,
-    precision: NumericPrecision,
-) -> String {
-    use crate::backend::wgpu::types::UnaryOpCode;
-
-    let (source, ty, nan, pos_inf, neg_inf, is_inf) = match precision {
-        NumericPrecision::F64 => (
-            UNARY_SHADER_F64,
-            "f64",
-            "is_nan64",
-            "pos_inf_f64",
-            "neg_inf_f64",
-            "is_inf64",
-        ),
-        NumericPrecision::F32 => (
-            UNARY_SHADER_F32,
-            "f32",
-            "is_nan32",
-            "pos_inf_f32",
-            "neg_inf_f32",
-            "is_inf32",
-        ),
-    };
-    let header_end = source
-        .find("fn expm1_precise")
-        .expect("unary WGSL helper section is missing");
-    let mut shader = format!(
-        r#"
-struct Tensor {{ data: array<{ty}>, }};
-struct Params {{ len: u32, op: u32, offset: u32, total: u32, }};
-@group(0) @binding(0) var<storage, read> A: Tensor;
-@group(0) @binding(1) var<storage, read_write> Out: Tensor;
-@group(0) @binding(2) var<uniform> params: Params;
-"#
-    );
-
-    let helpers: Vec<&str> = match op {
-        UnaryOpCode::Expm1 => vec!["expm1_precise"],
-        UnaryOpCode::Log1p => vec!["log1p_precise"],
-        UnaryOpCode::Gamma => vec![
-            "lanczos_gamma",
-            "is_non_positive_integer",
-            nan,
-            pos_inf,
-            neg_inf,
-            if ty == "f64" { "nan_f64" } else { "nan_f32" },
-            is_inf,
-            "gamma_real",
-        ],
-        UnaryOpCode::Factorial => vec![
-            nan,
-            pos_inf,
-            neg_inf,
-            if ty == "f64" { "nan_f64" } else { "nan_f32" },
-            is_inf,
-            "factorial_real",
-        ],
-        UnaryOpCode::Sinc => vec![nan, pos_inf, neg_inf, is_inf, "sinc_real"],
-        UnaryOpCode::Heaviside => vec![nan, "heaviside_real"],
-        UnaryOpCode::Erf => vec![nan, pos_inf, neg_inf, is_inf, "erf_real"],
-        UnaryOpCode::Gammaln => vec![
-            "lanczos_gammaln",
-            nan,
-            pos_inf,
-            if ty == "f64" { "nan_f64" } else { "nan_f32" },
-            "gammaln_real",
-        ],
-        UnaryOpCode::Round => vec![nan, pos_inf, neg_inf, is_inf],
-        UnaryOpCode::Erfcinv if ty == "f32" => {
-            vec![nan, pos_inf, neg_inf, is_inf, "erf_real"]
-        }
-        UnaryOpCode::Erfcinv => vec![nan, pos_inf, neg_inf, is_inf, "erf_real", "erfcinv_real"],
-        _ => Vec::new(),
-    };
-    if !helpers.is_empty() {
-        let constants_start = source
-            .find("const PI:")
-            .expect("unary WGSL constants are missing");
-        shader.push_str(&source[constants_start..header_end]);
-    }
-    for helper in helpers {
-        shader.push_str(wgsl_function(source, helper));
-        shader.push_str("\n\n");
-    }
-
-    let apply_body = match op {
-        UnaryOpCode::Sin => "return sin(a);".to_owned(),
-        UnaryOpCode::Cos => "return cos(a);".to_owned(),
-        UnaryOpCode::Abs => "return abs(a);".to_owned(),
-        UnaryOpCode::Exp => "return exp(a);".to_owned(),
-        UnaryOpCode::Log => "return log(a);".to_owned(),
-        UnaryOpCode::Sqrt => "return sqrt(a);".to_owned(),
-        UnaryOpCode::Sign => "if (a > 0.0) { return 1.0; } if (a < 0.0) { return -1.0; } if (a == 0.0) { return 0.0; } return a;".to_owned(),
-        UnaryOpCode::Real | UnaryOpCode::Conj => "return a;".to_owned(),
-        UnaryOpCode::Imag => "return 0.0;".to_owned(),
-        UnaryOpCode::Angle => format!("return atan2({ty}(0.0), a);"),
-        UnaryOpCode::Expm1 => "return expm1_precise(a);".to_owned(),
-        UnaryOpCode::Log1p => "return log1p_precise(a);".to_owned(),
-        UnaryOpCode::Log10 => "return log(a) * 0.4342944819032518;".to_owned(),
-        UnaryOpCode::Log2 => "return log(a) * 1.4426950408889634;".to_owned(),
-        UnaryOpCode::Pow2 => "return exp(a * 0.6931471805599453);".to_owned(),
-        UnaryOpCode::Floor => "return floor(a);".to_owned(),
-        UnaryOpCode::Ceil => "return ceil(a);".to_owned(),
-        UnaryOpCode::Fix => "let value = trunc(a); if (value == 0.0) { return 0.0; } return value;".to_owned(),
-        UnaryOpCode::Tan => "return tan(a);".to_owned(),
-        UnaryOpCode::Asin => "return asin(a);".to_owned(),
-        UnaryOpCode::Acos => "return acos(a);".to_owned(),
-        UnaryOpCode::Atan => "return atan(a);".to_owned(),
-        UnaryOpCode::Sinh => "return sinh(a);".to_owned(),
-        UnaryOpCode::Cosh => "return cosh(a);".to_owned(),
-        UnaryOpCode::Tanh => "return tanh(a);".to_owned(),
-        UnaryOpCode::Asinh => "return asinh(a);".to_owned(),
-        UnaryOpCode::Acosh => "return acosh(a);".to_owned(),
-        UnaryOpCode::Atanh => "return atanh(a);".to_owned(),
-        UnaryOpCode::Gamma => "return gamma_real(a);".to_owned(),
-        UnaryOpCode::Factorial => "return factorial_real(a);".to_owned(),
-        UnaryOpCode::Single => if ty == "f64" { "return f64(f32(a));" } else { "return a;" }.to_owned(),
-        UnaryOpCode::NextPow2 => "let value = abs(a); if (value == 0.0) { return 0.0; } return ceil(log2(value));".to_owned(),
-        UnaryOpCode::Sinc => "return sinc_real(a);".to_owned(),
-        UnaryOpCode::Heaviside => "return heaviside_real(a);".to_owned(),
-        UnaryOpCode::Erf => "return erf_real(a);".to_owned(),
-        UnaryOpCode::Gammaln => "return gammaln_real(a);".to_owned(),
-        UnaryOpCode::Round => format!("if ({nan}(a) || {is_inf}(a)) {{ return a; }} if (a >= 0.0) {{ return floor(a + 0.5); }} return ceil(a - 0.5);"),
-        UnaryOpCode::Erfcinv if ty == "f32" => "if (a != a) { return a; } if (a < 0.0 || a > 2.0) { return bitcast<f32>(0x7fc00000u); } if (a == 0.0) { return bitcast<f32>(0x7f800000u); } if (a == 2.0) { return bitcast<f32>(0xff800000u); } if (a == 1.0) { return 0.0; } var lo: f32 = -6.0; var hi: f32 = 6.0; var step: u32 = 0u; loop { if (step >= 26u) { break; } let mid = 0.5 * (lo + hi); let erfc_mid = 1.0 - erf_real(mid); if (erfc_mid > a) { lo = mid; } else { hi = mid; } step = step + 1u; } return 0.5 * (lo + hi);".to_owned(),
-        UnaryOpCode::Erfcinv => "return erfcinv_real(a);".to_owned(),
-    };
-    shader.push_str(&format!(
-        r#"
-fn apply(a: {ty}) -> {ty} {{ {apply_body} }}
-
-@compute @workgroup_size(512)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
-    let local = gid.x;
-    if local >= params.len {{ return; }}
-    let idx = params.offset + local;
-    if idx >= params.total {{ return; }}
-    Out.data[idx] = apply(A.data[idx]);
-}}
-"#
-    ));
-    shader
-}
 
 pub const UNARY_LAYOUT_SHADER_F64: &str = r#"
 struct Tensor { data: array<f64>, };

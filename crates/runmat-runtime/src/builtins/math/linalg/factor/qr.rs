@@ -6,20 +6,105 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::type_resolvers::{matrix_dims, numeric_tensor_from_shape};
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use super::lu::PivotMode;
 
 const BUILTIN_NAME: &str = "qr";
+
+pub const QR_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qr-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qr with a typed-integer matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QrIntegerInputExtension"),
+};
+
+pub const QR_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qr-integer-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qr with a typed-integer economy selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QrIntegerOptionExtension"),
+};
+pub const QR_RESIDENT_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qr-resident-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qr with a gpuArray option value is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QrResidentOptionExtension"),
+};
+pub const QR_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qr-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qr with a logical matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QrLogicalInputExtension"),
+};
+pub const QR_LOGICAL_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "qr-logical-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "qr with a logical economy selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:QrLogicalOptionExtension"),
+};
+
+pub const QR_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    QR_INTEGER_INPUT_EXTENSION,
+    QR_INTEGER_OPTION_EXTENSION,
+    QR_RESIDENT_OPTION_EXTENSION,
+    QR_LOGICAL_INPUT_EXTENSION,
+    QR_LOGICAL_OPTION_EXTENSION,
+];
+
+const QR_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The public full-matrix classes are single and double; RunMat mode admits real integer matrices only after an exact binary64-boundary check.",
+}];
+
+const QR_INTEGER_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "economy_selector",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented legacy economy selector is the numeric literal 0; RunMat mode additionally accepts typed integer scalar zero without a floating conversion.",
+    }];
+
+pub const QR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[Q, R, P] = qr(integer_A, options...)",
+        inputs: &QR_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The gated matrix crosses one checked binary64 QR boundary. Q, R, and matrix-form P are double; vector-form P is a one-based double index vector, and automatic residency may restore outputs to the owner.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[Q, R, P] = qr(A, integer_zero)",
+        inputs: &QR_INTEGER_OPTION_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed integer scalar zero selects the legacy economy/vector form exactly in RunMat mode; every nonzero or nonscalar integer option rejects as an invalid option, and an explicit resident option is independently gated before exact-owner download.",
+    },
+];
 
 const QR_OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "R",
@@ -301,6 +386,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(qr_type),
     descriptor(crate::builtins::math::linalg::factor::qr::QR_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::factor::qr::QR_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::factor::qr::QR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
 async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -394,19 +481,63 @@ struct QrOptions {
 
 /// Evaluate the builtin with full access to multiple outputs.
 pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
+    if crate::builtins::common::validation::value_has_native_integer_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &QR_INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if crate::builtins::common::validation::value_has_logical_class(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &QR_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    for option in args {
+        if crate::builtins::common::validation::value_contains_explicit_gpu(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &QR_RESIDENT_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if crate::builtins::common::validation::value_has_logical_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &QR_LOGICAL_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if crate::builtins::common::validation::value_has_native_integer_class(option) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &QR_INTEGER_OPTION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
     let options = parse_options(args).await?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    if crate::builtins::common::validation::value_has_native_integer_class(&value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
+            .await?
+    {
+        return Err(qr_invalid_input(
+            "qr: integer input must be exactly representable as double",
+        ));
+    }
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = evaluate_gpu(&handle, &options).await? {
-                return Ok(eval);
+            let integer_input = runmat_accelerate_api::handle_integer_type(&handle).is_some();
+            if !integer_input {
+                if let Some(eval) = evaluate_gpu(&handle, &options).await? {
+                    return Ok(eval);
+                }
             }
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(with_qr_context)?;
-            let prefer_gpu = runmat_accelerate_api::provider().is_some();
-            evaluate_host_value(Value::Tensor(tensor), options, prefer_gpu).await
+            let owner = gpu_helpers::exact_provider_for_handle(&handle);
+            evaluate_host_value(Value::Tensor(tensor), options, owner).await
         }
-        other => evaluate_host_value(other, options, false).await,
+        other => evaluate_host_value(other, options, None).await,
     }
 }
 
@@ -472,11 +603,11 @@ async fn evaluate_gpu(
 async fn evaluate_host_value(
     value: Value,
     options: QrOptions,
-    prefer_gpu: bool,
+    output_provider: Option<&'static dyn AccelProvider>,
 ) -> BuiltinResult<QrEval> {
     let matrix = extract_matrix(value).await?;
     let components = qr_factor(matrix)?;
-    assemble_eval(components, options, prefer_gpu)
+    assemble_eval(components, options, output_provider)
 }
 
 async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
@@ -487,6 +618,7 @@ async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
     for arg in args {
         if is_zero_scalar(arg).await {
             opts.mode = QrMode::Economy;
+            opts.pivot = PivotMode::Vector;
             continue;
         }
         if let Some(text) = tensor::value_to_string(arg) {
@@ -515,26 +647,30 @@ async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
 async fn is_zero_scalar(value: &Value) -> bool {
     match value {
         Value::Num(n) => n.abs() <= EPS_SCALAR,
-        Value::Int(i) => i.to_i64() == 0,
+        Value::Int(i) => i.is_zero(),
         Value::Bool(b) => !b,
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                t.data[0].abs() <= EPS_SCALAR
+            if tensor::is_scalar_tensor(t) {
+                t.integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                    .map_or_else(
+                        || tensor::tensor_value_f64(t, 0).abs() <= EPS_SCALAR,
+                        |value| value.is_zero(),
+                    )
             } else {
                 false
             }
         }
         Value::GpuTensor(handle) => {
-            // Best-effort: treat 1-element gpuArray with ~0 value as zero option
             if handle.shape.iter().product::<usize>() == 1 {
-                if let Some(p) = runmat_accelerate_api::provider() {
-                    if let Ok(host) = download_handle_async(p, handle).await {
-                        return host
-                            .data
-                            .first()
-                            .map(|v| v.abs() <= EPS_SCALAR)
-                            .unwrap_or(false);
-                    }
+                if let Ok(host) = gpu_helpers::gather_tensor_async(handle).await {
+                    return host
+                        .integer_storage()
+                        .and_then(|storage| storage.value_at(0))
+                        .map_or_else(
+                            || tensor::tensor_value_f64(&host, 0).abs() <= EPS_SCALAR,
+                            |value| value.is_zero(),
+                        );
                 }
             }
             false
@@ -576,7 +712,7 @@ async fn extract_matrix(value: Value) -> BuiltinResult<ColMajorMatrix> {
 fn assemble_eval(
     components: QrComponents,
     options: QrOptions,
-    prefer_gpu: bool,
+    output_provider: Option<&'static dyn AccelProvider>,
 ) -> BuiltinResult<QrEval> {
     let rows = components.reflectors.rows;
     let cols = components.reflectors.cols;
@@ -589,8 +725,8 @@ fn assemble_eval(
 
     let (q_value, r_value) = match options.mode {
         QrMode::Full => (
-            matrix_to_value(&q_full, "qr", prefer_gpu)?,
-            matrix_to_value(&r_full, "qr", prefer_gpu)?,
+            matrix_to_value(&q_full, "qr", output_provider)?,
+            matrix_to_value(&r_full, "qr", output_provider)?,
         ),
         QrMode::Economy => {
             let mut q_econ = if rows >= cols {
@@ -606,14 +742,15 @@ fn assemble_eval(
             q_econ.clean(EPS_CLEAN);
             r_econ.clean(EPS_CLEAN);
             (
-                matrix_to_value(&q_econ, "qr", prefer_gpu)?,
-                matrix_to_value(&r_econ, "qr", prefer_gpu)?,
+                matrix_to_value(&q_econ, "qr", output_provider)?,
+                matrix_to_value(&r_econ, "qr", output_provider)?,
             )
         }
     };
 
-    let perm_matrix_value = matrix_to_value(&perm_matrix, "qr", prefer_gpu)?;
-    let perm_vector_value = maybe_upload_value(pivot_vector_to_value(&perm_vector)?, prefer_gpu);
+    let perm_matrix_value = matrix_to_value(&perm_matrix, "qr", output_provider)?;
+    let perm_vector_value =
+        maybe_upload_value(pivot_vector_to_value(&perm_vector)?, output_provider);
 
     Ok(QrEval {
         q: q_value,
@@ -645,23 +782,20 @@ fn perm_matrix(size: usize, perm: &[usize]) -> ColMajorMatrix {
     matrix
 }
 
-fn matrix_to_value(matrix: &ColMajorMatrix, label: &str, prefer_gpu: bool) -> BuiltinResult<Value> {
+fn matrix_to_value(
+    matrix: &ColMajorMatrix,
+    label: &str,
+    output_provider: Option<&'static dyn AccelProvider>,
+) -> BuiltinResult<Value> {
     let value = matrix.to_value(label)?;
-    Ok(maybe_upload_value(value, prefer_gpu))
+    Ok(maybe_upload_value(value, output_provider))
 }
 
-fn maybe_upload_value(value: Value, prefer_gpu: bool) -> Value {
-    if !prefer_gpu {
-        return value;
-    }
+fn maybe_upload_value(value: Value, output_provider: Option<&'static dyn AccelProvider>) -> Value {
     match value {
         Value::Tensor(tensor) => {
-            if let Some(provider) = runmat_accelerate_api::provider() {
-                let view = runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
-                    shape: &tensor.shape,
-                };
-                if let Ok(handle) = provider.upload(&view) {
+            if let Some(provider) = output_provider {
+                if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
                     return Value::GpuTensor(handle);
                 }
             }
@@ -902,11 +1036,12 @@ impl ColMajorMatrix {
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
+        let values = tensor::tensor_values_f64_cow(tensor);
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
                 let idx = row + col * rows;
-                data[idx] = Complex64::new(tensor.data[idx], 0.0);
+                data[idx] = Complex64::new(values[idx], 0.0);
             }
         }
         Ok(Self { rows, cols, data })
@@ -922,7 +1057,7 @@ impl ColMajorMatrix {
         for col in 0..cols {
             for row in 0..rows {
                 let idx = row + col * rows;
-                let (re, im) = tensor.data[idx];
+                let (re, im) = tensor.materialize_f64()[idx];
                 data[idx] = Complex64::new(re, im);
             }
         }
@@ -1029,7 +1164,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Tensor as Matrix, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, Tensor as Matrix};
 
     fn tensor_from_value(value: Value) -> Matrix {
         match value {
@@ -1040,7 +1176,7 @@ pub(crate) mod tests {
 
     fn tensor_close(a: &Matrix, b: &Matrix, tol: f64) {
         assert_eq!(a.shape, b.shape);
-        for (lhs, rhs) in a.data.iter().zip(&b.data) {
+        for (lhs, rhs) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
             if (lhs - rhs).abs() > tol {
                 panic!("tensor mismatch: lhs={lhs}, rhs={rhs}, tol={tol}");
             }
@@ -1090,6 +1226,91 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn qr_matrix_conversion_reads_typed_integer_storage_exactly() {
+        let tensor = Matrix::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![3, 2])
+            .expect("typed integer tensor");
+
+        let matrix = ColMajorMatrix::from_tensor(&tensor).expect("matrix");
+        assert_eq!(matrix.rows, 3);
+        assert_eq!(matrix.cols, 2);
+        assert_eq!(
+            matrix.data,
+            vec![
+                Complex64::new(1.0, 0.0),
+                Complex64::new(2.0, 0.0),
+                Complex64::new(3.0, 0.0),
+                Complex64::new(4.0, 0.0),
+                Complex64::new(5.0, 0.0),
+                Complex64::new(6.0, 0.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn qr_resident_integer_gates_then_uses_checked_owner_fallback() {
+        test_support::with_test_provider(|provider| {
+            let input =
+                Matrix::new_integer(IntegerStorage::U16(vec![2, 0, 0, 4]), vec![2, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err = match evaluate(Value::GpuTensor(handle.clone()), &[]) {
+                    Err(err) => err,
+                    Ok(_) => panic!("strict mode must gate resident integer input"),
+                };
+                assert_eq!(
+                    err.identifier(),
+                    QR_INTEGER_INPUT_EXTENSION.error_identifier
+                );
+            }
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let eval = evaluate(Value::GpuTensor(handle), &[]).expect("resident qr");
+            for output in [eval.q(), eval.r(), eval.permutation_matrix()] {
+                let Value::GpuTensor(output) = output else {
+                    panic!("resident fallback must restore every matrix output");
+                };
+                assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
+            }
+        });
+    }
+
+    #[test]
+    fn qr_typed_and_resident_integer_zero_select_vector_economy_form() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let matrix = || Matrix::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let typed = evaluate(
+            Value::Tensor(matrix()),
+            &[Value::Int(runmat_value::IntValue::U16(0))],
+        )
+        .expect("typed zero option");
+        assert_eq!(typed.mode(), QrMode::Economy);
+        assert_eq!(typed.pivot_mode(), PivotMode::Vector);
+
+        test_support::with_test_provider(|provider| {
+            let zero = Matrix::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &zero).expect("integer upload");
+            let handle =
+                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err =
+                    match evaluate(Value::Tensor(matrix()), &[Value::GpuTensor(handle.clone())]) {
+                        Err(err) => err,
+                        Ok(_) => panic!("resident option must be gated in strict mode"),
+                    };
+                assert_eq!(
+                    err.identifier(),
+                    QR_RESIDENT_OPTION_EXTENSION.error_identifier
+                );
+            }
+            let resident = evaluate(Value::Tensor(matrix()), &[Value::GpuTensor(handle)])
+                .expect("resident zero option");
+            assert_eq!(resident.mode(), QrMode::Economy);
+            assert_eq!(resident.pivot_mode(), PivotMode::Vector);
+        });
+    }
+
+    #[test]
     fn qr_invalid_argument_identifier_is_stable() {
         match evaluate(Value::Num(1.0), &[Value::from("nope")]) {
             Err(err) => assert_eq!(err.identifier(), QR_ERROR_INVALID_ARGUMENT.identifier),
@@ -1131,7 +1352,8 @@ pub(crate) mod tests {
             for j in 0..q.cols() {
                 let mut sum = 0.0;
                 for k in 0..q.rows() {
-                    sum += q.data[k + i * q.rows()] * q.data[k + j * q.rows()];
+                    sum += q.materialize_f64()[k + i * q.rows()]
+                        * q.materialize_f64()[k + j * q.rows()];
                 }
                 qtq_data[i + j * q.cols()] = sum;
             }
@@ -1158,7 +1380,10 @@ pub(crate) mod tests {
         assert_eq!(eval.pivot_mode(), PivotMode::Vector);
         let vector = tensor_from_value(eval.permutation());
         assert_eq!(vector.shape, vec![2, 1]);
-        assert!(vector.data.iter().all(|v| *v == 1.0 || *v == 2.0));
+        assert!(vector
+            .materialize_f64()
+            .iter()
+            .all(|v| *v == 1.0 || *v == 2.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1172,6 +1397,38 @@ pub(crate) mod tests {
         let r = tensor_from_value(eval.r());
         assert_eq!(q.shape, vec![4, 3]);
         assert_eq!(r.shape, vec![3, 3]);
+    }
+
+    #[test]
+    fn qr_economy_option_reads_typed_integer_scalar_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let data: Vec<f64> = (0..12).map(|i| (i + 1) as f64).collect();
+        let a = Matrix::new(data, vec![4, 3]).unwrap();
+        let option = Matrix::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("option");
+
+        let eval = evaluate(Value::Tensor(a), &[Value::Tensor(option)]).expect("evaluate econ");
+        assert_eq!(eval.mode(), QrMode::Economy);
+        assert_eq!(tensor_from_value(eval.q()).shape, vec![4, 3]);
+        assert_eq!(tensor_from_value(eval.r()).shape, vec![3, 3]);
+    }
+
+    #[test]
+    fn qr_economy_option_zero_classifier_reads_all_integer_storage_variants() {
+        let options = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in options {
+            let option = Matrix::new_integer(storage, vec![1, 1]).expect("option");
+            assert!(block_on(is_zero_scalar(&Value::Tensor(option))));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1196,7 +1453,7 @@ pub(crate) mod tests {
             let data: Vec<f64> = vec![1.0, 4.0, 2.0, 5.0];
             let a = Matrix::new(data.clone(), vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1231,10 +1488,13 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     fn qr_wgpu_matches_cpu() {
         let _accel_guard = test_support::accel_test_lock();
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         )
-        .expect("register wgpu provider");
+        .is_err()
+        {
+            return;
+        }
 
         let tol = match runmat_accelerate_api::provider()
             .expect("provider")
@@ -1251,7 +1511,7 @@ pub(crate) mod tests {
         let host_p = tensor_from_value(host_eval.permutation_matrix());
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -1274,13 +1534,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn qr_wgpu_economy_device_path() {
+    fn qr_wgpu_economy_fallback_preserves_residency_and_values() {
         let _accel_guard = test_support::accel_test_lock();
         std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         )
-        .expect("register wgpu provider");
+        .is_err()
+        {
+            std::env::remove_var("RUNMAT_WGPU_FORCE_PRECISION");
+            return;
+        }
 
         let tensor = Matrix::new(
             vec![
@@ -1291,13 +1555,13 @@ pub(crate) mod tests {
         )
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval =
-            evaluate(Value::GpuTensor(handle), &[Value::from(0.0)]).expect("gpu economy eval");
+            evaluate(Value::GpuTensor(handle), &[Value::from("econ")]).expect("gpu economy eval");
 
         match gpu_eval.q() {
             Value::GpuTensor(_) => {}
@@ -1317,7 +1581,8 @@ pub(crate) mod tests {
             for j in 0..gpu_q.cols() {
                 let mut sum = 0.0;
                 for k in 0..gpu_q.rows() {
-                    sum += gpu_q.data[k + i * gpu_q.rows()] * gpu_q.data[k + j * gpu_q.rows()];
+                    sum += gpu_q.materialize_f64()[k + i * gpu_q.rows()]
+                        * gpu_q.materialize_f64()[k + j * gpu_q.rows()];
                 }
                 qtq_data[i + j * gpu_q.cols()] = sum;
             }
@@ -1340,10 +1605,13 @@ pub(crate) mod tests {
         .unwrap();
         tensor_close(&qtq, &identity, 1e-3);
 
-        // Q*R reconstructs the input (no pivoting)
+        // The evaluation envelope always exposes pivoted factors and their
+        // permutation, so Q*R reconstructs A*P.
         let qr_product = crate::builtins::common::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
-        let a_matrix = Matrix::new(tensor.data.clone(), tensor.shape.clone()).unwrap();
-        tensor_close(&qr_product, &a_matrix, 1e-3);
+        let a_matrix = Matrix::new(tensor.materialize_f64().clone(), tensor.shape.clone()).unwrap();
+        let gpu_p = test_support::gather(gpu_eval.permutation_matrix()).expect("gather P");
+        let permuted = crate::builtins::common::matrix::matrix_mul(&a_matrix, &gpu_p).expect("A*P");
+        tensor_close(&qr_product, &permuted, 1e-3);
     }
 
     fn qr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

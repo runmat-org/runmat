@@ -28,6 +28,7 @@ fn main(
     let base_out = params.offset_out;
     let transpose_a = (params.flags & 1u) != 0u;
     let transpose_b = (params.flags & 2u) != 0u;
+    let accumulate = (params.flags & 4u) != 0u;
 
     let global_row = wid.y * tile + lid.y;
     let global_col = wid.x * tile + lid.x;
@@ -69,7 +70,12 @@ fn main(
         workgroupBarrier();
     }
     if (global_row < params.m && global_col < params.n) {
-        Out.data[base_out + global_row + global_col * ldc] = acc;
+        let out_idx = base_out + global_row + global_col * ldc;
+        if (accumulate) {
+            Out.data[out_idx] = Out.data[out_idx] + acc;
+        } else {
+            Out.data[out_idx] = acc;
+        }
     }
 }
 "#;
@@ -104,6 +110,7 @@ fn main(
     let base_out = params.offset_out;
     let transpose_a = (params.flags & 1u) != 0u;
     let transpose_b = (params.flags & 2u) != 0u;
+    let accumulate = (params.flags & 4u) != 0u;
 
     let global_row = wid.y * tile + lid.y;
     let global_col = wid.x * tile + lid.x;
@@ -144,7 +151,12 @@ fn main(
         workgroupBarrier();
     }
     if (global_row < params.m && global_col < params.n) {
-        Out.data[base_out + global_row + global_col * ldc] = acc;
+        let out_idx = base_out + global_row + global_col * ldc;
+        if (accumulate) {
+            Out.data[out_idx] = Out.data[out_idx] + acc;
+        } else {
+            Out.data[out_idx] = acc;
+        }
     }
 }
 "#;

@@ -1,12 +1,18 @@
 //! MATLAB-compatible `pagemtimes` builtin.
 
-use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
+};
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -18,6 +24,58 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pagemtimes";
+
+pub const PAGEMTIMES_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pagemtimes-integer-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pagemtimes with typed-integer input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PagemtimesIntegerInputExtension"),
+    };
+
+pub const PAGEMTIMES_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [PAGEMTIMES_INTEGER_INPUT_EXTENSION];
+
+const PAGEMTIMES_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public X is single or double; RunMat mode admits real integer pages only after an exact binary64-boundary check.",
+    }];
+
+const PAGEMTIMES_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public Y is single or double; RunMat mode admits real integer pages only after an exact binary64-boundary check.",
+    }];
+
+pub const PAGEMTIMES_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Z = pagemtimes(integer_X, Y, transpose_options...)",
+        inputs: &PAGEMTIMES_INTEGER_X_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed-integer left pages are a gated RunMat extension. Authoritative values cross once into binary64 after exactness checks; a resident result is restored to the owning provider when possible.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Z = pagemtimes(X, integer_Y, transpose_options...)",
+        inputs: &PAGEMTIMES_INTEGER_Y_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed-integer right pages are a gated RunMat extension. Authoritative values cross once into binary64 after exactness checks; a resident result is restored to the owning provider when possible.",
+    },
+];
 
 const PAGEMTIMES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Z",
@@ -229,10 +287,34 @@ fn pagemtimes_type(args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Typ
     accel = "custom",
     type_resolver(pagemtimes_type),
     descriptor(crate::builtins::math::linalg::ops::pagemtimes::PAGEMTIMES_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::ops::pagemtimes::PAGEMTIMES_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::linalg::ops::pagemtimes::PAGEMTIMES_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::ops::pagemtimes"
 )]
 async fn pagemtimes_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let call = PagemtimesCall::parse(first, rest)?;
+    for value in [&call.lhs, &call.rhs] {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PAGEMTIMES_INTEGER_INPUT_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    crate::builtins::common::validation::reject_typed_complex_integer(&call.lhs, NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&call.rhs, NAME)?;
+    for value in [&call.lhs, &call.rhs] {
+        if crate::builtins::common::validation::value_has_native_integer_class(value)
+            && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+                .await?
+        {
+            return Err(pagemtimes_invalid_input(
+                "pagemtimes: integer input must be exactly representable as double",
+            ));
+        }
+    }
     pagemtimes_eval(call).await
 }
 
@@ -365,15 +447,16 @@ impl PageInput {
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        if !matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) {
-            return Err(pagemtimes_invalid_input(format!(
-                "pagemtimes: numeric class {} is not supported",
-                tensor.dtype.class_name()
-            )));
-        }
+        let dtype = tensor.numeric_dtype();
+        let output_dtype = if matches!(dtype, NumericDType::F32) {
+            NumericDType::F32
+        } else {
+            NumericDType::F64
+        };
         let shape = canonical_matrix_shape(&tensor.shape);
         let expected = checked_product(&shape)?;
-        if tensor.data.len() != expected {
+        let data = tensor::tensor_into_values_f64(tensor);
+        if data.len() != expected {
             return Err(pagemtimes_internal(
                 "pagemtimes: tensor data length does not match shape",
             ));
@@ -382,15 +465,15 @@ impl PageInput {
             rows: shape[0],
             cols: shape[1],
             page_dims: shape.get(2..).unwrap_or(&[]).to_vec(),
-            dtype: tensor.dtype,
-            data: PageData::Real(tensor.data),
+            dtype: output_dtype,
+            data: PageData::Real(data),
         })
     }
 
     fn from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(&tensor.shape);
         let expected = checked_product(&shape)?;
-        if tensor.data.len() != expected {
+        if tensor.materialize_f64().len() != expected {
             return Err(pagemtimes_internal(
                 "pagemtimes: complex tensor data length does not match shape",
             ));
@@ -400,7 +483,7 @@ impl PageInput {
             cols: shape[1],
             page_dims: shape.get(2..).unwrap_or(&[]).to_vec(),
             dtype: NumericDType::F64,
-            data: PageData::Complex(tensor.data),
+            data: PageData::Complex(tensor.materialize_f64()),
         })
     }
 
@@ -487,17 +570,12 @@ impl PageOutput {
             Self::Real(tensor) => {
                 if wants_gpu {
                     if let Some(provider) = provider {
-                        let view = HostTensorView {
-                            data: &tensor.data,
-                            shape: &tensor.shape,
-                        };
-                        let handle = provider.upload(&view).map_err(|err| {
-                            pagemtimes_internal(format!("pagemtimes: gpu upload failed ({err})"))
-                        })?;
-                        runmat_accelerate_api::set_handle_precision(
-                            &handle,
-                            precision_for_dtype(tensor.dtype),
-                        );
+                        let handle =
+                            gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
+                                pagemtimes_internal(format!(
+                                    "pagemtimes: gpu upload failed ({err})"
+                                ))
+                            })?;
                         return Ok(gpu_helpers::resident_gpu_value(handle));
                     }
                 }
@@ -734,15 +812,6 @@ fn broadcast_page_dims(lhs: &[usize], rhs: &[usize]) -> BuiltinResult<Vec<usize>
     Ok(out)
 }
 
-fn precision_for_dtype(dtype: NumericDType) -> ProviderPrecision {
-    match dtype {
-        NumericDType::F32 => ProviderPrecision::F32,
-        NumericDType::F64 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-            ProviderPrecision::F64
-        }
-    }
-}
-
 fn source_page_index(page_dims: &[usize], coords: &[usize]) -> BuiltinResult<usize> {
     let mut stride = 1usize;
     let mut index = 0usize;
@@ -820,7 +889,7 @@ fn type_name(value: &Value) -> &'static str {
         Value::Cell(_) => "cell array",
         Value::Struct(_) => "struct",
         Value::GpuTensor(_) => "gpuArray",
-        Value::Object(_) => "object",
+        Value::ObjectArray(_) | Value::Object(_) => "object",
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
         Value::FunctionHandle(_)
@@ -831,6 +900,11 @@ fn type_name(value: &Value) -> &'static str {
         Value::ClassRef(_) => "class reference",
         Value::MException(_) => "MException",
         Value::OutputList(_) => "output list",
+        Value::Future(_) => "future",
+        Value::Task(_) => "task",
+        Value::Pool(_) => "pool",
+        Value::Job(_) => "job",
+        Value::Foreign(_) => "foreign reference",
     }
 }
 
@@ -845,7 +919,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView, ProviderPrecision};
-    use runmat_builtins::{CharArray, IntValue};
+    use runmat_value::{CharArray, IntValue, IntegerStorage};
 
     fn call(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(pagemtimes_builtin(first, rest))
@@ -893,9 +967,83 @@ mod tests {
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 2]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![70.0, 100.0, 150.0, 220.0, 670.0, 780.0, 910.0, 1060.0]
         );
+    }
+
+    #[test]
+    fn typed_integer_pages_read_exact_storage_and_return_double() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let lhs = Tensor::new_integer(
+            IntegerStorage::I16(vec![
+                1, 2, 3, 4, // page 1
+                5, 6, 7, 8, // page 2
+            ]),
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        let rhs = Tensor::new_integer(
+            IntegerStorage::U16(vec![
+                10, 20, 30, 40, // page 1
+                50, 60, 70, 80, // page 2
+            ]),
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        let out = expect_tensor(call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).unwrap());
+        assert_eq!(out.shape, vec![2, 2, 2]);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        assert!(out.integer_storage().is_none());
+        assert_eq!(
+            out.materialize_f64(),
+            vec![70.0, 100.0, 150.0, 220.0, 670.0, 780.0, 910.0, 1060.0]
+        );
+    }
+
+    #[test]
+    fn mixed_single_and_integer_pages_return_double_from_exact_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let lhs = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::F32)
+            .unwrap();
+        let rhs = Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
+
+        let out = expect_tensor(call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).unwrap());
+        assert_eq!(out.shape, vec![2, 2]);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        assert_eq!(out.materialize_f64(), vec![26.0, 38.0, 30.0, 44.0]);
+    }
+
+    #[test]
+    fn resident_integer_pages_gate_then_use_checked_owner_fallback() {
+        test_support::with_test_provider(|provider| {
+            let input =
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 2]), vec![2, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err = call(
+                    Value::GpuTensor(handle.clone()),
+                    vec![Value::GpuTensor(handle.clone())],
+                )
+                .expect_err("strict mode must gate resident integer input");
+                assert_eq!(
+                    err.identifier(),
+                    PAGEMTIMES_INTEGER_INPUT_EXTENSION.error_identifier
+                );
+            }
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let Value::GpuTensor(output) = call(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::GpuTensor(handle)],
+            )
+            .expect("resident pagemtimes") else {
+                panic!("resident fallback must restore output");
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather output");
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 4.0]);
+        });
     }
 
     #[test]
@@ -908,7 +1056,7 @@ mod tests {
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 2]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![70.0, 100.0, 150.0, 220.0, 230.0, 340.0, 310.0, 460.0]
         );
     }
@@ -923,9 +1071,10 @@ mod tests {
         );
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 4, 3]);
-        assert_eq!(out.data.len(), 2 * 2 * 4 * 3);
-        assert_eq!(&out.data[0..4], &[7.0, 10.0, 15.0, 22.0]);
-        assert_eq!(&out.data[44..48], &[271.0, 298.0, 311.0, 342.0]);
+        let values = out.materialize_f64();
+        assert_eq!(values.len(), 2 * 2 * 4 * 3);
+        assert_eq!(&values[0..4], &[7.0, 10.0, 15.0, 22.0]);
+        assert_eq!(&values[44..48], &[271.0, 298.0, 311.0, 342.0]);
     }
 
     #[test]
@@ -933,7 +1082,10 @@ mod tests {
         let rhs = tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![2, 2, 2]);
         let out = expect_tensor(call(Value::Num(2.5), vec![rhs]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 2]);
-        assert_eq!(out.data, vec![2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0]
+        );
     }
 
     #[test]
@@ -942,7 +1094,7 @@ mod tests {
         let out = expect_tensor(call(lhs, vec![Value::Num(-2.0)]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 2]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![-2.0, -4.0, -6.0, -8.0, -10.0, -12.0, -14.0, -16.0]
         );
     }
@@ -964,7 +1116,7 @@ mod tests {
         );
         assert_eq!(out.shape, vec![3, 3]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![23.0, 53.0, 83.0, 29.0, 67.0, 105.0, 35.0, 81.0, 127.0]
         );
     }
@@ -1034,7 +1186,7 @@ mod tests {
         let singleton_pages = tensor(vec![1.0; 4], vec![2, 2, 1]);
         let out = expect_tensor(call(empty_pages.clone(), vec![singleton_pages]).unwrap());
         assert_eq!(out.shape, vec![2, 2, 0]);
-        assert!(out.data.is_empty());
+        assert!(out.is_empty());
 
         let three_pages = tensor(vec![1.0; 12], vec![2, 2, 3]);
         let err = call(empty_pages, vec![three_pages]).unwrap_err();
@@ -1056,7 +1208,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_integer_inputs() {
+    fn rejects_integer_scalar_inputs() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = call(Value::Int(IntValue::I32(2)), vec![Value::Num(3.0)]).unwrap_err();
         assert_eq!(err.identifier(), PAGEMTIMES_ERROR_INVALID_INPUT.identifier);
     }
@@ -1072,16 +1225,17 @@ mod tests {
                 .unwrap(),
         );
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
-        assert_eq!(out.dtype, NumericDType::F32);
-        assert_eq!(out.data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(out.numeric_dtype(), NumericDType::F32);
+        assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
     fn gpu_input_roundtrips_to_gpu_result() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+            let data = tensor.as_f64_slice().expect("double tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data,
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).unwrap();
@@ -1089,22 +1243,17 @@ mod tests {
             assert!(matches!(out, Value::GpuTensor(_)));
             let gathered = test_support::gather(out).unwrap();
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![2.0, 4.0, 6.0, 8.0]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
         });
     }
 
     #[test]
-    fn gpu_single_input_preserves_single_precision_metadata() {
+    fn gpu_single_input_preserves_native_single_storage() {
         test_support::with_test_provider(|provider| {
             let lhs =
                 Tensor::new_with_dtype(vec![1.25, 2.5, 3.75, 4.5], vec![2, 2], NumericDType::F32)
                     .unwrap();
-            let view = HostTensorView {
-                data: &lhs.data,
-                shape: &lhs.shape,
-            };
-            let handle = provider.upload(&view).unwrap();
-            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
+            let handle = gpu_helpers::upload_tensor(provider, &lhs).expect("single upload");
             let rhs = Value::Tensor(
                 Tensor::new_with_dtype(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2], NumericDType::F32)
                     .unwrap(),
@@ -1118,8 +1267,8 @@ mod tests {
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
             let gathered = test_support::gather(out).unwrap();
-            assert_eq!(gathered.dtype, NumericDType::F32);
-            assert_eq!(gathered.data, lhs.data);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.materialize_f64(), lhs.materialize_f64());
         });
     }
 
@@ -1146,7 +1295,7 @@ mod tests {
                 }
                 Value::ComplexTensor(tensor) => {
                     assert_eq!(tensor.shape, vec![1, 1]);
-                    let (re, im) = tensor.data[0];
+                    let (re, im) = tensor.materialize_f64()[0];
                     assert!((re - 5.0).abs() < 1e-12);
                     assert!((im - 5.0).abs() < 1e-12);
                 }

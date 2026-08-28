@@ -7,7 +7,7 @@
     "identity",
     "matrix"
   ],
-  "summary": "Create sparse double identity matrices.",
+  "summary": "Create sparse identity matrices.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -27,13 +27,14 @@
   "tested": {
     "unit": "builtins::array::creation::sparse::tests::speye_supports_square_rectangular_vector_and_negative_sizes"
   },
-  "description": "`speye` returns a sparse double matrix with ones on the main diagonal and unstored zeros elsewhere.",
+  "description": "`speye` returns a host-resident sparse matrix with ones on the main diagonal and unstored zeros elsewhere.",
   "behaviors": [
     "`speye()` returns a sparse `1 x 1` identity matrix.",
     "`speye(n)` returns an `n x n` sparse identity matrix.",
     "`speye(m, n)` and `speye([m n])` return an `m x n` sparse matrix with `min(m,n)` stored diagonal ones.",
     "Negative dimensions are treated as zero, matching MATLAB sparse allocation behavior.",
-    "The optional typename accepts `double`; `single` and `logical` sparse storage are not represented by RunMat's current `SparseTensor`."
+    "The optional typename selects `double`, `single`, or `logical` sparse storage.",
+    "Scalar, two-element-vector, and two-argument dimensions accept single, double, and all eight integer classes and are decoded without conversion through double."
   ],
   "examples": [
     {
@@ -73,8 +74,8 @@
   "syntax": {
     "example": {
       "description": "Supported forms",
-      "input": "S = speye()\nS = speye(n)\nS = speye(m, n)\nS = speye([m n])\nS = speye(..., \"double\")",
-      "output": "`S` is a sparse double matrix."
+      "input": "S = speye()\nS = speye(n)\nS = speye(m, n)\nS = speye([m n])\nS = speye(..., typename)",
+      "output": "`S` is a sparse matrix whose class follows `typename`, or double when it is omitted."
     },
     "points": [
       "`speye` has one output.",

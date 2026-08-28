@@ -1,10 +1,3 @@
----
-title: "Workspace Replay"
-category: "Session Engine"
-section: "7.4"
-last_updated: "May 28, 2026"
----
-
 # Workspace Replay
 
 Workspace replay persists and restores live session variables. It is owned by

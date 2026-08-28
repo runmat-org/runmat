@@ -33,7 +33,7 @@
   },
   "description": "`ne(A, B)` (or `A ~= B`) compares inputs element-wise for inequality. Scalar expansion and output-shape behavior follow MATLAB semantics.",
   "behaviors": [
-    "Numeric, logical, and character inputs are compared element-wise using MATLAB's implicit expansion rules.",
+    "Numeric, logical, and character inputs are compared element-wise using MATLAB's implicit expansion rules; mixed integer and floating comparisons do not convert authoritative integer storage through `f64` or lose precision.",
     "Complex numbers are considered different when either their real **or** imaginary part differs.",
     "Character arrays compare by Unicode code point; you can mix them with numeric arrays (`'A' ~= 65`) or strings.",
     "String scalars and string arrays compare lexically; implicit expansion works across the string dimensions.",
@@ -70,7 +70,7 @@
   "faqs": [
     {
       "question": "Does `ne` return logical values?",
-      "answer": "Yes. Scalars return `true` or `false`. Arrays return logical arrays, and `gpuArray` inputs return `gpuArray` logical outputs."
+      "answer": "Yes. Scalars return `true` or `false`, and arrays return logical arrays. Valid provider comparisons remain resident; exact fallback automatically gathers internal residency while preserving explicitly requested gpuArray output residency."
     },
     {
       "question": "How are NaN values treated?",

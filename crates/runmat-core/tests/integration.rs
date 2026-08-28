@@ -98,10 +98,16 @@ exactStopTime = t0 + t1/(1-ratio)";
                 .as_ref()
                 .expect("exactStopTime has scalar preview");
             assert_eq!(preview.values.len(), 1);
+            let Some(runmat_core::NumericPreviewValue::Float(value)) = preview.values.first()
+            else {
+                panic!(
+                    "unexpected non-floating workspace preview: {:?}",
+                    preview.values
+                );
+            };
             assert!(
-                (preview.values[0] - 11.458330203035164).abs() < 1e-10,
-                "unexpected workspace preview: {}",
-                preview.values[0]
+                (*value - 11.458330203035164).abs() < 1e-10,
+                "unexpected workspace preview: {value}"
             );
         }
     });
@@ -199,6 +205,648 @@ fn test_strict_mode_rejects_runmat_extensions() {
 }
 
 #[test]
+fn test_matlab_mode_rejects_runmat_syntax_extensions() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        for (source, identifier) in [
+            ("t = spawn(1);", "RunMat:SpawnExtensionDisabled"),
+            ("y = await(1);", "RunMat:AwaitExtensionDisabled"),
+        ] {
+            let error = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect_err("matlab mode should reject RunMat syntax extensions");
+            let RunError::Semantic(error) = error else {
+                panic!("expected semantic extension error");
+            };
+            assert_eq!(error.identifier.as_deref(), Some(identifier));
+        }
+    });
+}
+
+#[test]
+fn test_randi_wide_integer_outputs_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = randi(5, 2, 2, 'int64');",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert!(
+            matlab
+                .error
+                .as_ref()
+                .is_some_and(|error| error.to_string().contains("RunMat extensions")),
+            "matlab mode must reject the wide randi extension: {:?}",
+            matlab.error
+        );
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:RandiWideIntegerExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = randi(5, 2, 2, 'int64'); class(out)",
+        )
+        .expect("runmat mode should enable wide randi outputs");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(
+            runmat.value,
+            Some(runmat_value::Value::String("int64".to_string()))
+        );
+    });
+}
+
+#[test]
+fn test_randi_prototype_forms_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let documented = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "p = uint8(zeros(2,3)); out = randi(5, 'like', p); numel(out)",
+        )
+        .expect("documented like form");
+        assert!(documented.error.is_none(), "{:?}", documented.error);
+        assert_eq!(documented.value, Some(runmat_value::Value::Num(1.0)));
+
+        let rejected = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "p = false(2,3); out = randi([0 1], p);",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            rejected.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:RandiImplicitPrototypeExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let extension = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "p = false(2,3); out = randi([0 1], p); numel(out)",
+        )
+        .expect("runmat mode should enable the bare prototype shorthand");
+        assert!(extension.error.is_none(), "{:?}", extension.error);
+        assert_eq!(extension.value, Some(runmat_value::Value::Num(6.0)));
+    });
+}
+
+#[test]
+fn test_generator_grid_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        let explicit_double = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = randperm(0, 'double');",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            explicit_double
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:RandpermExplicitDoubleExtension")
+        );
+
+        let randperm_like = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = randperm(0, 'like', 0);",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            randperm_like
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:RandpermLikeExtension")
+        );
+
+        let meshgrid_like = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = meshgrid(uint8([1 2]), 'like', uint8(0));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            meshgrid_like
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:MeshgridLikeExtension")
+        );
+
+        let meshgrid_complex = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = meshgrid([1+2i 3+4i]);",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            meshgrid_complex
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:MeshgridComplexAxesExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        for source in [
+            "out = randperm(0, 'double'); numel(out)",
+            "out = randperm(0, 'like', 0); numel(out)",
+            "out = meshgrid(uint8([1 2]), 'like', uint8(0)); class(out)",
+            "out = meshgrid([1+2i 3+4i]); class(out)",
+        ] {
+            let runmat = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("RunMat mode should enable generator/grid extension");
+            assert!(runmat.error.is_none(), "{source}: {:?}", runmat.error);
+        }
+    });
+}
+
+#[test]
+fn test_gpuarray_construction_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        for (source, identifier) in [
+            (
+                "out = gpuArray(1, 1, 1);",
+                "RunMat:compatibility:GpuArraySizeExtension",
+            ),
+            (
+                "out = gpuArray(1, 'uint8');",
+                "RunMat:compatibility:GpuArrayDtypeExtension",
+            ),
+            (
+                "out = gpuArray(1, 'like', uint8(0));",
+                "RunMat:compatibility:GpuArrayLikeExtension",
+            ),
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some(identifier),
+                "{source}"
+            );
+        }
+    });
+}
+
+#[test]
+fn test_macd_nondouble_matrix_extension_follows_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = macd(uint8([2 1 1 1]));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:MacdNondoubleMatrixExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = macd(uint8([2 1 1 1])); class(out)",
+        )
+        .expect("RunMat mode accepts raw integer macd matrix");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(
+            runmat.value,
+            Some(runmat_value::Value::String("double".to_string()))
+        );
+    });
+}
+
+#[test]
+fn test_fread_like_extension_follows_session_compatibility_mode() {
+    gc_test_context(|| {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let path = temp.path().join("fread-like.bin");
+        let path = path.to_string_lossy();
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            &format!(
+                "fid = fopen('{path}', 'w+b'); fwrite(fid, uint8(7), 'uint8'); frewind(fid); out = fread(fid, 1, 'uint8', 'like', uint8(0));"
+            ),
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:FreadLikeExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            &format!(
+                "fid = fopen('{path}', 'rb'); out = fread(fid, 1, 'uint8', 'like', uint8(0)); fclose(fid); class(out)"
+            ),
+        )
+        .expect("RunMat mode accepts fread like");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(
+            runmat.value,
+            Some(runmat_value::Value::String("uint8".to_string()))
+        );
+    });
+}
+
+#[test]
+fn test_pagefun_host_extension_follows_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = pagefun(@mtimes, [1 2; 3 4], eye(2));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:PagefunHostInputsExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = pagefun(@mtimes, [1 2; 3 4], eye(2)); out(2,2)",
+        )
+        .expect("RunMat mode accepts all-host pagefun");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(runmat.value, Some(runmat_value::Value::Num(4.0)));
+    });
+}
+
+#[test]
+fn test_linalg_coefficient_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        let decomposition = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = decomposition(int16([2 0; 0 4]));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            decomposition
+                .error
+                .as_ref()
+                .and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:DecompositionNonfloatingInputExtension")
+        );
+
+        let eigs = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = eigs(int16([1 0; 0 8]), 1);",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            eigs.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:EigsNonfloatingMatrixExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let decomposition = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = decomposition(int16([2 0; 0 4]));",
+        )
+        .expect("RunMat mode accepts integer decomposition coefficients");
+        assert!(decomposition.error.is_none(), "{:?}", decomposition.error);
+
+        let eigs = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = eigs(int16([1 0; 0 8]), 1); out(1)",
+        )
+        .expect("RunMat mode accepts integer eigs coefficients");
+        assert!(eigs.error.is_none(), "{:?}", eigs.error);
+        assert_eq!(eigs.value, Some(runmat_value::Value::Num(8.0)));
+    });
+}
+
+#[test]
+fn test_waveform_dtype_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        for (source, identifier) in [
+            (
+                "out = sawtooth(single([0 1]));",
+                "RunMat:compatibility:SawtoothNondoubleInputExtension",
+            ),
+            (
+                "out = square(int16([0 4]));",
+                "RunMat:compatibility:SquareNonfloatingInputExtension",
+            ),
+            (
+                "out = sinc(int16([0 1]));",
+                "RunMat:compatibility:SincNonfloatingInputExtension",
+            ),
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some(identifier)
+            );
+        }
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        for source in [
+            "out = sawtooth(single([0 1]));",
+            "out = square(int16([0 4]));",
+            "out = sinc(int16([0 1]));",
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("RunMat mode accepts waveform dtype extension");
+            assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        }
+    });
+}
+
+#[test]
+fn test_pskmod_integer_controls_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        for (source, identifier) in [
+            (
+                "out = pskmod(0, uint16(4));",
+                "RunMat:compatibility:PskmodIntegerModulationOrderExtension",
+            ),
+            (
+                "out = pskmod(0, 4, int16(0), 'bin');",
+                "RunMat:compatibility:PskmodIntegerPhaseOffsetExtension",
+            ),
+            (
+                "out = pskmod(0, 4, 0, uint16([0 3 1 2]));",
+                "RunMat:compatibility:PskmodIntegerCustomOrderExtension",
+            ),
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some(identifier)
+            );
+        }
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = pskmod(0, uint16(4), int16(0), uint16([0 3 1 2])); abs(out)",
+        )
+        .expect("RunMat mode accepts typed-integer pskmod controls");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        assert_eq!(outcome.value, Some(runmat_value::Value::Num(1.0)));
+    });
+}
+
+#[test]
+fn test_trnd_integer_arguments_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        for (source, identifier) in [
+            (
+                "out = trnd(uint16(5));",
+                "RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension",
+            ),
+            (
+                "out = trnd(5, uint16([2 3]));",
+                "RunMat:compatibility:TrndIntegerSizeExtension",
+            ),
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some(identifier)
+            );
+        }
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = trnd(uint16(5), uint16([2 3])); size(out)",
+        )
+        .expect("RunMat mode accepts typed-integer trnd arguments");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_value::Value::Tensor(shape)) = outcome.value else {
+            panic!("expected size vector");
+        };
+        assert_eq!(shape.materialize_f64(), vec![2.0, 3.0]);
+    });
+}
+
+#[test]
+fn test_db_nonfloating_inputs_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        for source in [
+            "out = db(int16(10));",
+            "out = db(logical([1 0]));",
+            "out = db(complex(int16(3), int16(4)));",
+            "out = db(10, uint16(50));",
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some("RunMat:compatibility:DbNonfloatingInputExtension")
+            );
+        }
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = [db(int16(10)), db(logical(1)), db(complex(int16(3), int16(4))), db(10, uint16(50))]; size(out)",
+        )
+        .expect("RunMat mode accepts nonfloating db inputs");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_value::Value::Tensor(shape)) = outcome.value else {
+            panic!("expected size vector");
+        };
+        assert_eq!(shape.materialize_f64(), vec![1.0, 4.0]);
+    });
+}
+
+#[test]
+fn test_delaunaytri_integer_extensions_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        for (source, identifier) in [
+            (
+                "dt = DelaunayTri(uint16([0 0; 1 0; 0 1]));",
+                "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension",
+            ),
+            (
+                "dt = DelaunayTri([0 0; 1 0; 0 1], uint16(zeros(0, 2)));",
+                "RunMat:compatibility:DelaunayTriIntegerTopologyExtension",
+            ),
+        ] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("runtime failure should be returned in the execution outcome");
+            assert_eq!(
+                outcome.error.as_ref().and_then(|error| error.identifier()),
+                Some(identifier)
+            );
+        }
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "dt = DelaunayTri(uint16([0 0; 1 0; 0 1])); out = nearestNeighbor(dt, uint16([0 0])); out",
+        )
+        .expect("RunMat mode accepts typed-integer DelaunayTri coordinates");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_value::Value::Tensor(indices)) = outcome.value else {
+            panic!("expected nearest-neighbor index tensor");
+        };
+        assert_eq!(indices.materialize_f64(), vec![1.0]);
+    });
+}
+
+#[test]
+fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = intmax(like=uint64(1)); out",
+        )
+        .expect("name-value integer prototype form executes");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        assert_eq!(
+            outcome.value,
+            Some(runmat_value::Value::Int(runmat_value::IntValue::U64(
+                u64::MAX
+            )))
+        );
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = linspace(0, 1, 3.9); out",
+        )
+        .expect("fractional linspace count executes");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
+            panic!("expected linspace tensor")
+        };
+        assert_eq!(values.shape, vec![1, 3]);
+        assert_eq!(values.materialize_f64(), vec![0.0, 0.5, 1.0]);
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = linspace(0, 1, NaN); out",
+        )
+        .expect("NaN linspace count executes");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
+            panic!("expected scalar NaN tensor")
+        };
+        assert_eq!(values.shape, vec![1, 1]);
+        assert!(values.materialize_f64()[0].is_nan());
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = logspace(int8(0), 2, 3);",
+        )
+        .expect("compatibility error is returned in the execution outcome");
+        assert!(outcome.error.is_some());
+    });
+}
+
+#[test]
+fn test_number_theory_and_remainder_real_domain_match_documented_forms() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = gcd(int16([-12 18]), 6); out",
+        )
+        .expect("gcd integer array and scalar double execute");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
+            panic!("expected gcd tensor")
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_value::IntegerStorage::I16(vec![6, 6]))
+        );
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "[g,u,v] = gcd(30,56); out = 30*u + 56*v - g; out",
+        )
+        .expect("extended gcd outputs execute");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        assert_eq!(outcome.value, Some(runmat_value::Value::Num(0.0)));
+
+        let outcome =
+            runmat_core::execute_text_request_for_testing(&mut engine, "out = lcm(-6, 3);")
+                .expect("lcm domain rejection is returned in the execution outcome");
+        assert!(outcome.error.is_some());
+
+        for source in ["out = mod(complex(2), 1);", "out = rem(2, complex(1));"] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("real-domain rejection is returned in the execution outcome");
+            assert!(outcome.error.is_some());
+        }
+    });
+}
+
+#[test]
+fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+        let matlab = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = sparse(uint64([1 2]));",
+        )
+        .expect("runtime failure should be returned in the execution outcome");
+        assert_eq!(
+            matlab.error.as_ref().and_then(|error| error.identifier()),
+            Some("RunMat:compatibility:SparseIntegerExtension")
+        );
+
+        engine.set_compat_mode(CompatMode::RunMat);
+        let runmat = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = sparse(uint64([1 2])); class(out)",
+        )
+        .expect("runmat mode should enable sparse integer storage");
+        assert!(runmat.error.is_none(), "{:?}", runmat.error);
+        assert_eq!(
+            runmat.value,
+            Some(runmat_value::Value::String("uint64".to_string()))
+        );
+    });
+}
+
+#[test]
 fn test_request_host_policy_disables_top_level_await() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
@@ -207,7 +855,7 @@ fn test_request_host_policy_disables_top_level_await() {
                 name: "request-await-policy.m".to_string(),
                 text: "y = await(1);".to_string(),
             },
-            compatibility: CompatMode::Matlab,
+            compatibility: CompatMode::RunMat,
             host_policy: abi::HostExecutionPolicy {
                 top_level_await: false,
                 dynamic_eval: true,
@@ -231,6 +879,7 @@ fn test_request_host_policy_disables_top_level_await() {
 fn test_await_passes_through_non_spawn_operand_at_runtime() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::RunMat);
         let result = runmat_core::execute_text_request_for_testing(&mut engine, "y = await(1);")
             .expect("execution should complete successfully");
         assert!(
@@ -239,7 +888,7 @@ fn test_await_passes_through_non_spawn_operand_at_runtime() {
         );
         let readback = runmat_core::execute_text_request_for_testing(&mut engine, "y")
             .expect("readback should succeed");
-        assert_eq!(readback.value, Some(runmat_builtins::Value::Num(1.0)));
+        assert_eq!(readback.value, Some(runmat_value::Value::Num(1.0)));
     });
 }
 
@@ -247,9 +896,10 @@ fn test_await_passes_through_non_spawn_operand_at_runtime() {
 fn test_spawn_handle_is_consumed_after_await() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::RunMat);
         let first_await = runmat_core::execute_text_request_for_testing(
             &mut engine,
-            "t = spawn(41 + 1); first = await(t);",
+            "async function y = work(); y = 41 + 1; end; t = spawn(work()); first = await(t);",
         )
         .expect("first await execution should complete successfully");
         assert!(
@@ -259,18 +909,18 @@ fn test_spawn_handle_is_consumed_after_await() {
 
         let first = runmat_core::execute_text_request_for_testing(&mut engine, "first")
             .expect("first readback should succeed");
-        assert_eq!(first.value, Some(runmat_builtins::Value::Num(42.0)));
+        assert_eq!(first.value, Some(runmat_value::Value::Num(42.0)));
 
         let second_await =
             runmat_core::execute_text_request_for_testing(&mut engine, "second = await(t);");
         match second_await {
             Err(RunError::Runtime(err)) => {
-                assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+                assert_eq!(err.identifier(), Some("RunMat:ExecutionService"));
             }
             Err(other) => panic!("expected runtime await-handle error, got: {other:?}"),
             Ok(exec) => {
                 if let Some(err) = exec.error {
-                    assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+                    assert_eq!(err.identifier(), Some("RunMat:ExecutionService"));
                 } else {
                     let second =
                         runmat_core::execute_text_request_for_testing(&mut engine, "second")
@@ -330,13 +980,13 @@ fn test_control_flow_execution() {
 
         let x = runmat_core::execute_text_request_for_testing(&mut engine, "x")
             .expect("x readback should succeed");
-        assert_eq!(x.value, Some(runmat_builtins::Value::Num(10.0)));
+        assert_eq!(x.value, Some(runmat_value::Value::Num(10.0)));
         let y = runmat_core::execute_text_request_for_testing(&mut engine, "y")
             .expect("y readback should succeed");
-        assert_eq!(y.value, Some(runmat_builtins::Value::Num(30.0)));
+        assert_eq!(y.value, Some(runmat_value::Value::Num(30.0)));
         let z = runmat_core::execute_text_request_for_testing(&mut engine, "z")
             .expect("z readback should succeed");
-        assert_eq!(z.value, Some(runmat_builtins::Value::Num(6.0)));
+        assert_eq!(z.value, Some(runmat_value::Value::Num(6.0)));
     });
 }
 

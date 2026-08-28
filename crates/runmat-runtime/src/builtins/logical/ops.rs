@@ -3,11 +3,18 @@
 use log::trace;
 use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::ComplexTensor;
+use runmat_value::{CharArray, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::{
     gpu_helpers,
@@ -53,6 +60,44 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "logical";
+
+const LOGICAL_STRING_ARRAY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "logical-string-array-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "logical with string-array input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LogicalStringArrayInputExtension"),
+};
+const LOGICAL_SYMBOLIC_CONSTANT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "logical-symbolic-constant-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "logical with a symbolic numeric constant is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:LogicalSymbolicConstantInputExtension"),
+    };
+pub const LOGICAL_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    LOGICAL_STRING_ARRAY_EXTENSION,
+    LOGICAL_SYMBOLIC_CONSTANT_EXTENSION,
+];
+
+const LOGICAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight real integer classes convert elementwise without floating materialization; zero becomes false and every nonzero value becomes true.",
+    }];
+pub const LOGICAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = logical(integer_A)",
+        inputs: &LOGICAL_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host conversion reads authoritative integer storage exactly; resident conversion uses a validated owning-provider path or exact gather and class-preserving restoration.",
+    }];
 
 const LOGICAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -141,6 +186,8 @@ fn logical_error_with_message(
     accel = "unary",
     type_resolver(logical_type),
     descriptor(crate::builtins::logical::ops::LOGICAL_DESCRIPTOR),
+    extensions(crate::builtins::logical::ops::LOGICAL_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::ops::LOGICAL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::ops"
 )]
 async fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -156,14 +203,21 @@ async fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
 async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Bool(_) | Value::LogicalArray(_) => Ok(value),
+        Value::Num(n) if n.is_nan() => Err(conversion_error("NaN")),
         Value::Num(n) => Ok(Value::Bool(n != 0.0)),
         Value::Int(i) => Ok(Value::Bool(!i.is_zero())),
-        Value::Complex(re, im) => Ok(Value::Bool(!complex_is_zero(re, im))),
+        Value::Complex(_, _) => Err(conversion_error("complex")),
         Value::Tensor(tensor) => logical_from_tensor(tensor),
         Value::SparseTensor(sparse) => logical_from_sparse_tensor(sparse),
-        Value::ComplexTensor(tensor) => logical_from_complex_tensor(tensor),
+        Value::ComplexTensor(_) => Err(conversion_error("complex")),
         Value::CharArray(chars) => logical_from_char_array(chars),
-        Value::StringArray(strings) => logical_from_string_array(strings),
+        Value::StringArray(strings) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &LOGICAL_STRING_ARRAY_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            logical_from_string_array(strings)
+        }
         Value::GpuTensor(handle) => logical_from_gpu(handle).await,
         Value::String(_) => Err(conversion_error("string")),
         Value::Symbolic(expr) => expr
@@ -173,6 +227,7 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::SymbolicArray(_) => Err(conversion_error("sym")),
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) => Err(conversion_error("struct")),
+        Value::ObjectArray(array) => Err(conversion_error(array.class_name())),
         Value::Object(obj) => Err(conversion_error(&obj.class_name)),
         Value::HandleObject(handle) => Err(conversion_error(&handle.class_name)),
         Value::Listener(_) => Err(conversion_error("event.listener")),
@@ -182,29 +237,66 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_) => Err(conversion_error("function_handle")),
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
-        Value::MException(_) => Err(conversion_error("MException")),
+        Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_) => Err(conversion_error("MException")),
+        Value::Foreign(_) => Err(conversion_error("foreign")),
         Value::OutputList(_) => Err(conversion_error("OutputList")),
     }
 }
 
 fn logical_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
+    if tensor.integer_storage().is_none()
+        && tensor.materialize_f64().iter().any(|value| value.is_nan())
+    {
+        return Err(conversion_error("NaN"));
+    }
     let buffer = LogicalBuffer::from_real_tensor(&tensor);
     logical_buffer_to_host(buffer)
 }
 
-fn logical_from_sparse_tensor(sparse: runmat_builtins::SparseTensor) -> BuiltinResult<Value> {
-    let tensor = sparse.to_dense().map_err(|err| {
-        logical_error_with_message(
-            format!("logical: failed to densify sparse input: {err}"),
-            &LOGICAL_ERROR_INTERNAL,
-        )
-    })?;
-    logical_from_tensor(tensor)
-}
-
-fn logical_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let buffer = LogicalBuffer::from_complex_tensor(&tensor);
-    logical_buffer_to_host(buffer)
+fn logical_from_sparse_tensor(sparse: runmat_value::SparseTensor) -> BuiltinResult<Value> {
+    if sparse.is_logical() {
+        return Ok(Value::SparseTensor(sparse));
+    }
+    if sparse.integer_storage().is_none()
+        && (0..sparse.nnz()).any(|index| {
+            sparse
+                .numeric_value_at(index)
+                .is_some_and(|value| match value {
+                    runmat_value::NumericScalar::F64(value) => value.is_nan(),
+                    runmat_value::NumericScalar::F32(value) => value.is_nan(),
+                    _ => false,
+                })
+        })
+    {
+        return Err(conversion_error("NaN"));
+    }
+    let mut col_ptrs = Vec::with_capacity(sparse.cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    col_ptrs.push(0);
+    for col in 0..sparse.cols {
+        for index in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+            if !sparse
+                .numeric_value_at(index)
+                .expect("validated sparse storage index")
+                .is_zero()
+            {
+                row_indices.push(sparse.row_indices[index]);
+            }
+        }
+        col_ptrs.push(row_indices.len());
+    }
+    runmat_value::SparseTensor::new_logical(sparse.rows, sparse.cols, col_ptrs, row_indices)
+        .map(Value::SparseTensor)
+        .map_err(|err| {
+            logical_error_with_message(
+                format!("logical: failed to convert sparse input: {err}"),
+                &LOGICAL_ERROR_INTERNAL,
+            )
+        })
 }
 
 fn logical_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
@@ -227,9 +319,25 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         return Ok(Value::GpuTensor(handle));
     }
 
-    let provider = runmat_accelerate_api::provider();
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    {
+        return Err(conversion_error("complex"));
+    }
+    let provider = gpu_helpers::exact_provider_for_handle(&handle);
 
     if let Some(p) = provider {
+        let contains_nan = match provider_input_contains_nan(p, &handle).await {
+            Ok(contains_nan) => contains_nan,
+            Err(_) => {
+                let host =
+                    gpu_helpers::download_value_preserving_residency_async(p, &handle).await?;
+                value_contains_nan(&host)
+            }
+        };
+        if contains_nan {
+            return Err(conversion_error("NaN"));
+        }
         match p.logical_islogical(&handle) {
             Ok(true) => {
                 runmat_accelerate_api::set_handle_logical(&handle, true);
@@ -240,7 +348,8 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 trace!("logical: provider logical_islogical hook unavailable, falling back ({err})")
             }
         }
-        if let Some(result) = try_gpu_cast(p, &handle).await {
+        if let Some(mut result) = try_gpu_cast(p, &handle).await {
+            copy_logical_provenance(&mut result, &handle);
             return Ok(gpu_helpers::logical_gpu_value(result));
         } else {
             trace!(
@@ -259,7 +368,69 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             )
         })?;
     let buffer = LogicalBuffer::from_real_tensor(&tensor);
-    logical_buffer_to_gpu(buffer, provider)
+    logical_buffer_to_gpu(
+        buffer,
+        provider,
+        runmat_accelerate_api::handle_is_explicit(&handle),
+    )
+}
+
+async fn provider_input_contains_nan(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    source: &GpuTensorHandle,
+) -> BuiltinResult<bool> {
+    let mask = provider
+        .logical_isnan(source)
+        .map_err(|error| logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL))?;
+    let mask_valid = !gpu_helpers::same_gpu_handle(&mask, source)
+        && mask.shape == source.shape
+        && mask.device_id == source.device_id
+        && gpu_helpers::exact_provider_for_handle(&mask)
+            .is_some_and(|owner| std::ptr::eq(owner, provider));
+    if !mask_valid {
+        gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
+        return Err(logical_error_with_message(
+            "logical: provider returned a malformed NaN mask",
+            &LOGICAL_ERROR_INTERNAL,
+        ));
+    }
+    let maximum = provider.reduce_max(&mask).await.map_err(|error| {
+        gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
+        logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL)
+    })?;
+    let maximum_valid = !gpu_helpers::same_gpu_handle(&maximum, source)
+        && !gpu_helpers::same_gpu_handle(&maximum, &mask)
+        && maximum.shape.iter().product::<usize>() == 1
+        && maximum.device_id == source.device_id
+        && gpu_helpers::exact_provider_for_handle(&maximum)
+            .is_some_and(|owner| std::ptr::eq(owner, provider));
+    if !maximum_valid {
+        gpu_helpers::free_unprotected_exact_owner(&maximum, &[source, &mask]);
+        gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
+        return Err(logical_error_with_message(
+            "logical: provider returned a malformed NaN reduction",
+            &LOGICAL_ERROR_INTERNAL,
+        ));
+    }
+    let downloaded = provider.download(&maximum).await.map_err(|error| {
+        gpu_helpers::free_unprotected_exact_owner(&maximum, &[source, &mask]);
+        gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
+        logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL)
+    })?;
+    gpu_helpers::free_unprotected_exact_owner(&maximum, &[source, &mask]);
+    gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
+    Ok(downloaded.data.first().is_some_and(|value| *value != 0.0))
+}
+
+fn value_contains_nan(value: &Value) -> bool {
+    match value {
+        Value::Num(value) => value.is_nan(),
+        Value::Tensor(tensor) => {
+            tensor.integer_storage().is_none()
+                && tensor.materialize_f64().iter().any(|value| value.is_nan())
+        }
+        _ => false,
+    }
 }
 
 fn logical_buffer_to_host(buffer: LogicalBuffer) -> BuiltinResult<Value> {
@@ -278,6 +449,7 @@ fn logical_buffer_to_host(buffer: LogicalBuffer) -> BuiltinResult<Value> {
 fn logical_buffer_to_gpu(
     buffer: LogicalBuffer,
     provider: Option<&'static dyn AccelProvider>,
+    explicit: bool,
 ) -> BuiltinResult<Value> {
     if let Some(p) = provider {
         let floats: Vec<f64> = buffer
@@ -290,12 +462,31 @@ fn logical_buffer_to_gpu(
             shape: &buffer.shape,
         };
         match p.upload(&view) {
-            Ok(handle) => Ok(gpu_helpers::logical_gpu_value(handle)),
+            Ok(mut handle) => {
+                if explicit {
+                    runmat_accelerate_api::mark_handle_explicit(&mut handle);
+                } else {
+                    runmat_accelerate_api::mark_handle_automatic(&mut handle);
+                }
+                Ok(gpu_helpers::logical_gpu_value(handle))
+            }
             Err(err) => {
                 trace!("logical: upload failed during fallback path ({err})");
-                logical_buffer_to_host(buffer)
+                if explicit {
+                    Err(logical_error_with_message(
+                        format!("logical: failed to preserve explicit gpuArray residency: {err}"),
+                        &LOGICAL_ERROR_INTERNAL,
+                    ))
+                } else {
+                    logical_buffer_to_host(buffer)
+                }
             }
         }
+    } else if explicit {
+        Err(logical_error_with_message(
+            "logical: no exact owner for explicit gpuArray input",
+            &LOGICAL_ERROR_GPU_GATHER_FAILED,
+        ))
     } else {
         logical_buffer_to_host(buffer)
     }
@@ -306,13 +497,60 @@ async fn try_gpu_cast(
     input: &GpuTensorHandle,
 ) -> Option<GpuTensorHandle> {
     let zeros = provider.zeros_like(input).ok()?;
-    let result = provider.elem_ne(input, &zeros).await.ok();
+    let zeros_valid = zeros.shape == input.shape
+        && zeros.device_id == input.device_id
+        && !gpu_helpers::same_gpu_handle(&zeros, input)
+        && runmat_accelerate_api::handle_storage(&zeros)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(&zeros)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_integer_type(&zeros)
+            == runmat_accelerate_api::handle_integer_type(input)
+        && runmat_accelerate_api::handle_is_logical(&zeros)
+            == runmat_accelerate_api::handle_is_logical(input)
+        && gpu_helpers::exact_provider_for_handle(&zeros)
+            .is_some_and(|owner| std::ptr::eq(owner, provider));
+    if !zeros_valid {
+        gpu_helpers::free_unprotected_exact_owner(&zeros, &[input]);
+        return None;
+    }
+    let result = provider
+        .elem_ne(input, &zeros)
+        .await
+        .ok()
+        .and_then(|output| {
+            if valid_logical_gpu_output(&output, input, provider) {
+                Some(output)
+            } else {
+                gpu_helpers::free_unprotected_exact_owner(&output, &[input, &zeros]);
+                None
+            }
+        });
     let _ = provider.free(&zeros);
     result
 }
 
-fn complex_is_zero(re: f64, im: f64) -> bool {
-    re == 0.0 && im == 0.0
+fn copy_logical_provenance(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {
+    runmat_accelerate_api::set_handle_provenance(
+        output,
+        runmat_accelerate_api::handle_provenance(input)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+    );
+}
+
+fn valid_logical_gpu_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !gpu_helpers::same_gpu_handle(output, input)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
 }
 
 fn conversion_error(type_name: &str) -> RuntimeError {
@@ -333,20 +571,15 @@ struct LogicalBuffer {
 
 impl LogicalBuffer {
     fn from_real_tensor(tensor: &Tensor) -> Self {
-        let bits: Vec<u8> = tensor
-            .data
-            .iter()
-            .map(|&v| if v != 0.0 { 1 } else { 0 })
-            .collect();
-        let shape = canonical_shape(&tensor.shape, bits.len());
-        Self { bits, shape }
-    }
-
-    fn from_complex_tensor(tensor: &ComplexTensor) -> Self {
-        let bits: Vec<u8> = tensor
-            .data
-            .iter()
-            .map(|&(re, im)| if !complex_is_zero(re, im) { 1 } else { 0 })
+        let bits: Vec<u8> = (0..tensor.len())
+            .map(|index| {
+                u8::from(
+                    !tensor
+                        .numeric_value_at(index)
+                        .expect("tensor storage is structurally valid")
+                        .is_zero(),
+                )
+            })
             .collect();
         let shape = canonical_shape(&tensor.shape, bits.len());
         Self { bits, shape }
@@ -387,8 +620,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        CellArray, IntValue, MException, ObjectInstance, SparseTensor, StructValue, SymbolicExpr,
+    use runmat_value::{
+        CellArray, IntValue, IntegerComplexStorage, IntegerStorage, MException, ObjectInstance,
+        SparseTensor, StructValue, SymbolicExpr,
     };
 
     fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -420,6 +654,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logical_converts_symbolic_constants() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let nonzero = logical_builtin(Value::Symbolic(SymbolicExpr::constant(2.0)), Vec::new())
             .expect("logical");
         assert_eq!(nonzero, Value::Bool(true));
@@ -444,13 +679,11 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn logical_nan_is_true() {
+    fn logical_rejects_nan() {
         let tensor = Tensor::new(vec![0.0, f64::NAN, -0.0], vec![1, 3]).unwrap();
-        let result = logical_builtin(Value::Tensor(tensor), Vec::new()).expect("logical");
-        match result {
-            Value::LogicalArray(array) => assert_eq!(array.data, vec![0, 1, 0]),
-            other => panic!("expected logical array, got {:?}", other),
-        }
+        let error = logical_builtin(Value::Tensor(tensor), Vec::new())
+            .expect_err("NaN conversion must fail");
+        assert!(error.message().contains("NaN"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -469,30 +702,57 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn logical_sparse_tensor_densifies() {
+    fn logical_sparse_tensor_preserves_sparse_storage() {
         let sparse = SparseTensor::new(3, 2, vec![0, 1, 2], vec![1, 2], vec![4.0, -1.0]).unwrap();
         let result = logical_builtin(Value::SparseTensor(sparse), Vec::new()).expect("logical");
         match result {
-            Value::LogicalArray(array) => {
-                assert_eq!(array.shape, vec![3, 2]);
-                assert_eq!(array.data, vec![0, 1, 0, 0, 0, 1]);
+            Value::SparseTensor(sparse) => {
+                assert!(sparse.is_logical());
+                assert_eq!(sparse.shape(), vec![3, 2]);
+                assert_eq!(sparse.col_ptrs, vec![0, 1, 2]);
+                assert_eq!(sparse.row_indices, vec![1, 2]);
+                assert_eq!(
+                    sparse.to_dense_logical().expect("dense logical").data,
+                    vec![0, 1, 0, 0, 0, 1]
+                );
             }
-            other => panic!("expected logical array, got {:?}", other),
+            other => panic!("expected logical sparse tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn logical_sparse_nan_rejects_like_dense_nan() {
+        let sparse = SparseTensor::new(2, 1, vec![0, 1], vec![0], vec![f64::NAN]).unwrap();
+        let error = logical_builtin(Value::SparseTensor(sparse), Vec::new())
+            .expect_err("sparse NaN must reject");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:logical:ConversionNotPossible")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn logical_complex_conversion() {
+    fn logical_rejects_complex_conversion() {
         let complex =
             ComplexTensor::new(vec![(0.0, 0.0), (1.0, 0.0), (0.0, 2.0)], vec![3, 1]).unwrap();
-        let result = logical_builtin(Value::ComplexTensor(complex), Vec::new()).expect("logical");
-        match result {
-            Value::LogicalArray(array) => {
-                assert_eq!(array.data, vec![0, 1, 1]);
-            }
-            other => panic!("expected logical array, got {:?}", other),
-        }
+        let error = logical_builtin(Value::ComplexTensor(complex), Vec::new())
+            .expect_err("complex conversion must fail");
+        assert!(error.message().contains("complex"));
+    }
+
+    #[test]
+    fn logical_rejects_typed_complex_integer_components() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![0, u64::MAX, 0]),
+            IntegerStorage::U64(vec![0, 0, 1_u64 << 63]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![3, 1]).expect("typed complex");
+
+        let error = logical_builtin(Value::ComplexTensor(tensor), Vec::new())
+            .expect_err("complex conversion must fail");
+        assert!(error.message().contains("complex"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -603,14 +863,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, -2.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 logical_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("logical");
             let gathered = test_support::gather(result.clone()).expect("gather");
-            assert_eq!(gathered.data, vec![0.0, 1.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 1.0]);
             if let Value::GpuTensor(out) = result {
                 assert!(runmat_accelerate_api::handle_is_logical(&out));
             } else {
@@ -625,7 +885,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -680,18 +940,19 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn logical_wgpu_matches_cpu_conversion() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
 
-        let tensor = Tensor::new(vec![0.0, 2.0, -3.0, f64::NAN], vec![2, 2]).unwrap();
+        let tensor = Tensor::new(vec![0.0, 2.0, -3.0, 1.0], vec![2, 2]).unwrap();
         let cpu = logical_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
 
         let gpu_value = logical_builtin(Value::GpuTensor(handle), Vec::new()).unwrap();
@@ -718,6 +979,6 @@ pub(crate) mod tests {
         };
 
         assert_eq!(gathered.shape, expected_shape);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 }

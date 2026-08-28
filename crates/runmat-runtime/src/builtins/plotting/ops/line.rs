@@ -3,16 +3,21 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
-use runmat_plot::plots::{Figure, Line3Plot, LinePlot};
+use runmat_plot::plots::{Figure, Line3Plot, LinePlot, NumericPlotData};
+use runmat_value::{Tensor, Value};
 
-use super::common::{numeric_pair, numeric_triplet};
+use super::common::{numeric_plot_data, numeric_plot_data_pair, numeric_plot_data_triplet};
 use super::op_common::line_inputs::NumericInput;
 use super::op_common::{apply_axes_target, split_leading_axes_handle, AxesTarget};
-use super::plot::build_line_plot_for_builtin;
-use super::plot3::build_line3_plot_for_builtin;
+use super::plot::build_line_plot_from_numeric_data_for_builtin;
+use super::plot3::build_line3_plot_from_numeric_data_for_builtin;
 use super::plotting_error;
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
@@ -24,12 +29,32 @@ use super::style::{
     looks_like_option_name, parse_line_style_args, value_as_bool, value_as_string, LineAppearance,
     LineStyleParseOptions,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "line";
-type Series2D = (Vec<f64>, Vec<f64>);
-type Series3D = (Vec<f64>, Vec<f64>, Vec<f64>);
+const LINE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "XData/YData/ZData",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Line coordinate properties accept all eight integer classes and retain their native class, shape, and exact values.",
+    }];
+pub const LINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "h = line(integer_coordinates, ...)",
+        inputs: &LINE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native numeric storage is authoritative for coordinate properties and figure persistence; only renderer geometry materialization crosses to floating point.",
+    }];
+type Series2D = (NumericPlotData, NumericPlotData);
+type Series3D = (NumericPlotData, NumericPlotData, NumericPlotData);
 
 const LINE_OUTPUT_HANDLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -144,6 +169,7 @@ pub const LINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::line::LINE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::line::LINE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::line"
 )]
 pub async fn line_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -482,7 +508,13 @@ async fn build_2d_objects(
                 appearance.color =
                     line_color_for_target_axes_series_index(color_target.0, color_target.1, idx);
             }
-            let mut plot = build_line_plot_for_builtin(BUILTIN_NAME, x, y, label, &appearance)?;
+            let mut plot = build_line_plot_from_numeric_data_for_builtin(
+                BUILTIN_NAME,
+                x,
+                y,
+                label,
+                &appearance,
+            )?;
             if label.is_empty() {
                 plot.label = None;
             }
@@ -523,7 +555,14 @@ async fn build_3d_objects(
                 appearance.color =
                     line_color_for_target_axes_series_index(color_target.0, color_target.1, idx);
             }
-            let mut plot = build_line3_plot_for_builtin(BUILTIN_NAME, x, y, z, label, &appearance)?;
+            let mut plot = build_line3_plot_from_numeric_data_for_builtin(
+                BUILTIN_NAME,
+                x,
+                y,
+                z,
+                label,
+                &appearance,
+            )?;
             if label.is_empty() {
                 plot.label = None;
             }
@@ -537,46 +576,53 @@ async fn build_3d_objects(
 
 fn expand_xy_series(x: &Tensor, y: &Tensor) -> BuiltinResult<Vec<Series2D>> {
     if is_vector_tensor(x) && is_vector_tensor(y) {
-        let (x, y) = numeric_pair(x.clone(), y.clone(), BUILTIN_NAME)?;
+        let (x, y) = numeric_plot_data_pair(x.clone(), y.clone(), BUILTIN_NAME)?;
         return Ok(vec![(x, y)]);
     }
     if same_matrix_shape(x, y) {
-        return Ok((0..x.cols())
-            .map(|col| (column(x, col), column(y, col)))
-            .collect());
+        return (0..x.cols())
+            .map(|col| Ok((column(x, col)?, column(y, col)?)))
+            .collect::<BuiltinResult<Vec<_>>>();
     }
     if is_vector_tensor(x) && vector_len(x) == y.rows() {
-        return Ok((0..y.cols())
-            .map(|col| (x.data.clone(), column(y, col)))
-            .collect());
+        return (0..y.cols())
+            .map(|col| Ok((numeric_plot_data(x.clone())?, column(y, col)?)))
+            .collect::<BuiltinResult<Vec<_>>>();
     }
     if is_vector_tensor(y) && vector_len(y) == x.rows() {
-        return Ok((0..x.cols())
-            .map(|col| (column(x, col), y.data.clone()))
-            .collect());
+        return (0..x.cols())
+            .map(|col| Ok((column(x, col)?, numeric_plot_data(y.clone())?)))
+            .collect::<BuiltinResult<Vec<_>>>();
     }
     Err(line_err("X and Y inputs must be vectors with equal length, matrices with the same size, or a vector paired with each matrix column"))
 }
 
 fn expand_xyz_series(x: &Tensor, y: &Tensor, z: &Tensor) -> BuiltinResult<Vec<Series3D>> {
     if is_vector_tensor(x) && is_vector_tensor(y) && is_vector_tensor(z) {
-        let (x, y, z) = numeric_triplet(x.clone(), y.clone(), z.clone(), BUILTIN_NAME)?;
+        let (x, y, z) = numeric_plot_data_triplet(x.clone(), y.clone(), z.clone(), BUILTIN_NAME)?;
         return Ok(vec![(x, y, z)]);
     }
     if same_matrix_shape(x, y) && same_matrix_shape(x, z) {
-        return Ok((0..x.cols())
-            .map(|col| (column(x, col), column(y, col), column(z, col)))
-            .collect());
+        return (0..x.cols())
+            .map(|col| Ok((column(x, col)?, column(y, col)?, column(z, col)?)))
+            .collect::<BuiltinResult<Vec<_>>>();
     }
     Err(line_err(
         "X, Y, and Z inputs must be vectors with equal length or matrices with the same size",
     ))
 }
 
-fn column(tensor: &Tensor, col: usize) -> Vec<f64> {
-    (0..tensor.rows())
-        .map(|row| tensor.data[row + col * tensor.rows()])
-        .collect()
+fn column(tensor: &Tensor, col: usize) -> BuiltinResult<NumericPlotData> {
+    let indices = (0..tensor.rows())
+        .map(|row| row + col * tensor.rows())
+        .collect::<Vec<_>>();
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(line_err)?
+        .gather(&indices)
+        .map_err(line_err)?;
+    NumericPlotData::new(storage, vec![tensor.rows(), 1]).map_err(line_err)
 }
 
 fn is_vector_tensor(tensor: &Tensor) -> bool {
@@ -584,7 +630,7 @@ fn is_vector_tensor(tensor: &Tensor) -> bool {
 }
 
 fn vector_len(tensor: &Tensor) -> usize {
-    tensor.data.len()
+    tensor_utils::tensor_element_len(tensor)
 }
 
 fn same_matrix_shape(a: &Tensor, b: &Tensor) -> bool {
@@ -595,26 +641,15 @@ pub(super) fn handles_value(handles: Vec<f64>) -> Value {
     if handles.len() == 1 {
         Value::Num(handles[0])
     } else {
-        Value::Tensor(Tensor {
-            rows: 1,
-            cols: handles.len(),
-            shape: vec![1, handles.len()],
-            data: handles,
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        let len = handles.len();
+        Value::Tensor(Tensor::new(handles, vec![1, len]).expect("line handle row vector"))
     }
 }
 
 fn vector_value(data: &[f64]) -> Value {
-    Value::Tensor(Tensor {
-        data: data.to_vec(),
-        integer_data: None,
-        rows: 1,
-        cols: data.len(),
-        shape: vec![1, data.len()],
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(
+        Tensor::new(data.to_vec(), vec![1, data.len()]).expect("line property row vector"),
+    )
 }
 
 fn begins_with_name_value(args: &[Value]) -> bool {
@@ -654,6 +689,8 @@ mod tests {
     use crate::builtins::plotting::{clone_figure, configure_subplot, current_figure_handle};
     use futures::executor::block_on;
     use runmat_plot::plots::PlotElement;
+    use runmat_value::IntegerStorage;
+    use runmat_value::NumericStorage;
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -663,14 +700,11 @@ mod tests {
     }
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("line test tensor"))
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {
+        Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor")
     }
 
     #[test]
@@ -683,6 +717,19 @@ mod tests {
         assert!(labels.contains(&"h = line(X, Y)"));
         assert!(labels.contains(&"h = line(X, Y, Z)"));
         assert!(labels.contains(&"h = line(Name, Value, ...)"));
+    }
+
+    #[test]
+    fn expand_xy_series_reads_typed_integer_storage_without_mirror() {
+        let x = cleared_int_tensor(IntegerStorage::I16(vec![1, 2]), 1, 2);
+        let y = cleared_int_tensor(IntegerStorage::I16(vec![10, 20, 30, 40]), 2, 2);
+
+        let series = expand_xy_series(&x, &y).expect("series");
+
+        assert_eq!(series.len(), 2);
+        assert_eq!(series[0].0.storage(), &NumericStorage::I16(vec![1, 2]));
+        assert_eq!(series[0].1.storage(), &NumericStorage::I16(vec![10, 20]));
+        assert_eq!(series[1].1.storage(), &NumericStorage::I16(vec![30, 40]));
     }
 
     #[test]
@@ -805,7 +852,46 @@ mod tests {
         let Value::Tensor(x) = x else {
             panic!("expected XData tensor");
         };
-        assert_eq!(x.data, vec![7.0, 8.0, 9.0, 10.0]);
+        assert_eq!(x.materialize_f64(), vec![7.0, 8.0, 9.0, 10.0]);
+    }
+
+    #[test]
+    fn line_constructor_get_and_set_preserve_wide_uint64_data() {
+        let _guard = setup();
+        let wide = 9_007_199_254_740_993_u64;
+        let x = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![wide, wide + 1]), vec![1, 2]).unwrap(),
+        );
+        let y = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![wide + 2, wide + 3]), vec![1, 2]).unwrap(),
+        );
+        let Value::Num(handle) = block_on(line_builtin(vec![x, y])).unwrap() else {
+            panic!("expected scalar handle")
+        };
+
+        let Value::Tensor(x_data) =
+            get_builtin(vec![Value::Num(handle), Value::from("XData")]).unwrap()
+        else {
+            panic!("expected XData tensor")
+        };
+        assert_eq!(
+            x_data.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide, wide + 1]))
+        );
+
+        let replacement = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![wide + 4, wide + 5]), vec![1, 2]).unwrap(),
+        );
+        set_builtin(vec![Value::Num(handle), Value::from("XData"), replacement]).unwrap();
+        let Value::Tensor(x_data) =
+            get_builtin(vec![Value::Num(handle), Value::from("XData")]).unwrap()
+        else {
+            panic!("expected XData tensor")
+        };
+        assert_eq!(
+            x_data.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide + 4, wide + 5]))
+        );
     }
 
     #[test]
@@ -839,7 +925,7 @@ mod tests {
         let Value::Tensor(handles) = handles else {
             panic!("expected handle row vector");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plots().count(), 2);
     }
@@ -883,6 +969,6 @@ mod tests {
         let Value::Tensor(z) = z else {
             panic!("expected ZData tensor");
         };
-        assert_eq!(z.data, vec![7.0, 8.0, 9.0]);
+        assert_eq!(z.materialize_f64(), vec![7.0, 8.0, 9.0]);
     }
 }

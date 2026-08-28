@@ -1,4 +1,4 @@
-use runmat_builtins::{StringArray, Tensor, Value};
+use runmat_value::{StringArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -167,7 +167,7 @@ fn business_day_helpers_execute_in_scripts() {
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 4.0).abs() < f64::EPSILON)));
-    assert!(vars.iter().any(
-        |value| matches!(value, Value::Tensor(Tensor { data, .. }) if data == &vec![1.0, 1.0])
-    ));
+    assert!(vars.iter().any(|value| {
+        matches!(value, Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0, 1.0])
+    }));
 }

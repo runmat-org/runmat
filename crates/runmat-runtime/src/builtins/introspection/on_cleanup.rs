@@ -1,4 +1,5 @@
 //! MATLAB-compatible `onCleanup` handle object.
+use runmat_types::MemberAccess;
 
 use std::collections::HashMap;
 
@@ -8,17 +9,28 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ClassDef, HandleRef, MethodDef, ObjectInstance, PropertyDef, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, HandleRef, ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(crate) const ON_CLEANUP_CLASS: &str = "onCleanup";
 const CALLBACK_PROPERTY: &str = "__oncleanup_callback";
 const ACTIVE_PROPERTY: &str = "__oncleanup_active";
+const ON_CLEANUP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "onCleanup accepts only a function handle or closure and returns a handle object; numeric values are rejected as callbacks.",
+};
+const CANCEL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "cancel accepts only an onCleanup handle and returns a fixed double status; it has no integer data, control, or class-preserving form.",
+};
 
 #[cfg(test)]
 pub(crate) static ON_CLEANUP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -130,6 +142,7 @@ pub const ON_CLEANUP_CANCEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     summary = "Create an object that runs a function when deleted or cleared.",
     keywords = "onCleanup,cleanup,delete,clear,resource,RAII",
     descriptor(crate::builtins::introspection::on_cleanup::ON_CLEANUP_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::on_cleanup::ON_CLEANUP_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::on_cleanup"
 )]
 pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<Value> {
@@ -195,6 +208,7 @@ pub(crate) async fn on_cleanup_delete_builtin(value: Value) -> BuiltinResult<Val
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::introspection::on_cleanup::ON_CLEANUP_CANCEL_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::on_cleanup::CANCEL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::on_cleanup"
 )]
 async fn on_cleanup_cancel_builtin(value: Value) -> BuiltinResult<Value> {
@@ -243,38 +257,38 @@ pub(crate) async fn run_cleanup_for_workspace_values(values: &[Value]) -> Builti
 }
 
 fn ensure_on_cleanup_class_registered() {
-    if runmat_builtins::get_class(ON_CLEANUP_CLASS).is_some() {
+    if crate::class_registry::get_class(ON_CLEANUP_CLASS).is_some() {
         return;
     }
     let mut methods = HashMap::new();
     methods.insert(
         "delete".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "delete".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "__runmat_oncleanup_delete".to_string(),
             implicit_class_argument: None,
         },
     );
     methods.insert(
         "cancel".to_string(),
-        MethodDef {
+        crate::class_registry::RuntimeMethod {
             name: "cancel".to_string(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
-            access: Access::Public,
+            access: MemberAccess::Public,
             function_name: "cancel".to_string(),
             implicit_class_argument: None,
         },
     );
-    runmat_builtins::register_class(ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: ON_CLEANUP_CLASS.to_string(),
         parent: Some("handle".to_string()),
-        properties: HashMap::<String, PropertyDef>::new(),
+        properties: HashMap::<String, crate::class_registry::RuntimeProperty>::new(),
         methods,
     });
 }
@@ -381,7 +395,7 @@ mod tests {
             let counter = Arc::clone(&counter);
             Box::pin(async move {
                 *counter.lock().unwrap() += 1;
-                Ok(Value::Tensor(runmat_builtins::Tensor::zeros(vec![0, 0])))
+                Ok(Value::Tensor(runmat_value::Tensor::zeros(vec![0, 0])))
             })
         })
     }
@@ -454,10 +468,17 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn rejects_non_function_handle_callback() {
+    fn rejects_numeric_and_non_function_handle_callbacks() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
-        let err = block_on(on_cleanup_builtin(Value::Num(1.0))).expect_err("expected error");
-        assert_eq!(err.identifier(), Some("RunMat:onCleanup:InvalidCallback"));
+        for callback in [Value::Num(1.0), Value::Int(runmat_value::IntValue::I64(1))] {
+            let err = block_on(on_cleanup_builtin(callback)).expect_err("expected error");
+            assert_eq!(err.identifier(), Some("RunMat:onCleanup:InvalidCallback"));
+        }
+        let err = block_on(on_cleanup_cancel_builtin(Value::Int(
+            runmat_value::IntValue::U64(1),
+        )))
+        .expect_err("integer is not an onCleanup handle");
+        assert_eq!(err.identifier(), Some("RunMat:onCleanup:InvalidObject"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -504,7 +525,7 @@ mod tests {
         }))
         .expect("create cleanup c");
 
-        let mut struct_value = runmat_builtins::StructValue::new();
+        let mut struct_value = runmat_value::StructValue::new();
         struct_value.insert("cleanup", cleanup_a);
         let mut object = ObjectInstance::new("CleanupHolder".to_string());
         object.properties.insert("cleanup".to_string(), cleanup_b);

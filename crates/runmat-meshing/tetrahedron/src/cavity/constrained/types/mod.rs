@@ -22,10 +22,6 @@ pub use errors::*;
 pub(super) const MAX_MULTI_INTERIOR_REFILL_NODES: usize = 6;
 pub(super) const MAX_MULTI_INTERIOR_REFILL_CANDIDATES: usize = 512;
 pub(super) const MAX_CONSTRAINED_CAVITY_EXPANSION_STEPS: usize = 64;
-pub(super) const MAX_CAP_SIDE_CONNECTOR_CHAIN_DEPTH: usize = 2;
-pub(super) const MAX_CAP_SIDE_CONNECTOR_CHAIN_FACES_PER_DEPTH: usize = 128;
-pub(super) const MAX_CAP_SIDE_CONNECTORS_PER_CHAIN_FACE: usize = 2;
-pub(super) const MAX_CAP_SIDE_CONNECTOR_CHAIN_CANDIDATES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstrainedCavity {
@@ -64,6 +60,48 @@ pub struct ConstrainedCavityRefillOptions {
     pub min_scaled_jacobian: f64,
     pub volume_relative_tolerance: f64,
     pub min_protected_node_distance_m: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstrainedCavityRefillBudget {
+    pub maximum_nodes: u64,
+    pub maximum_boundary_faces: u64,
+    pub maximum_candidate_tetrahedra: u64,
+    pub maximum_candidate_evaluations: u64,
+    pub maximum_search_attempts: u64,
+    pub maximum_expansion_rounds: u32,
+    pub cancellation_check_interval: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstrainedCavitySteinerCandidateBudget {
+    pub maximum_candidates: u64,
+    pub maximum_evaluations: u64,
+    pub cancellation_check_interval: u64,
+}
+
+impl Default for ConstrainedCavitySteinerCandidateBudget {
+    fn default() -> Self {
+        Self {
+            maximum_candidates: 4_096,
+            maximum_evaluations: 1_000_000,
+            cancellation_check_interval: 1_024,
+        }
+    }
+}
+
+impl Default for ConstrainedCavityRefillBudget {
+    fn default() -> Self {
+        Self {
+            maximum_nodes: 10_000,
+            maximum_boundary_faces: 20_000,
+            maximum_candidate_tetrahedra: 1_000_000,
+            maximum_candidate_evaluations: 100_000_000,
+            maximum_search_attempts: 1_000_000,
+            maximum_expansion_rounds: 1_024,
+            cancellation_check_interval: 1_024,
+        }
+    }
 }
 
 impl Default for ConstrainedCavityRefillOptions {

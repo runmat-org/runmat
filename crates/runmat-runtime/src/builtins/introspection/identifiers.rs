@@ -11,9 +11,10 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::identifiers")]
 pub const NAMELENGTHMAX_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -259,7 +260,7 @@ fn iskeyword_type(args: &[Type], _context: &ResolveContext) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::StringArray;
+    use runmat_value::StringArray;
 
     #[test]
     fn namelengthmax_returns_current_identifier_limit() {

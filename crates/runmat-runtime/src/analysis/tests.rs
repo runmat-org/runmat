@@ -4499,6 +4499,7 @@ fn gpu_run_with_provider_emits_device_refs() {
                 shape: host.shape.to_vec(),
                 device_id: 7,
                 buffer_id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
+                descriptor: Default::default(),
             })
         }
 

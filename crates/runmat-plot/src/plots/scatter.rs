@@ -10,14 +10,19 @@ use crate::core::{
 use crate::gpu::scatter2::Scatter2GpuInputs;
 use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::surface::ColorMap;
+use crate::plots::NumericPlotData;
 use glam::{Vec3, Vec4};
+use runmat_value::NumericStorage;
+
+pub type HostScatterData = (Vec<f64>, Vec<f64>);
 
 /// High-performance GPU-accelerated scatter plot
 #[derive(Debug, Clone)]
 pub struct ScatterPlot {
-    /// Raw data points (x, y coordinates)
-    pub x_data: Vec<f64>,
-    pub y_data: Vec<f64>,
+    /// Authoritative host source values. GPU-backed plots retain their source
+    /// buffers in `gpu_inputs` instead.
+    source_x: Option<NumericPlotData>,
+    source_y: Option<NumericPlotData>,
     pub theta_data: Option<Vec<f64>>,
     pub r_data: Option<Vec<f64>>,
 
@@ -84,15 +89,21 @@ pub struct ScatterGpuStyle {
 
 impl ScatterPlot {
     pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
-        if !self.x_data.is_empty() && self.x_data.len() == self.y_data.len() {
-            return Ok((self.x_data.clone(), self.y_data.clone()));
+        if let Some((x, y)) = self.export_numeric_xy_data().await? {
+            return Ok((x.materialize_f64(), y.materialize_f64()));
         }
-        if !self.x_data.is_empty() || !self.y_data.is_empty() {
-            return Err(format!(
-                "scatter plot has partial CPU source data: x has {} values, y has {} values",
-                self.x_data.len(),
-                self.y_data.len()
-            ));
+        Ok((Vec::new(), Vec::new()))
+    }
+
+    pub async fn export_numeric_xy_data(
+        &self,
+    ) -> Result<Option<(NumericPlotData, NumericPlotData)>, String> {
+        match (&self.source_x, &self.source_y) {
+            (Some(x), Some(y)) if x.len() == y.len() => {
+                return Ok(Some((x.clone(), y.clone())));
+            }
+            (None, None) => {}
+            _ => return Err("scatter plot has partial CPU source data".to_string()),
         }
 
         if let Some(inputs) = &self.gpu_inputs {
@@ -117,7 +128,24 @@ impl ScatterPlot {
                 inputs.scalar,
             )
             .await?;
-            return Ok((x, y));
+            let shape = vec![1, len];
+            let (x, y) = match inputs.scalar {
+                crate::gpu::ScalarType::F64 => (
+                    NumericPlotData::new(NumericStorage::F64(x), shape.clone())?,
+                    NumericPlotData::new(NumericStorage::F64(y), shape)?,
+                ),
+                crate::gpu::ScalarType::F32 => (
+                    NumericPlotData::new(
+                        NumericStorage::F32(x.into_iter().map(|v| v as f32).collect()),
+                        shape.clone(),
+                    )?,
+                    NumericPlotData::new(
+                        NumericStorage::F32(y.into_iter().map(|v| v as f32).collect()),
+                        shape,
+                    )?,
+                ),
+            };
+            return Ok(Some((x, y)));
         }
 
         if self.gpu_vertices.is_some() {
@@ -126,11 +154,23 @@ impl ScatterPlot {
             );
         }
 
-        Ok((Vec::new(), Vec::new()))
+        Ok(None)
     }
 
     /// Create a new scatter plot with data
     pub fn new(x_data: Vec<f64>, y_data: Vec<f64>) -> Result<Self, String> {
+        let x_len = x_data.len();
+        let y_len = y_data.len();
+        Self::from_numeric_data(
+            NumericPlotData::from_f64(x_data, vec![1, x_len])?,
+            NumericPlotData::from_f64(y_data, vec![1, y_len])?,
+        )
+    }
+
+    pub fn from_numeric_data(
+        x_data: NumericPlotData,
+        y_data: NumericPlotData,
+    ) -> Result<Self, String> {
         if x_data.len() != y_data.len() {
             return Err(format!(
                 "Data length mismatch: x_data has {} points, y_data has {} points",
@@ -144,8 +184,8 @@ impl ScatterPlot {
         }
 
         Ok(Self {
-            x_data,
-            y_data,
+            source_x: Some(x_data),
+            source_y: Some(y_data),
             theta_data: None,
             r_data: None,
             color: Vec4::new(1.0, 0.2, 0.2, 1.0), // Brighter red
@@ -181,8 +221,8 @@ impl ScatterPlot {
         style: ScatterGpuStyle,
     ) -> Self {
         Self {
-            x_data: Vec::new(),
-            y_data: Vec::new(),
+            source_x: None,
+            source_y: None,
             theta_data: None,
             r_data: None,
             color: style.color,
@@ -304,6 +344,19 @@ impl ScatterPlot {
 
     /// Update the data points
     pub fn update_data(&mut self, x_data: Vec<f64>, y_data: Vec<f64>) -> Result<(), String> {
+        let x_len = x_data.len();
+        let y_len = y_data.len();
+        self.update_numeric_data(
+            NumericPlotData::from_f64(x_data, vec![1, x_len])?,
+            NumericPlotData::from_f64(y_data, vec![1, y_len])?,
+        )
+    }
+
+    pub fn update_numeric_data(
+        &mut self,
+        x_data: NumericPlotData,
+        y_data: NumericPlotData,
+    ) -> Result<(), String> {
         if x_data.len() != y_data.len() {
             return Err(format!(
                 "Data length mismatch: x_data has {} points, y_data has {} points",
@@ -316,8 +369,10 @@ impl ScatterPlot {
             return Err("Cannot update with empty data".to_string());
         }
 
-        self.x_data = x_data;
-        self.y_data = y_data;
+        self.source_x = Some(x_data);
+        self.source_y = Some(y_data);
+        self.theta_data = None;
+        self.r_data = None;
         self.dirty = true;
         self.invalidate_gpu_vertices();
         self.clear_gpu_source_inputs();
@@ -352,8 +407,8 @@ impl ScatterPlot {
 
     /// Get the number of data points
     pub fn len(&self) -> usize {
-        if !self.x_data.is_empty() {
-            self.x_data.len()
+        if let Some(source) = &self.source_x {
+            source.len()
         } else {
             self.gpu_point_count.unwrap_or(0)
         }
@@ -362,6 +417,24 @@ impl ScatterPlot {
     /// Check if the plot has no data
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn source_data(&self) -> (Option<&NumericPlotData>, Option<&NumericPlotData>) {
+        (self.source_x.as_ref(), self.source_y.as_ref())
+    }
+
+    pub fn host_xy_f64(&self) -> Result<Option<HostScatterData>, String> {
+        match (&self.source_x, &self.source_y) {
+            (Some(x), Some(y)) if x.len() == y.len() => {
+                Ok(Some((x.materialize_f64(), y.materialize_f64())))
+            }
+            (None, None) => Ok(None),
+            (x, y) => Err(format!(
+                "scatter plot has partial CPU source data: x has {} values, y has {} values",
+                x.as_ref().map_or(0, NumericPlotData::len),
+                y.as_ref().map_or(0, NumericPlotData::len)
+            )),
+        }
     }
 
     /// Generate vertices for GPU rendering
@@ -373,11 +446,14 @@ impl ScatterPlot {
             return self.vertices.as_ref().unwrap();
         }
         if self.dirty || self.vertices.is_none() {
+            let (x_data, y_data) = self
+                .host_xy_f64()
+                .expect("validated scatter host source")
+                .unwrap_or_default();
             let base_color = self.color;
             if self.per_point_colors.is_some() || self.color_values.is_some() { /* vertex color takes precedence; shader blends by face alpha */
             }
-            let mut verts =
-                vertex_utils::create_scatter_plot(&self.x_data, &self.y_data, base_color);
+            let mut verts = vertex_utils::create_scatter_plot(&x_data, &y_data, base_color);
             // per-point colors
             if let Some(ref colors) = self.per_point_colors {
                 let m = colors.len().min(verts.len());
@@ -441,10 +517,13 @@ impl ScatterPlot {
             return self.bounds.unwrap_or_default();
         }
         if self.dirty || self.bounds.is_none() {
-            let points: Vec<Vec3> = self
-                .x_data
+            let (x_data, y_data) = self
+                .host_xy_f64()
+                .expect("validated scatter host source")
+                .unwrap_or_default();
+            let points: Vec<Vec3> = x_data
                 .iter()
-                .zip(self.y_data.iter())
+                .zip(y_data.iter())
                 .map(|(&x, &y)| Vec3::new(x as f32, y as f32, 0.0))
                 .collect();
             self.bounds = Some(BoundingBox::from_points(&points));
@@ -531,15 +610,17 @@ impl ScatterPlot {
 
     /// Get plot statistics for debugging
     pub fn statistics(&self) -> PlotStatistics {
-        let (min_x, max_x, min_y, max_y) = if !self.x_data.is_empty() {
-            let (min_x, max_x) = self
-                .x_data
+        let (min_x, max_x, min_y, max_y) = if self.source_x.is_some() {
+            let (x_data, y_data) = self
+                .host_xy_f64()
+                .expect("validated scatter host source")
+                .unwrap_or_default();
+            let (min_x, max_x) = x_data
                 .iter()
                 .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), &x| {
                     (min.min(x), max.max(x))
                 });
-            let (min_y, max_y) = self
-                .y_data
+            let (min_y, max_y) = y_data
                 .iter()
                 .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), &y| {
                     (min.min(y), max.max(y))
@@ -566,7 +647,14 @@ impl ScatterPlot {
 
     /// Estimate memory usage in bytes
     pub fn estimated_memory_usage(&self) -> usize {
-        std::mem::size_of::<f64>() * (self.x_data.len() + self.y_data.len())
+        self.source_x
+            .as_ref()
+            .map_or(0, NumericPlotData::estimated_byte_len)
+            .saturating_add(
+                self.source_y
+                    .as_ref()
+                    .map_or(0, NumericPlotData::estimated_byte_len),
+            )
             + self
                 .vertices
                 .as_ref()
@@ -631,8 +719,7 @@ mod tests {
 
         let plot = ScatterPlot::new(x.clone(), y.clone()).unwrap();
 
-        assert_eq!(plot.x_data, x);
-        assert_eq!(plot.y_data, y);
+        assert_eq!(plot.host_xy_f64().unwrap(), Some((x, y)));
         assert_eq!(plot.len(), 4);
         assert!(!plot.is_empty());
         assert!(plot.visible);

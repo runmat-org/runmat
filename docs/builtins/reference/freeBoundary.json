@@ -30,6 +30,7 @@
   "description": "`freeBoundary(dt)` returns an M-by-2 one-based edge list for edges used by only one triangle in a 2-D `DelaunayTri` object.",
   "behaviors": [
     "Accepts `DelaunayTri` objects from the legacy constructor.",
+    "MATLAB-compatible object connectivity uses double storage; manually supplied typed-integer connectivity is available in `runmat` compatibility mode.",
     "Returns one-based vertex indices sorted deterministically by edge.",
     "Returns a 0-by-2 tensor for empty triangulations."
   ],

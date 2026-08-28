@@ -2,7 +2,7 @@ use std::sync::Once;
 
 use runmat_accelerate::simple_provider::register_inprocess_provider;
 use runmat_accelerate::{prepare_builtin_args, promote_binary, BinaryOp};
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 static INIT: Once = Once::new();
 
@@ -10,9 +10,11 @@ fn ensure_auto_init() {
     INIT.call_once(|| {
         std::env::set_var("RUNMAT_ACCEL_AUTO_OFFLOAD", "1");
         std::env::set_var("RUNMAT_ACCEL_CALIBRATE", "0");
+        std::env::set_var("RUNMAT_ACCEL_CALIBRATE_REFRESH", "1");
         std::env::set_var("RUNMAT_ACCEL_THRESHOLD_UNARY", "1");
         std::env::set_var("RUNMAT_ACCEL_THRESHOLD_ELEMWISE", "1");
         std::env::set_var("RUNMAT_ACCEL_THRESHOLD_REDUCTION", "1");
+        std::env::set_var("RUNMAT_ACCEL_SMALL_BATCH_MAX_DIM", "0");
         register_inprocess_provider();
     });
 }
@@ -25,7 +27,7 @@ fn make_tensor(len: usize) -> Tensor {
 #[tokio::test]
 async fn promotes_large_tensors_to_gpu_for_elementwise() {
     ensure_auto_init();
-    let tensor = make_tensor(8);
+    let tensor = make_tensor(8_192);
     let value = Value::Tensor(tensor.clone());
     let (a_gpu, b_gpu) = promote_binary(BinaryOp::Elementwise, &value, &value)
         .await
@@ -37,7 +39,7 @@ async fn promotes_large_tensors_to_gpu_for_elementwise() {
 #[tokio::test]
 async fn gather_occurs_for_sink_builtins() {
     ensure_auto_init();
-    let tensor = make_tensor(4);
+    let tensor = make_tensor(8_192);
     let value = Value::Tensor(tensor.clone());
     let (gpu, _) = promote_binary(BinaryOp::Elementwise, &value, &value)
         .await
@@ -49,7 +51,7 @@ async fn gather_occurs_for_sink_builtins() {
 #[tokio::test]
 async fn prepare_builtin_promotes_sinc_as_unary() {
     ensure_auto_init();
-    let tensor = make_tensor(4);
+    let tensor = make_tensor(8_192);
     let prepared = prepare_builtin_args("sinc", &[Value::Tensor(tensor)])
         .await
         .expect("prepare");

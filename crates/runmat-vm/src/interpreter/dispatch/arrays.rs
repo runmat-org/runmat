@@ -1,6 +1,6 @@
 use crate::ops::arrays as array_ops;
-use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 use std::future::Future;
 
 pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result<(), RuntimeError> {

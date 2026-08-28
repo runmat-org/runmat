@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`encode` gathers provider inputs when needed, then builds and returns host sparse count matrices from host text-model metadata."
+    "notes": "`encode` is an object/text host operation. Resident numeric model or document arguments reject before provider access; only a compatibility-gated resident ForceCellOutput control can be gathered."
   },
   "fusion": {
     "elementwise": false,
@@ -37,7 +37,8 @@
     "`encode(___, 'ForceCellOutput', true)` wraps the sparse result in a 1-by-1 cell array. This preserves the documented scalar-bag cell-output form without pretending object-array parity exists.",
     "Words or n-grams not present in the bag model are ignored.",
     "For `bagOfNgrams`, RunMat encodes the n-gram rows stored on the compatibility object and derives scan lengths from those rows.",
-    "Non-scalar bag object arrays and native MATLAB sparse model storage remain broader Text Analytics/runtime work."
+    "Non-scalar bag object arrays and native MATLAB sparse model storage remain broader Text Analytics/runtime work.",
+    "Integer and numeric model/document values are never converted to text. RunMat mode optionally accepts exact scalar integer ForceCellOutput predicates behind an extension gate; zero is false and every nonzero integer is true."
   ],
   "examples": [
     {
@@ -67,10 +68,14 @@
     },
     {
       "question": "Does `encode` execute on the GPU?",
-      "answer": "No. It gathers provider inputs when needed, uses host text metadata, and returns host sparse values."
+      "answer": "No. Bag models and documents are host object/text values. Numeric resident values in those roles reject before provider access; only a RunMat-mode resident ForceCellOutput control can gather after validation and gating."
     }
   ],
   "links": [
+    {
+      "label": "MathWorks encode documentation",
+      "url": "https://www.mathworks.com/help/textanalytics/ref/bagofwords.encode.html"
+    },
     {
       "label": "bagOfWords",
       "url": "./bagOfWords"
@@ -102,5 +107,5 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/encode.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/encode.rs"
   },
-  "gpu_residency": "`encode` currently gathers provider inputs and returns host sparse output because RunMat sparse values are host-resident."
+  "gpu_residency": "`encode` returns host sparse output. It does not gather model or document arguments speculatively; invalid numeric resident values reject before provider access. A resident ForceCellOutput scalar is a separately gated RunMat extension."
 }

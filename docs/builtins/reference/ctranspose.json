@@ -33,9 +33,10 @@
   },
   "description": "`B = ctranspose(A)` (or `A'`) swaps the first two dimensions of `A` and conjugates complex values. Real-valued inputs therefore behave like simple transpose, with MATLAB/RunMat Hermitian semantics for complex data.",
   "behaviors": [
-    "Works for scalars, vectors, matrices, and N-D arrays; only the first two axes are swapped.",
+    "Works for scalars, vectors, and matrices. N-D arrays with a nonsingleton dimension above two are rejected; use `permute` for N-D reordering.",
     "Real numeric, logical, and character data are not changed by conjugation.",
-    "Complex values receive element-wise conjugation after the transpose (`(a + bi)' = a - bi`).",
+    "Complex single and double values receive element-wise conjugation after the transpose (`(a + bi)' = a - bi`), and remain complex even when every imaginary component is zero. Complex integer storage is rejected.",
+    "Dense real integer input preserves all eight integer classes. Integer-valued sparse storage is available only through the `ctranspose-integer-sparse` RunMat extension.",
     "Character arrays and cell arrays preserve their types; `ctranspose` simply rearranges entries.",
     "String scalars are passed through unchanged; string arrays transpose like MATLAB.",
     "Empty arrays and singleton dimensions follow MATLAB's column-major semantics."
@@ -82,7 +83,7 @@
     },
     {
       "question": "What about higher-dimensional arrays?",
-      "answer": "Only the first two axes are swapped; trailing dimensions stay in-place, matching MATLAB."
+      "answer": "Use `permute` for higher-dimensional arrays. `ctranspose` accepts vectors and matrices, including explicit trailing singleton dimensions, and rejects nonsingleton dimensions above two."
     },
     {
       "question": "Does the result share storage with the input?",
@@ -98,11 +99,11 @@
     },
     {
       "question": "Can I rely on `ctranspose` inside linear-algebra routines (e.g., Hermitian products)?",
-      "answer": "Yes. The builtin mirrors MATLAB semantics precisely and is safe to use inside idioms like `A' * A`."
+      "answer": "Yes for the supported numeric, logical, character, string, cell, scalar-struct, sparse, and resident array forms described above. On those inputs it preserves the conjugate-transpose semantics required by idioms such as `A' * A`."
     },
     {
       "question": "What error do I get for unsupported types?",
-      "answer": "Non-numeric objects (e.g., structs) raise `ctranspose: unsupported input type ...`, matching MATLAB's strict type checks."
+      "answer": "Supported scalar structs are unchanged by transpose. Unsupported value kinds raise `ctranspose: unsupported input type ...`; external objects can provide their own `ctranspose` method."
     }
   ],
   "links": [

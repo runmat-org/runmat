@@ -1,10 +1,13 @@
 //! Shared exact host-side conversion support for MATLAB integer cast builtins.
 
-use runmat_builtins::{IntValue, IntegerStorage, SymbolicArray, Tensor, Value};
+use runmat_value::{
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, SymbolicArray,
+    Tensor, Value,
+};
 
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum IntegerTarget {
     I8,
     I16,
@@ -17,6 +20,36 @@ pub(crate) enum IntegerTarget {
 }
 
 impl IntegerTarget {
+    pub(crate) fn class_name(self) -> &'static str {
+        match self {
+            Self::I8 => "int8",
+            Self::I16 => "int16",
+            Self::I32 => "int32",
+            Self::I64 => "int64",
+            Self::U8 => "uint8",
+            Self::U16 => "uint16",
+            Self::U32 => "uint32",
+            Self::U64 => "uint64",
+        }
+    }
+
+    pub(crate) fn cast_i128(self, value: i128) -> IntValue {
+        match self {
+            Self::I8 => IntValue::I8(value.clamp(i8::MIN as i128, i8::MAX as i128) as i8),
+            Self::I16 => IntValue::I16(value.clamp(i16::MIN as i128, i16::MAX as i128) as i16),
+            Self::I32 => IntValue::I32(value.clamp(i32::MIN as i128, i32::MAX as i128) as i32),
+            Self::I64 => IntValue::I64(value.clamp(i64::MIN as i128, i64::MAX as i128) as i64),
+            Self::U8 => IntValue::U8(value.clamp(0, u8::MAX as i128) as u8),
+            Self::U16 => IntValue::U16(value.clamp(0, u16::MAX as i128) as u16),
+            Self::U32 => IntValue::U32(value.clamp(0, u32::MAX as i128) as u32),
+            Self::U64 => IntValue::U64(value.clamp(0, u64::MAX as i128) as u64),
+        }
+    }
+
+    pub(crate) fn uses_extended_scalar_precision(self) -> bool {
+        matches!(self, Self::I64 | Self::U64)
+    }
+
     pub(crate) fn from_int_value(value: &IntValue) -> Self {
         match value {
             IntValue::I8(_) => Self::I8,
@@ -40,6 +73,19 @@ impl IntegerTarget {
             IntegerStorage::U16(_) => Self::U16,
             IntegerStorage::U32(_) => Self::U32,
             IntegerStorage::U64(_) => Self::U64,
+        }
+    }
+
+    pub(crate) fn accelerator_type(self) -> runmat_accelerate_api::IntegerElementType {
+        match self {
+            Self::I8 => runmat_accelerate_api::IntegerElementType::I8,
+            Self::I16 => runmat_accelerate_api::IntegerElementType::I16,
+            Self::I32 => runmat_accelerate_api::IntegerElementType::I32,
+            Self::I64 => runmat_accelerate_api::IntegerElementType::I64,
+            Self::U8 => runmat_accelerate_api::IntegerElementType::U8,
+            Self::U16 => runmat_accelerate_api::IntegerElementType::U16,
+            Self::U32 => runmat_accelerate_api::IntegerElementType::U32,
+            Self::U64 => runmat_accelerate_api::IntegerElementType::U64,
         }
     }
 
@@ -74,18 +120,27 @@ impl IntegerTarget {
     }
 
     pub(crate) fn cast_tensor(self, tensor: Tensor) -> Result<Tensor, String> {
-        let values = match tensor.integer_data {
-            Some(storage) => integer_values(storage)
-                .iter()
-                .map(|value| self.cast_int(value))
-                .collect(),
-            None => tensor
-                .data
+        let shape = tensor.shape.clone();
+        let storage = tensor.into_numeric_storage()?;
+        let values = match storage {
+            NumericStorage::F64(values) => values
                 .iter()
                 .map(|&value| self.cast_scalar(value))
                 .collect(),
+            NumericStorage::F32(values) => values
+                .iter()
+                .map(|&value| self.cast_scalar(f64::from(value)))
+                .collect(),
+            storage => integer_values(
+                storage
+                    .into_integer_storage()
+                    .expect("integer numeric storage"),
+            )
+            .iter()
+            .map(|value| self.cast_int(value))
+            .collect(),
         };
-        Tensor::new_integer(self.storage(values), tensor.shape)
+        Tensor::new_integer(self.storage(values), shape)
     }
 
     pub(crate) fn storage(self, values: Vec<IntValue>) -> IntegerStorage {
@@ -166,6 +221,7 @@ impl IntegerTarget {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum CastError {
     Unsupported(String),
     Internal(String),
@@ -181,7 +237,7 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
             0.0
         }))),
         Value::Tensor(tensor) => cast_tensor_value(target, tensor),
-        Value::SparseTensor(_) => Err(CastError::Unsupported("sparse".to_string())),
+        Value::SparseTensor(sparse) => cast_sparse_value(target, sparse),
         Value::LogicalArray(array) => {
             let tensor = tensor::logical_to_tensor(&array).map_err(CastError::Internal)?;
             cast_tensor_value(target, tensor)
@@ -199,13 +255,109 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
             cast_tensor_value(target, tensor)
         }
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
+            let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
+                .ok_or_else(|| {
+                    CastError::Internal("no acceleration provider owns the input handle".into())
+                })?;
+            let source_integer = runmat_accelerate_api::handle_integer_type(&handle);
+            let source_logical = runmat_accelerate_api::handle_is_logical(&handle);
+            let source_precision = runmat_accelerate_api::handle_precision(&handle);
+            let source_storage = runmat_accelerate_api::handle_storage(&handle);
+            let source_metadata_consistent = if source_integer.is_some() {
+                matches!(
+                    source_storage,
+                    runmat_accelerate_api::GpuTensorStorage::Real
+                        | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                ) && source_precision.is_none()
+                    && !source_logical
+            } else {
+                matches!(
+                    source_storage,
+                    runmat_accelerate_api::GpuTensorStorage::Real
+                        | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                ) && source_precision == Some(provider.precision())
+                    && (!source_logical
+                        || source_storage == runmat_accelerate_api::GpuTensorStorage::Real)
+            };
+            if !source_metadata_consistent
+                || !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+                    &handle,
+                    source_precision,
+                    source_integer,
+                    source_logical,
+                )
+            {
+                return Err(CastError::Internal(
+                    "input handle has contradictory class metadata".into(),
+                ));
+            }
+            let input_metadata =
+                crate::builtins::common::gpu_helpers::snapshot_handle_metadata(&handle);
+            let provenance = runmat_accelerate_api::handle_provenance(&handle)
+                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            if runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                let gathered = crate::builtins::common::gpu_helpers::gather_value_async(
+                    &Value::GpuTensor(handle.clone()),
+                )
                 .await
-                .map_err(|error| CastError::Internal(error.message))?;
-            cast_tensor_value(target, tensor)
+                .map_err(|error| CastError::Internal(error.message().to_string()))?;
+                let result = cast_complex_value(gathered, target)?;
+                return crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+                    &handle,
+                    result,
+                    target.class_name(),
+                )
+                .map_err(|error| CastError::Internal(error.message().to_string()));
+            }
+            let mut output = match provider
+                .cast_to_integer(&handle, target.accelerator_type())
+                .await
+            {
+                Ok(output) => output,
+                Err(error) => {
+                    crate::builtins::common::gpu_helpers::restore_handle_metadata(
+                        &handle,
+                        &input_metadata,
+                    );
+                    return Err(CastError::Internal(error.to_string()));
+                }
+            };
+            crate::builtins::common::gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+            let valid = output.shape == handle.shape
+                && output.device_id == handle.device_id
+                && !crate::builtins::common::gpu_helpers::same_gpu_handle(&handle, &output)
+                && crate::builtins::common::gpu_helpers::exact_provider_for_handle(&output)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                && runmat_accelerate_api::handle_storage(&output)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_integer_type(&output)
+                    == Some(target.accelerator_type())
+                && runmat_accelerate_api::handle_precision(&output).is_none()
+                && !runmat_accelerate_api::handle_is_logical(&output)
+                && crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+                    &output,
+                    None,
+                    Some(target.accelerator_type()),
+                    false,
+                );
+            if !valid {
+                crate::builtins::common::gpu_helpers::free_unprotected_exact_owner(
+                    &output,
+                    &[&handle],
+                );
+                return Err(CastError::Internal(
+                    "provider returned an invalid integer cast result".into(),
+                ));
+            }
+            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+            Ok(crate::builtins::common::gpu_helpers::resident_gpu_value(
+                output,
+            ))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(CastError::Unsupported("complex".to_string()))
+        value @ (Value::Complex(_, _) | Value::ComplexTensor(_)) => {
+            cast_complex_value(value, target)
         }
         Value::String(_) | Value::StringArray(_) => {
             Err(CastError::Unsupported("string".to_string()))
@@ -217,6 +369,7 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
         Value::SymbolicArray(array) => cast_symbolic_array(target, array),
         Value::Cell(_) => Err(CastError::Unsupported("cell".to_string())),
         Value::Struct(_) => Err(CastError::Unsupported("struct".to_string())),
+        Value::ObjectArray(array) => Err(CastError::Unsupported(array.class_name().to_string())),
         Value::Object(object) => Err(CastError::Unsupported(object.class_name)),
         Value::HandleObject(handle) => Err(CastError::Unsupported(handle.class_name)),
         Value::Listener(_) => Err(CastError::Unsupported("event.listener".to_string())),
@@ -226,7 +379,12 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_) => Err(CastError::Unsupported("function_handle".to_string())),
         Value::ClassRef(_) => Err(CastError::Unsupported("meta.class".to_string())),
-        Value::MException(_) => Err(CastError::Unsupported("MException".to_string())),
+        Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_) => Err(CastError::Unsupported("MException".to_string())),
+        Value::Foreign(_) => Err(CastError::Unsupported("foreign".to_string())),
         Value::OutputList(_) => Err(CastError::Unsupported("OutputList".to_string())),
     }
 }
@@ -247,14 +405,82 @@ fn cast_symbolic_array(target: IntegerTarget, array: SymbolicArray) -> Result<Va
         .map_err(CastError::Internal)
 }
 
+pub(crate) fn cast_sparse_value(
+    target: IntegerTarget,
+    sparse: runmat_value::SparseTensor,
+) -> Result<Value, CastError> {
+    let values = match sparse.integer_storage() {
+        Some(storage) => storage
+            .exact_values()
+            .iter()
+            .map(|value| target.cast_int(value))
+            .collect(),
+        None => sparse
+            .materialize_f64()
+            .iter()
+            .map(|&value| target.cast_scalar(value))
+            .collect(),
+    };
+    let storage = target.storage(values);
+    runmat_value::SparseTensor::new_integer(
+        sparse.rows,
+        sparse.cols,
+        sparse.col_ptrs,
+        sparse.row_indices,
+        storage,
+    )
+    .map(Value::SparseTensor)
+    .map_err(CastError::Internal)
+}
+
+pub(crate) fn cast_complex_value(value: Value, target: IntegerTarget) -> Result<Value, CastError> {
+    let (real, imag, shape) = match value {
+        Value::Complex(real, imag) => (
+            vec![target.cast_scalar(real)],
+            vec![target.cast_scalar(imag)],
+            vec![1, 1],
+        ),
+        Value::ComplexTensor(tensor) => {
+            let shape = tensor.shape.clone();
+            if let Some(storage) = tensor.integer_storage() {
+                (
+                    integer_values(storage.real.clone())
+                        .iter()
+                        .map(|value| target.cast_int(value))
+                        .collect(),
+                    integer_values(storage.imag.clone())
+                        .iter()
+                        .map(|value| target.cast_int(value))
+                        .collect(),
+                    shape,
+                )
+            } else {
+                let (real, imag): (Vec<_>, Vec<_>) = tensor
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|(real, imag)| (target.cast_scalar(real), target.cast_scalar(imag)))
+                    .unzip();
+                (real, imag, shape)
+            }
+        }
+        _ => return Err(CastError::Unsupported("complex".to_string())),
+    };
+
+    let storage = IntegerComplexStorage::new(target.storage(real), target.storage(imag))
+        .map_err(CastError::Internal)?;
+    ComplexTensor::new_integer(storage, shape)
+        .map(Value::ComplexTensor)
+        .map_err(CastError::Internal)
+}
+
 fn cast_tensor_value(target: IntegerTarget, tensor: Tensor) -> Result<Value, CastError> {
     let tensor = target.cast_tensor(tensor).map_err(CastError::Internal)?;
-    if tensor.data.len() == 1 {
-        let storage = tensor
-            .integer_data
-            .expect("integer cast must construct exact integer storage");
+    if crate::builtins::common::tensor::is_scalar_tensor(&tensor) {
         Ok(Value::Int(
-            integer_values(storage).pop().expect("scalar storage"),
+            tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+                .expect("integer cast must construct one exact integer value"),
         ))
     } else {
         Ok(Value::Tensor(tensor))
@@ -308,7 +534,9 @@ pub(crate) fn integer_values(storage: IntegerStorage) -> Vec<IntValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::SymbolicExpr;
+    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+    use runmat_value::SymbolicExpr;
 
     #[test]
     fn uint64_to_int64_array_saturates_without_f64_rounding() {
@@ -364,6 +592,19 @@ mod tests {
     }
 
     #[test]
+    fn native_single_array_casts_through_authoritative_storage() {
+        let source = Tensor::from_f32(vec![-2.5, 1.5, 300.0], vec![1, 3]).expect("single tensor");
+        let output = IntegerTarget::U8
+            .cast_tensor(source)
+            .expect("uint8 conversion");
+
+        assert_eq!(
+            output.into_numeric_storage().expect("uint8 storage"),
+            NumericStorage::U8(vec![0, 2, u8::MAX])
+        );
+    }
+
+    #[test]
     fn symbolic_variable_array_cast_reports_unsupported_symbolic_input() {
         let source = SymbolicArray::new(vec![SymbolicExpr::variable("x")], vec![1, 1])
             .expect("symbolic array");
@@ -374,5 +615,279 @@ mod tests {
         ))
         .expect_err("symbolic variable must not be coerced to a number");
         assert!(matches!(error, CastError::Unsupported(kind) if kind == "sym"));
+    }
+
+    #[test]
+    fn sparse_casts_preserve_structure_and_convert_every_integer_class() {
+        let sparse =
+            runmat_value::SparseTensor::new(3, 2, vec![0, 1, 2], vec![0, 2], vec![1.5, -2.5])
+                .expect("sparse input");
+        let cases = [
+            (IntegerTarget::I8, "int8", vec![2.0, -3.0]),
+            (IntegerTarget::I16, "int16", vec![2.0, -3.0]),
+            (IntegerTarget::I32, "int32", vec![2.0, -3.0]),
+            (IntegerTarget::I64, "int64", vec![2.0, -3.0]),
+            (IntegerTarget::U8, "uint8", vec![2.0, 0.0]),
+            (IntegerTarget::U16, "uint16", vec![2.0, 0.0]),
+            (IntegerTarget::U32, "uint32", vec![2.0, 0.0]),
+            (IntegerTarget::U64, "uint64", vec![2.0, 0.0]),
+        ];
+        for (target, class, expected) in cases {
+            let Value::SparseTensor(output) =
+                cast_sparse_value(target, sparse.clone()).expect("sparse cast")
+            else {
+                panic!("integer cast must retain sparse storage");
+            };
+            assert_eq!(output.shape(), vec![3, 2]);
+            assert_eq!(output.col_ptrs, vec![0, 1, 2]);
+            assert_eq!(output.row_indices, vec![0, 2]);
+            assert_eq!(output.materialize_f64(), expected);
+            assert_eq!(
+                output.integer_storage().map(IntegerStorage::class_name),
+                Some(class)
+            );
+        }
+
+        let exact = runmat_value::SparseTensor::new_integer(
+            1,
+            1,
+            vec![0, 1],
+            vec![0],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("exact sparse input");
+        let Value::SparseTensor(output) =
+            cast_sparse_value(IntegerTarget::I64, exact).expect("exact sparse cast")
+        else {
+            panic!("integer cast must retain sparse storage");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I64(vec![i64::MAX]))
+        );
+    }
+
+    #[test]
+    fn every_integer_cast_builtin_dispatches_sparse_inputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let sparse = runmat_value::SparseTensor::new(2, 1, vec![0, 1], vec![1], vec![1.5])
+            .expect("sparse input");
+        for (builtin, class) in [
+            ("int8", "int8"),
+            ("int16", "int16"),
+            ("int32", "int32"),
+            ("int64", "int64"),
+            ("uint8", "uint8"),
+            ("uint16", "uint16"),
+            ("uint32", "uint32"),
+            ("uint64", "uint64"),
+        ] {
+            let Value::SparseTensor(output) =
+                crate::dispatcher::call_builtin(builtin, &[Value::SparseTensor(sparse.clone())])
+                    .expect("integer cast dispatch")
+            else {
+                panic!("{builtin} must preserve sparse storage");
+            };
+            assert_eq!(
+                output.integer_storage().map(IntegerStorage::class_name),
+                Some(class)
+            );
+            assert_eq!(output.get(1, 0), Some(2.0));
+        }
+    }
+
+    #[test]
+    fn integer_cast_builtins_dispatch_exact_typed_tensor_inputs() {
+        let cases = [
+            (
+                "int32",
+                IntegerStorage::U64(vec![u64::MAX, 1]),
+                IntegerStorage::I32(vec![i32::MAX, 1]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::I64(vec![-1, 300]),
+                IntegerStorage::U8(vec![0, u8::MAX]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::I64(vec![-1, 70_000]),
+                IntegerStorage::U16(vec![0, u16::MAX]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U64(vec![u64::MAX, 1]),
+                IntegerStorage::U32(vec![u32::MAX, 1]),
+            ),
+        ];
+
+        for (builtin, input_storage, expected_storage) in cases {
+            let input = Tensor::new_integer(input_storage, vec![1, 2]).expect("typed input");
+            let Value::Tensor(output) =
+                crate::dispatcher::call_builtin(builtin, &[Value::Tensor(input)])
+                    .expect("integer cast dispatch")
+            else {
+                panic!("{builtin} must return a typed tensor");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected_storage));
+        }
+    }
+
+    #[test]
+    fn integer_cast_scalar_result_uses_exact_storage_len() {
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("input");
+
+        let output = crate::dispatcher::call_builtin("uint32", &[Value::Tensor(input)])
+            .expect("integer scalar cast");
+
+        assert_eq!(output, Value::Int(IntValue::U32(u32::MAX)));
+    }
+
+    #[test]
+    fn complex_float_arrays_convert_every_integer_class_and_remain_complex() {
+        for target in [
+            IntegerTarget::I8,
+            IntegerTarget::I16,
+            IntegerTarget::I32,
+            IntegerTarget::I64,
+            IntegerTarget::U8,
+            IntegerTarget::U16,
+            IntegerTarget::U32,
+            IntegerTarget::U64,
+        ] {
+            let input = ComplexTensor::new(vec![(1.5, 0.49), (-2.5, -1.5)], vec![1, 2])
+                .expect("complex input");
+            let output = block_on(cast_value(Value::ComplexTensor(input), target))
+                .expect("complex integer conversion");
+            let Value::ComplexTensor(output) = output else {
+                panic!("integer conversion must preserve complex storage");
+            };
+            let expected = IntegerComplexStorage::new(
+                target.storage(vec![target.cast_scalar(1.5), target.cast_scalar(-2.5)]),
+                target.storage(vec![target.cast_scalar(0.49), target.cast_scalar(-1.5)]),
+            )
+            .expect("matching storage");
+            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.integer_storage().cloned(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn typed_complex_casts_preserve_exact_uint64_components_before_saturation() {
+        let input = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                IntegerStorage::U64(vec![1, 2]),
+            )
+            .expect("matching components"),
+            vec![1, 2],
+        )
+        .expect("typed complex input");
+        let output = block_on(cast_value(Value::ComplexTensor(input), IntegerTarget::I64))
+            .expect("int64 conversion");
+        let Value::ComplexTensor(output) = output else {
+            panic!("integer conversion must preserve complex storage");
+        };
+        assert_eq!(
+            output.integer_storage().cloned(),
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MAX, i64::MAX]),
+                    IntegerStorage::I64(vec![1, 2]),
+                )
+                .expect("matching components")
+            )
+        );
+    }
+
+    #[test]
+    fn typed_complex_integer_gpu_cast_stays_exact_and_resident() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                    IntegerStorage::U64(vec![1, u64::MAX]),
+                )
+                .expect("storage"),
+                vec![1, 2],
+            )
+            .expect("input");
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &input)
+                    .expect("upload");
+            let Value::GpuTensor(output) =
+                block_on(cast_value(Value::GpuTensor(handle), IntegerTarget::I64)).expect("cast")
+            else {
+                panic!("expected resident complex integer");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::I64)
+            );
+            let Value::ComplexTensor(gathered) = block_on(
+                crate::builtins::common::gpu_helpers::gather_value_async(&Value::GpuTensor(output)),
+            )
+            .expect("gather") else {
+                panic!("expected complex integer");
+            };
+            let storage = gathered.integer_storage().expect("integer storage");
+            assert_eq!(
+                storage.real,
+                IntegerStorage::I64(vec![9_007_199_254_740_993, i64::MAX])
+            );
+            assert_eq!(storage.imag, IntegerStorage::I64(vec![1, i64::MAX]));
+        });
+    }
+
+    #[test]
+    fn complex_integer_cast_matrix_preserves_empty_shape_and_complex_metadata() {
+        for target in [
+            IntegerTarget::I8,
+            IntegerTarget::I16,
+            IntegerTarget::I32,
+            IntegerTarget::I64,
+            IntegerTarget::U8,
+            IntegerTarget::U16,
+            IntegerTarget::U32,
+            IntegerTarget::U64,
+        ] {
+            let empty = ComplexTensor::new(Vec::new(), vec![2, 0, 3]).expect("complex empty");
+            let Value::ComplexTensor(output) =
+                block_on(cast_value(Value::ComplexTensor(empty), target)).expect("empty cast")
+            else {
+                panic!("integer conversion must preserve complex storage");
+            };
+            assert_eq!(output.shape, vec![2, 0, 3]);
+            let storage = output.integer_storage().expect("typed complex storage");
+            assert_eq!(storage.real, target.storage(Vec::new()));
+            assert_eq!(storage.imag, target.storage(Vec::new()));
+
+            let special = ComplexTensor::new(
+                vec![(f64::NAN, 0.0), (f64::INFINITY, f64::NEG_INFINITY)],
+                vec![1, 2],
+            )
+            .expect("complex special values");
+            let Value::ComplexTensor(output) =
+                block_on(cast_value(Value::ComplexTensor(special), target)).expect("special cast")
+            else {
+                panic!("integer conversion must preserve complex storage");
+            };
+            let storage = output.integer_storage().expect("typed complex storage");
+            assert_eq!(
+                storage.real,
+                target.storage(vec![
+                    target.cast_scalar(f64::NAN),
+                    target.cast_scalar(f64::INFINITY)
+                ])
+            );
+            assert_eq!(
+                storage.imag,
+                target.storage(vec![
+                    target.cast_scalar(0.0),
+                    target.cast_scalar(f64::NEG_INFINITY)
+                ])
+            );
+        }
     }
 }

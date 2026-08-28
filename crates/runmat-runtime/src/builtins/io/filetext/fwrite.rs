@@ -2,19 +2,134 @@
 use std::io::{Seek, SeekFrom, Write};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, IntValue, NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::registry;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
+
+const FWRITE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "direct fwrite of gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteGpuInputExtension"),
+};
+const FWRITE_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-integer-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integer-class fwrite file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteIntegerIdExtension"),
+};
+const FWRITE_INTEGER_SKIP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-integer-skip",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "typed integer fwrite skip controls are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteIntegerSkipExtension"),
+};
+const FWRITE_LOGICAL_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-logical-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "logical fwrite file identifiers and skips are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteLogicalControlExtension"),
+};
+const FWRITE_SINGLE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-single-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "single-precision fwrite file identifiers and skips are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteSingleControlExtension"),
+};
+const FWRITE_RESIDENT_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-resident-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "provider-resident fwrite control arguments are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteResidentControlExtension"),
+};
+const FWRITE_ARROW_PRECISION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-arrow-precision",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fread-style source=>output fwrite precision syntax is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteArrowPrecisionExtension"),
+};
+
+pub const FWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    FWRITE_GPU_INPUT_EXTENSION,
+    FWRITE_INTEGER_ID_EXTENSION,
+    FWRITE_INTEGER_SKIP_EXTENSION,
+    FWRITE_LOGICAL_CONTROL_EXTENSION,
+    FWRITE_SINGLE_CONTROL_EXTENSION,
+    FWRITE_RESIDENT_CONTROL_EXTENSION,
+    FWRITE_ARROW_PRECISION_EXTENSION,
+];
+
+const FWRITE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents all eight integer data classes; exact source values convert directly to the selected binary precision.",
+    }];
+const FWRITE_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents double identifiers; typed integer identifiers are independently gated.",
+    }];
+const FWRITE_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "skip",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents a double skip scalar; typed integer skips are independently gated and range-checked exactly.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "count = fwrite(fileID, integer_A, precision, ...)",
+        inputs: &FWRITE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer data remains authoritative through binary encoding; narrowing saturates and count is double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "count = fwrite(integer_fileID, A, ...)",
+        inputs: &FWRITE_INTEGER_ID_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The identifier is validated exactly before registry access.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "count = fwrite(fileID, A, precision, integer_skip, ...)",
+        inputs: &FWRITE_INTEGER_SKIP_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The skip is validated exactly in the host seek domain.",
+    },
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -305,6 +420,8 @@ fn map_string_result<T>(
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fwrite_type),
     descriptor(crate::builtins::io::filetext::fwrite::FWRITE_DESCRIPTOR),
+    extensions(crate::builtins::io::filetext::fwrite::FWRITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::filetext::fwrite::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
 async fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -335,6 +452,32 @@ pub async fn evaluate(
     data_value: &Value,
     rest: &[Value],
 ) -> BuiltinResult<FwriteEval> {
+    if matches!(data_value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FWRITE_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    preflight_control(fid_value, ControlRole::FileId)?;
+    let raw_refs: Vec<Value> = rest.to_vec();
+    let (raw_precision, raw_skip, _) =
+        map_string_result(classify_arguments(&raw_refs), &FWRITE_ERROR_INVALID_INPUT)?;
+    if let Some(skip) = raw_skip {
+        preflight_control(skip, ControlRole::Skip)?;
+    }
+    if let Some(precision) = raw_precision {
+        if scalar_string(
+            precision,
+            "fwrite: precision argument must be a string scalar or character vector",
+        )
+        .is_ok_and(|value| value.contains("=>"))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FWRITE_ARROW_PRECISION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
     let fid_host = gather_value(fid_value).await?;
     let fid = map_string_result(parse_fid(&fid_host), &FWRITE_ERROR_INVALID_INPUT)?;
     if fid < 0 {
@@ -415,10 +558,81 @@ async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     Ok(gathered)
 }
 
+#[derive(Clone, Copy)]
+enum ControlRole {
+    FileId,
+    Skip,
+}
+
+fn preflight_control(value: &Value, role: ControlRole) -> BuiltinResult<()> {
+    let integer_extension = match role {
+        ControlRole::FileId => &FWRITE_INTEGER_ID_EXTENSION,
+        ControlRole::Skip => &FWRITE_INTEGER_SKIP_EXTENSION,
+    };
+    match value {
+        Value::Int(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
+        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
+        }
+        Value::Bool(_) | Value::LogicalArray(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FWRITE_LOGICAL_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FWRITE_SINGLE_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FWRITE_RESIDENT_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FWRITE_LOGICAL_CONTROL_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    integer_extension,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FWRITE_SINGLE_CONTROL_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn parse_fid(value: &Value) -> Result<i32, String> {
     let scalar = match value {
         Value::Num(n) => *n,
-        Value::Int(int) => int.to_f64(),
+        Value::Int(int) => {
+            return int
+                .try_to_i32()
+                .ok_or_else(|| "fwrite: file identifier is out of range".to_string());
+        }
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return int
+                    .try_to_i32()
+                    .ok_or_else(|| "fwrite: file identifier is out of range".to_string());
+            }
+            tensor::tensor_value_f64(t, 0)
+        }
         _ => return Err("fwrite: file identifier must be numeric".to_string()),
     };
     if !scalar.is_finite() {
@@ -426,6 +640,9 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
     }
     if scalar.fract().abs() > f64::EPSILON {
         return Err("fwrite: file identifier must be an integer".to_string());
+    }
+    if scalar < i32::MIN as f64 || scalar > i32::MAX as f64 {
+        return Err("fwrite: file identifier is out of range".to_string());
     }
     Ok(scalar as i32)
 }
@@ -483,8 +700,9 @@ fn is_string_like(value: &Value) -> bool {
 fn is_numeric_like(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(t) => t.data.len() == 1,
+        Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(la) => la.data.len() == 1,
+        Value::GpuTensor(handle) => handle.shape.iter().product::<usize>() == 1,
         _ => false,
     }
 }
@@ -540,24 +758,45 @@ fn parse_precision_string(raw: &str) -> Result<WriteSpec, String> {
 fn parse_skip(arg: Option<&Value>) -> Result<usize, String> {
     match arg {
         None => Ok(0),
+        Some(Value::Int(int)) => int_to_skip(int),
+        Some(Value::Tensor(t)) if tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return int_to_skip(&int);
+            }
+            parse_skip_scalar(tensor::tensor_value_f64(t, 0))
+        }
         Some(value) => {
             let scalar = numeric_scalar(value, "fwrite: skip must be numeric")?;
-            if !scalar.is_finite() {
-                return Err("fwrite: skip value must be finite".to_string());
-            }
-            if scalar < 0.0 {
-                return Err("fwrite: skip value must be non-negative".to_string());
-            }
-            let rounded = scalar.round();
-            if (rounded - scalar).abs() > f64::EPSILON {
-                return Err("fwrite: skip value must be an integer".to_string());
-            }
-            if rounded > i64::MAX as f64 {
-                return Err("fwrite: skip value is too large".to_string());
-            }
-            Ok(rounded as usize)
+            parse_skip_scalar(scalar)
         }
     }
+}
+
+fn parse_skip_scalar(scalar: f64) -> Result<usize, String> {
+    if !scalar.is_finite() {
+        return Err("fwrite: skip value must be finite".to_string());
+    }
+    if scalar < 0.0 {
+        return Err("fwrite: skip value must be non-negative".to_string());
+    }
+    let rounded = scalar.round();
+    if (rounded - scalar).abs() > f64::EPSILON {
+        return Err("fwrite: skip value must be an integer".to_string());
+    }
+    if rounded >= i64::MAX as f64 {
+        return Err("fwrite: skip value is too large".to_string());
+    }
+    Ok(rounded as usize)
+}
+
+fn int_to_skip(value: &IntValue) -> Result<usize, String> {
+    let Some(skip) = value.try_to_usize() else {
+        return Err("fwrite: skip value must be non-negative".to_string());
+    };
+    if skip > i64::MAX as usize {
+        return Err("fwrite: skip value is too large".to_string());
+    }
+    Ok(skip)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -650,7 +889,7 @@ fn numeric_scalar(value: &Value, err: &str) -> Result<f64, String> {
         Value::Num(n) => Ok(*n),
         Value::Int(int) => Ok(int.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(if la.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -658,20 +897,54 @@ fn numeric_scalar(value: &Value, err: &str) -> Result<f64, String> {
     }
 }
 
-fn flatten_elements(value: &Value) -> Result<Vec<f64>, String> {
+#[derive(Clone, Debug)]
+enum WriteElement {
+    Floating(f64),
+    Integer(IntValue),
+}
+
+impl WriteElement {
+    fn as_f64(&self) -> f64 {
+        match self {
+            Self::Floating(value) => *value,
+            Self::Integer(value) => value.to_f64(),
+        }
+    }
+}
+
+fn flatten_elements(value: &Value) -> Result<Vec<WriteElement>, String> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
-        Value::Num(n) => Ok(vec![*n]),
-        Value::Int(int) => Ok(vec![int.to_f64()]),
-        Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
+        Value::Tensor(tensor) => Ok((0..tensor.len())
+            .map(|index| {
+                let value = tensor
+                    .numeric_value_at(index)
+                    .expect("index within authoritative numeric storage");
+                value.into_int_value().map_or_else(
+                    || WriteElement::Floating(value.materialize_f64()),
+                    WriteElement::Integer,
+                )
+            })
+            .collect()),
+        Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
+        Value::Int(int) => Ok(vec![WriteElement::Integer(int.clone())]),
+        Value::Bool(b) => Ok(vec![WriteElement::Floating(if *b { 1.0 } else { 0.0 })]),
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
-            .map(|bit| if *bit != 0 { 1.0 } else { 0.0 })
+            .map(|bit| WriteElement::Floating(if *bit != 0 { 1.0 } else { 0.0 }))
             .collect()),
-        Value::CharArray(ca) => Ok(flatten_char_array(ca)),
-        Value::String(text) => Ok(text.chars().map(|ch| ch as u32 as f64).collect()),
-        Value::StringArray(sa) => Ok(flatten_string_array(sa)),
+        Value::CharArray(ca) => Ok(flatten_char_array(ca)
+            .into_iter()
+            .map(WriteElement::Floating)
+            .collect()),
+        Value::String(text) => Ok(text
+            .chars()
+            .map(|ch| WriteElement::Floating(ch as u32 as f64))
+            .collect()),
+        Value::StringArray(sa) => Ok(flatten_string_array(sa)
+            .into_iter()
+            .map(WriteElement::Floating)
+            .collect()),
         Value::GpuTensor(_) => Err("fwrite: expected host tensor data after gathering".to_string()),
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err("fwrite: complex values are not supported yet".to_string())
@@ -691,7 +964,7 @@ fn flatten_char_array(ca: &CharArray) -> Vec<f64> {
     values
 }
 
-fn flatten_string_array(sa: &runmat_builtins::StringArray) -> Vec<f64> {
+fn flatten_string_array(sa: &runmat_value::StringArray) -> Vec<f64> {
     if sa.data.is_empty() {
         return Vec::new();
     }
@@ -707,53 +980,82 @@ fn flatten_string_array(sa: &runmat_builtins::StringArray) -> Vec<f64> {
 
 fn write_elements(
     file: &mut File,
-    values: &[f64],
+    values: &[WriteElement],
     spec: WriteSpec,
     skip: usize,
     machine: MachineFormat,
 ) -> Result<usize, String> {
     let endianness = machine.to_endianness();
     let skip_offset = skip as i64;
-    for &value in values {
+    for value in values {
         match spec.input {
             InputType::UInt8 => {
-                let byte = to_u8(value);
+                let byte = match integer_unsigned(value, u8::MAX as u64) {
+                    Some(value) => value as u8,
+                    None => to_u8(value.as_f64()),
+                };
                 write_bytes(file, &[byte])?;
             }
             InputType::Int8 => {
-                let byte = to_i8(value) as u8;
+                let byte = match integer_signed(value, i8::MIN as i64, i8::MAX as i64) {
+                    Some(value) => value as i8,
+                    None => to_i8(value.as_f64()),
+                } as u8;
                 write_bytes(file, &[byte])?;
             }
             InputType::UInt16 => {
-                let bytes = encode_u16(value, endianness);
+                let bytes = match integer_unsigned(value, u16::MAX as u64) {
+                    Some(value) => endian_u16(value as u16, endianness),
+                    None => encode_u16(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::Int16 => {
-                let bytes = encode_i16(value, endianness);
+                let bytes = match integer_signed(value, i16::MIN as i64, i16::MAX as i64) {
+                    Some(value) => endian_i16(value as i16, endianness),
+                    None => encode_i16(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::UInt32 => {
-                let bytes = encode_u32(value, endianness);
+                let bytes = match integer_unsigned(value, u32::MAX as u64) {
+                    Some(value) => endian_u32(value as u32, endianness),
+                    None => encode_u32(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::Int32 => {
-                let bytes = encode_i32(value, endianness);
+                let bytes = match integer_signed(value, i32::MIN as i64, i32::MAX as i64) {
+                    Some(value) => endian_i32(value as i32, endianness),
+                    None => encode_i32(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::UInt64 => {
-                let bytes = encode_u64(value, endianness);
+                let bytes = match value {
+                    WriteElement::Integer(_) => {
+                        endian_u64(integer_unsigned(value, u64::MAX).unwrap(), endianness)
+                    }
+                    _ => encode_u64(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::Int64 => {
-                let bytes = encode_i64(value, endianness);
+                let bytes = match value {
+                    WriteElement::Integer(_) => endian_i64(
+                        integer_signed(value, i64::MIN, i64::MAX).unwrap(),
+                        endianness,
+                    ),
+                    _ => encode_i64(value.as_f64(), endianness),
+                };
                 write_bytes(file, &bytes)?;
             }
             InputType::Float32 => {
-                let bytes = encode_f32(value, endianness);
+                let bytes = encode_f32(value.as_f64(), endianness);
                 write_bytes(file, &bytes)?;
             }
             InputType::Float64 => {
-                let bytes = encode_f64(value, endianness);
+                let bytes = encode_f64(value.as_f64(), endianness);
                 write_bytes(file, &bytes)?;
             }
         }
@@ -766,12 +1068,71 @@ fn write_elements(
     Ok(values.len())
 }
 
+fn integer_raw(value: &WriteElement) -> Option<i128> {
+    match value {
+        WriteElement::Integer(IntValue::I8(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I16(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I32(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::I64(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U8(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U16(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U32(v)) => Some(*v as i128),
+        WriteElement::Integer(IntValue::U64(v)) => Some(*v as i128),
+        WriteElement::Floating(_) => None,
+    }
+}
+fn integer_unsigned(value: &WriteElement, max: u64) -> Option<u64> {
+    integer_raw(value).map(|v| v.clamp(0, max as i128) as u64)
+}
+fn integer_signed(value: &WriteElement, min: i64, max: i64) -> Option<i64> {
+    integer_raw(value).map(|v| v.clamp(min as i128, max as i128) as i64)
+}
+fn endian_u16(value: u16, endian: Endianness) -> [u8; 2] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_i16(value: i16, endian: Endianness) -> [u8; 2] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_u32(value: u32, endian: Endianness) -> [u8; 4] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_i32(value: i32, endian: Endianness) -> [u8; 4] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_u64(value: u64, endian: Endianness) -> [u8; 8] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+fn endian_i64(value: i64, endian: Endianness) -> [u8; 8] {
+    match endian {
+        Endianness::Little => value.to_le_bytes(),
+        Endianness::Big => value.to_be_bytes(),
+    }
+}
+
 fn write_bytes(file: &mut File, bytes: &[u8]) -> Result<(), String> {
     file.write_all(bytes)
         .map_err(|err| format!("fwrite: failed to write to file ({err})"))
 }
 
 fn to_u8(value: f64) -> u8 {
+    if value.is_nan() {
+        return 0;
+    }
     if !value.is_finite() {
         return if value.is_sign_negative() { 0 } else { u8::MAX };
     }
@@ -872,6 +1233,9 @@ fn encode_f64(value: f64, endianness: Endianness) -> [u8; 8] {
 }
 
 fn saturating_round(value: f64, min: f64, max: f64) -> f64 {
+    if value.is_nan() {
+        return 0.0;
+    }
     if !value.is_finite() {
         return if value.is_sign_negative() { min } else { max };
     }
@@ -930,9 +1294,9 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Tensor;
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
+    use runmat_value::{IntegerStorage, Tensor};
     use std::io::Read;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
@@ -975,6 +1339,154 @@ pub(crate) mod tests {
         assert!(labels.contains(&"count = fwrite(fid, data, precision, skip, machinefmt)"));
     }
 
+    #[test]
+    fn fwrite_integer_capabilities_and_control_roles_are_independently_gated() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 3);
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let fid =
+            preflight_control(&Value::Int(IntValue::I32(3)), ControlRole::FileId).unwrap_err();
+        assert_eq!(
+            fid.identifier(),
+            Some("RunMat:compatibility:FwriteIntegerIdExtension")
+        );
+        let skip = preflight_control(&Value::Int(IntValue::U16(2)), ControlRole::Skip).unwrap_err();
+        assert_eq!(
+            skip.identifier(),
+            Some("RunMat:compatibility:FwriteIntegerSkipExtension")
+        );
+    }
+
+    #[test]
+    fn fwrite_classifies_resident_skip_before_gathering() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 903,
+            buffer_id: 903,
+            descriptor: Default::default(),
+        });
+        let args = vec![Value::from("uint8"), resident];
+        let (_, skip, _) = classify_arguments(&args).expect("classified controls");
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = preflight_control(skip.expect("skip"), ControlRole::Skip).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FwriteResidentControlExtension")
+        );
+    }
+
+    #[test]
+    fn fwrite_nan_to_integer_precision_writes_zero() {
+        assert_eq!(to_u8(f64::NAN), 0);
+        assert_eq!(
+            encode_i16(f64::NAN, Endianness::Little),
+            0_i16.to_le_bytes()
+        );
+        assert_eq!(encode_u64(f64::NAN, Endianness::Big), 0_u64.to_be_bytes());
+    }
+
+    #[test]
+    fn typed_integer_precision_conversions_stay_in_integer_domain() {
+        let signed_min = WriteElement::Integer(IntValue::I64(i64::MIN));
+        let unsigned_max = WriteElement::Integer(IntValue::U64(u64::MAX));
+        let wide_unsigned = WriteElement::Integer(IntValue::U64(9_007_199_254_740_993));
+
+        assert_eq!(integer_unsigned(&signed_min, u64::MAX), Some(0));
+        assert_eq!(
+            integer_signed(&unsigned_max, i64::MIN, i64::MAX),
+            Some(i64::MAX)
+        );
+        assert_eq!(
+            integer_unsigned(&wide_unsigned, u32::MAX as u64),
+            Some(u32::MAX as u64)
+        );
+        assert_eq!(
+            integer_signed(&wide_unsigned, i32::MIN as i64, i32::MAX as i64),
+            Some(i32::MAX as i64)
+        );
+    }
+
+    #[test]
+    fn fwrite_flattens_each_integer_storage_class_without_reading_f64_mirror() {
+        let cases = [
+            (IntegerStorage::I8(vec![-8]), -8_i128),
+            (IntegerStorage::I16(vec![-16]), -16),
+            (IntegerStorage::I32(vec![-32]), -32),
+            (IntegerStorage::I64(vec![i64::MIN]), i64::MIN as i128),
+            (IntegerStorage::U8(vec![8]), 8),
+            (IntegerStorage::U16(vec![16]), 16),
+            (IntegerStorage::U32(vec![32]), 32),
+            (IntegerStorage::U64(vec![u64::MAX]), u64::MAX as i128),
+        ];
+
+        for (storage, expected) in cases {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
+            let elements = flatten_elements(&Value::Tensor(tensor)).expect("typed elements");
+            assert_eq!(elements.len(), 1);
+            assert_eq!(integer_raw(&elements[0]), Some(expected));
+        }
+    }
+
+    #[test]
+    fn fwrite_scalar_parser_reads_typed_integer_storage_exactly() {
+        let scalar = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
+        assert_eq!(
+            numeric_scalar(&Value::Tensor(scalar), "scalar").expect("scalar"),
+            7.0
+        );
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn fwrite_skip_parses_integer_values_exactly() {
+        let exact = (1_u64 << 53) + 1;
+
+        assert_eq!(
+            parse_skip(Some(&Value::Int(IntValue::U64(exact)))).unwrap(),
+            exact as usize
+        );
+        assert!(parse_skip(Some(&Value::Int(IntValue::U64(u64::MAX)))).is_err());
+        assert!(parse_skip(Some(&Value::Int(IntValue::I8(-1)))).is_err());
+        assert!(parse_skip(Some(&Value::Num(i64::MAX as f64))).is_err());
+        assert!(parse_skip(Some(&Value::Num((i64::MAX as f64) + 1.0))).is_err());
+    }
+
+    #[test]
+    fn fwrite_fid_and_skip_read_typed_integer_storage_exactly() {
+        let fid =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
+        assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
+        assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
+        assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+
+        let skip =
+            Tensor::new_integer(IntegerStorage::U16(vec![9]), vec![1, 1]).expect("skip tensor");
+        assert_eq!(parse_skip(Some(&Value::Tensor(skip))).unwrap(), 9);
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("skip");
+        assert!(parse_skip(Some(&Value::Tensor(too_large))).is_err());
+    }
+
+    #[test]
+    fn fwrite_typed_scalar_parameters_ignore_poisoned_f64_mirrors() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+        for storage in classes {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
+            let value = Value::Tensor(tensor);
+            assert_eq!(parse_fid(&value).unwrap(), 7);
+            assert_eq!(parse_skip(Some(&value)).unwrap(), 7);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fwrite_default_uint8_bytes() {
@@ -998,6 +1510,156 @@ pub(crate) mod tests {
         let bytes = test_support::fs::read(&path).expect("read");
         assert_eq!(bytes, vec![1u8, 2, 255]);
         test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fwrite_uint64_preserves_exact_typed_tensor_bytes() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fwrite_uint64_exact");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let values = [9_007_199_254_740_993, u64::MAX];
+        let tensor = Tensor::new_integer(IntegerStorage::U64(values.to_vec()), vec![2, 1])
+            .expect("typed uint64 tensor");
+
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &Value::Tensor(tensor),
+            &[Value::from("uint64")],
+        )
+        .expect("fwrite");
+        assert_eq!(eval.count(), values.len());
+        run_fclose(&[Value::Num(fid as f64)]).expect("fclose");
+
+        let bytes = test_support::fs::read(&path).expect("read");
+        assert_eq!(
+            bytes,
+            values
+                .into_iter()
+                .flat_map(u64::to_ne_bytes)
+                .collect::<Vec<_>>()
+        );
+        test_support::fs::remove_file(path).expect("remove file");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fwrite_int64_preserves_exact_typed_tensor_bytes() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fwrite_int64_exact");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let values = [i64::MIN, i64::MAX];
+        let tensor = Tensor::new_integer(IntegerStorage::I64(values.to_vec()), vec![2, 1])
+            .expect("typed int64 tensor");
+
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &Value::Tensor(tensor),
+            &[Value::from("int64")],
+        )
+        .expect("fwrite");
+        assert_eq!(eval.count(), values.len());
+        run_fclose(&[Value::Num(fid as f64)]).expect("fclose");
+
+        let bytes = test_support::fs::read(&path).expect("read");
+        assert_eq!(
+            bytes,
+            values
+                .into_iter()
+                .flat_map(i64::to_ne_bytes)
+                .collect::<Vec<_>>()
+        );
+        test_support::fs::remove_file(path).expect("remove file");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fwrite_uint64_narrowing_stays_in_integer_domain() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fwrite_uint64_to_uint32");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+            Value::from("ieee-be"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![2, 1],
+        )
+        .expect("typed uint64 tensor");
+
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &Value::Tensor(tensor),
+            &[Value::from("uint32")],
+        )
+        .expect("fwrite");
+        assert_eq!(eval.count(), 2);
+        run_fclose(&[Value::Num(fid as f64)]).expect("fclose");
+
+        let bytes = test_support::fs::read(&path).expect("read");
+        assert_eq!(
+            bytes,
+            [u32::MAX.to_be_bytes(), u32::MAX.to_be_bytes()].concat()
+        );
+        test_support::fs::remove_file(path).expect("remove file");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fwrite_signed_integer_to_unsigned_target_saturates_without_f64_rounding() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fwrite_int64_to_uint16");
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+            Value::from("ieee-be"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid as i32;
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, -1, 65_535, i64::MAX]),
+            vec![4, 1],
+        )
+        .expect("typed int64 tensor");
+
+        let eval = run_evaluate(
+            &Value::Num(fid as f64),
+            &Value::Tensor(tensor),
+            &[Value::from("uint16")],
+        )
+        .expect("fwrite");
+        assert_eq!(eval.count(), 4);
+        run_fclose(&[Value::Num(fid as f64)]).expect("fclose");
+
+        let bytes = test_support::fs::read(&path).expect("read");
+        assert_eq!(
+            bytes,
+            [
+                0_u16.to_be_bytes(),
+                0_u16.to_be_bytes(),
+                65_535_u16.to_be_bytes(),
+                u16::MAX.to_be_bytes(),
+            ]
+            .concat()
+        );
+        test_support::fs::remove_file(path).expect("remove file");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1102,13 +1764,29 @@ pub(crate) mod tests {
 
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![Value::from("uint16")];
-            let eval = run_evaluate(&Value::Num(fid as f64), &Value::GpuTensor(handle), &args)
-                .expect("fwrite");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = run_evaluate(
+                    &Value::Num(fid as f64),
+                    &Value::GpuTensor(handle.clone()),
+                    &args,
+                )
+                .expect_err("MATLAB mode rejects direct gpuArray fwrite");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:FwriteGpuInputExtension")
+                );
+            }
+            let eval = {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                run_evaluate(&Value::Num(fid as f64), &Value::GpuTensor(handle), &args)
+                    .expect("RunMat mode accepts direct gpuArray fwrite")
+            };
             assert_eq!(eval.count(), 4);
 
             run_fclose(&[Value::Num(fid as f64)]).unwrap();
@@ -1181,6 +1859,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn fwrite_wgpu_tensor_roundtrip() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fwrite_wgpu_roundtrip");
@@ -1195,9 +1874,9 @@ pub(crate) mod tests {
             .expect("wgpu provider");
 
         let tensor = Tensor::new(vec![0.5, -1.25, 3.75], vec![3, 1]).unwrap();
-        let expected = tensor.data.clone();
+        let expected = tensor.materialize_f64().clone();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload to gpu");

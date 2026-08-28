@@ -1,16 +1,22 @@
 //! MATLAB-compatible `triplot` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::NumericScalar;
+use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -163,6 +169,78 @@ pub const TRIPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &TRIPLOT_ERRORS,
 };
 
+const TRIPLOT_INTEGER_CONNECTIVITY_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "triplot-integer-connectivity",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "triplot with native typed-integer connectivity is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TriplotIntegerConnectivityExtension"),
+    };
+const TRIPLOT_INTEGER_COORDINATE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "triplot-integer-coordinates",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "triplot with native typed-integer coordinates is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TriplotIntegerCoordinatesExtension"),
+    };
+const TRIPLOT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "triplot-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interactive triplot gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TriplotGpuInputExtension"),
+};
+pub const TRIPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    TRIPLOT_INTEGER_CONNECTIVITY_EXTENSION,
+    TRIPLOT_INTEGER_COORDINATE_EXTENSION,
+    TRIPLOT_GPU_INPUT_EXTENSION,
+];
+const TRIPLOT_INTEGER_CONNECTIVITY_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "TRI or ConnectivityList",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The compatibility target describes a connectivity matrix without enumerating native integer storage. RunMat mode decodes every vertex ID exactly as a positive one-based structural index.",
+    }];
+const TRIPLOT_INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed X coordinates are mode-gated and must be exactly representable at the binary64 plotting boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed Y coordinates are mode-gated and must be exactly representable at the binary64 plotting boundary.",
+    },
+];
+pub const TRIPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = triplot(integer_TRI, X, Y, ...)",
+        inputs: &TRIPLOT_INTEGER_CONNECTIVITY_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Connectivity remains exact through bounds validation and only selects coordinate elements; the returned graphics handle is double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = triplot(TRI, integer_X, integer_Y, ...)",
+        inputs: &TRIPLOT_INTEGER_COORDINATE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Coordinates cross one checked binary64 rendering boundary after compatibility admission; triplot is a host plotting sink.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::triplot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "triplot",
@@ -199,6 +277,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::triplot::TRIPLOT_DESCRIPTOR),
+    extensions(crate::builtins::plotting::triplot::TRIPLOT_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::triplot::TRIPLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::triplot"
 )]
 pub async fn triplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
@@ -311,6 +391,36 @@ async fn parse_triplot_args(
     } = extract_triplot_style_args(rest)?;
     if let Some(parent_axes) = parent_axes {
         axes_target = Some(parent_axes);
+    }
+
+    if crate::builtins::common::validation::value_contains_native_integer_class(&tri) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRIPLOT_INTEGER_CONNECTIVITY_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &x,
+        &TRIPLOT_INTEGER_COORDINATE_EXTENSION,
+        BUILTIN_NAME,
+        "x coordinates",
+    )
+    .await?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &y,
+        &TRIPLOT_INTEGER_COORDINATE_EXTENSION,
+        BUILTIN_NAME,
+        "y coordinates",
+    )
+    .await?;
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&tri)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&x)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&y)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRIPLOT_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
 
     let tri = NumericInput::from_value(tri, BUILTIN_NAME)?
@@ -485,7 +595,11 @@ fn build_triangle_edges(
     if tri.cols != 3 {
         return Err(triplot_invalid("TRI must be an M-by-3 connectivity matrix"));
     }
-    if !is_vector_tensor(x) || !is_vector_tensor(y) || x.data.len() != y.data.len() {
+    let point_count = tensor_utils::tensor_element_len(x);
+    if !is_vector_tensor(x)
+        || !is_vector_tensor(y)
+        || point_count != tensor_utils::tensor_element_len(y)
+    {
         return Err(triplot_invalid(
             "X and Y must be coordinate vectors with the same length",
         ));
@@ -493,24 +607,46 @@ fn build_triangle_edges(
     if tri.rows == 0 {
         return Ok((Vec::new(), Vec::new()));
     }
-    if x.data.is_empty() {
+    if point_count == 0 {
         return Err(triplot_invalid("X and Y must contain at least one point"));
     }
 
+    let x_values = tensor_utils::tensor_values_f64(x);
+    let y_values = tensor_utils::tensor_values_f64(y);
     let mut x_edges = Vec::with_capacity(tri.rows * 5);
     let mut y_edges = Vec::with_capacity(tri.rows * 5);
     for row in 0..tri.rows {
-        let a = vertex_index(tri.data[row], x.data.len())?;
-        let b = vertex_index(tri.data[row + tri.rows], x.data.len())?;
-        let c = vertex_index(tri.data[row + 2 * tri.rows], x.data.len())?;
+        let a = vertex_index_at(tri, row, point_count)?;
+        let b = vertex_index_at(tri, row + tri.rows, point_count)?;
+        let c = vertex_index_at(tri, row + 2 * tri.rows, point_count)?;
         for idx in [a, b, c, a] {
-            x_edges.push(x.data[idx]);
-            y_edges.push(y.data[idx]);
+            x_edges.push(x_values[idx]);
+            y_edges.push(y_values[idx]);
         }
         x_edges.push(f64::NAN);
         y_edges.push(f64::NAN);
     }
     Ok((x_edges, y_edges))
+}
+
+fn vertex_index_at(tensor: &Tensor, index: usize, point_count: usize) -> BuiltinResult<usize> {
+    let value = tensor
+        .numeric_value_at(index)
+        .ok_or_else(|| triplot_invalid("TRI index is out of range"))?;
+    if let Some(integer) = value.into_int_value() {
+        let one_based = integer.try_to_usize().ok_or_else(|| {
+            triplot_invalid("TRI indices must be positive integers in the runtime index range")
+        })?;
+        if one_based == 0 || one_based > point_count {
+            return Err(triplot_invalid("TRI references a vertex outside X/Y"));
+        }
+        return Ok(one_based - 1);
+    }
+    match value {
+        NumericScalar::F64(value) => vertex_index(value, point_count),
+        NumericScalar::F32(value) => vertex_index(f64::from(value), point_count),
+        _ => unreachable!("integer scalar handled above"),
+    }
 }
 
 fn vertex_index(value: f64, point_count: usize) -> BuiltinResult<usize> {
@@ -527,17 +663,15 @@ fn vertex_index(value: f64, point_count: usize) -> BuiltinResult<usize> {
 }
 
 fn column_tensor(tensor: &Tensor, col: usize) -> Tensor {
-    let data = (0..tensor.rows)
-        .map(|row| tensor.data[row + col * tensor.rows])
+    let indices = (0..tensor.rows)
+        .map(|row| row + col * tensor.rows)
         .collect::<Vec<_>>();
-    Tensor {
-        rows: tensor.rows,
-        cols: 1,
-        shape: vec![tensor.rows, 1],
-        data,
-        integer_data: None,
-        dtype: tensor.dtype,
-    }
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .and_then(|storage| storage.gather(&indices))
+        .expect("triplot column indices");
+    Tensor::from_numeric_storage(storage, vec![tensor.rows, 1]).expect("triplot column shape")
 }
 
 fn is_vector_tensor(tensor: &Tensor) -> bool {
@@ -592,14 +726,12 @@ mod tests {
     use runmat_plot::plots::PlotElement;
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("triplot test tensor"))
+    }
+
+    fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        Tensor::new_integer(runmat_value::IntegerStorage::I16(data), vec![rows, cols])
+            .expect("integer tensor")
     }
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -607,6 +739,96 @@ mod tests {
         ensure_plot_test_env();
         reset_plot_state();
         guard
+    }
+
+    #[test]
+    fn triplot_edges_read_typed_integer_storage_exactly() {
+        let (x_edges, y_edges) = build_triangle_edges(
+            &int_tensor(vec![1, 2, 3], 1, 3),
+            &int_tensor(vec![10, 20, 30], 3, 1),
+            &int_tensor(vec![1, 2, 3], 3, 1),
+        )
+        .expect("edges");
+
+        assert_eq!(x_edges[..4], [10.0, 20.0, 30.0, 10.0]);
+        assert!(x_edges[4].is_nan());
+        assert_eq!(y_edges[..4], [1.0, 2.0, 3.0, 1.0]);
+        assert!(y_edges[4].is_nan());
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn triplot_connectivity_parser_preserves_wide_integer_indices_exactly() {
+        let one_based = 9_007_199_254_740_993_u64;
+        let tensor = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![one_based]),
+            vec![1, 1],
+        )
+        .expect("wide connectivity");
+        assert_eq!(
+            vertex_index_at(&tensor, 0, one_based as usize).expect("exact index"),
+            one_based as usize - 1
+        );
+    }
+
+    #[test]
+    fn triplot_integer_connectivity_and_coordinates_are_independently_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let connectivity_error = block_on(triplot_builtin(vec![
+            Value::Tensor(int_tensor(vec![1, 2, 3], 1, 3)),
+            tensor(&[0.0, 1.0, 0.0], 1, 3),
+            tensor(&[0.0, 0.0, 1.0], 1, 3),
+        ]))
+        .expect_err("typed connectivity is an extension");
+        assert_eq!(
+            connectivity_error.identifier(),
+            TRIPLOT_INTEGER_CONNECTIVITY_EXTENSION.error_identifier
+        );
+
+        let coordinate_error = block_on(triplot_builtin(vec![
+            tensor(&[1.0, 2.0, 3.0], 1, 3),
+            Value::Tensor(int_tensor(vec![0, 1, 0], 1, 3)),
+            tensor(&[0.0, 0.0, 1.0], 1, 3),
+        ]))
+        .expect_err("typed coordinates are an extension");
+        assert_eq!(
+            coordinate_error.identifier(),
+            TRIPLOT_INTEGER_COORDINATE_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn triplot_explicit_gpu_input_is_gated_before_gather() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 3],
+            device_id: 0,
+            buffer_id: 9_462_001,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let error = block_on(triplot_builtin(vec![
+            Value::GpuTensor(handle),
+            tensor(&[0.0, 1.0, 0.0], 1, 3),
+            tensor(&[0.0, 0.0, 1.0], 1, 3),
+        ]))
+        .expect_err("MATLAB mode rejects explicit interactive gpuArray input");
+        assert_eq!(
+            error.identifier(),
+            TRIPLOT_GPU_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn triplot_column_tensor_reads_typed_integer_storage_exactly() {
+        let column = column_tensor(&int_tensor(vec![1, 2, 3, 4], 2, 2), 1);
+
+        assert_eq!(column.materialize_f64(), vec![3.0, 4.0]);
+        assert_eq!(column.numeric_dtype(), runmat_value::NumericDType::I16);
+        assert_eq!(
+            column.integer_storage(),
+            Some(&runmat_value::IntegerStorage::I16(vec![3, 4]))
+        );
     }
 
     #[test]
@@ -624,11 +846,12 @@ mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line plot");
         };
-        assert_eq!(line.x_data.len(), 10);
-        assert_eq!(&line.x_data[0..4], &[0.0, 1.0, 0.0, 0.0]);
-        assert!(line.x_data[4].is_nan());
-        assert_eq!(&line.y_data[5..9], &[0.0, 1.0, 1.0, 0.0]);
-        assert!(line.y_data[9].is_nan());
+        let (x, y) = line.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x.len(), 10);
+        assert_eq!(&x[0..4], &[0.0, 1.0, 0.0, 0.0]);
+        assert!(x[4].is_nan());
+        assert_eq!(&y[5..9], &[0.0, 1.0, 1.0, 0.0]);
+        assert!(y[9].is_nan());
         assert_eq!(line.line_style, runmat_plot::plots::LineStyle::Dashed);
     }
 
@@ -692,13 +915,14 @@ mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line plot");
         };
-        assert_eq!(line.x_data.len(), 5);
-        assert_eq!(line.y_data.len(), 5);
-        assert_eq!(line.x_data[0], line.x_data[3]);
-        assert_eq!(line.y_data[0], line.y_data[3]);
-        assert!(line.x_data[4].is_nan());
-        assert!(line.y_data[4].is_nan());
-        for (x, y) in line.x_data.iter().zip(&line.y_data).take(3) {
+        let (x_data, y_data) = line.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x_data.len(), 5);
+        assert_eq!(y_data.len(), 5);
+        assert_eq!(x_data[0], x_data[3]);
+        assert_eq!(y_data[0], y_data[3]);
+        assert!(x_data[4].is_nan());
+        assert!(y_data[4].is_nan());
+        for (x, y) in x_data.iter().zip(&y_data).take(3) {
             let point = (*x, *y);
             assert!(
                 point == (0.0, 0.0) || point == (1.0, 0.0) || point == (0.0, 1.0),
@@ -724,13 +948,14 @@ mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line plot");
         };
-        assert_eq!(line.x_data.len(), 5);
-        assert_eq!(line.y_data.len(), 5);
-        assert_eq!(line.x_data[0], line.x_data[3]);
-        assert_eq!(line.y_data[0], line.y_data[3]);
-        assert!(line.x_data[4].is_nan());
-        assert!(line.y_data[4].is_nan());
-        for (x, y) in line.x_data.iter().zip(&line.y_data).take(3) {
+        let (x_data, y_data) = line.host_xy_f64().unwrap().unwrap();
+        assert_eq!(x_data.len(), 5);
+        assert_eq!(y_data.len(), 5);
+        assert_eq!(x_data[0], x_data[3]);
+        assert_eq!(y_data[0], y_data[3]);
+        assert!(x_data[4].is_nan());
+        assert!(y_data[4].is_nan());
+        for (x, y) in x_data.iter().zip(&y_data).take(3) {
             let point = (*x, *y);
             assert!(
                 point == (0.0, 0.0) || point == (1.0, 0.0) || point == (0.0, 1.0),
@@ -765,7 +990,8 @@ mod tests {
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
             panic!("expected line plot");
         };
-        assert!(line.x_data.is_empty());
-        assert!(line.y_data.is_empty());
+        let (x, y) = line.host_xy_f64().unwrap().unwrap();
+        assert!(x.is_empty());
+        assert!(y.is_empty());
     }
 }

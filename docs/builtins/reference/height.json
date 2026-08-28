@@ -1,0 +1,15 @@
+{
+  "title": "height",
+  "category": "table",
+  "keywords": ["height", "rows", "table", "timetable", "array"],
+  "summary": "Return the number of rows in a table, timetable, or array.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "For GPU-resident arrays, `height` reads shape metadata without provider lookup, download, or data conversion."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::table::tests::height_reads_resident_shape_without_provider_or_data_access", "integration": "crates/runmat-vm/tests/integer_multidimensional_fft_and_table_selection.rs"},
+  "description": "`height(A)` returns the size of the first dimension as a scalar double. Integer array contents remain untouched because only authoritative shape metadata is inspected.",
+  "behaviors": ["Tables and timetables return their row count.", "Numeric, complex, logical, character, cell, datetime, duration, and categorical arrays return the size of dimension one.", "Every integer class has the same structural contract; values are not materialized or converted.", "The result is scalar double. Counts outside exact binary64 range are explicitly outside the current representable contract."],
+  "examples": [{"description": "Count matrix rows", "input": "n = height(uint64(zeros(5, 3)))", "output": "n = 5"}],
+  "links": [{"label": "width", "url": "./width"}, {"label": "size", "url": "./size"}, {"label": "head", "url": "./head"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/predicates.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/predicates.rs"}
+}

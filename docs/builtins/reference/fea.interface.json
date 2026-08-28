@@ -1,0 +1,19 @@
+{
+  "title": "fea.interface",
+  "category": "fea",
+  "keywords": ["fea", "interface", "contact", "fsi", "cht"],
+  "summary": "Create a typed RunMat FEA interface.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": null },
+  "description": "`fea.interface(id, primaryRegion, secondaryRegion, Name, Value, ...)` creates contact, fluid-structure, or conjugate heat-transfer interface data.",
+  "behaviors": [
+    "Interface id and both region selectors are exact text values; `Kind` defaults to contact.",
+    "Finite real numeric fields accept all eight built-in integer classes and cross one host-only binary64 model-storage boundary after field and shape validation.",
+    "Contact fields are penalty stiffness scale, maximum penetration ratio, and friction coefficient; FSI fields are normal stiffness, damping ratio, and relaxation factor; CHT fields are thermal conductance, contact resistance, and relaxation factor.",
+    "Unknown fields, nonfinite values, nonscalar values, and resident numeric fields are rejected before object construction."
+  ],
+  "examples": [{ "description": "Create a contact interface", "input": "contact = fea.interface(\"joint\", \"face:a\", \"face:b\", \"Kind\", \"contact\", \"FrictionCoefficient\", uint8(0));" }],
+  "faqs": [{ "question": "Does interface construction use the GPU?", "answer": "No. It creates host model data; backend execution occurs only in a later solve." }],
+  "links": [{ "label": "FEA models", "url": "../../fea/models" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

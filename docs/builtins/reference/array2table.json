@@ -1,15 +1,15 @@
 {
   "title": "array2table",
   "category": "table",
-  "keywords": ["array2table", "table", "VariableNames", "RowNames"],
+  "keywords": ["array2table", "table", "VariableNames", "RowNames", "DimensionNames"],
   "summary": "Convert an array into a table.",
   "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Inputs are gathered before table materialization."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
-  "description": "`array2table(A)` splits two-dimensional arrays into table variables by column.",
-  "behaviors": ["Numeric, complex, logical, string, and cell arrays are split column-wise.", "`\"VariableNames\"` and `\"RowNames\"` are supported."],
+  "description": "`array2table(A)` splits a homogeneous two-dimensional array into table variables by column. Native integer columns preserve the exact class and values of `A`.",
+  "behaviors": ["Numeric, complex, logical, string, and cell arrays are split column-wise.", "`\"VariableNames\"`, `\"RowNames\"`, and `\"DimensionNames\"` are supported. Current variable names may contain Unicode, spaces, and leading or trailing whitespace; row-name edge whitespace is removed.", "Interactive resident GPU input is a mode-gated RunMat extension. It gathers exact typed storage before table construction and rejects in MATLAB-compatible mode."],
   "examples": [{"description": "Create named variables", "input": "T = array2table([1 3; 2 4], 'VariableNames', {'A','B'})", "output": "T = 2x2 table"}],
   "links": [{"label": "table2array", "url": "./table2array"}, {"label": "table", "url": "./table"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/conversions.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/conversions.rs"}
 }

@@ -14,10 +14,11 @@
     "elementwise": true,
     "reduction": false,
     "precisions": [
+      "f32",
       "f64"
     ],
     "broadcasting": "elementwise",
-    "notes": "GPU inputs are gathered to the host so the reference implementation can guarantee MATLAB-exact values at canonical multiples of 60, 90, 120, and 180 degrees."
+    "notes": "GPU inputs gather to the exact host reference path and the floating result is restored to the owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -31,15 +32,18 @@
     "unit": "builtins::math::trigonometry::cosd::tests",
     "integration": null
   },
-  "description": "`y = cosd(x)` evaluates cosine using degree input rather than radians. Canonical multiples are handled to preserve exact MATLAB/RunMat values (for example 0, ±0.5, and ±1) where applicable.",
+  "description": "`y = cosd(x)` evaluates cosine element-wise in degrees. MATLAB documents single and double real or complex arrays; RunMat mode additionally admits typed integers, logicals, and characters through explicit compatibility gates.",
   "behaviors": [
     "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
-    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "Single real and complex inputs preserve single output; double inputs preserve double output.",
+    "Typed integers are a RunMat-only extension. All eight real integer classes require exact binary64 representability before degree reduction and produce double output; aligned values above `flintmax` are accepted when their significant bits fit binary64.",
+    "Logical and character inputs are separately gated RunMat-only extensions and produce double output.",
     "Returns exactly 0 at multiples of 90 and exactly ±1 at multiples of 180.",
     "Returns exactly ±0.5 at multiples of 60 and 120.",
     "Complex inputs delegate to the analytic extension of `cos` after scaling by `pi/180`; exact-value treatment for complex operands is deferred.",
     "Output shape matches the input shape; non-finite inputs propagate as `NaN`.",
-    "String inputs are unsupported and raise a builtin-scoped error."
+    "String inputs are unsupported and raise a builtin-scoped error.",
+    "Table, timetable, tall, and distributed container inputs remain general RunMat container/runtime gaps rather than integer-storage gaps."
   ],
   "examples": [
     {
@@ -73,6 +77,10 @@
     }
   ],
   "links": [
+    {
+      "label": "MATLAB cosd documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/double.cosd.html"
+    },
     {
       "label": "sind",
       "url": "./sind"

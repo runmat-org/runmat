@@ -1,16 +1,27 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
+#include "exact_assembly.hxx"
+#include "exact_healing.hxx"
+#include "exact_xcaf_healing.hxx"
 
 #include <BRep_Builder.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepClass3d.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
+#include <BRepTools_WireExplorer.hxx>
+#include <Geom2d_Curve.hxx>
 #include <IGESControl_Reader.hxx>
 #include <IGESCAFControl_Reader.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <IMeshTools_Parameters.hxx>
 #include <Message_ProgressIndicator.hxx>
 #include <Message_ProgressRange.hxx>
+#include <Standard_Version.hxx>
 #include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Quantity_Color.hxx>
@@ -29,10 +40,18 @@
 #include <TopAbs_Orientation.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopExp.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <TopoDS_Wire.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc.hxx>
 #include <XCAFDoc_ColorTool.hxx>
@@ -42,10 +61,12 @@
 #include <XCAFDoc_MaterialTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Mat.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -70,6 +91,18 @@ std::string str_from_rust(rust::Str value) {
 
 std::string bytes_to_string(rust::Slice<const std::uint8_t> bytes) {
   return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+std::array<std::uint8_t, 32> geometry_digest(const std::string& bytes) {
+  rust::Vec<std::uint8_t> digest = occt_geometry_digest(
+      rust::Slice<const std::uint8_t>(
+          reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size()));
+  if (digest.size() != 32) {
+    throw std::runtime_error("OCCT geometry digest has an invalid length");
+  }
+  std::array<std::uint8_t, 32> result;
+  std::copy(digest.begin(), digest.end(), result.begin());
+  return result;
 }
 
 std::string format_name(OcctCadFormat format) {
@@ -131,13 +164,13 @@ private:
     if (document.IsNull()) {
       return;
     }
-    Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
-    app->Close(document);
-    document.Nullify();
     shape_tool.Nullify();
     color_tool.Nullify();
     layer_tool.Nullify();
     material_tool.Nullify();
+    Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
+    app->Close(document);
+    document.Nullify();
     has_xcaf = false;
   }
 };
@@ -171,6 +204,8 @@ void check_cancelled(const OcctImportOptions& options) {
     throw std::runtime_error("OCCT CAD import cancelled");
   }
 }
+
+std::string label_entry(const TDF_Label& label);
 
 IMeshTools_Parameters mesh_parameters_from_options(const OcctImportOptions& options) {
   IMeshTools_Parameters mesh_parameters;
@@ -930,6 +965,300 @@ OcctImportPayload import_cad_bytes(rust::Str path,
   return result;
 }
 
+OcctExactShapePayload import_exact_cad_bytes(
+    rust::Str path,
+    rust::Slice<const std::uint8_t> bytes,
+    OcctCadFormat format,
+    OcctImportOptions options) {
+  const std::string path_string = str_from_rust(path);
+  check_cancelled(options);
+  CadDocument document = read_shape(path_string, bytes, format, options);
+  check_cancelled(options);
+
+  // Polygonal data is a derived display cache. Removing it before serialization ensures the
+  // representation consumed by exact evaluators cannot accidentally carry tessellation authority.
+  BRepTools::Clean(document.shape);
+  check_cancelled(options);
+
+  std::array<std::uint8_t, 32> original_geometry_digest{};
+  bool original_kernel_valid = false;
+  std::uint64_t healing_identity_work_bytes = 0;
+  bool duplicates_consolidated = false;
+  bool post_duplicate_kernel_valid = false;
+  bool post_sewing_kernel_valid = false;
+  bool post_small_topology_kernel_valid = false;
+  bool orientation_repaired = false;
+  bool sewn = false;
+  bool gaps_repaired = false;
+  bool short_edges_simplified = false;
+  bool sliver_faces_simplified = false;
+  double maximum_healing_displacement = 0.0;
+  std::array<double, 3> displacement_original{0.0, 0.0, 0.0};
+  std::array<double, 3> displacement_proposed{0.0, 0.0, 0.0};
+  std::vector<ExactHealingMutation::Relation> healing_relations;
+  if (options.heal_orientation || options.heal_duplicates || options.heal_sew ||
+      options.heal_gaps || options.heal_short_edges_and_sliver_faces) {
+    const std::string original_representation = serialize_exact_shape(document.shape, options);
+    if (static_cast<std::uint64_t>(original_representation.size()) >
+        options.max_exact_representation_bytes) {
+      throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+    }
+    original_geometry_digest = geometry_digest(original_representation);
+    const BRepCheck_Analyzer original_analyzer(document.shape, Standard_True);
+    original_kernel_valid = original_analyzer.IsValid();
+    if (document.has_xcaf) {
+      ExactXcafHealingResult healing = heal_exact_xcaf_definitions(
+          document.shape_tool, options, healing_identity_work_bytes);
+      document.shape = healing.shape;
+      healing_identity_work_bytes = healing.identity_work_bytes;
+      duplicates_consolidated = healing.duplicates_consolidated;
+      post_duplicate_kernel_valid = healing.post_duplicate_kernel_valid;
+      sewn = healing.sewn;
+      gaps_repaired = healing.gaps_repaired;
+      post_sewing_kernel_valid = healing.post_sewing_kernel_valid;
+      short_edges_simplified = healing.short_edges_simplified;
+      sliver_faces_simplified = healing.sliver_faces_simplified;
+      post_small_topology_kernel_valid = healing.post_small_topology_kernel_valid;
+      orientation_repaired = healing.orientation_repaired;
+      maximum_healing_displacement = healing.maximum_displacement;
+      displacement_original = healing.displacement_original;
+      displacement_proposed = healing.displacement_proposed;
+      healing_relations = std::move(healing.relations);
+    } else {
+      if (options.heal_duplicates) {
+        ExactHealingMutation consolidation = consolidate_exact_duplicates(
+            document.shape, options, healing_identity_work_bytes);
+        document.shape = consolidation.shape;
+        healing_identity_work_bytes = consolidation.identity_work_bytes;
+        duplicates_consolidated = consolidation.changed;
+        const BRepCheck_Analyzer duplicate_analyzer(document.shape, Standard_True);
+        post_duplicate_kernel_valid = duplicate_analyzer.IsValid();
+      }
+      if (options.heal_sew || options.heal_gaps) {
+        const std::string before_sewing = serialize_exact_shape(document.shape, options);
+        if (static_cast<std::uint64_t>(before_sewing.size()) >
+            options.max_exact_representation_bytes) {
+          throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+        }
+        ExactHealingMutation sewing = sew_exact_shape(
+            document.shape,
+            options,
+            options.maximum_healing_displacement,
+            healing_identity_work_bytes);
+        document.shape = sewing.shape;
+        healing_identity_work_bytes = sewing.identity_work_bytes;
+        maximum_healing_displacement = sewing.maximum_displacement;
+        displacement_original = sewing.displacement_original;
+        displacement_proposed = sewing.displacement_proposed;
+        healing_relations = sewing.relations;
+        const std::string after_sewing = serialize_exact_shape(document.shape, options);
+        if (static_cast<std::uint64_t>(after_sewing.size()) >
+            options.max_exact_representation_bytes) {
+          throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+        }
+        const bool changed = geometry_digest(before_sewing) != geometry_digest(after_sewing);
+        sewn = options.heal_sew && changed;
+        gaps_repaired = options.heal_gaps && changed;
+        const BRepCheck_Analyzer sewing_analyzer(document.shape, Standard_True);
+        post_sewing_kernel_valid = sewing_analyzer.IsValid();
+      }
+      if (options.heal_short_edges_and_sliver_faces) {
+        const std::string before_small_topology =
+            serialize_exact_shape(document.shape, options);
+        if (static_cast<std::uint64_t>(before_small_topology.size()) >
+            options.max_exact_representation_bytes) {
+          throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+        }
+        ExactHealingMutation small_topology = simplify_exact_small_topology(
+            document.shape,
+            options,
+            options.maximum_healing_displacement,
+            healing_identity_work_bytes,
+            short_edges_simplified,
+            sliver_faces_simplified);
+        document.shape = small_topology.shape;
+        healing_identity_work_bytes = small_topology.identity_work_bytes;
+        maximum_healing_displacement = small_topology.maximum_displacement;
+        displacement_original = small_topology.displacement_original;
+        displacement_proposed = small_topology.displacement_proposed;
+        healing_relations = small_topology.relations;
+        const std::string after_small_topology =
+            serialize_exact_shape(document.shape, options);
+        if (static_cast<std::uint64_t>(after_small_topology.size()) >
+            options.max_exact_representation_bytes) {
+          throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+        }
+        const bool changed =
+            geometry_digest(before_small_topology) != geometry_digest(after_small_topology);
+        if (changed != (short_edges_simplified || sliver_faces_simplified)) {
+          throw std::runtime_error(
+              "OCCT small-topology repair produced unclassified topology mutation");
+        }
+        const BRepCheck_Analyzer small_topology_analyzer(document.shape, Standard_True);
+        post_small_topology_kernel_valid = small_topology_analyzer.IsValid();
+      }
+      if (options.heal_orientation) {
+        const std::array<std::uint8_t, 32> before_orientation =
+            geometry_digest(serialize_exact_shape(document.shape, options));
+        ExactHealingMutation repair = repair_exact_orientation(
+            document.shape, options, healing_identity_work_bytes);
+        document.shape = repair.shape;
+        healing_identity_work_bytes = repair.identity_work_bytes;
+        orientation_repaired = before_orientation !=
+                               geometry_digest(serialize_exact_shape(document.shape, options));
+      }
+    }
+    BRepTools::Clean(document.shape);
+    check_cancelled(options);
+  }
+
+  const std::string representation = serialize_exact_shape(document.shape, options);
+  if (static_cast<std::uint64_t>(representation.size()) >
+      options.max_exact_representation_bytes) {
+    throw std::runtime_error("OCCT exact representation exceeded its byte budget");
+  }
+
+  OcctExactShapePayload result;
+  result.kernel_version = OCC_VERSION_COMPLETE;
+  result.kernel_abi = std::string("occt/") + OCC_VERSION_COMPLETE + "/brep-v3";
+  result.original_kernel_valid = original_kernel_valid;
+  result.healing_identity_work_bytes = healing_identity_work_bytes;
+  result.orientation_repaired = orientation_repaired;
+  result.duplicates_consolidated = duplicates_consolidated;
+  result.post_duplicate_kernel_valid = post_duplicate_kernel_valid;
+  result.post_sewing_kernel_valid = post_sewing_kernel_valid;
+  result.post_small_topology_kernel_valid = post_small_topology_kernel_valid;
+  result.sewn = sewn;
+  result.gaps_repaired = gaps_repaired;
+  result.short_edges_simplified = short_edges_simplified;
+  result.sliver_faces_simplified = sliver_faces_simplified;
+  result.maximum_healing_displacement = maximum_healing_displacement;
+  result.displacement_original_x = displacement_original[0];
+  result.displacement_original_y = displacement_original[1];
+  result.displacement_original_z = displacement_original[2];
+  result.displacement_proposed_x = displacement_proposed[0];
+  result.displacement_proposed_y = displacement_proposed[1];
+  result.displacement_proposed_z = displacement_proposed[2];
+  for (const ExactHealingMutation::Relation& relation : healing_relations) {
+    OcctHealingRelationPayload payload;
+    switch (relation.kind) {
+      case 0:
+        payload.kind = OcctHealingEntityKind::Vertex;
+        break;
+      case 1:
+        payload.kind = OcctHealingEntityKind::Edge;
+        break;
+      case 2:
+        payload.kind = OcctHealingEntityKind::Face;
+        break;
+      default:
+        throw std::runtime_error("OCCT healing relation has an invalid entity kind");
+    }
+    for (const std::string& segment : relation.path_segments) {
+      payload.path_segments.push_back(segment);
+    }
+    for (const std::uint8_t byte : relation.source_digest) {
+      payload.source_digest.push_back(byte);
+    }
+    const bool has_target = std::any_of(
+        relation.target_digest.begin(), relation.target_digest.end(), [](const auto byte) {
+          return byte != 0;
+        });
+    if (has_target) {
+      for (const std::uint8_t byte : relation.target_digest) {
+        payload.target_digest.push_back(byte);
+      }
+    }
+    result.healing_relations.push_back(payload);
+  }
+  if (result.orientation_repaired || result.duplicates_consolidated || result.sewn ||
+      result.gaps_repaired || result.short_edges_simplified ||
+      result.sliver_faces_simplified) {
+    for (const std::uint8_t byte : original_geometry_digest) {
+      result.original_geometry_digest.push_back(byte);
+    }
+  }
+  result.representation.reserve(representation.size());
+  for (const unsigned char byte : representation) {
+    result.representation.push_back(static_cast<std::uint8_t>(byte));
+  }
+
+  const std::pair<TopAbs_ShapeEnum, std::uint64_t*> inventories[] = {
+      {TopAbs_COMPOUND, &result.compound_count},
+      {TopAbs_COMPSOLID, &result.compsolid_count},
+      {TopAbs_SOLID, &result.solid_count},
+      {TopAbs_SHELL, &result.shell_count},
+      {TopAbs_FACE, &result.face_count},
+      {TopAbs_WIRE, &result.wire_count},
+      {TopAbs_EDGE, &result.edge_count},
+      {TopAbs_VERTEX, &result.vertex_count},
+  };
+  for (const auto& inventory : inventories) {
+    check_cancelled(options);
+    TopTools_IndexedMapOfShape shapes;
+    TopExp::MapShapes(document.shape, inventory.first, shapes);
+    *inventory.second = static_cast<std::uint64_t>(shapes.Extent());
+    if (*inventory.second > options.max_exact_entities) {
+      throw std::runtime_error("OCCT exact topology exceeded its entity budget");
+    }
+  }
+
+  append_exact_occurrences(result,
+                           document.shape,
+                           document.shape_tool,
+                           document.has_xcaf,
+                           representation,
+                           options);
+  const std::uint64_t projected_entity_count =
+      static_cast<std::uint64_t>(result.occurrences.size()) +
+      static_cast<std::uint64_t>(result.vertices.size()) +
+      static_cast<std::uint64_t>(result.edges.size()) +
+      static_cast<std::uint64_t>(result.faces.size()) +
+      static_cast<std::uint64_t>(result.wires.size()) +
+      static_cast<std::uint64_t>(result.coedges.size()) +
+      static_cast<std::uint64_t>(result.shells.size()) +
+      static_cast<std::uint64_t>(result.solids.size()) +
+      static_cast<std::uint64_t>(result.lumps.size());
+  if (projected_entity_count > options.max_exact_entities) {
+    throw std::runtime_error("OCCT exact topology exceeded its occurrence entity budget");
+  }
+  result.vertex_count = static_cast<std::uint64_t>(result.vertices.size());
+  result.edge_count = static_cast<std::uint64_t>(result.edges.size());
+  result.face_count = static_cast<std::uint64_t>(result.faces.size());
+  result.wire_count = static_cast<std::uint64_t>(result.wires.size());
+  result.shell_count = static_cast<std::uint64_t>(result.shells.size());
+  result.solid_count = static_cast<std::uint64_t>(result.solids.size());
+
+  BRepCheck_Analyzer analyzer(document.shape, Standard_True);
+  result.kernel_valid = analyzer.IsValid();
+  check_cancelled(options);
+
+  GProp_GProps surface_properties;
+  BRepGProp::SurfaceProperties(document.shape, surface_properties);
+  result.surface_area = surface_properties.Mass();
+
+  GProp_GProps volume_properties;
+  BRepGProp::VolumeProperties(document.shape, volume_properties);
+  result.volume = volume_properties.Mass();
+  result.has_volume_properties = result.solid_count > 0 && finite_value(result.volume) &&
+                                 result.volume > 0.0;
+  if (result.has_volume_properties) {
+    const gp_Pnt centroid = volume_properties.CentreOfMass();
+    const gp_Mat inertia = volume_properties.MatrixOfInertia();
+    result.centroid_x = centroid.X();
+    result.centroid_y = centroid.Y();
+    result.centroid_z = centroid.Z();
+    result.inertia_xx = inertia.Value(1, 1);
+    result.inertia_yy = inertia.Value(2, 2);
+    result.inertia_zz = inertia.Value(3, 3);
+    result.inertia_xy = inertia.Value(1, 2);
+    result.inertia_xz = inertia.Value(1, 3);
+    result.inertia_yz = inertia.Value(2, 3);
+  }
+  check_cancelled(options);
+  return result;
+}
+
 OcctPreviewSessionStartPayload start_cad_preview_session(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
@@ -982,6 +1311,8 @@ OcctPreviewSessionChunkPayload read_cad_preview_session_chunk(
   options.relative_deflection = session.mesh_parameters.Relative;
   options.max_triangles = std::numeric_limits<std::uint64_t>::max();
   options.truncate_at_max_triangles = false;
+  options.max_exact_representation_bytes = std::numeric_limits<std::uint64_t>::max();
+  options.max_exact_entities = std::numeric_limits<std::uint64_t>::max();
   options.cancel_token_id = chunk_options.cancel_token_id;
   check_cancelled(options);
 

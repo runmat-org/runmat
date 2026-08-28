@@ -9,13 +9,13 @@
     "binary data",
     "text"
   ],
-  "summary": "Write numeric or text payloads to TCP client connections with MATLAB-compatible encoding behavior.",
+  "summary": "Write numeric or text payloads to a TCP client connection.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "All TCP writes execute on the host CPU. GPU-resident arguments are gathered automatically before socket I/O."
+    "notes": "All TCP writes execute on the host CPU. Automatically resident data is gathered transparently; explicit `gpuArray` data requires `runmat` mode."
   },
   "fusion": {
     "elementwise": false,
@@ -27,13 +27,15 @@
   "tested": {
     "unit": "builtins::io::net::write::tests"
   },
-  "description": "`write(t, data, ...)` sends binary or text payloads through a `tcpclient` connection while honoring MATLAB-compatible datatype conversion, byte-order handling, and timeout rules.",
+  "description": "`write(t, data, ...)` sends binary or text payloads through a `tcpclient` connection with selectable datatype conversion, byte order, and timeout handling.",
   "behaviors": [
-    "`write(t, data)` converts `data` to unsigned 8-bit integers (the MATLAB default) and sends the bytes to the peer. The return value is the number of elements written when the caller requests an output argument.",
-    "`write(t, data, datatype)` encodes the payload using the supplied MATLAB datatype token. Supported values mirror MATLAB: `\"uint8\"` (default), `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Numeric conversions saturate to the destination range just like MATLAB cast operations. `\"char\"` treats values as single-byte character codes and `\"string\"` encodes UTF-8 text.",
+    "`write(t, data)` sends values using the datatype of `data`. Double, single, and all eight native integer classes therefore retain their native wire width and signedness.",
+    "`write(t, data, datatype)` converts the payload to the supplied datatype before encoding it. Supported values are `\"uint8\"`, `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Integer conversions saturate to the destination range; `\"char\"` uses single-byte character codes and `\"string\"` encodes UTF-8 text.",
+    "The compatibility target documents real row and column vectors. Matrix and multidimensional numeric data, sparse data, and logical data are separate RunMat language extensions available in `runmat` mode.",
     "The client’s `ByteOrder` property controls how multi-byte numeric values are serialised. `\"little-endian\"` is the default, while `\"big-endian\"` matches the traditional network byte order.",
     "When the socket cannot send the entire payload before the timeout expires, `write` raises `RunMat:write:Timeout`. If the peer closes the connection before or during the transfer the builtin raises `RunMat:write:ConnectionClosed` and marks the client as disconnected.",
-    "Inputs that originate on the GPU are gathered back to the host automatically before any bytes are written."
+    "Automatically resident data is gathered through its owning provider before bytes are written. Explicit `gpuArray` input is a RunMat language extension and is rejected in MATLAB-compatible modes before provider or socket access.",
+    "The current RunMat implementation returns the number of elements written when an output is requested. The compatibility target documents `write` without an output, so code that assigns this value is RunMat-specific."
   ],
   "examples": [
     {
@@ -62,7 +64,7 @@
   "faqs": [
     {
       "question": "How many output values does `write` return?",
-      "answer": "When the caller requests an output, the builtin returns the number of elements written (after datatype conversion). This mirrors the behaviour of MATLAB’s numeric I/O routines. If no output is requested, the value is discarded."
+      "answer": "The current RunMat implementation returns the number of elements written when requested. The compatibility target documents no output, so portable code should call `write` without assigning a result."
     },
     {
       "question": "Does `write` support complex numbers?",
@@ -74,7 +76,7 @@
     },
     {
       "question": "What happens to GPU-resident tensors?",
-      "answer": "They are gathered automatically before the write. Networking is a CPU-only subsystem, so the resulting data is sent from host memory and any temporary handles are released after the transfer."
+      "answer": "Automatically resident tensors are gathered transparently. An explicit `gpuArray` argument requires `runmat` mode because the compatibility target does not document interactive device input for this operation."
     },
     {
       "question": "Can I stream large payloads?",
@@ -82,6 +84,10 @@
     }
   ],
   "links": [
+    {
+      "label": "MATLAB language extensions",
+      "url": "/docs/runtime/getting-started/language-extensions"
+    },
     {
       "label": "tcpclient",
       "url": "./tcpclient"
@@ -112,6 +118,6 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/write.rs"
   },
   "gpu_behavior": [
-    "Networking occurs on the host CPU. If `data` or the tcpclient struct resides on the GPU, RunMat gathers the values to host memory before converting them to bytes. Acceleration providers are not involved and the resulting payload remains on the CPU. Providers that support residency tracking automatically mark any gathered tensors as released."
+    "Networking occurs on the host CPU. Automatically resident data is gathered through its owning provider before byte conversion. Explicit `gpuArray` data follows the separately gated RunMat extension policy."
   ]
 }

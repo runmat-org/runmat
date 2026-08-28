@@ -10,29 +10,35 @@
 //! * `[x, fval, exitflag, output] = fzero(...)`
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{StructValue, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::brent::{
     brent_zero, BrentParams, BrentZeroBracket, BrentZeroObserver, BrentZeroResult,
     BrentZeroStepKind,
 };
 use crate::builtins::math::optim::common::{
-    call_scalar_function, option_f64, option_string, option_usize,
+    call_scalar_function_with_precision, call_scalar_function_with_precision_info, option_f64,
+    option_string, option_usize,
 };
 use crate::builtins::math::optim::type_resolvers::scalar_root_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "fzero";
 const ALGORITHM: &str = "bisection, interpolation";
-const DEFAULT_TOL_X: f64 = 1.0e-6;
+const DEFAULT_TOL_X: f64 = f64::EPSILON;
 const DEFAULT_MAX_ITER: usize = 400;
 const DEFAULT_MAX_FUN_EVALS: usize = 500;
 
@@ -227,6 +233,125 @@ const FZERO_ERRORS: [BuiltinErrorDescriptor; 3] = [
     FZERO_ERROR_TOO_MANY_OUTPUTS,
 ];
 
+const FZERO_INTEGER_INITIAL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x0 or [a,b]",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer initial points and intervals are independently gated and every value must convert exactly to binary64.",
+    }];
+const FZERO_INTEGER_CALLBACK_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fun(x) result",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer function values are gated before resident gather and must convert exactly to binary64.",
+    }];
+const FZERO_INTEGER_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "TolX",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer TolX is independently gated and must convert exactly to a positive binary64 scalar.",
+    }];
+const FZERO_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "MaxIter",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer iteration counts are independently gated and decoded exactly through platform bounds.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "MaxFunEvals",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer evaluation counts are independently gated and decoded exactly through platform bounds.",
+    },
+];
+pub const FZERO_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "x = fzero(fun, integer_x0_or_interval, options)",
+        inputs: &FZERO_INTEGER_INITIAL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Documented x0 supports single or double, not typed-integer classes. Strict compatibility rejects typed integers; RunMat mode admits exact binary64 values and returns double x, fval, and exitflag. A documented single x0 separately yields single numeric outputs.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "fzero callback returns an integer function value",
+        inputs: &FZERO_INTEGER_CALLBACK_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Strict compatibility rejects typed function values before provider access. RunMat mode converts exact values at the binary64 solver boundary; numeric output precision remains determined by x0.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "fzero(..., options.TolX=integer)",
+        inputs: &FZERO_INTEGER_TOLERANCE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed-integer TolX is RunMat-only. It overrides the precision-specific default without changing output precision.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "fzero(..., options.MaxIter=integer, options.MaxFunEvals=integer)",
+        inputs: &FZERO_INTEGER_COUNT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented controls are integer-valued numeric scalars, not documented typed-integer classes. RunMat's typed forms preserve exact counts without a binary64 round trip.",
+    },
+];
+
+pub(crate) const FZERO_INPUT_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fzero-nonfloating-initial-point",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "fzero with a typed-integer or logical initial point or interval is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FzeroNumericInputExtension"),
+    };
+pub(crate) const FZERO_CALLBACK_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fzero-nonfloating-callback-output",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "fzero with typed-integer or logical function values is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FzeroCallbackExtension"),
+    };
+pub(crate) const FZERO_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fzero-typed-option-controls",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fzero with typed-integer option controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FzeroOptionExtension"),
+};
+pub(crate) const FZERO_RESIDENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fzero-resident-fallback",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "fzero with provider-resident numeric input or callback output is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FzeroResidentExtension"),
+    };
+pub const FZERO_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FZERO_INPUT_NUMERIC_EXTENSION,
+    FZERO_CALLBACK_NUMERIC_EXTENSION,
+    FZERO_OPTION_EXTENSION,
+    FZERO_RESIDENT_EXTENSION,
+];
+
 pub const FZERO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FZERO_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -308,6 +433,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(scalar_root_type),
     descriptor(crate::builtins::math::optim::fzero::FZERO_DESCRIPTOR),
+    extensions(crate::builtins::math::optim::fzero::FZERO_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::optim::fzero::FZERO_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::optim::fzero"
 )]
 async fn fzero_builtin(function: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -320,11 +447,24 @@ async fn fzero_builtin(function: Value, x: Value, rest: Vec<Value>) -> BuiltinRe
     validate_requested_outputs()?;
     let options = parse_options(rest.first())
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_ARGUMENT))?;
-    let opts = FzeroOptions::from_struct(options.as_ref())
+    let mut opts = FzeroOptions::from_struct(options.as_ref())
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_ARGUMENT))?;
-    let bracket = initial_bracket(&function, x, &opts)
+    let x = crate::builtins::math::optim::common::prepare_floating_value(
+        NAME,
+        x,
+        &FZERO_INPUT_NUMERIC_EXTENSION,
+        &FZERO_RESIDENT_EXTENSION,
+        "initial point or interval",
+    )
+    .await
+    .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_INPUT))?;
+    let initial_single = matches!(&x, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32);
+    let bracket = initial_bracket(&function, x, &opts, initial_single)
         .await
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_INPUT))?;
+    if !opts.tol_x_explicit {
+        opts.tol_x = default_tol_x(initial_single || bracket.function_single);
+    }
     let mut iter_log = IterDisplay::new(opts.display);
     let observer: Option<&mut dyn BrentZeroObserver> = if matches!(opts.display, DisplayMode::Iter)
     {
@@ -347,11 +487,20 @@ async fn fzero_builtin(function: Value, x: Value, rest: Vec<Value>) -> BuiltinRe
             max_iter: opts.max_iter,
             max_fun_evals: opts.max_fun_evals,
         },
+        initial_single,
         observer,
     )
     .await
     .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_INPUT))?;
-    finalize(result, &opts)
+    finalize(result, &opts, initial_single)
+}
+
+fn default_tol_x(single: bool) -> f64 {
+    if single {
+        f32::EPSILON as f64
+    } else {
+        f64::EPSILON
+    }
 }
 
 fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
@@ -368,6 +517,7 @@ fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
 #[derive(Clone, Copy)]
 struct FzeroOptions {
     tol_x: f64,
+    tol_x_explicit: bool,
     max_iter: usize,
     max_fun_evals: usize,
     display: DisplayMode,
@@ -375,6 +525,12 @@ struct FzeroOptions {
 
 impl FzeroOptions {
     fn from_struct(options: Option<&StructValue>) -> BuiltinResult<Self> {
+        crate::builtins::math::optim::common::ensure_option_extensions(
+            NAME,
+            options,
+            &FZERO_OPTION_EXTENSION,
+            &FZERO_RESIDENT_EXTENSION,
+        )?;
         let display = DisplayMode::parse(&option_string(options, "Display", "off")?)?;
         let tol_x = option_f64(NAME, options, "TolX", DEFAULT_TOL_X)?;
         if tol_x <= 0.0 {
@@ -387,6 +543,12 @@ impl FzeroOptions {
         let max_fun_evals = option_usize(NAME, options, "MaxFunEvals", DEFAULT_MAX_FUN_EVALS)?;
         Ok(Self {
             tol_x,
+            tol_x_explicit: options.is_some_and(|options| {
+                options
+                    .fields
+                    .keys()
+                    .any(|key| key.eq_ignore_ascii_case("TolX"))
+            }),
             max_iter: max_iter.max(1),
             max_fun_evals: max_fun_evals.max(1),
             display,
@@ -422,26 +584,33 @@ struct Bracket {
     fa: f64,
     fb: f64,
     evals: usize,
+    function_single: bool,
 }
 
 async fn initial_bracket(
     function: &Value,
     x: Value,
     options: &FzeroOptions,
+    single: bool,
 ) -> BuiltinResult<Bracket> {
     let x = crate::dispatcher::gather_if_needed_async(&x).await?;
     match x {
-        Value::Tensor(tensor) if tensor.data.len() == 2 => {
-            let a = tensor.data[0];
-            let b = tensor.data[1];
-            bracket_from_endpoints(function, a, b).await
+        Value::Tensor(tensor) => {
+            let values = tensor::tensor_values_f64(&tensor);
+            match values.as_slice() {
+                [a, b] => bracket_from_endpoints(function, *a, *b, single).await,
+                [guess] => expand_bracket(function, *guess, options, single).await,
+                _ => Err(fzero_error_with_detail(
+                    &FZERO_ERROR_INVALID_INPUT,
+                    "initial point must be a scalar or two-element bracket",
+                )),
+            }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            expand_bracket(function, tensor.data[0], options).await
+        Value::Num(n) => expand_bracket(function, n, options, single).await,
+        Value::Int(i) => expand_bracket(function, i.to_f64(), options, single).await,
+        Value::Bool(b) => {
+            expand_bracket(function, if b { 1.0 } else { 0.0 }, options, single).await
         }
-        Value::Num(n) => expand_bracket(function, n, options).await,
-        Value::Int(i) => expand_bracket(function, i.to_f64(), options).await,
-        Value::Bool(b) => expand_bracket(function, if b { 1.0 } else { 0.0 }, options).await,
         other => Err(fzero_error_with_detail(
             &FZERO_ERROR_INVALID_INPUT,
             format!("initial point must be a scalar or two-element bracket, got {other:?}"),
@@ -449,14 +618,20 @@ async fn initial_bracket(
     }
 }
 
-async fn bracket_from_endpoints(function: &Value, a: f64, b: f64) -> BuiltinResult<Bracket> {
+async fn bracket_from_endpoints(
+    function: &Value,
+    a: f64,
+    b: f64,
+    single: bool,
+) -> BuiltinResult<Bracket> {
     if !a.is_finite() || !b.is_finite() || a == b {
         return Err(fzero_error_with_detail(
             &FZERO_ERROR_INVALID_INPUT,
             "bracket endpoints must be finite and distinct",
         ));
     }
-    let fa = call_scalar_function(NAME, function, a).await?;
+    let (fa, fa_single) =
+        call_scalar_function_with_precision_info(NAME, function, a, single).await?;
     if fa == 0.0 {
         return Ok(Bracket {
             a,
@@ -464,9 +639,11 @@ async fn bracket_from_endpoints(function: &Value, a: f64, b: f64) -> BuiltinResu
             fa,
             fb: fa,
             evals: 1,
+            function_single: fa_single,
         });
     }
-    let fb = call_scalar_function(NAME, function, b).await?;
+    let (fb, fb_single) =
+        call_scalar_function_with_precision_info(NAME, function, b, single).await?;
     if fb == 0.0 || fa.signum() != fb.signum() {
         Ok(Bracket {
             a,
@@ -474,6 +651,7 @@ async fn bracket_from_endpoints(function: &Value, a: f64, b: f64) -> BuiltinResu
             fa,
             fb,
             evals: 2,
+            function_single: fa_single || fb_single,
         })
     } else {
         Err(fzero_error_with_detail(
@@ -487,6 +665,7 @@ async fn expand_bracket(
     function: &Value,
     x0: f64,
     options: &FzeroOptions,
+    single: bool,
 ) -> BuiltinResult<Bracket> {
     if !x0.is_finite() {
         return Err(fzero_error_with_detail(
@@ -494,7 +673,8 @@ async fn expand_bracket(
             "initial point must be finite",
         ));
     }
-    let f0 = call_scalar_function(NAME, function, x0).await?;
+    let (f0, function_single) =
+        call_scalar_function_with_precision_info(NAME, function, x0, single).await?;
     if f0 == 0.0 {
         return Ok(Bracket {
             a: x0,
@@ -502,6 +682,7 @@ async fn expand_bracket(
             fa: f0,
             fb: f0,
             evals: 1,
+            function_single,
         });
     }
 
@@ -510,8 +691,8 @@ async fn expand_bracket(
     while evals + 2 <= options.max_fun_evals {
         let a = x0 - step;
         let b = x0 + step;
-        let fa = call_scalar_function(NAME, function, a).await?;
-        let fb = call_scalar_function(NAME, function, b).await?;
+        let fa = call_scalar_function_with_precision(NAME, function, a, single).await?;
+        let fb = call_scalar_function_with_precision(NAME, function, b, single).await?;
         evals += 2;
         if fa == 0.0 {
             return Ok(Bracket {
@@ -520,6 +701,7 @@ async fn expand_bracket(
                 fa,
                 fb: fa,
                 evals,
+                function_single,
             });
         }
         if fa.signum() != f0.signum() {
@@ -529,6 +711,7 @@ async fn expand_bracket(
                 fa,
                 fb: f0,
                 evals,
+                function_single,
             });
         }
         if fb.signum() != f0.signum() {
@@ -538,6 +721,7 @@ async fn expand_bracket(
                 fa: f0,
                 fb,
                 evals,
+                function_single,
             });
         }
         if fb == 0.0 || fa.signum() != fb.signum() {
@@ -547,6 +731,7 @@ async fn expand_bracket(
                 fa,
                 fb,
                 evals,
+                function_single,
             });
         }
         step *= 1.6;
@@ -558,14 +743,23 @@ async fn expand_bracket(
     ))
 }
 
-fn finalize(result: BrentZeroResult, options: &FzeroOptions) -> BuiltinResult<Value> {
+fn finalize(result: BrentZeroResult, options: &FzeroOptions, single: bool) -> BuiltinResult<Value> {
     let exit_flag = if result.converged { 1 } else { 0 };
     let message = build_message(&result);
     emit_summary(&result, exit_flag, &message, options);
 
-    let x = Value::Num(result.x);
-    let fval = Value::Num(result.fval);
-    let exitflag = Value::Num(exit_flag as f64);
+    let scalar = |value: f64| -> BuiltinResult<Value> {
+        if single {
+            Tensor::new_with_dtype(vec![value], vec![1, 1], runmat_value::NumericDType::F32)
+                .map(Value::Tensor)
+                .map_err(|error| fzero_error_with_detail(&FZERO_ERROR_INVALID_INPUT, error))
+        } else {
+            Ok(Value::Num(value))
+        }
+    };
+    let x = scalar(result.x)?;
+    let fval = scalar(result.fval)?;
+    let exitflag = scalar(exit_flag as f64)?;
     let output_struct = Value::Struct(build_output_struct(&result, &message));
 
     match crate::output_count::current_output_count() {
@@ -674,7 +868,7 @@ mod tests {
     use super::*;
     use crate::builtins::math::optim::brent::interpolation_step_accepted;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_value::{IntegerStorage, Tensor};
     use std::sync::Arc;
 
     #[test]
@@ -693,10 +887,148 @@ mod tests {
     }
 
     #[test]
+    fn fzero_single_interval_returns_single_numerical_outputs() {
+        let bracket =
+            Tensor::new_with_dtype(vec![3.0, 4.0], vec![1, 2], runmat_value::NumericDType::F32)
+                .unwrap();
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let result = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(bracket),
+            Vec::new(),
+        ))
+        .unwrap();
+        let Value::OutputList(outputs) = result else {
+            panic!("expected three outputs");
+        };
+        assert_eq!(outputs.len(), 3);
+        for output in outputs {
+            assert!(
+                matches!(output, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
+            );
+        }
+    }
+
+    #[test]
+    fn fzero_single_precision_is_explicitly_threaded_through_all_callback_calls() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed_calls = calls.clone();
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, args, _requested_outputs| {
+                observed_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Value::Tensor(argument) = &args[0] else {
+                    panic!("expected a single-precision scalar tensor")
+                };
+                assert_eq!(argument.numeric_dtype(), runmat_value::NumericDType::F32);
+                let residual = argument.materialize_f64()[0] - std::f64::consts::PI;
+                Box::pin(async move {
+                    Ok(Value::Tensor(
+                        Tensor::new_with_dtype(
+                            vec![residual],
+                            vec![1, 1],
+                            runmat_value::NumericDType::F32,
+                        )
+                        .unwrap(),
+                    ))
+                })
+            },
+        )));
+        let bracket =
+            Tensor::new_with_dtype(vec![3.0, 4.0], vec![1, 2], runmat_value::NumericDType::F32)
+                .unwrap();
+        let root = block_on(fzero_builtin(
+            Value::BoundFunctionHandle {
+                name: "single_root".to_string(),
+                function: 7_709,
+            },
+            Value::Tensor(bracket),
+            Vec::new(),
+        ))
+        .unwrap();
+        assert!(
+            matches!(root, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
+        );
+        assert!(calls.load(std::sync::atomic::Ordering::Relaxed) > 2);
+    }
+
+    #[test]
+    fn fzero_single_callback_result_selects_single_default_tolerance() {
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |_function, args, _requested_outputs| {
+                assert!(matches!(args[0], Value::Num(_)));
+                let x = match &args[0] {
+                    Value::Num(value) => *value,
+                    _ => unreachable!(),
+                };
+                Box::pin(async move {
+                    Ok(Value::Tensor(
+                        Tensor::new_with_dtype(
+                            vec![x - 1.0],
+                            vec![1, 1],
+                            runmat_value::NumericDType::F32,
+                        )
+                        .unwrap(),
+                    ))
+                })
+            },
+        )));
+        let options = FzeroOptions::from_struct(None).unwrap();
+        let bracket = block_on(bracket_from_endpoints(
+            &Value::BoundFunctionHandle {
+                name: "single_result".to_string(),
+                function: 7_710,
+            },
+            0.0,
+            2.0,
+            false,
+        ))
+        .unwrap();
+        assert!(bracket.function_single);
+        assert_eq!(default_tol_x(bracket.function_single), f32::EPSILON as f64);
+        assert_eq!(default_tol_x(false), f64::EPSILON);
+        assert!(!options.tol_x_explicit);
+    }
+
+    #[test]
+    fn fzero_bracket_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let bracket =
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![1, 2]).expect("bracket");
+
+        let root = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Tensor(bracket),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Num(n) => assert!((n - std::f64::consts::PI).abs() < 1.0e-6),
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
     fn fzero_scalar_initial_guess_expands_bracket() {
         let root = block_on(fzero_builtin(
             Value::FunctionHandle("cos".into()),
             Value::Num(1.0),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Num(n) => assert!((n - std::f64::consts::FRAC_PI_2).abs() < 1.0e-6),
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fzero_initial_guess_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let guess = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("guess");
+
+        let root = block_on(fzero_builtin(
+            Value::FunctionHandle("cos".into()),
+            Value::Tensor(guess),
             Vec::new(),
         ))
         .unwrap();

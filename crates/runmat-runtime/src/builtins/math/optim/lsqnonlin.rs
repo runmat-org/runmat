@@ -3,14 +3,15 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{
     call_function, initial_guess, lookup_option, option_f64, option_string, option_usize,
 };
@@ -703,7 +704,10 @@ async fn real_array(label: &str, value: Value) -> BuiltinResult<RealArray> {
         Value::Num(n) => finite_array(label, vec![n], vec![1, 1]),
         Value::Int(i) => finite_array(label, vec![i.to_f64()], vec![1, 1]),
         Value::Bool(flag) => finite_array(label, vec![if flag { 1.0 } else { 0.0 }], vec![1, 1]),
-        Value::Tensor(tensor) => finite_array(label, tensor.data, tensor.shape),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            finite_array(label, tensor::tensor_into_values_f64(tensor), shape)
+        }
         Value::LogicalArray(LogicalArray { data, shape }) => finite_array(
             label,
             data.into_iter()
@@ -758,7 +762,7 @@ async fn bound_vector(
         Value::Num(value) => vec![value],
         Value::Int(value) => vec![value.to_f64()],
         Value::Bool(flag) => vec![if flag { 1.0 } else { 0.0 }],
-        Value::Tensor(Tensor { data, .. }) => data,
+        Value::Tensor(tensor) => tensor::tensor_into_values_f64(tensor),
         Value::LogicalArray(LogicalArray { data, .. }) => data
             .into_iter()
             .map(|flag| if flag == 0 { 0.0 } else { 1.0 })
@@ -791,7 +795,7 @@ async fn bound_vector(
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(Tensor { data, .. }) => data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(LogicalArray { data, .. }) => data.is_empty(),
         _ => false,
     }
@@ -920,10 +924,38 @@ fn gradient(jacobian: &[f64], residual: &[f64], n: usize) -> Vec<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::IntegerStorage;
     use std::sync::Arc;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    #[test]
+    fn lsqnonlin_real_array_reads_typed_integer_storage_exactly() {
+        let input =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).expect("integer");
+
+        let parsed = block_on(real_array("x0", Value::Tensor(input))).expect("real array");
+
+        assert_eq!(parsed.values, vec![1.0, 2.0]);
+        assert_eq!(parsed.shape, vec![2, 1]);
+    }
+
+    #[test]
+    fn lsqnonlin_bound_vector_reads_typed_integer_storage_exactly() {
+        let input =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1, 2]), vec![2, 1]).expect("integer");
+
+        let parsed = block_on(bound_vector(
+            "lower bounds",
+            Value::Tensor(input),
+            3,
+            f64::NEG_INFINITY,
+        ))
+        .expect("bounds");
+
+        assert_eq!(parsed, vec![-1.0, 2.0, f64::NEG_INFINITY]);
     }
 
     #[test]
@@ -932,7 +964,7 @@ mod tests {
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
                 let x = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
                 Box::pin(async move {
@@ -954,8 +986,8 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 2.0).abs() < 1.0e-5);
-                assert!((t.data[1] - 3.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[0] - 2.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[1] - 3.0).abs() < 1.0e-5);
             }
             other => panic!("unexpected value {other:?}"),
         }
@@ -1027,7 +1059,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let x = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
                 Box::pin(async move { Ok(tensor(vec![x[0] - 2.0, x[1] - 5.0], vec![2, 1])) })
@@ -1045,8 +1077,8 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 1.0).abs() < 1.0e-5);
-                assert!((t.data[1] - 5.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[0] - 1.0).abs() < 1.0e-5);
+                assert!((t.materialize_f64()[1] - 5.0).abs() < 1.0e-5);
             }
             other => panic!("unexpected value {other:?}"),
         }
@@ -1058,7 +1090,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let x = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
                 Box::pin(async move { Ok(tensor(vec![x[0] - 1.0, 2.0 * x[1] - 4.0], vec![1, 2])) })
@@ -1095,7 +1127,7 @@ mod tests {
                     Value::Tensor(j) => {
                         assert_eq!(j.shape, vec![2, 2]);
                         let expected = [1.0, 0.0, 0.0, 2.0];
-                        for (actual, expected) in j.data.iter().zip(expected) {
+                        for (actual, expected) in j.materialize_f64().iter().zip(expected) {
                             assert!((actual - expected).abs() < 1.0e-6);
                         }
                     }
@@ -1112,7 +1144,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let x = match &args[0] {
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
                 Box::pin(async move { Ok(tensor(vec![x[0] - 4.0, x[1] - 5.0], vec![2, 1])) })
@@ -1136,7 +1168,7 @@ mod tests {
             Value::OutputList(outputs) => {
                 assert_eq!(outputs.len(), 2);
                 assert!(
-                    matches!(&outputs[0], Value::Tensor(t) if (t.data[0] - 4.0).abs() < 1.0e-5 && (t.data[1] - 5.0).abs() < 1.0e-5)
+                    matches!(&outputs[0], Value::Tensor(t) if (t.materialize_f64()[0] - 4.0).abs() < 1.0e-5 && (t.materialize_f64()[1] - 5.0).abs() < 1.0e-5)
                 );
                 assert!(matches!(&outputs[1], Value::Num(resnorm) if *resnorm < 1.0e-10));
             }

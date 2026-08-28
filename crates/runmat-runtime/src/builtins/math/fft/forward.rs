@@ -1,16 +1,21 @@
 //! MATLAB-compatible `fft` builtin with GPU-aware semantics for RunMat.
 
 use super::common::{
-    default_dimension, gather_gpu_complex_tensor, parse_length, transform_complex_tensor,
+    default_dimension, ensure_wide_integer_data_exact, gather_gpu_complex_tensor,
+    is_wide_integer_value, parse_length, restore_complex_gpu_result, transform_complex_tensor,
     value_to_complex_tensor, TransformDirection,
 };
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -50,6 +55,116 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "fft";
+
+const FFT_WIDE_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fft-wide-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fft with host int64 or uint64 data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FftWideIntegerDataExtension"),
+};
+
+const FFT_WIDE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fft-wide-integer-controls",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fft with int64 or uint64 N or DIM controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FftWideIntegerControlExtension"),
+};
+
+pub const FFT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [FFT_WIDE_DATA_EXTENSION, FFT_WIDE_CONTROL_EXTENSION];
+
+const FFT_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented integer data enters the floating FFT domain and produces double output.",
+    }];
+
+const FFT_WIDE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &[
+            runmat_builtins::BuiltinIntegerClass::Int64,
+            runmat_builtins::BuiltinIntegerClass::Uint64,
+        ],
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Host wide integers are independently gated and must be exactly representable as double before FFT evaluation; resident wide integers are rejected.",
+    }];
+
+const FFT_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "N is parsed exactly as a nonnegative structural length; logical scalar controls are also documented.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "DIM",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "DIM is parsed exactly as a positive one-based dimension; logical scalar controls are also documented.",
+    },
+];
+
+const FFT_WIDE_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N or DIM",
+        classes: &[
+            runmat_builtins::BuiltinIntegerClass::Int64,
+            runmat_builtins::BuiltinIntegerClass::Uint64,
+        ],
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "Wide structural controls are decoded from authoritative integer storage and independently gated.",
+    }];
+
+pub const FFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = fft(integer_X, ...)",
+        inputs: &FFT_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer input is converted once at the documented double FFT boundary; provider fallback restores a resident result to the input owner.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = fft(X, integer_N, integer_DIM)",
+        inputs: &FFT_INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Documented controls are decoded exactly in every supported integer class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = fft(int64_or_uint64_X, ...)",
+        inputs: &FFT_WIDE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only wide data cannot silently round at the double boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = fft(X, int64_or_uint64_N_or_DIM)",
+        inputs: &FFT_WIDE_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "RunMat-only wide controls are independently gated and parsed exactly.",
+    },
+];
 
 const FFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -219,9 +334,25 @@ fn fft_error_with_message(
     keywords = "fft,fourier transform,complex,gpu",
     type_resolver(fft_type),
     descriptor(crate::builtins::math::fft::forward::FFT_DESCRIPTOR),
+    extensions(crate::builtins::math::fft::forward::FFT_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::fft::forward::FFT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::fft::forward"
 )]
 async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "fft")?;
+    if is_wide_integer_value(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FFT_WIDE_DATA_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+        ensure_wide_integer_data_exact(&value, BUILTIN_NAME)?;
+    }
+    if rest.iter().any(is_wide_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FFT_WIDE_CONTROL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let (length, dimension) = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => fft_gpu(handle, length, dimension).await,
@@ -264,10 +395,10 @@ async fn fft_gpu(
                 fft_error_with_source(&FFT_ERROR_INVALID_INPUT, "gpu gather failed", source)
             })?;
         let transformed = fft_complex_tensor(complex, length, dimension)?;
-        return Ok(complex_tensor_into_value(transformed));
+        return restore_complex_gpu_result(&handle, &transformed, BUILTIN_NAME);
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.fft_dim(&handle, length, dim_index).await {
             return Ok(Value::GpuTensor(out));
         }
@@ -279,7 +410,7 @@ async fn fft_gpu(
             fft_error_with_source(&FFT_ERROR_INVALID_INPUT, "gpu gather failed", source)
         })?;
     let transformed = fft_complex_tensor(complex, length, dimension)?;
-    Ok(complex_tensor_into_value(transformed))
+    restore_complex_gpu_result(&handle, &transformed, BUILTIN_NAME)
 }
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
@@ -335,10 +466,8 @@ pub(crate) mod tests {
     use num_complex::Complex;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{
-        builtin_function_by_name, ComplexTensor as HostComplexTensor, IntValue, ResolveContext,
-        Tensor, Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{ComplexTensor as HostComplexTensor, IntValue, Tensor};
     use rustfft::FftPlanner;
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
@@ -411,7 +540,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![4]);
                 let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(
                         approx_eq(*val, expected[idx], 1e-12),
                         "idx {idx} {:?} ~= {:?}",
@@ -433,7 +562,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 4]);
                 let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(
                         approx_eq(*val, expected[idx], 1e-12),
                         "idx {idx} {:?} ~= {:?}",
@@ -462,7 +591,7 @@ pub(crate) mod tests {
                     (9.0, 0.0),
                     (-3.0, 0.0),
                 ];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*val, expected[idx], 1e-12));
                 }
             }
@@ -479,8 +608,8 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![5]);
-                assert!(approx_eq(ct.data[0], (6.0, 0.0), 1e-12));
-                assert_eq!(ct.data.len(), 5);
+                assert!(approx_eq(ct.materialize_f64()[0], (6.0, 0.0), 1e-12));
+                assert_eq!(ct.materialize_f64().len(), 5);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -501,8 +630,16 @@ pub(crate) mod tests {
         let base_ct = value_as_complex_tensor(baseline);
         let result_ct = value_as_complex_tensor(result);
         assert_eq!(base_ct.shape, result_ct.shape);
-        assert_eq!(base_ct.data.len(), result_ct.data.len());
-        for (idx, (a, b)) in base_ct.data.iter().zip(result_ct.data.iter()).enumerate() {
+        assert_eq!(
+            base_ct.materialize_f64().len(),
+            result_ct.materialize_f64().len()
+        );
+        for (idx, (a, b)) in base_ct
+            .materialize_f64()
+            .iter()
+            .zip(result_ct.materialize_f64().iter())
+            .enumerate()
+        {
             assert!(
                 approx_eq(*a, *b, 1e-12),
                 "mismatch at index {idx}: {:?} vs {:?}",
@@ -522,7 +659,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2]);
                 let expected = [(3.0, 0.0), (-1.0, 0.0)];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*val, expected[idx], 1e-12));
                 }
             }
@@ -538,7 +675,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![0]);
-                assert!(ct.data.is_empty());
+                assert!(ct.materialize_f64().is_empty());
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -552,7 +689,7 @@ pub(crate) mod tests {
         let result =
             fft_host(Value::ComplexTensor(tensor.clone()), None, None).expect("fft complex");
         let mut expected = tensor
-            .data
+            .materialize_f64()
             .iter()
             .map(|(re, im)| Complex::new(*re, *im))
             .collect::<Vec<_>>();
@@ -562,8 +699,8 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![3]);
-                assert_eq!(ct.data.len(), 3);
-                for (idx, val) in ct.data.iter().enumerate() {
+                assert_eq!(ct.materialize_f64().len(), 3);
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     let exp = expected[idx];
                     assert!(approx_eq(*val, (exp.re, exp.im), 1e-12));
                 }
@@ -581,7 +718,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 4]);
                 let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
-                for (idx, val) in ct.data.iter().enumerate() {
+                for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*val, expected[idx], 1e-12));
                 }
             }
@@ -599,9 +736,13 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 4, 1]);
-                assert_eq!(ct.data.len(), original.data.len());
-                for (idx, (re, im)) in ct.data.iter().enumerate() {
-                    assert!(approx_eq((*re, *im), (original.data[idx], 0.0), 1e-12));
+                assert_eq!(ct.materialize_f64().len(), original.materialize_f64().len());
+                for (idx, (re, im)) in ct.materialize_f64().iter().enumerate() {
+                    assert!(approx_eq(
+                        (*re, *im),
+                        (original.materialize_f64()[idx], 0.0),
+                        1e-12
+                    ));
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -620,12 +761,14 @@ pub(crate) mod tests {
                 assert_eq!(ct.shape, vec![1, 4, 4]);
                 let mut expected = Vec::with_capacity(16);
                 for _depth in 0..4 {
-                    for &value in &original.data {
+                    for &value in &original.materialize_f64() {
                         expected.push((value, 0.0));
                     }
                 }
-                assert_eq!(ct.data.len(), expected.len());
-                for (idx, (actual, expected)) in ct.data.iter().zip(expected.iter()).enumerate() {
+                assert_eq!(ct.materialize_f64().len(), expected.len());
+                for (idx, (actual, expected)) in
+                    ct.materialize_f64().iter().zip(expected.iter()).enumerate()
+                {
                     assert!(
                         approx_eq(*actual, *expected, 1e-12),
                         "idx {idx}: {:?} != {:?}",
@@ -641,7 +784,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_non_numeric_length() {
-        let err = block_on(parse_arguments(&[Value::Bool(true)])).unwrap_err();
+        let err = block_on(parse_arguments(&[Value::from("invalid")])).unwrap_err();
         assert_eq!(error_identifier(&err), FFT_ERROR_INVALID_LENGTH.identifier);
         assert!(error_message(err).contains(FFT_ERROR_INVALID_LENGTH.message));
     }
@@ -687,13 +830,63 @@ pub(crate) mod tests {
         assert_eq!(parsed_dim, Some(2));
     }
 
+    #[test]
+    fn fft_integer_contract_gates_wide_data_and_accepts_documented_logical_controls() {
+        let builtin = builtin_function_by_name("fft").expect("fft registration");
+        assert_eq!(builtin.integer_capabilities.len(), 4);
+        assert_eq!(builtin.extensions.len(), 2);
+
+        let logical_length = fft_builtin_sync(
+            Value::Int(runmat_value::IntValue::I8(7)),
+            vec![Value::Bool(true)],
+        )
+        .expect("logical N is documented");
+        assert!(matches!(logical_length, Value::Complex(_, _)));
+
+        let wide = Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                vec![1, 1],
+            )
+            .expect("wide integer tensor"),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = fft_builtin_sync(wide, Vec::new()).expect_err("wide data must gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FftWideIntegerDataExtension")
+        );
+        drop(_compat);
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let lossy = Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                vec![1, 1],
+            )
+            .expect("wide integer tensor"),
+        );
+        let error = fft_builtin_sync(lossy, Vec::new())
+            .expect_err("wide data must not silently round in extension mode");
+        assert!(error.message().contains("exactly representable as double"));
+
+        let exact_above_contiguous_range = Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_994]),
+                vec![1, 1],
+            )
+            .expect("exact wide integer tensor"),
+        );
+        fft_builtin_sync(exact_above_contiguous_range, Vec::new())
+            .expect("exactly representable wide data is admitted in extension mode");
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -702,7 +895,11 @@ pub(crate) mod tests {
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
             assert_eq!(gpu_host.shape, cpu_host.shape);
-            for (a, b) in gpu_host.data.iter().zip(cpu_host.data.iter()) {
+            for (a, b) in gpu_host
+                .materialize_f64()
+                .iter()
+                .zip(cpu_host.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, 1e-12));
             }
             provider.free(&handle).ok();
@@ -715,7 +912,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -729,7 +926,11 @@ pub(crate) mod tests {
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
             assert_eq!(gpu_host.shape, cpu_host.shape);
-            for (a, b) in gpu_host.data.iter().zip(cpu_host.data.iter()) {
+            for (a, b) in gpu_host
+                .materialize_f64()
+                .iter()
+                .zip(cpu_host.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, 1e-10));
             }
             provider.free(&handle).ok();
@@ -742,7 +943,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new((1..=18).map(|v| v as f64).collect(), vec![2, 3, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -753,7 +954,11 @@ pub(crate) mod tests {
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
             assert_eq!(gpu_host.shape, cpu_host.shape);
-            for (a, b) in gpu_host.data.iter().zip(cpu_host.data.iter()) {
+            for (a, b) in gpu_host
+                .materialize_f64()
+                .iter()
+                .zip(cpu_host.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, 1e-10), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();
@@ -770,7 +975,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
             let tensor_cpu = tensor.clone();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -784,7 +989,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
             };
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
-            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+            for (a, b) in gpu_ct
+                .materialize_f64()
+                .iter()
+                .zip(cpu_ct.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, tol), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();

@@ -26,6 +26,9 @@ pub(crate) fn lower_expr_with_replacements(
         HirExprKind::Number(value) => {
             MirRvalue::Use(MirOperand::Constant(MirConstant::Number(value.clone())))
         }
+        HirExprKind::IntegerLiteral(value) => MirRvalue::Use(MirOperand::Constant(
+            MirConstant::IntegerLiteral(value.clone()),
+        )),
         HirExprKind::String(value) => {
             MirRvalue::Use(MirOperand::Constant(MirConstant::String(value.clone())))
         }
@@ -36,7 +39,7 @@ pub(crate) fn lower_expr_with_replacements(
             MirRvalue::Use(MirOperand::Local(ctx.local_for_binding(*binding)?))
         }
         HirExprKind::Unary(op, inner) => MirRvalue::Unary(
-            op.clone(),
+            *op,
             lower_operand_with_replacements(ctx, inner, temps, await_replacements)?,
         ),
         HirExprKind::Binary(left, op, right) => match op {
@@ -62,7 +65,7 @@ pub(crate) fn lower_expr_with_replacements(
             }
             _ => MirRvalue::Binary(
                 lower_operand_with_replacements(ctx, left, temps, await_replacements)?,
-                op.clone(),
+                *op,
                 lower_operand_with_replacements(ctx, right, temps, await_replacements)?,
             ),
         },
@@ -141,7 +144,7 @@ pub(crate) fn lower_expr_with_replacements(
                         function,
                         args,
                         syntax: call.syntax.clone(),
-                        requested_outputs: call.requested_outputs.clone(),
+                        requested_outputs: call.requested_outputs,
                     }
                 } else {
                     call_rvalue(call, args, arg_spans)?
@@ -347,7 +350,7 @@ pub(crate) fn lower_indexing_with_replacements(
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirIndexing, HirError> {
     Ok(MirIndexing {
-        kind: indexing.kind.clone(),
+        kind: indexing.kind,
         plan: classify_mir_index_plan(indexing),
         components: indexing
             .components
@@ -357,7 +360,7 @@ pub(crate) fn lower_indexing_with_replacements(
                 lower_index_component(ctx, dim, component, temps, await_replacements)
             })
             .collect::<Result<_, _>>()?,
-        result_context: indexing.result_context.clone(),
+        result_context: indexing.result_context,
         cell_expand_all: indexing.kind == IndexKind::Brace
             && indexing
                 .components
@@ -439,7 +442,7 @@ fn index_component_is_definitely_scalar(component: &IndexComponent) -> bool {
 
 fn hir_expr_is_definitely_scalar_index(expr: &HirExpr) -> bool {
     match &expr.kind {
-        HirExprKind::Number(_) => true,
+        HirExprKind::Number(_) | HirExprKind::IntegerLiteral(_) => true,
         HirExprKind::Constant(name)
             if name.0.eq_ignore_ascii_case("true") || name.0.eq_ignore_ascii_case("false") =>
         {
@@ -563,7 +566,7 @@ fn call_rvalue(
         args,
         arg_spans,
         syntax: call.syntax.clone(),
-        requested_outputs: call.requested_outputs.clone(),
+        requested_outputs: call.requested_outputs,
         fallback_policy,
         workspace_first_name: call.workspace_first_name.clone(),
         bare_identifier: call.bare_identifier,
@@ -590,7 +593,7 @@ fn dynamic_call_rvalue(
         args,
         arg_spans,
         syntax: call.syntax.clone(),
-        requested_outputs: call.requested_outputs.clone(),
+        requested_outputs: call.requested_outputs,
         fallback_policy,
         workspace_first_name: call.workspace_first_name.clone(),
         bare_identifier: call.bare_identifier,
@@ -610,8 +613,12 @@ fn requested_output_count_for_arg_expansion(requested: &RequestedOutputCount) ->
 fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
     match callee {
         MirCallee::Static(CallableIdentity::Builtin(id)) => {
-            runmat_builtins::builtin_function_by_name(&id.0)
-                .map(|builtin| builtin.semantics())
+            runmat_builtins::builtin_catalog_entry_by_name(&id.0)
+                .map(|entry| entry.legacy_semantics())
+                .or_else(|| {
+                    runmat_builtins::builtin_function_by_name(&id.0)
+                        .map(|builtin| builtin.semantics())
+                })
                 .or_else(|| runmat_builtins::builtin_semantics_for_name(&id.0))
                 .unwrap_or_else(BuiltinSemantics::unknown)
         }
@@ -734,6 +741,9 @@ pub(crate) fn lower_simple_operand(
 ) -> Result<Option<MirOperand>, HirError> {
     Ok(Some(match &expr.kind {
         HirExprKind::Number(value) => MirOperand::Constant(MirConstant::Number(value.clone())),
+        HirExprKind::IntegerLiteral(value) => {
+            MirOperand::Constant(MirConstant::IntegerLiteral(value.clone()))
+        }
         HirExprKind::String(value) => MirOperand::Constant(MirConstant::String(value.clone())),
         HirExprKind::Constant(name) => MirOperand::Constant(MirConstant::Symbol(name.clone())),
         HirExprKind::Binding(binding) => MirOperand::Local(ctx.local_for_binding(*binding)?),

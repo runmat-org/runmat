@@ -1,6 +1,6 @@
-use runmat_builtins::Value;
 use runmat_runtime::warning_store::RuntimeWarning;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
 use crate::fusion::FusionPlanSnapshot;
 use crate::workspace::WorkspaceSnapshot;
@@ -10,6 +10,8 @@ pub struct ExecutionStats {
     pub total_executions: usize,
     pub jit_compiled: usize,
     pub interpreter_fallback: usize,
+    pub native_osr_transfers: usize,
+    pub vectorized_native_regions: u64,
     pub total_execution_time_ms: u64,
     pub average_execution_time_ms: f64,
 }

@@ -31,14 +31,16 @@
     "unit": "builtins::math::trigonometry::cos::tests",
     "integration": "builtins::math::trigonometry::cos::tests::cos_gpu_provider_roundtrip"
   },
-  "description": "`y = cos(x)` evaluates cosine of each element in `x` using radian input. Real and complex values are handled element-wise with behavior aligned to MATLAB and RunMat.",
+  "description": "`y = cos(x)` evaluates cosine element-wise in radians. MATLAB documents single and double real or complex arrays; RunMat mode additionally admits typed integers, logicals, characters, and the `\"like\"` output form through explicit compatibility gates.",
   "behaviors": [
     "Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.",
-    "Logical and integer inputs are promoted to double precision before evaluation so downstream arithmetic matches MATLAB’s numeric tower.",
+    "Single real and complex inputs preserve single output; double inputs preserve double output.",
+    "Typed integers are a RunMat-only extension. All eight real integer classes are accepted only through the integer gate, must be exactly representable at the binary64 transcendental boundary, and produce double output; representability is tested from significant bits, so aligned values above `flintmax` can remain exact.",
+    "Logical and character inputs are separate RunMat-only extensions and produce double output.",
     "Complex values use the analytic extension `cos(a + bi) = cos(a)cosh(b) - i·sin(a)sinh(b)` while propagating `NaN`/`Inf` components independently.",
-    "Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB’s behaviour.",
-    "Appending `'like', prototype` mirrors the prototype’s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.",
-    "Empty inputs and singleton dimensions are preserved without introducing extraneous allocations."
+    "Appending `'like', prototype` is a RunMat-only extension that controls host/GPU residency and real/complex representation; a GPU result is transferred or recomputed onto the prototype's owning provider, and the form is not part of MATLAB's documented `cos` syntax.",
+    "Empty inputs and singleton dimensions are preserved without introducing extraneous allocations.",
+    "Table, timetable, tall, and distributed container inputs remain general RunMat container/runtime gaps rather than integer-storage gaps."
   ],
   "examples": [
     {
@@ -79,7 +81,7 @@
     },
     {
       "question": "Does `cos` promote inputs to double precision?",
-      "answer": "Yes. Unless you request otherwise with `'like'`, RunMat promotes numeric inputs to double precision, matching MATLAB’s default behaviour."
+      "answer": "Single and double floating inputs preserve their class. RunMat-only integer, logical, and character inputs return double."
     },
     {
       "question": "How does `cos` handle complex inputs?",
@@ -95,10 +97,14 @@
     },
     {
       "question": "Does `cos` work with character arrays?",
-      "answer": "Yes. Character arrays are converted to their Unicode code points before cosine is evaluated, and the result is returned as a dense double array of the same size."
+      "answer": "Only in RunMat compatibility mode. Character arrays are converted to Unicode code points and return a shape-preserving dense double array."
     }
   ],
   "links": [
+    {
+      "label": "MATLAB cos documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/double.cos.html"
+    },
     {
       "label": "sin",
       "url": "./sin"

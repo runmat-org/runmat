@@ -1,7 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::{Tensor, Value};
 use runmat_runtime::elementwise_neg;
+use runmat_value::{Tensor, Value};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -12,9 +12,9 @@ fn test_scalar_negation() {
     assert_eq!(result, Value::Num(-42.0));
 
     // Test integer scalar
-    let int = Value::Int(runmat_builtins::IntValue::I32(5));
+    let int = Value::Int(runmat_value::IntValue::I32(5));
     let result = elementwise_neg(&int).unwrap();
-    assert_eq!(result, Value::Int(runmat_builtins::IntValue::I32(-5)));
+    assert_eq!(result, Value::Int(runmat_value::IntValue::I32(-5)));
 
     // Test boolean scalar
     let bool_val = Value::Bool(true);
@@ -31,7 +31,10 @@ fn test_matrix_negation() {
     let result = elementwise_neg(&value).unwrap();
 
     if let Value::Tensor(result_matrix) = result {
-        assert_eq!(result_matrix.data, vec![-1.0, -2.0, -3.0, -4.0]);
+        assert_eq!(
+            result_matrix.materialize_f64(),
+            vec![-1.0, -2.0, -3.0, -4.0]
+        );
         assert_eq!(result_matrix.rows(), 2);
         assert_eq!(result_matrix.cols(), 2);
     } else {
@@ -48,7 +51,7 @@ fn test_vector_negation() {
     let result = elementwise_neg(&value).unwrap();
 
     if let Value::Tensor(result_matrix) = result {
-        assert_eq!(result_matrix.data, vec![-1.0, -2.0, -3.0]);
+        assert_eq!(result_matrix.materialize_f64(), vec![-1.0, -2.0, -3.0]);
         assert_eq!(result_matrix.rows(), 1);
         assert_eq!(result_matrix.cols(), 3);
     } else {

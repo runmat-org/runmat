@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "Tokenization is host text processing. Numeric and provider-resident text or delimiter inputs reject before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,7 +28,7 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "[tok, rem] = strtok(text, delimiters) - Split text into first token and remainder.",
+  "description": "`[tok, rem] = strtok(text, delimiters)` skips leading delimiter characters, returns the first token, and optionally returns the remaining text beginning at the delimiter after that token.",
   "signatures": [
     {
       "label": "[tok, rem] = strtok(text, delimiters)",
@@ -62,7 +62,8 @@
   "behaviors": [
     "Split text into first token and remainder.",
     "When multiple outputs are requested, returns both the first token and the remaining text.",
-    "Leading delimiters are skipped before token selection; the returned remainder begins at the delimiter after the token."
+    "Leading delimiters are skipped before token selection; the returned remainder begins at the delimiter after the token.",
+    "Integer arrays are not character-code input and are rejected without provider access or implicit text conversion."
   ],
   "examples": [
     "[tok,rem] = strtok(\"  alpha,beta\", \" ,\") returns tok = \"alpha\" and rem = \",beta\"."

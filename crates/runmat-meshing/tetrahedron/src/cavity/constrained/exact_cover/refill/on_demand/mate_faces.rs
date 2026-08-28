@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn on_demand_interior_mate_faces_for_trace(
+pub(in crate::cavity::constrained) fn on_demand_interior_mate_faces_for_trace(
     cavity: &ConstrainedCavity,
     candidates: &[ConstrainedCavityRefillTetrahedron],
     options: ConstrainedCavityRefillOptions,

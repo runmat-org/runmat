@@ -1,10 +1,3 @@
----
-title: "High-Level IR (HIR)"
-category: "Compilation Pipeline"
-section: "2.2"
-last_updated: "May 28, 2026"
----
-
 # High-Level IR (HIR)
 
 The High-Level IR (HIR) stage is the second phase of the RunMat compilation pipeline. It transforms the Abstract Syntax Tree (AST) produced by the parser into a semantically resolved representation. This stage is responsible for scope resolution, binding management, closure capture analysis, and flattening the nested MATLAB source structure into a canonical `HirAssembly`.

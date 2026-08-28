@@ -3,15 +3,16 @@
   "category": "math/signal",
   "keywords": ["blackman", "window", "signal processing", "dsp", "fft"],
   "summary": "Generate a Blackman window vector in MATLAB and RunMat.",
-  "description": "`blackman` generates Blackman windows for spectral analysis and filtering workflows. It supports MATLAB/RunMat symmetric and periodic forms, with optional single-precision output.",
+  "description": "`blackman` generates a Blackman window from a nonnegative scalar length. The length accepts single, double, or any of the eight built-in integer classes; floating lengths round to the nearest integer.",
   "behaviors": [
     "`blackman(L)` returns an `L x 1` symmetric Blackman window.",
     "`blackman(L, 'periodic')` returns the periodic form used in spectral-analysis workflows.",
     "`blackman(..., 'single')` returns a single-precision window; `'double'` is the default.",
-    "If `L` is noninteger, RunMat rounds it to the nearest integer before constructing the window.",
+    "Length `L` accepts single, double, int8, int16, int32, int64, uint8, uint16, uint32, or uint64; noninteger floating values round to the nearest integer.",
+    "A logical scalar length is available only as an explicitly gated RunMat extension.",
     "`blackman(0)` returns an empty `0 x 1` tensor.",
     "`blackman(1)` returns `1`.",
-    "For the symmetric case and `L > 1`, coefficients follow `0.42 - 0.5*cos(2*pi*n/(L-1)) + 0.08*cos(4*pi*n/(L-1))`.",
+    "For the symmetric case and `L > 1`, coefficients use `cospi` evaluation of `0.42 - 0.5*cospi(2*n/(L-1)) + 0.08*cospi(4*n/(L-1))`, matching the current enhanced-accuracy algorithm.",
     "The periodic form is constructed by evaluating a symmetric window of length `L + 1` and dropping the final sample."
   ],
   "examples": [
@@ -40,6 +41,14 @@
     {
       "question": "Does `blackman` support single precision?",
       "answer": "Yes. Pass `'single'` as the final option to request a single-precision output. The default output type is double precision."
+    },
+    {
+      "question": "Does an integer length produce an integer window?",
+      "answer": "No. Every integer length class is a structural input; output is double by default or single when requested explicitly."
+    },
+    {
+      "question": "Does `blackman` accept a gpuArray input?",
+      "answer": "No interactive gpuArray input form exists because the only numeric input is a host scalar length. GPU code generation is a separate documented capability; RunMat may internally materialize the new floating window on its active provider."
     }
   ],
   "links": [

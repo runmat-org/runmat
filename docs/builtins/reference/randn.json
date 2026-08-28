@@ -36,10 +36,11 @@
     "`randn()` returns a scalar double drawn from `𝒩(0, 1)`.",
     "`randn(n)` returns an `n × n` dense double matrix.",
     "`randn(m, n, ...)` accepts an arbitrary number of dimension arguments.",
-    "`randn(sz)` accepts a size vector (row or column) and returns an array with shape `sz`.",
-    "`randn(A)` or `randn(___, 'like', A)` matches both the shape and residency of `A`, including GPU tensors and complex prototypes.",
+    "`randn(sz)` accepts a documented row size vector; a column size vector is an independently gated RunMat-mode extension.",
+    "All eight integer classes are documented for scalar, separate-dimension, and row-size-vector controls and are decoded structurally from authoritative storage; resident size controls are separately gated RunMat extensions.",
+    "`randn(___, 'like', A)` matches the type, complexity, and residency of `A`, while ordinary size arguments determine shape and omission of size arguments returns a scalar. The old implicit `randn(A)` prototype form is not supported.",
     "Complex prototypes yield complex Gaussian samples with independent `𝒩(0, 1)` real and imaginary parts.",
-    "Class specifiers currently support `'double'`; other classes (e.g., `'single'`) emit descriptive errors until native representations land."
+    "Class specifiers support native `'single'` and `'double'`; integer and logical output prototypes are rejected before generation."
   ],
   "examples": [
     {
@@ -92,7 +93,7 @@
     },
     {
       "question": "What happens if I request `'single'` precision?",
-      "answer": "RunMat currently supports double precision. Supplying `'single'` raises a descriptive error until native single-precision tensors land."
+      "answer": "RunMat returns a native single-precision tensor. GPU generation uses a matching provider path when available and otherwise preserves single precision through the fallback."
     },
     {
       "question": "How does `randn` behave on the GPU?",

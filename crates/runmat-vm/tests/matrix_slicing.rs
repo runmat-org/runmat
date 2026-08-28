@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 use test_helpers::execute_source;
 
 #[test]
@@ -11,7 +11,7 @@ fn basic_matrix_and_slices() {
     if let Value::Tensor(v) = &vars[1] {
         assert_eq!(v.rows(), 4);
         assert_eq!(v.cols(), 1);
-        assert_eq!(v.data, vec![1.0, 3.0, 2.0, 4.0]);
+        assert_eq!(v.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
     } else {
         panic!("Expected vector from A(:)");
     }
@@ -21,7 +21,7 @@ fn basic_matrix_and_slices() {
     if let Value::Tensor(c) = &vars[1] {
         assert_eq!(c.rows(), 2);
         assert_eq!(c.cols(), 1);
-        assert_eq!(c.data, vec![2.0, 4.0]);
+        assert_eq!(c.materialize_f64(), vec![2.0, 4.0]);
     } else {
         panic!("Expected column slice A(:,2)");
     }
@@ -31,7 +31,7 @@ fn basic_matrix_and_slices() {
     if let Value::Tensor(r) = &vars[1] {
         assert_eq!(r.rows(), 1);
         assert_eq!(r.cols(), 2);
-        assert_eq!(r.data, vec![3.0, 4.0]);
+        assert_eq!(r.materialize_f64(), vec![3.0, 4.0]);
     } else {
         panic!("Expected row slice A(2,:)");
     }
@@ -42,7 +42,7 @@ fn basic_matrix_and_slices() {
         assert_eq!(b.rows(), 2);
         assert_eq!(b.cols(), 2);
         // Column-major storage
-        assert_eq!(b.data, vec![1.0, 3.0, 2.0, 4.0]);
+        assert_eq!(b.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
     } else {
         panic!("Expected full slice A(:,:)");
     }
@@ -54,14 +54,14 @@ fn empty_slice_from_two_arg_colon() {
     if let Value::Tensor(b) = &vars[1] {
         assert_eq!(b.rows(), 1);
         assert_eq!(b.cols(), 0);
-        assert!(b.data.is_empty());
+        assert!(b.materialize_f64().is_empty());
     } else {
         panic!("Expected tensor for empty slice result");
     }
     if let Value::Tensor(sz) = &vars[2] {
         assert_eq!(sz.rows(), 1);
         assert_eq!(sz.cols(), 2);
-        assert_eq!(sz.data, vec![1.0, 0.0]);
+        assert_eq!(sz.materialize_f64(), vec![1.0, 0.0]);
     } else {
         panic!("Expected size vector for empty slice");
     }
@@ -80,14 +80,14 @@ fn empty_slice_rows_and_columns() {
     if let Value::Tensor(r) = &vars[1] {
         assert_eq!(r.rows(), 0);
         assert_eq!(r.cols(), 4);
-        assert!(r.data.is_empty());
+        assert!(r.materialize_f64().is_empty());
     } else {
         panic!("Expected tensor for empty row slice");
     }
     if let Value::Tensor(c) = &vars[2] {
         assert_eq!(c.rows(), 3);
         assert_eq!(c.cols(), 0);
-        assert!(c.data.is_empty());
+        assert!(c.materialize_f64().is_empty());
     } else {
         panic!("Expected tensor for empty column slice");
     }
@@ -105,7 +105,7 @@ fn range_to_plain_end_column_slice() {
     if let Value::Tensor(c) = &vars[1] {
         assert_eq!(c.rows(), 3);
         assert_eq!(c.cols(), 1);
-        assert_eq!(c.data, vec![10.0, 11.0, 12.0]);
+        assert_eq!(c.materialize_f64(), vec![10.0, 11.0, 12.0]);
     } else {
         panic!("Expected tensor for M(:, 4:end)");
     }
@@ -123,7 +123,7 @@ fn mixed_end_bounded_and_plain_ranges_gather() {
     if let Value::Tensor(s) = &vars[1] {
         assert_eq!(s.rows(), 2);
         assert_eq!(s.cols(), 2);
-        assert_eq!(s.data, vec![10.0, 11.0, 14.0, 15.0]);
+        assert_eq!(s.materialize_f64(), vec![10.0, 11.0, 14.0, 15.0]);
     } else {
         panic!("Expected tensor for M(2:end-1, 3:4)");
     }
@@ -141,7 +141,7 @@ fn mixed_end_minus_and_plain_end_ranges_gather() {
     if let Value::Tensor(s) = &vars[1] {
         assert_eq!(s.rows(), 2);
         assert_eq!(s.cols(), 2);
-        assert_eq!(s.data, vec![14.0, 15.0, 18.0, 19.0]);
+        assert_eq!(s.materialize_f64(), vec![14.0, 15.0, 18.0, 19.0]);
     } else {
         panic!("Expected tensor for M(2:end-1, 4:end)");
     }
@@ -163,7 +163,7 @@ fn linear_index_preserves_numeric_index_shape() {
     if let Value::Tensor(r) = &vars[3] {
         assert_eq!(r.rows(), 1);
         assert_eq!(r.cols(), 3);
-        assert_eq!(r.data, vec![1.0, 3.0, 5.0]);
+        assert_eq!(r.materialize_f64(), vec![1.0, 3.0, 5.0]);
     } else {
         panic!("Expected tensor for row-shaped linear index");
     }
@@ -171,7 +171,7 @@ fn linear_index_preserves_numeric_index_shape() {
     if let Value::Tensor(c) = &vars[4] {
         assert_eq!(c.rows(), 3);
         assert_eq!(c.cols(), 1);
-        assert_eq!(c.data, vec![1.0, 3.0, 5.0]);
+        assert_eq!(c.materialize_f64(), vec![1.0, 3.0, 5.0]);
     } else {
         panic!("Expected tensor for column-shaped linear index");
     }

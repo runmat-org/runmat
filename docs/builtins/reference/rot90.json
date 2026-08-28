@@ -36,7 +36,8 @@
   "behaviors": [
     "Default behaviour rotates 90 degrees counterclockwise (`k = 1`).",
     "`rot90(A, K)` rotates by `K * 90°`; the rotation count can be positive, negative, or zero. Any integer multiple of four leaves the input unchanged.",
-    "The direction keywords `'clockwise'` and `'counterclockwise'` are accepted as an alternative to the numeric argument (case-insensitive).",
+    "The documented numeric `K` form accepts scalar integer values. RunMat mode also accepts the case-insensitive direction keywords `'clockwise'` and `'counterclockwise'`; strict MATLAB mode rejects that extension with `RunMat:compatibility:Rot90DirectionTokenExtension`.",
+    "Dense integer arrays retain their exact native class and values through every rotation, including `uint64` values above the binary64 exactness limit.",
     "Works for numeric tensors, logical masks, complex arrays, string arrays, and character matrices. Scalars are unchanged.",
     "For empty dimensions the function still swaps the first two extents, so `rot90(zeros(0, 3))` returns a `3×0` array."
   ],
@@ -75,7 +76,7 @@
   "faqs": [
     {
       "question": "What directions does `rot90` support?",
-      "answer": "Numeric rotation counts (integers) and the strings `'clockwise'` / `'counterclockwise'` are recognised. Any other strings raise an error."
+      "answer": "The compatibility surface uses an integer rotation count. RunMat mode also recognizes `'clockwise'` and `'counterclockwise'`; strict MATLAB mode rejects those direction tokens as a RunMat extension."
     },
     {
       "question": "Does `rot90` modify dimensions beyond the first two?",

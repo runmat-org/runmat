@@ -1,22 +1,182 @@
 //! MATLAB-compatible `pskmod` builtin for M-PSK integer and bit modulation.
 
+use runmat_value::NumericDType;
 use std::f64::consts::TAU;
 
 use runmat_accelerate_api::{
-    GpuTensorHandle, ProviderBitModulationRequest, ProviderModulationRequest,
+    GpuTensorHandle, IntegerElementType, ProviderBitModulationRequest, ProviderModulationRequest,
 };
-use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type,
+};
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntValue, IntegerStorage, LogicalArray, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pskmod";
 const INTEGER_TOL: f64 = 1e-9;
+
+const PSKMOD_INTEGER_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pskmod-integer-modulation-order",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pskmod with typed-integer modulation order M is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PskmodIntegerModulationOrderExtension"),
+};
+
+const PSKMOD_INTEGER_PHASE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pskmod-integer-phase-offset",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pskmod with a typed-integer phase offset is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PskmodIntegerPhaseOffsetExtension"),
+};
+
+const PSKMOD_INTEGER_CUSTOM_ORDER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "pskmod-integer-custom-order",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "pskmod with a typed-integer custom symbol order is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:PskmodIntegerCustomOrderExtension"),
+    };
+
+pub const PSKMOD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    PSKMOD_INTEGER_ORDER_EXTENSION,
+    PSKMOD_INTEGER_PHASE_EXTENSION,
+    PSKMOD_INTEGER_CUSTOM_ORDER_EXTENSION,
+];
+
+const PSKMOD_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Complex M-PSK baseband samples.",
+}];
+
+const PSKMOD_BASE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer symbols or grouped bit input.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Modulation order greater than one.",
+    },
+];
+
+const PSKMOD_EXTENDED_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer symbols or grouped bit input.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Modulation order greater than one.",
+    },
+    BuiltinParamDescriptor {
+        name: "args",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional phase offset, symbol order, and name-value options.",
+    },
+];
+
+const PSKMOD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = pskmod(X, M)",
+        inputs: &PSKMOD_BASE_INPUTS,
+        outputs: &PSKMOD_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = pskmod(X, M, phaseoffset, symorder, Name, Value)",
+        inputs: &PSKMOD_EXTENDED_INPUTS,
+        outputs: &PSKMOD_OUTPUTS,
+    },
+];
+
+const PSKMOD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PSKMOD.INVALID_ARGUMENT",
+    identifier: None,
+    when: "Symbols, modulation order, phase, mapping, or options are invalid.",
+    message: "pskmod: invalid argument",
+};
+
+const PSKMOD_ERRORS: [BuiltinErrorDescriptor; 1] = [PSKMOD_ERROR_INVALID_ARGUMENT];
+
+pub const PSKMOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PSKMOD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PSKMOD_ERRORS,
+};
+
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer symbol/bit input accepts signed and unsigned classes through 32 bits on host and GPU; int64/uint64 symbols reject.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "M",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer modulation order is gated by pskmod-integer-modulation-order; documented floating scalar order remains ordinary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "phaseoffset",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer phase offset is gated by pskmod-integer-phase-offset.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "symorder",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer custom symbol order is gated by pskmod-integer-custom-order.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = pskmod(X, M, phaseoffset, symorder, Name, Value)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Default output is complex double for every integer input; OutputDataType can select single, and provider/fallback paths preserve selected resident precision.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::comms::pskmod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -56,11 +216,32 @@ fn pskmod_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     summary = "Map integer or bit symbols onto a PSK complex-baseband constellation.",
     keywords = "pskmod,psk,modulation,communications,gray,binary,phaseoffset,gpu",
     type_resolver(pskmod_type),
+    descriptor(crate::builtins::comms::pskmod::PSKMOD_DESCRIPTOR),
+    extensions(crate::builtins::comms::pskmod::PSKMOD_EXTENSIONS),
+    integer_capabilities(crate::builtins::comms::pskmod::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::comms::pskmod"
 )]
 async fn pskmod_builtin(x: Value, m: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let order = parse_modulation_order(&m)?;
+    if is_typed_integer_value(&m) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PSKMOD_INTEGER_ORDER_EXTENSION,
+            NAME,
+        )?;
+    }
     let options = ParsedOptions::parse(&rest, order)?;
+    if options.integer_phase_extension {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PSKMOD_INTEGER_PHASE_EXTENSION,
+            NAME,
+        )?;
+    }
+    if options.integer_custom_order_extension {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PSKMOD_INTEGER_CUSTOM_ORDER_EXTENSION,
+            NAME,
+        )?;
+    }
     match x {
         Value::GpuTensor(handle) => pskmod_gpu(handle, order, options).await,
         other => {
@@ -79,6 +260,9 @@ async fn pskmod_gpu(
         .or_else(runmat_accelerate_api::provider)
         .ok_or_else(|| pskmod_error("pskmod: no acceleration provider registered"))?;
     let constellation = constellation_table(order, &options)?;
+    if let Some(class) = runmat_accelerate_api::handle_integer_type(&handle) {
+        validate_gpu_symbol_class(class)?;
+    }
     if runmat_accelerate_api::handle_is_logical(&handle)
         && !matches!(options.input_type, InputType::Bit)
     {
@@ -91,7 +275,10 @@ async fn pskmod_gpu(
                 constellation: &constellation,
             };
             if let Ok(out) = provider.modulate_constellation(request).await {
-                return Ok(gpu_helpers::complex_gpu_value(out));
+                if valid_gpu_output(provider, &handle, &out, options.output_dtype, &handle.shape) {
+                    return Ok(gpu_helpers::complex_gpu_value(out));
+                }
+                gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
             }
         }
         InputType::Bit => {
@@ -104,7 +291,18 @@ async fn pskmod_gpu(
                     constellation: &constellation,
                 };
                 if let Ok(out) = provider.modulate_bits_constellation(request).await {
-                    return Ok(gpu_helpers::complex_gpu_value(out));
+                    let mut output_shape = handle.shape.clone();
+                    output_shape[0] = input_rows / bits_per_symbol(order)?;
+                    if valid_gpu_output(
+                        provider,
+                        &handle,
+                        &out,
+                        options.output_dtype,
+                        &output_shape,
+                    ) {
+                        return Ok(gpu_helpers::complex_gpu_value(out));
+                    }
+                    gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
                 }
             }
         }
@@ -120,12 +318,56 @@ async fn pskmod_gpu(
     Ok(gpu_helpers::complex_gpu_value(out))
 }
 
+fn valid_gpu_output(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
+    handle: &GpuTensorHandle,
+    dtype: OutputDType,
+    shape: &[usize],
+) -> bool {
+    let element_type = match dtype {
+        OutputDType::Double => runmat_accelerate_api::NumericElementType::F64,
+        OutputDType::Single => runmat_accelerate_api::NumericElementType::F32,
+    };
+    !gpu_helpers::same_gpu_handle(input, handle)
+        && handle.device_id == provider.device_id()
+        && handle.shape == shape
+        && runmat_accelerate_api::provider_for_handle(handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && gpu_helpers::numeric_descriptor_matches(
+            handle,
+            element_type,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        )
+        && !runmat_accelerate_api::handle_is_logical(handle)
+}
+
+fn validate_gpu_symbol_class(class: IntegerElementType) -> BuiltinResult<()> {
+    if matches!(
+        class,
+        IntegerElementType::I8
+            | IntegerElementType::I16
+            | IntegerElementType::I32
+            | IntegerElementType::U8
+            | IntegerElementType::U16
+            | IntegerElementType::U32
+    ) {
+        Ok(())
+    } else {
+        Err(pskmod_error(
+            "pskmod: integer X must have class int8, int16, int32, uint8, uint16, or uint32",
+        ))
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ParsedOptions {
     phase_offset: f64,
     mapping: SymbolMapping,
     input_type: InputType,
     output_dtype: OutputDType,
+    integer_phase_extension: bool,
+    integer_custom_order_extension: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -153,14 +395,19 @@ impl ParsedOptions {
         let mut mapping = SymbolMapping::Gray;
         let mut input_type = InputType::Integer;
         let mut output_dtype = OutputDType::Double;
+        let mut integer_phase_extension = false;
+        let mut integer_custom_order_extension = false;
         let mut idx = 0usize;
 
         if let Some(first) = args.first() {
             if !is_name_value_key(first) {
                 if is_scalar_numeric(first) {
                     phase_offset = scalar_number(first, "phaseoffset")?;
+                    integer_phase_extension = is_typed_integer_value(first);
                 } else {
                     mapping = parse_symbol_mapping(first, order)?;
+                    integer_custom_order_extension = matches!(&mapping, SymbolMapping::Custom(_))
+                        && is_typed_integer_value(first);
                 }
                 idx = 1;
             }
@@ -168,6 +415,8 @@ impl ParsedOptions {
         if let Some(second) = args.get(idx) {
             if !is_name_value_key(second) {
                 mapping = parse_symbol_mapping(second, order)?;
+                integer_custom_order_extension =
+                    matches!(&mapping, SymbolMapping::Custom(_)) && is_typed_integer_value(second);
                 idx += 1;
             }
         }
@@ -235,8 +484,15 @@ impl ParsedOptions {
             mapping,
             input_type,
             output_dtype,
+            integer_phase_extension,
+            integer_custom_order_extension,
         })
     }
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
 #[derive(Debug)]
@@ -256,9 +512,17 @@ impl SymbolInput {
                 Self::from_tensor(tensor, order, input_type)
             }
             Value::Int(i) => {
-                let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
-                    .map_err(|e| pskmod_error(format!("pskmod: {e}")))?;
-                Self::from_tensor(tensor, order, input_type)
+                validate_scalar_symbol_class(&i)?;
+                let symbol = integer_to_symbol_with_name(&i, "X")?;
+                match input_type {
+                    InputType::Integer => Ok(Self {
+                        data: vec![symbol],
+                        shape: vec![1, 1],
+                    }),
+                    InputType::Bit => {
+                        bits_to_symbols(vec![symbol_to_bit(symbol, "X")?], vec![1, 1], order)
+                    }
+                }
             }
             Value::Bool(b) => {
                 let logical = LogicalArray {
@@ -280,10 +544,21 @@ impl SymbolInput {
     }
 
     fn from_tensor(tensor: Tensor, order: usize, input_type: InputType) -> BuiltinResult<Self> {
+        let shape = tensor.shape.clone();
+        if let Some(storage) = tensor.integer_storage() {
+            validate_symbol_storage_class(storage)?;
+            let symbols = integer_storage_to_symbols(storage, "X")?;
+            return match input_type {
+                InputType::Integer => Ok(Self {
+                    data: symbols,
+                    shape,
+                }),
+                InputType::Bit => bits_to_symbols(symbols_to_bits(symbols, "X")?, shape, order),
+            };
+        }
         match input_type {
             InputType::Integer => {
-                let data = tensor
-                    .data
+                let data = tensor_utils::tensor_values_f64_cow(&tensor)
                     .iter()
                     .map(|&value| number_to_symbol_with_name(value, "X"))
                     .collect::<BuiltinResult<Vec<_>>>()?;
@@ -293,8 +568,7 @@ impl SymbolInput {
                 })
             }
             InputType::Bit => {
-                let bits = tensor
-                    .data
+                let bits = tensor_utils::tensor_values_f64_cow(&tensor)
                     .iter()
                     .map(|&value| number_to_bit(value, "X"))
                     .collect::<BuiltinResult<Vec<_>>>()?;
@@ -312,6 +586,42 @@ impl SymbolInput {
             InputType::Integer => Err(pskmod_error("pskmod: logical X requires InputType='bit'")),
             InputType::Bit => bits_to_symbols(logical.data, logical.shape, order),
         }
+    }
+}
+
+fn validate_scalar_symbol_class(value: &IntValue) -> BuiltinResult<()> {
+    if matches!(
+        value,
+        IntValue::I8(_)
+            | IntValue::I16(_)
+            | IntValue::I32(_)
+            | IntValue::U8(_)
+            | IntValue::U16(_)
+            | IntValue::U32(_)
+    ) {
+        Ok(())
+    } else {
+        Err(pskmod_error(
+            "pskmod: integer X must have class int8, int16, int32, uint8, uint16, or uint32",
+        ))
+    }
+}
+
+fn validate_symbol_storage_class(storage: &IntegerStorage) -> BuiltinResult<()> {
+    if matches!(
+        storage,
+        IntegerStorage::I8(_)
+            | IntegerStorage::I16(_)
+            | IntegerStorage::I32(_)
+            | IntegerStorage::U8(_)
+            | IntegerStorage::U16(_)
+            | IntegerStorage::U32(_)
+    ) {
+        Ok(())
+    } else {
+        Err(pskmod_error(
+            "pskmod: integer X must have class int8, int16, int32, uint8, uint16, or uint32",
+        ))
     }
 }
 
@@ -378,8 +688,12 @@ fn modulate_symbols(
         out.push((constellation[point], constellation[point + 1]));
     }
 
-    let tensor =
-        ComplexTensor::new(out, symbols.shape).map_err(|e| pskmod_error(format!("pskmod: {e}")))?;
+    let dtype = match options.output_dtype {
+        OutputDType::Double => NumericDType::F64,
+        OutputDType::Single => NumericDType::F32,
+    };
+    let tensor = ComplexTensor::from_f64_values_with_dtype(out, symbols.shape, dtype)
+        .map_err(|e| pskmod_error(format!("pskmod: {e}")))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -443,9 +757,34 @@ fn bits_per_symbol(order: usize) -> BuiltinResult<usize> {
 }
 
 fn parse_modulation_order(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        let order = integer_to_symbol_with_name(value, "M")?;
+        if order < 2 || order > isize::MAX as usize {
+            return Err(pskmod_error(
+                "pskmod: M must be a positive integer greater than 1",
+            ));
+        }
+        return Ok(order);
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor_utils::is_scalar_tensor(tensor) {
+            if let Some(storage) = tensor.integer_storage() {
+                let integer = storage
+                    .value_at(0)
+                    .ok_or_else(|| pskmod_error("pskmod: M must be a scalar"))?;
+                let order = integer_to_symbol_with_name(&integer, "M")?;
+                if order < 2 || order > isize::MAX as usize {
+                    return Err(pskmod_error(
+                        "pskmod: M must be a positive integer greater than 1",
+                    ));
+                }
+                return Ok(order);
+            }
+        }
+    }
     let number = scalar_number(value, "M")?;
     let order = number_to_symbol_with_name(number, "M")?;
-    if order < 2 {
+    if order < 2 || order > isize::MAX as usize {
         return Err(pskmod_error(
             "pskmod: M must be a positive integer greater than 1",
         ));
@@ -515,14 +854,19 @@ fn invert_mapping(mapping: &[usize], order: usize) -> BuiltinResult<Vec<usize>> 
 
 fn vector_to_symbols(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|&number| number_to_symbol_with_name(number, name))
-            .collect(),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                integer_storage_to_symbols(storage, name)
+            } else {
+                tensor_utils::tensor_values_f64_cow(tensor)
+                    .iter()
+                    .map(|&number| number_to_symbol_with_name(number, name))
+                    .collect()
+            }
+        }
         Value::LogicalArray(logical) => Ok(logical.data.iter().map(|&v| usize::from(v)).collect()),
         Value::Num(n) => Ok(vec![number_to_symbol_with_name(*n, name)?]),
-        Value::Int(i) => Ok(vec![number_to_symbol_with_name(i.to_f64(), name)?]),
+        Value::Int(i) => Ok(vec![integer_to_symbol_with_name(i, name)?]),
         Value::Bool(b) => Ok(vec![usize::from(*b)]),
         other => Err(pskmod_error(format!(
             "pskmod: {name} must be a numeric vector, got {other:?}"
@@ -535,7 +879,9 @@ fn scalar_number(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -546,7 +892,7 @@ fn scalar_number(value: &Value, name: &str) -> BuiltinResult<f64> {
 fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(tensor) => tensor_utils::is_scalar_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
     }
@@ -564,22 +910,55 @@ fn number_to_symbol_with_name(value: f64, name: &str) -> BuiltinResult<usize> {
             "pskmod: {name} values must be nonnegative integers"
         )));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX.saturating_sub(1) as f64 {
         return Err(pskmod_error(format!(
             "pskmod: {name} value is too large for this platform"
         )));
     }
-    Ok(rounded as usize)
+    let parsed = rounded as usize;
+    if parsed as f64 != rounded || parsed == usize::MAX {
+        return Err(pskmod_error(format!(
+            "pskmod: {name} value is too large for this platform"
+        )));
+    }
+    Ok(parsed)
+}
+
+fn integer_storage_to_symbols(storage: &IntegerStorage, name: &str) -> BuiltinResult<Vec<usize>> {
+    storage
+        .exact_values()
+        .iter()
+        .map(|value| integer_to_symbol_with_name(value, name))
+        .collect()
+}
+
+fn integer_to_symbol_with_name(value: &IntValue, name: &str) -> BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        pskmod_error(format!(
+            "pskmod: {name} value is too large for this platform"
+        ))
+    })
 }
 
 fn number_to_bit(value: f64, name: &str) -> BuiltinResult<u8> {
     let symbol = number_to_symbol_with_name(value, name)?;
+    symbol_to_bit(symbol, name)
+}
+
+fn symbol_to_bit(symbol: usize, name: &str) -> BuiltinResult<u8> {
     match symbol {
         0 | 1 => Ok(symbol as u8),
         _ => Err(pskmod_error(format!(
             "pskmod: {name} bit inputs must contain only 0 or 1"
         ))),
     }
+}
+
+fn symbols_to_bits(symbols: Vec<usize>, name: &str) -> BuiltinResult<Vec<u8>> {
+    symbols
+        .into_iter()
+        .map(|symbol| symbol_to_bit(symbol, name))
+        .collect()
 }
 
 fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
@@ -626,6 +1005,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::ProviderPrecision;
 
     fn pskmod(x: Value, order: usize, rest: Vec<Value>) -> ComplexTensor {
         match block_on(super::pskmod_builtin(x, Value::Num(order as f64), rest)).expect("pskmod") {
@@ -636,6 +1016,10 @@ mod tests {
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).expect("tensor"))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     fn assert_complex_close(actual: &[(f64, f64)], expected: &[(f64, f64)]) {
@@ -652,16 +1036,58 @@ mod tests {
     fn pskmod_bpsk_gray_matches_binary() {
         let out = pskmod(tensor(vec![0.0, 1.0], vec![1, 2]), 2, vec![]);
         assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.data, &[(1.0, 0.0), (-1.0, 0.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(1.0, 0.0), (-1.0, 0.0)]);
     }
 
     #[test]
     fn pskmod_qpsk_gray_mapping() {
         let out = pskmod(tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]), 4, vec![]);
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
         );
+    }
+
+    #[test]
+    fn pskmod_reads_typed_integer_symbol_storage_exactly() {
+        let out = pskmod(
+            integer_tensor(IntegerStorage::U32(vec![0, 1, 2, 3]), vec![1, 4]),
+            4,
+            vec![],
+        );
+        assert_eq!(out.shape, vec![1, 4]);
+        assert_complex_close(
+            &out.materialize_f64(),
+            &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
+        );
+    }
+
+    #[test]
+    fn pskmod_accepts_only_documented_integer_symbol_classes() {
+        for storage in [
+            IntegerStorage::I8(vec![0, 1, 2, 3]),
+            IntegerStorage::I16(vec![0, 1, 2, 3]),
+            IntegerStorage::I32(vec![0, 1, 2, 3]),
+            IntegerStorage::U8(vec![0, 1, 2, 3]),
+            IntegerStorage::U16(vec![0, 1, 2, 3]),
+            IntegerStorage::U32(vec![0, 1, 2, 3]),
+        ] {
+            pskmod(integer_tensor(storage, vec![1, 4]), 4, vec![]);
+        }
+        for storage in [
+            IntegerStorage::I64(vec![0, 1, 2, 3]),
+            IntegerStorage::U64(vec![0, 1, 2, 3]),
+        ] {
+            let err = block_on(super::pskmod_builtin(
+                integer_tensor(storage, vec![1, 4]),
+                Value::Num(4.0),
+                vec![],
+            ))
+            .expect_err("unsupported integer X class");
+            assert!(err
+                .message()
+                .contains("int8, int16, int32, uint8, uint16, or uint32"));
+        }
     }
 
     #[test]
@@ -679,7 +1105,7 @@ mod tests {
                 (theta.cos(), theta.sin())
             })
             .collect::<Vec<_>>();
-        assert_complex_close(&out.data, &expected);
+        assert_complex_close(&out.materialize_f64(), &expected);
     }
 
     #[test]
@@ -690,7 +1116,7 @@ mod tests {
             vec![Value::Num(0.0), Value::from("bin")],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
             &[(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)],
         );
     }
@@ -702,7 +1128,7 @@ mod tests {
             2,
             vec![Value::Num(std::f64::consts::FRAC_PI_2), Value::from("bin")],
         );
-        assert_complex_close(&out.data, &[(0.0, 1.0), (0.0, -1.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(0.0, 1.0), (0.0, -1.0)]);
     }
 
     #[test]
@@ -714,7 +1140,22 @@ mod tests {
             vec![Value::Num(0.0), mapping],
         );
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
+            &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
+        );
+    }
+
+    #[test]
+    fn pskmod_reads_typed_integer_custom_mapping_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let mapping = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
+        let out = pskmod(
+            integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
+            4,
+            vec![Value::Num(0.0), mapping],
+        );
+        assert_complex_close(
+            &out.materialize_f64(),
             &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
         );
     }
@@ -725,7 +1166,18 @@ mod tests {
         let out = pskmod(bits, 4, vec![Value::from("InputType"), Value::from("bit")]);
         assert_eq!(out.shape, vec![2, 2]);
         assert_complex_close(
-            &out.data,
+            &out.materialize_f64(),
+            &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
+        );
+    }
+
+    #[test]
+    fn pskmod_reads_typed_integer_bit_storage_exactly() {
+        let bits = integer_tensor(IntegerStorage::U8(vec![0, 0, 0, 1, 1, 0, 1, 1]), vec![4, 2]);
+        let out = pskmod(bits, 4, vec![Value::from("InputType"), Value::from("bit")]);
+        assert_eq!(out.shape, vec![2, 2]);
+        assert_complex_close(
+            &out.materialize_f64(),
             &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
         );
     }
@@ -738,8 +1190,21 @@ mod tests {
             vec![Value::from("OutputDataType"), Value::from("single")],
         );
         let theta = TAU / 8.0;
-        assert_eq!(out.data[0].0, (theta.cos() as f32) as f64);
-        assert_eq!(out.data[0].1, (theta.sin() as f32) as f64);
+        assert_eq!(out.materialize_f64()[0].0, (theta.cos() as f32) as f64);
+        assert_eq!(out.materialize_f64()[0].1, (theta.sin() as f32) as f64);
+    }
+
+    #[test]
+    fn pskmod_single_input_still_defaults_to_double_output() {
+        let out = pskmod(
+            Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap()),
+            8,
+            vec![],
+        );
+        let theta = TAU / 8.0;
+        assert_eq!(out.materialize_f64()[0].0, theta.cos());
+        assert_eq!(out.materialize_f64()[0].1, theta.sin());
+        assert_ne!(out.materialize_f64()[0].0, (theta.cos() as f32) as f64);
     }
 
     #[test]
@@ -778,7 +1243,7 @@ mod tests {
             vec![Value::from("InputType"), Value::from("bit")],
         );
         assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.data, &[(1.0, 0.0), (-1.0, 0.0)]);
+        assert_complex_close(&out.materialize_f64(), &[(1.0, 0.0), (-1.0, 0.0)]);
     }
 
     #[test]
@@ -794,7 +1259,7 @@ mod tests {
             );
             let input_handle = provider
                 .upload(&HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 })
                 .expect("upload");
@@ -819,9 +1284,63 @@ mod tests {
                 panic!("expected gathered complex tensor");
             };
             assert_eq!(actual.shape, expected.shape);
-            assert_complex_close(&actual.data, &expected.data);
+            assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
             provider.free(&input_handle).ok();
             provider.free(&output_handle).ok();
+        });
+    }
+
+    #[test]
+    fn pskmod_gpu_enforces_integer_symbol_classes_and_output_precision() {
+        test_support::with_test_provider(|provider| {
+            let accepted =
+                Tensor::new_integer(IntegerStorage::U32(vec![0, 1, 2, 3]), vec![1, 4]).unwrap();
+            let accepted_handle =
+                gpu_helpers::upload_tensor(provider, &accepted).expect("accepted integer upload");
+            let result = block_on(super::pskmod_builtin(
+                Value::GpuTensor(accepted_handle),
+                Value::Num(4.0),
+                vec![],
+            ))
+            .expect("supported integer gpuArray");
+            let Value::GpuTensor(result_handle) = result else {
+                panic!("expected resident modulation output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&result_handle),
+                Some(ProviderPrecision::F64)
+            );
+
+            let rejected =
+                Tensor::new_integer(IntegerStorage::U64(vec![0, 1, 2, 3]), vec![1, 4]).unwrap();
+            let rejected_handle =
+                gpu_helpers::upload_tensor(provider, &rejected).expect("rejected integer upload");
+            let err = block_on(super::pskmod_builtin(
+                Value::GpuTensor(rejected_handle),
+                Value::Num(4.0),
+                vec![],
+            ))
+            .expect_err("unsupported integer gpuArray class");
+            assert!(err
+                .message()
+                .contains("int8, int16, int32, uint8, uint16, or uint32"));
+
+            let single = Tensor::from_f32(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
+            let single_handle =
+                gpu_helpers::upload_tensor(provider, &single).expect("single upload");
+            let result = block_on(super::pskmod_builtin(
+                Value::GpuTensor(single_handle),
+                Value::Num(4.0),
+                vec![Value::from("OutputDataType"), Value::from("single")],
+            ))
+            .expect("explicit single gpuArray output");
+            let Value::GpuTensor(result_handle) = result else {
+                panic!("expected resident single modulation output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&result_handle),
+                Some(ProviderPrecision::F32)
+            );
         });
     }
 
@@ -837,7 +1356,7 @@ mod tests {
                 let input = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
                 let expected = pskmod(Value::Tensor(input.clone()), 4, vec![]);
                 let view = HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 };
                 let input_handle = provider.upload(&view).expect("upload");
@@ -862,7 +1381,7 @@ mod tests {
                     panic!("expected gathered complex tensor");
                 };
                 assert_eq!(actual.shape, expected.shape);
-                assert_complex_close(&actual.data, &expected.data);
+                assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
                 provider.free(&input_handle).ok();
                 provider.free(&output_handle).ok();
             }
@@ -889,7 +1408,7 @@ mod tests {
                     vec![Value::from("InputType"), Value::from("bit")],
                 );
                 let view = HostTensorView {
-                    data: &input.data,
+                    data: &input.materialize_f64(),
                     shape: &input.shape,
                 };
                 let input_handle = provider.upload(&view).expect("upload");
@@ -914,7 +1433,7 @@ mod tests {
                     panic!("expected gathered complex tensor");
                 };
                 assert_eq!(actual.shape, expected.shape);
-                assert_complex_close(&actual.data, &expected.data);
+                assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
                 provider.free(&input_handle).ok();
                 provider.free(&output_handle).ok();
             }
@@ -936,5 +1455,133 @@ mod tests {
         ))
         .expect_err("expected plot error");
         assert!(err.to_string().contains("PlotConstellation"));
+    }
+
+    #[test]
+    fn pskmod_integer_scalars_preserve_exact_symbol_bounds() {
+        assert_eq!(
+            parse_modulation_order(&Value::Int(runmat_value::IntValue::U16(4))).unwrap(),
+            4
+        );
+        assert_eq!(
+            SymbolInput::from_value(
+                Value::Int(runmat_value::IntValue::U16(3)),
+                4,
+                InputType::Integer,
+            )
+            .unwrap()
+            .data,
+            vec![3]
+        );
+        for value in [
+            Value::Int(runmat_value::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(parse_modulation_order(&value).is_err());
+        }
+        assert!(number_to_symbol_with_name(usize::MAX as f64, "M").is_err());
+        assert!(number_to_symbol_with_name(1.0e300, "M").is_err());
+    }
+
+    #[test]
+    fn pskmod_typed_integer_tensors_preserve_exact_symbol_values() {
+        let order = Tensor::new_integer(IntegerStorage::U64(vec![4]), vec![1, 1]).unwrap();
+        assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
+
+        let phase = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).unwrap();
+        assert_eq!(scalar_number(&Value::Tensor(phase), "phase").unwrap(), 3.0);
+
+        let out = pskmod(
+            integer_tensor(IntegerStorage::U32(vec![0, 1, 2, 3]), vec![1, 4]),
+            4,
+            vec![],
+        );
+        assert_complex_close(
+            &out.materialize_f64(),
+            &[(1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (-1.0, 0.0)],
+        );
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let custom = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
+            let out = pskmod(
+                integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
+                4,
+                vec![Value::Num(0.0), custom],
+            );
+            assert_complex_close(
+                &out.materialize_f64(),
+                &[(1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)],
+            );
+        }
+
+        for storage in [
+            IntegerStorage::I8(vec![4]),
+            IntegerStorage::I16(vec![4]),
+            IntegerStorage::I32(vec![4]),
+            IntegerStorage::I64(vec![4]),
+            IntegerStorage::U8(vec![4]),
+            IntegerStorage::U16(vec![4]),
+            IntegerStorage::U32(vec![4]),
+            IntegerStorage::U64(vec![4]),
+        ] {
+            let order = Tensor::new_integer(storage, vec![1, 1]).expect("typed order");
+            assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
+        }
+    }
+
+    #[test]
+    fn pskmod_typed_integer_controls_follow_compatibility_mode() {
+        let custom = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4])
+                    .expect("typed custom order"),
+            )
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(super::pskmod_builtin(
+                Value::Num(0.0),
+                Value::Int(IntValue::U16(4)),
+                vec![],
+            ))
+            .expect_err("MATLAB mode rejects typed-integer M");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:PskmodIntegerModulationOrderExtension")
+            );
+
+            let error = block_on(super::pskmod_builtin(
+                Value::Num(0.0),
+                Value::Num(4.0),
+                vec![Value::Int(IntValue::I16(0)), Value::from("bin")],
+            ))
+            .expect_err("MATLAB mode rejects typed-integer phase");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:PskmodIntegerPhaseOffsetExtension")
+            );
+
+            let error = block_on(super::pskmod_builtin(
+                Value::Num(0.0),
+                Value::Num(4.0),
+                vec![Value::Num(0.0), custom()],
+            ))
+            .expect_err("MATLAB mode rejects typed-integer custom order");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:PskmodIntegerCustomOrderExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(block_on(super::pskmod_builtin(
+                Value::Num(0.0),
+                Value::Int(IntValue::U16(4)),
+                vec![Value::Int(IntValue::I16(0)), custom()],
+            ))
+            .is_ok());
+        }
     }
 }

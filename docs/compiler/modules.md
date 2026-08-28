@@ -1,10 +1,3 @@
----
-title: "Module Composition"
-category: "Compilation Pipeline"
-section: "2.3"
-last_updated: "May 30, 2026"
----
-
 # Module Composition
 
 RunMat composes source files into a project-aware module graph before HIR lowering resolves calls, imports, function handles, and entrypoints. This gives the compiler a stable view of a project without changing the MATLAB folder conventions users already write.

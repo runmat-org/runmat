@@ -1,10 +1,8 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
-// Use a local trait-alias shim to avoid compile-time dependency ordering issues.
-// Downstream crates in the workspace provide runmat_builtins; during GC unit tests, we provide a minimal Value.
-use runmat_builtins::Value;
 use runmat_time::Instant;
+use runmat_value::Value;
 use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -23,6 +21,55 @@ pub mod stats;
 
 // Finalizer support
 use std::collections::HashMap;
+
+#[derive(Clone, Copy)]
+struct ExternalRootProvider {
+    roots: fn() -> Vec<GcHandle>,
+    roots_on_other_threads: fn() -> bool,
+}
+
+static EXTERNAL_ROOT_PROVIDERS: once_cell::sync::Lazy<
+    RwLock<HashMap<&'static str, ExternalRootProvider>>,
+> = once_cell::sync::Lazy::new(|| RwLock::new(HashMap::new()));
+
+/// Register a runtime-owned root source without making the collector depend on
+/// that runtime domain. Re-registering the same stable name replaces it.
+pub fn register_external_root_provider(
+    name: &'static str,
+    roots: fn() -> Vec<GcHandle>,
+    roots_on_other_threads: fn() -> bool,
+) {
+    EXTERNAL_ROOT_PROVIDERS.write().insert(
+        name,
+        ExternalRootProvider {
+            roots,
+            roots_on_other_threads,
+        },
+    );
+}
+
+fn external_roots() -> Vec<GcHandle> {
+    let providers = EXTERNAL_ROOT_PROVIDERS
+        .read()
+        .values()
+        .copied()
+        .collect::<Vec<_>>();
+    providers
+        .into_iter()
+        .flat_map(|provider| (provider.roots)())
+        .collect()
+}
+
+fn external_roots_exist_on_other_threads() -> bool {
+    let providers = EXTERNAL_ROOT_PROVIDERS
+        .read()
+        .values()
+        .copied()
+        .collect::<Vec<_>>();
+    providers
+        .into_iter()
+        .any(|provider| (provider.roots_on_other_threads)())
+}
 
 /// A finalizer that runs when a GC-managed Value is collected.
 ///
@@ -495,9 +542,7 @@ impl GarbageCollector {
         // RunMat has stop-the-world safepoints or synchronized root snapshots,
         // cross-thread collection must defer rather than miss another thread's
         // interpreter roots.
-        if registered_roots_exist_on_other_threads()
-            || runmat_builtins::static_property_values_exist_on_other_threads()
-        {
+        if registered_roots_exist_on_other_threads() || external_roots_exist_on_other_threads() {
             return Ok(0);
         }
 
@@ -514,7 +559,7 @@ impl GarbageCollector {
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
         }
-        combined_roots.extend(runmat_builtins::static_property_gc_roots());
+        combined_roots.extend(external_roots());
         combined_roots.extend(gc_barrier_minor_roots());
 
         // Collect young generation via unified collector/allocator
@@ -561,9 +606,7 @@ impl GarbageCollector {
             return Ok(0);
         }
         // Same thread-local root visibility rule as minor collection.
-        if registered_roots_exist_on_other_threads()
-            || runmat_builtins::static_property_values_exist_on_other_threads()
-        {
+        if registered_roots_exist_on_other_threads() || external_roots_exist_on_other_threads() {
             return Ok(0);
         }
 
@@ -579,7 +622,7 @@ impl GarbageCollector {
         if let Ok(mut ext) = ROOT_SCANNER.with(|scanner| scanner.scan_roots()) {
             combined_roots.append(&mut ext);
         }
-        combined_roots.extend(runmat_builtins::static_property_gc_roots());
+        combined_roots.extend(external_roots());
         combined_roots.extend(gc_barrier_minor_roots());
 
         let mut allocator = self.allocator.lock();
@@ -1052,6 +1095,18 @@ mod tests {
     use super::*;
     use std::ptr::NonNull;
 
+    thread_local! {
+        static TEST_EXTERNAL_ROOT: std::cell::Cell<Option<GcHandle>> = const { std::cell::Cell::new(None) };
+    }
+
+    fn test_external_roots() -> Vec<GcHandle> {
+        TEST_EXTERNAL_ROOT.with(|root| root.get().into_iter().collect())
+    }
+
+    fn test_external_roots_on_other_threads() -> bool {
+        false
+    }
+
     #[test]
     fn test_basic_allocation() {
         gc_test_context(|| {
@@ -1061,6 +1116,25 @@ mod tests {
                 gc_clone_value(&ptr).expect("valid GC handle"),
                 Value::Num(42.0)
             );
+        });
+    }
+
+    #[test]
+    fn registered_external_root_provider_participates_in_collection() {
+        gc_test_context(|| {
+            register_external_root_provider(
+                "runmat-gc-test-external-root",
+                test_external_roots,
+                test_external_roots_on_other_threads,
+            );
+            let handle = gc_allocate(Value::String("external-root".into())).unwrap();
+            TEST_EXTERNAL_ROOT.with(|root| root.set(Some(handle)));
+            gc_collect_major().unwrap();
+            assert_eq!(
+                gc_clone_value(&handle).unwrap(),
+                Value::String("external-root".into())
+            );
+            TEST_EXTERNAL_ROOT.with(|root| root.set(None));
         });
     }
 
@@ -1127,7 +1201,7 @@ mod tests {
 
     #[test]
     fn collection_skips_when_other_thread_has_registered_roots() {
-        use runmat_builtins::HandleRef;
+        use runmat_value::HandleRef;
         use std::sync::mpsc;
         use std::thread;
 

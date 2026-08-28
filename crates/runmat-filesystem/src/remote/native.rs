@@ -1674,7 +1674,9 @@ mod tests {
     use futures::executor;
     use serde::Deserialize;
     use std::collections::HashMap;
+    use std::ffi::OsString;
     use std::net::TcpListener as StdTcpListener;
+    use std::path::Component;
     use std::sync::Arc;
     use tempfile::tempdir;
     use tokio::net::TcpListener as TokioTcpListener;
@@ -1707,8 +1709,20 @@ mod tests {
         }
 
         fn resolve(&self, remote_path: &str) -> PathBuf {
-            let trimmed = remote_path.trim_start_matches('/');
-            self.root.join(trimmed)
+            let mut segments: Vec<OsString> = Vec::new();
+            let portable_path = remote_path.replace('\\', "/");
+            for component in Path::new(&portable_path).components() {
+                match component {
+                    Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
+                    Component::ParentDir => {
+                        segments.pop();
+                    }
+                    Component::Normal(segment) => segments.push(segment.to_os_string()),
+                }
+            }
+            let mut target = (*self.root).clone();
+            target.extend(segments);
+            target
         }
 
         fn virtualize(&self, path: &Path) -> String {
@@ -2275,6 +2289,19 @@ mod tests {
             axum::serve(listener, service).await.unwrap();
         });
         (base, harness, rt)
+    }
+
+    #[test]
+    fn test_server_paths_remain_inside_the_temporary_root() {
+        let harness = Harness::new();
+        assert_eq!(
+            harness.resolve("/reports/../../outside.txt"),
+            harness.root.join("outside.txt")
+        );
+        assert_eq!(
+            harness.resolve("reports\\nested\\..\\result.txt"),
+            harness.root.join("reports").join("result.txt")
+        );
     }
 
     #[test]

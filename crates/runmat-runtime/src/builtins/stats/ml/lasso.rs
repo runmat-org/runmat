@@ -1,17 +1,101 @@
 //! Lasso and elastic-net regularized linear regression.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ResolveContext, StructValue, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "lasso";
 const EPS: f64 = 1.0e-12;
+const MAX_NUM_LAMBDA: usize = 10_000;
+const MAX_ITERATIONS: usize = 1_000_000;
+
+const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lasso-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lasso with native-class integer predictor or response data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoIntegerDataExtension"),
+};
+const INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lasso-integer-parameter",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lasso with native-class integer floating parameters is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoIntegerParameterExtension"),
+};
+const INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lasso-integer-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lasso with native-class integer structural controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoIntegerControlExtension"),
+};
+const INTEGER_BOOLEAN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lasso-integer-boolean",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lasso with native-class integer logical controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoIntegerBooleanExtension"),
+};
+const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lasso-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lasso host fallback for explicit gpuArray inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LassoResidentInputExtension"),
+};
+
+pub const LASSO_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    INTEGER_DATA_EXTENSION,
+    INTEGER_PARAMETER_EXTENSION,
+    INTEGER_CONTROL_EXTENSION,
+    INTEGER_BOOLEAN_EXTENSION,
+    RESIDENT_INPUT_EXTENSION,
+];
+
+const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X or y",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Native integer data is gated before gather and must be exactly representable at the binary64 solver boundary.",
+}];
+const INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Alpha, Lambda, LambdaRatio, Weights, or RelTol",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Native integer floating parameters are gated and checked for exact binary64 representation.",
+    }];
+const INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "CV, DFmax, MaxIter, MCReps, or NumLambda",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Native integer structural controls are gated and decoded exactly without a floating round trip.",
+    }];
+const INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Intercept, Standardize, or UseCovariance",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Native integer logical controls accept only scalar zero or one, including scalar integer tensors.",
+    }];
+pub const LASSO_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "B = lasso(integer_X, integer_y, ___)", inputs: &INTEGER_DATA_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only integer data crosses a checked binary64 solver boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "B = lasso(X, y, Name, integer_value)", inputs: &INTEGER_PARAMETER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Floating parameters reject lossy integer conversion." },
+    BuiltinIntegerCapabilityDescriptor { form: "B = lasso(X, y, Name, integer_control)", inputs: &INTEGER_CONTROL_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Structural controls are parsed exactly; ordinary integer-valued doubles remain documented." },
+    BuiltinIntegerCapabilityDescriptor { form: "B = lasso(X, y, Name, integer_boolean)", inputs: &INTEGER_BOOLEAN_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Logical controls accept native integer scalar zero or one as a RunMat extension." },
+];
 
 const OUTPUT_B: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "B",
@@ -226,9 +310,13 @@ struct FitResult {
     keywords = "lasso,elastic net,regularization,regression,statistics,machine learning",
     type_resolver(lasso_type),
     descriptor(crate::builtins::stats::ml::lasso::LASSO_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::lasso::LASSO_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::lasso::LASSO_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::lasso"
 )]
 pub(crate) async fn lasso_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    validate_option_surface(&rest)?;
+    ensure_extensions(&x, &y, &rest)?;
     let x = gathered(x).await?;
     let y = gathered(y).await?;
     let rest = gather_values(rest).await?;
@@ -243,6 +331,92 @@ pub(crate) async fn lasso_builtin(x: Value, y: Value, rest: Vec<Value>) -> Built
         )),
         None => Ok(result.b),
     }
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn contains_explicit_gpu(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
+        Value::Cell(cell) => cell.data.iter().any(contains_explicit_gpu),
+        Value::Struct(value) => value.fields.values().any(contains_explicit_gpu),
+        Value::Object(value) => value.properties.values().any(contains_explicit_gpu),
+        Value::Closure(value) => value.captures.iter().any(contains_explicit_gpu),
+        Value::OutputList(values) => values.iter().any(contains_explicit_gpu),
+        _ => false,
+    }
+}
+
+fn validate_option_surface(rest: &[Value]) -> BuiltinResult<()> {
+    if !rest.len().is_multiple_of(2) {
+        return Err(invalid_argument(
+            "lasso: name-value options must be supplied in pairs",
+        ));
+    }
+    for pair in rest.chunks_exact(2) {
+        let name = scalar_text(&pair[0], "option name")?;
+        let canonical = canonical_option(&name);
+        if !matches!(
+            canonical.as_str(),
+            "alpha"
+                | "lambda"
+                | "lambdaratio"
+                | "numlambda"
+                | "standardize"
+                | "intercept"
+                | "weights"
+                | "reltol"
+                | "maxiter"
+                | "cv"
+                | "predictornames"
+                | "dfmax"
+                | "usecovariance"
+                | "mcreps"
+        ) {
+            return Err(invalid_argument(format!(
+                "lasso: unsupported option '{canonical}'"
+            )));
+        }
+        if canonical == "predictornames" {
+            string_list(&pair[1], "PredictorNames")?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if is_typed_integer(x) || is_typed_integer(y) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_DATA_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    for pair in rest.chunks_exact(2) {
+        if !is_typed_integer(&pair[1]) {
+            continue;
+        }
+        let name = canonical_option(&scalar_text(&pair[0], "option name")?);
+        let extension = match name.as_str() {
+            "cv" | "dfmax" | "maxiter" | "mcreps" | "numlambda" => &INTEGER_CONTROL_EXTENSION,
+            "intercept" | "standardize" | "usecovariance" => &INTEGER_BOOLEAN_EXTENSION,
+            _ => &INTEGER_PARAMETER_EXTENSION,
+        };
+        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+    }
+    if contains_explicit_gpu(x)
+        || contains_explicit_gpu(y)
+        || rest.iter().any(contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESIDENT_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 async fn gathered(value: Value) -> BuiltinResult<Value> {
@@ -275,8 +449,9 @@ fn lasso_compute(x: Value, y: Value, mut options: LassoOptions) -> BuiltinResult
             y_values.len()
         )));
     }
+    let x_values = tensor::tensor_values_f64_cow(&x);
     if y_values.iter().any(|value| !value.is_finite())
-        || x.data.iter().any(|value| !value.is_finite())
+        || x_values.iter().any(|value| !value.is_finite())
     {
         return Err(invalid_argument(
             "lasso: X and y must contain finite real values",
@@ -355,7 +530,7 @@ fn parse_options(rest: Vec<Value>) -> BuiltinResult<LassoOptions> {
                     ));
                 }
             }
-            "numlambda" => options.num_lambda = positive_usize(value, "NumLambda")?,
+            "numlambda" => options.num_lambda = bounded_usize(value, "NumLambda", MAX_NUM_LAMBDA)?,
             "standardize" => options.standardize = scalar_bool(value, "Standardize")?,
             "intercept" => options.intercept = scalar_bool(value, "Intercept")?,
             "weights" => options.weights = Some(positive_weight_vector(value, "Weights")?),
@@ -367,7 +542,7 @@ fn parse_options(rest: Vec<Value>) -> BuiltinResult<LassoOptions> {
                     ));
                 }
             }
-            "maxiter" => options.max_iter = positive_usize(value, "MaxIter")?,
+            "maxiter" => options.max_iter = bounded_usize(value, "MaxIter", MAX_ITERATIONS)?,
             "cv" => options.cv = parse_cv(value)?,
             "predictornames" => {
                 options.predictor_names = Some(string_list(value, "PredictorNames")?)
@@ -384,7 +559,6 @@ fn parse_options(rest: Vec<Value>) -> BuiltinResult<LassoOptions> {
                     _ => scalar_bool(value, "UseCovariance")?,
                 };
             }
-            "cacheSize" | "cachesize" | "abstol" | "b0" | "u0" | "rho" | "options" => {}
             "mcreps" => {
                 if positive_usize(value, "MCReps")? != 1 {
                     return Err(invalid_argument(
@@ -412,7 +586,11 @@ fn canonical_option(name: &str) -> String {
 
 fn value_to_real_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor),
+        Value::Tensor(tensor) => {
+            ensure_exact_integer_tensor(&tensor, label)?;
+            tensor::integer_tensor_to_f64(tensor)
+                .map_err(|err| invalid_argument(format!("lasso: {label}: {err}")))
+        }
         Value::LogicalArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
             Tensor::new(
@@ -427,12 +605,34 @@ fn value_to_real_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
         }
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
             .map_err(|err| invalid_argument(format!("lasso: {label}: {err}"))),
-        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
-            .map_err(|err| invalid_argument(format!("lasso: {label}: {err}"))),
+        Value::Int(i) => {
+            ensure_exact_integer_value(&i, label)?;
+            Tensor::new(vec![i.to_f64()], vec![1, 1])
+                .map_err(|err| invalid_argument(format!("lasso: {label}: {err}")))
+        }
         other => Err(invalid_argument(format!(
             "lasso: {label} must be real numeric, got {other:?}"
         ))),
     }
+}
+
+fn ensure_exact_integer_value(value: &runmat_value::IntValue, label: &str) -> BuiltinResult<()> {
+    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+        Ok(())
+    } else {
+        Err(invalid_argument(format!(
+            "lasso: integer {label} values must be exactly representable as double"
+        )))
+    }
+}
+
+fn ensure_exact_integer_tensor(value: &Tensor, label: &str) -> BuiltinResult<()> {
+    if let Some(storage) = value.integer_storage() {
+        for integer in storage.exact_values() {
+            ensure_exact_integer_value(&integer, label)?;
+        }
+    }
+    Ok(())
 }
 
 fn value_to_real_vector(label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
@@ -440,7 +640,7 @@ fn value_to_real_vector(label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.iter().filter(|dim| **dim > 1).count() > 1 {
         return Err(invalid_argument(format!("lasso: {label} must be a vector")));
     }
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
 }
 
 fn scalar_text(value: &Value, label: &str) -> BuiltinResult<String> {
@@ -457,7 +657,10 @@ fn scalar_text(value: &Value, label: &str) -> BuiltinResult<String> {
 fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
     let number = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
+        Value::Int(i) => {
+            ensure_exact_integer_value(i, label)?;
+            i.to_f64()
+        }
         Value::Bool(flag) => {
             if *flag {
                 1.0
@@ -465,7 +668,10 @@ fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            ensure_exact_integer_tensor(tensor, label)?;
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             if array.data[0] == 0 {
                 0.0
@@ -486,11 +692,19 @@ fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
 }
 
 fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid_argument(format!(
+                "lasso: {label} must be logical scalar"
+            ))),
+        };
+    }
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(*n != 0.0),
-        Value::Int(i) if i.to_f64() == 0.0 || i.to_f64() == 1.0 => Ok(i.to_f64() != 0.0),
         Value::String(text)
             if text.eq_ignore_ascii_case("true") || text.eq_ignore_ascii_case("false") =>
         {
@@ -513,13 +727,35 @@ fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
 }
 
 fn positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                invalid_argument(format!("lasso: {label} must be a positive integer scalar"))
+            });
+    }
     let raw = scalar_f64(value, label)?;
-    if raw < 1.0 || raw.fract() != 0.0 || raw > usize::MAX as f64 {
+    if raw < 1.0
+        || raw.fract() != 0.0
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(invalid_argument(format!(
             "lasso: {label} must be a positive integer scalar"
         )));
     }
     Ok(raw as usize)
+}
+
+fn bounded_usize(value: &Value, label: &str, max: usize) -> BuiltinResult<usize> {
+    let parsed = positive_usize(value, label)?;
+    if parsed > max {
+        return Err(invalid_argument(format!(
+            "lasso: {label} must be no greater than {max}"
+        )));
+    }
+    Ok(parsed)
 }
 
 fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
@@ -530,7 +766,8 @@ fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
                     "lasso: {label} must be a numeric vector"
                 )));
             }
-            tensor.data.clone()
+            ensure_exact_integer_tensor(tensor, label)?;
+            tensor::tensor_values_f64(tensor)
         }
         Value::LogicalArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
@@ -546,7 +783,10 @@ fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
                 .collect()
         }
         Value::Num(n) => vec![*n],
-        Value::Int(i) => vec![i.to_f64()],
+        Value::Int(i) => {
+            ensure_exact_integer_value(i, label)?;
+            vec![i.to_f64()]
+        }
         other => {
             return Err(invalid_argument(format!(
                 "lasso: {label} must be a numeric vector, got {other:?}"
@@ -629,6 +869,7 @@ fn string_list(value: &Value, label: &str) -> BuiltinResult<Vec<String>> {
 fn prepare_data(x: &Tensor, y: &[f64], options: &LassoOptions) -> BuiltinResult<PreparedData> {
     let rows = x.rows();
     let cols = x.cols();
+    let x_values = tensor::tensor_values_f64_cow(x);
     let mut weights = options.weights.clone().unwrap_or_else(|| vec![1.0; rows]);
     let weight_sum: f64 = weights.iter().sum();
     if !(weight_sum > 0.0 && weight_sum.is_finite()) {
@@ -649,10 +890,10 @@ fn prepare_data(x: &Tensor, y: &[f64], options: &LassoOptions) -> BuiltinResult<
 
     let mut x_means = vec![0.0; cols];
     let mut x_scales = vec![1.0; cols];
-    let mut x_work = vec![0.0; x.data.len()];
+    let mut x_work = vec![0.0; x_values.len()];
     for col in 0..cols {
         let mean = if options.intercept {
-            weighted_column_mean(x, &weights, col)
+            weighted_column_mean(&x_values, rows, &weights, col)
         } else {
             0.0
         };
@@ -660,7 +901,7 @@ fn prepare_data(x: &Tensor, y: &[f64], options: &LassoOptions) -> BuiltinResult<
         if options.intercept && options.standardize {
             let variance = (0..rows)
                 .map(|row| {
-                    let centered = x.get2(row, col).unwrap_or(0.0) - mean;
+                    let centered = x_values[row + col * rows] - mean;
                     weights[row] * centered * centered
                 })
                 .sum::<f64>();
@@ -673,12 +914,12 @@ fn prepare_data(x: &Tensor, y: &[f64], options: &LassoOptions) -> BuiltinResult<
         x_scales[col] = scale;
         for row in 0..rows {
             let idx = row + col * rows;
-            x_work[idx] = (x.data[idx] - mean) / scale;
+            x_work[idx] = (x_values[idx] - mean) / scale;
         }
     }
 
     Ok(PreparedData {
-        x_original: x.data.clone(),
+        x_original: x_values.to_vec(),
         x_work,
         y_original: y.to_vec(),
         y_work,
@@ -699,9 +940,9 @@ fn weighted_mean(values: &[f64], weights: &[f64]) -> f64 {
         .sum()
 }
 
-fn weighted_column_mean(x: &Tensor, weights: &[f64], col: usize) -> f64 {
-    (0..x.rows())
-        .map(|row| x.get2(row, col).unwrap_or(0.0) * weights[row])
+fn weighted_column_mean(x_values: &[f64], rows: usize, weights: &[f64], col: usize) -> f64 {
+    (0..rows)
+        .map(|row| x_values[row + col * rows] * weights[row])
         .sum()
 }
 
@@ -1143,10 +1384,21 @@ fn logical_scalar(value: bool) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::StringArray;
+    use runmat_value::StringArray;
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn output_pair(value: Value) -> (Value, Value) {
@@ -1188,8 +1440,8 @@ mod tests {
             panic!("expected coefficient tensor");
         };
         assert_eq!(coeffs.shape, vec![2, 1]);
-        assert!((coeffs.data[0] - 2.0).abs() < 1.0e-8);
-        assert!(coeffs.data[1].abs() < 1.0e-8);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-8);
+        assert!(coeffs.materialize_f64()[1].abs() < 1.0e-8);
     }
 
     #[test]
@@ -1233,6 +1485,101 @@ mod tests {
         assert!(info.fields.contains_key("DF"));
         assert!(info.fields.contains_key("MSE"));
         assert!(info.fields.contains_key("PredictorNames"));
+    }
+
+    #[test]
+    fn lasso_reads_typed_integer_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]);
+        let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), vec![4, 1]);
+        let out = block_on(lasso_builtin(
+            x,
+            y,
+            vec![
+                Value::CharArray(CharArray::new_row("Lambda")),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                Value::CharArray(CharArray::new_row("Alpha")),
+                cleared_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+                Value::CharArray(CharArray::new_row("Weights")),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1]), vec![4, 1]),
+                Value::CharArray(CharArray::new_row("MaxIter")),
+                cleared_int_tensor(IntegerStorage::U16(vec![50]), vec![1, 1]),
+                Value::CharArray(CharArray::new_row("Standardize")),
+                Value::Bool(false),
+            ],
+        ))
+        .unwrap();
+        let Value::Tensor(coeffs) = out else {
+            panic!("expected coefficient tensor");
+        };
+        assert_eq!(coeffs.shape, vec![1, 1]);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-8);
+    }
+
+    #[test]
+    fn lasso_gates_integer_roles_before_gather_and_rejects_lossy_data() {
+        let integer_data = cleared_int_tensor(IntegerStorage::U8(vec![1, 2]), vec![2, 1]);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = ensure_extensions(&integer_data, &tensor(vec![1.0, 2.0], vec![2, 1]), &[])
+            .expect_err("strict mode must reject integer data before gather");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:LassoIntegerDataExtension")
+        );
+        let err = ensure_extensions(
+            &tensor(vec![1.0, 2.0], vec![2, 1]),
+            &tensor(vec![1.0, 2.0], vec![2, 1]),
+            &[Value::from("MaxIter"), Value::Int(IntValue::U16(20))],
+        )
+        .expect_err("strict mode must reject integer controls before gather");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:LassoIntegerControlExtension")
+        );
+        drop(_strict);
+
+        let wide = cleared_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]);
+        let err = value_to_real_tensor("X", wide).expect_err("lossy integer must reject");
+        assert!(err.message.contains("exactly representable"));
+    }
+
+    #[test]
+    fn lasso_positive_usize_parses_integer_bounds_exactly() {
+        assert_eq!(
+            positive_usize(&Value::Int(IntValue::U16(3)), "NumLambda").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_usize(
+                &cleared_int_tensor(IntegerStorage::U64(vec![3]), vec![1, 1]),
+                "NumLambda"
+            )
+            .unwrap(),
+            3
+        );
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(positive_usize(&value, "NumLambda").is_err());
+        }
+        assert!(bounded_usize(
+            &cleared_int_tensor(IntegerStorage::U64(vec![usize::MAX as u64]), vec![1, 1]),
+            "NumLambda",
+            MAX_NUM_LAMBDA
+        )
+        .is_err());
+        assert_eq!(
+            bounded_usize(
+                &Value::Int(IntValue::U16(MAX_NUM_LAMBDA as u16)),
+                "NumLambda",
+                MAX_NUM_LAMBDA
+            )
+            .unwrap(),
+            MAX_NUM_LAMBDA
+        );
     }
 
     #[test]
@@ -1302,17 +1649,17 @@ mod tests {
         let lambda = row_field(&info, "Lambda");
         let mse = row_field(&info, "MSE");
         let se = row_field(&info, "SE");
-        assert_eq!(coeffs.cols, lambda.data.len());
-        assert_eq!(mse.data.len(), lambda.data.len());
-        assert_eq!(se.data.len(), lambda.data.len());
+        assert_eq!(coeffs.cols, lambda.materialize_f64().len());
+        assert_eq!(mse.materialize_f64().len(), lambda.materialize_f64().len());
+        assert_eq!(se.materialize_f64().len(), lambda.materialize_f64().len());
         let Some(Value::Num(index_min_mse)) = info.fields.get("IndexMinMSE") else {
             panic!("expected IndexMinMSE");
         };
         let Some(Value::Num(index_1se)) = info.fields.get("Index1SE") else {
             panic!("expected Index1SE");
         };
-        assert!(*index_min_mse >= 1.0 && *index_min_mse <= lambda.data.len() as f64);
-        assert!(*index_1se >= 1.0 && *index_1se <= lambda.data.len() as f64);
+        assert!(*index_min_mse >= 1.0 && *index_min_mse <= lambda.materialize_f64().len() as f64);
+        assert!(*index_1se >= 1.0 && *index_1se <= lambda.materialize_f64().len() as f64);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{select_axes_for_figure, FigureHandle};

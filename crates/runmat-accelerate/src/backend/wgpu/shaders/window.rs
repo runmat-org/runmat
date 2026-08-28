@@ -17,6 +17,20 @@ struct WindowParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: WindowParams;
 
+fn cospi_window(value: f64) -> f64 {
+    let doubled = value * 2.0;
+    let rounded = round(doubled);
+    if (doubled == rounded) {
+        let residue = u32(rounded) % 4u;
+        if (residue == 0u) { return 1.0; }
+        if (residue == 2u) { return -1.0; }
+        return 0.0;
+    }
+    let cycle = value - 2.0 * floor(value / 2.0);
+    let reduced = select(cycle, 2.0 - cycle, cycle > 1.0);
+    return cos(3.141592653589793 * reduced);
+}
+
 fn coeff(kind: u32, idx: u32, total: u32) -> f64 {
     if (total == 0u) {
         return 0.0;
@@ -27,8 +41,15 @@ fn coeff(kind: u32, idx: u32, total: u32) -> f64 {
     let phase = 2.0 * 3.141592653589793 * f64(idx) / f64(total - 1u);
     switch kind {
         case 0u: { return 0.5 - 0.5 * cos(phase); }
-        case 1u: { return 0.54 - 0.46 * cos(phase); }
-        default: { return 0.42 - 0.5 * cos(phase) + 0.08 * cos(2.0 * phase); }
+        case 1u: {
+            let turns = 2.0 * f64(idx) / f64(total - 1u);
+            return 0.54 - 0.46 * cospi_window(turns);
+        }
+        default: {
+            let first = 2.0 * f64(idx) / f64(total - 1u);
+            let second = 4.0 * f64(idx) / f64(total - 1u);
+            return 0.42 - 0.5 * cospi_window(first) + 0.08 * cospi_window(second);
+        }
     }
 }
 
@@ -68,6 +89,20 @@ struct WindowParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: WindowParams;
 
+fn cospi_window(value: f32) -> f32 {
+    let doubled = value * 2.0;
+    let rounded = round(doubled);
+    if (doubled == rounded) {
+        let residue = u32(rounded) % 4u;
+        if (residue == 0u) { return 1.0; }
+        if (residue == 2u) { return -1.0; }
+        return 0.0;
+    }
+    let cycle = value - 2.0 * floor(value / 2.0);
+    let reduced = select(cycle, 2.0 - cycle, cycle > 1.0);
+    return cos(3.1415927 * reduced);
+}
+
 fn coeff(kind: u32, idx: u32, total: u32) -> f32 {
     if (total == 0u) {
         return 0.0;
@@ -78,8 +113,15 @@ fn coeff(kind: u32, idx: u32, total: u32) -> f32 {
     let phase = 2.0 * 3.1415927 * f32(idx) / f32(total - 1u);
     switch kind {
         case 0u: { return 0.5 - 0.5 * cos(phase); }
-        case 1u: { return 0.54 - 0.46 * cos(phase); }
-        default: { return 0.42 - 0.5 * cos(phase) + 0.08 * cos(2.0 * phase); }
+        case 1u: {
+            let turns = 2.0 * f32(idx) / f32(total - 1u);
+            return 0.54 - 0.46 * cospi_window(turns);
+        }
+        default: {
+            let first = 2.0 * f32(idx) / f32(total - 1u);
+            let second = 4.0 * f32(idx) / f32(total - 1u);
+            return 0.42 - 0.5 * cospi_window(first) + 0.08 * cospi_window(second);
+        }
     }
 }
 

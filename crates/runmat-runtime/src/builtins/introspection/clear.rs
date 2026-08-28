@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::{build_runtime_error, workspace, BuiltinResult};
 
@@ -152,8 +152,8 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use once_cell::sync::Lazy;
-    use runmat_builtins::Value;
     use runmat_thread_local::runmat_thread_local;
+    use runmat_value::Value;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -230,7 +230,7 @@ mod tests {
             let counter = Arc::clone(&counter);
             Box::pin(async move {
                 *counter.lock().unwrap() += 1;
-                Ok(Value::Tensor(runmat_builtins::Tensor::zeros(vec![0, 0])))
+                Ok(Value::Tensor(runmat_value::Tensor::zeros(vec![0, 0])))
             })
         })
     }

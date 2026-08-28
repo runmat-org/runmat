@@ -1,11 +1,17 @@
 //! MATLAB-compatible `cell` builtin implemented for the modern RunMat runtime.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, StructValue, Tensor, Value,
+};
 
 use crate::builtins::cells::type_resolvers::cell_type;
 use crate::builtins::common::random_args::{keyword_of, shape_from_value};
@@ -13,6 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -45,6 +52,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "cell";
+
+const CELL_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cell-like",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the cell \"like\" prototype selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CellLikeExtension"),
+};
+
+const CELL_GPU_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cell-gpu-size",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "resident GPU size controls for cell are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CellGpuSizeExtension"),
+};
+
+pub const CELL_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [CELL_LIKE_EXTENSION, CELL_GPU_SIZE_EXTENSION];
 
 const CELL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -183,6 +207,27 @@ const CELL_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     },
 ];
 
+const CELL_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n_or_size_dimensions",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Square, variadic-dimension, and row-size-vector controls accept every integer class and are decoded from authoritative integer storage without binary64 conversion.",
+    }];
+
+pub const CELL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "C = cell(n), cell(sz1, ..., szN), or cell(sz) with integer size controls",
+        inputs: &CELL_INTEGER_SIZE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Signed negative dimensions clamp to zero, oversized dimensions fail before allocation, and resident size controls use an independently mode-gated exact gather fallback; every cell allocated by a documented form contains a host 0-by-0 double array.",
+    }];
+
 const CELL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.CELL.INVALID_INPUT",
     identifier: Some("RunMat:cell:InvalidInput"),
@@ -237,6 +282,8 @@ fn cell_error_with_message(
     sink = true,
     type_resolver(cell_type),
     descriptor(crate::builtins::cells::core::cell::CELL_DESCRIPTOR),
+    extensions(crate::builtins::cells::core::cell::CELL_EXTENSIONS),
+    integer_capabilities(crate::builtins::cells::core::cell::CELL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::cells::core::cell"
 )]
 async fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -260,6 +307,10 @@ impl ParsedCell {
             if let Some(keyword) = keyword_of(value) {
                 match keyword.as_str() {
                     "like" => {
+                        crate::compatibility::ensure_builtin_extension_enabled(
+                            &CELL_LIKE_EXTENSION,
+                            "cell",
+                        )?;
                         if prototype.is_some() {
                             return Err(cell_error_with_message(
                                 "cell: multiple 'like' specifications are not supported",
@@ -285,6 +336,12 @@ impl ParsedCell {
                 }
             }
 
+            if matches!(args[idx], Value::GpuTensor(_)) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &CELL_GPU_SIZE_EXTENSION,
+                    "cell",
+                )?;
+            }
             dims.push(args[idx].clone());
             idx += 1;
         }
@@ -295,7 +352,7 @@ impl ParsedCell {
 }
 
 fn build_cell(parsed: ParsedCell) -> BuiltinResult<Value> {
-    let shape = ensure_min_rank(parsed.shape);
+    let shape = normalize_shape(parsed.shape);
     let total = if shape.is_empty() {
         0
     } else {
@@ -322,10 +379,13 @@ fn build_cell(parsed: ParsedCell) -> BuiltinResult<Value> {
         .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL))
 }
 
-fn ensure_min_rank(dims: Vec<usize>) -> Vec<usize> {
+fn normalize_shape(mut dims: Vec<usize>) -> Vec<usize> {
+    while dims.len() > 2 && dims.last() == Some(&1) {
+        dims.pop();
+    }
     match dims.len() {
         0 => vec![0, 0],
-        1 => vec![dims[0], 1],
+        1 => vec![dims[0], dims[0]],
         _ => dims,
     }
 }
@@ -357,12 +417,11 @@ async fn parse_shape_arguments(
 
 fn parse_single_argument(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Int(_) | Value::Num(_) | Value::Bool(_) => {
+        Value::Int(_) | Value::Num(_) => {
             let n = parse_size_scalar(value, "cell")?;
             Ok(vec![n, n])
         }
         Value::Tensor(t) => parse_size_tensor(t),
-        Value::LogicalArray(arr) => parse_size_logical_array(arr),
         other => Err(cell_error_with_message(
             format!("cell: size arguments must be numeric scalars or vectors, got {other:?}"),
             &CELL_ERROR_INVALID_INPUT,
@@ -374,25 +433,18 @@ fn parse_size_scalar(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
         Value::Int(iv) => parse_intvalue(iv, context),
         Value::Num(n) => parse_numeric(*n, context),
-        Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            if !tensor::is_scalar_tensor(t) {
                 return Err(cell_error_with_message(
                     format!("{context}: size inputs must be scalar"),
                     &CELL_ERROR_INVALID_SIZE,
                 ));
             }
-            parse_numeric(t.data[0], context)
-        }
-        Value::LogicalArray(arr) => {
-            if arr.data.len() != 1 {
-                return Err(cell_error_with_message(
-                    format!("{context}: size inputs must be scalar"),
-                    &CELL_ERROR_INVALID_SIZE,
-                ));
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                parse_intvalue(&int, context)
+            } else {
+                parse_numeric(tensor::tensor_value_f64(t, 0), context)
             }
-            let numeric = if arr.data[0] != 0 { 1.0 } else { 0.0 };
-            parse_numeric(numeric, context)
         }
         other => Err(cell_error_with_message(
             format!("{context}: size inputs must be numeric scalars, got {other:?}"),
@@ -402,57 +454,48 @@ fn parse_size_scalar(value: &Value, context: &str) -> BuiltinResult<usize> {
 }
 
 fn parse_size_tensor(t: &Tensor) -> BuiltinResult<Vec<usize>> {
-    if t.data.is_empty() {
+    let len = tensor::tensor_element_len(t);
+    if len == 0 {
         return Ok(vec![0, 0]);
     }
-    if !is_vector_shape(&t.shape) {
+    if !is_row_vector_shape(&t.shape) {
         return Err(cell_error_with_message(
-            "cell: size vector must be 1-D",
+            "cell: size vector must be a row vector",
             &CELL_ERROR_INVALID_SIZE,
         ));
     }
     let dims = t
-        .data
-        .iter()
-        .map(|&value| parse_numeric(value, "cell"))
-        .collect::<Result<Vec<_>, _>>()?;
-    if dims.len() == 1 {
-        Ok(vec![dims[0], 1])
-    } else {
-        Ok(dims)
-    }
-}
-
-fn parse_size_logical_array(arr: &LogicalArray) -> BuiltinResult<Vec<usize>> {
-    if arr.data.is_empty() {
-        return Ok(vec![0, 0]);
-    }
-    if !is_vector_shape(&arr.shape) {
-        return Err(cell_error_with_message(
-            "cell: size vector must be 1-D",
-            &CELL_ERROR_INVALID_SIZE,
-        ));
-    }
-    let dims = arr
-        .data
-        .iter()
-        .map(|&value| {
-            let numeric = if value != 0 { 1.0 } else { 0.0 };
-            parse_numeric(numeric, "cell")
+        .integer_storage()
+        .map(|storage| {
+            (0..storage.len())
+                .map(|index| {
+                    storage.value_at(index).ok_or_else(|| {
+                        cell_error_with_message(
+                            "cell: size vector storage is inconsistent",
+                            &CELL_ERROR_INTERNAL,
+                        )
+                    })
+                })
+                .map(|value| value.and_then(|int| parse_intvalue(&int, "cell")))
+                .collect::<Result<Vec<_>, _>>()
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .unwrap_or_else(|| {
+            (0..t.len())
+                .map(|index| parse_numeric(tensor::tensor_value_f64(t, index), "cell"))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
     if dims.len() == 1 {
-        Ok(vec![dims[0], 1])
+        Ok(vec![dims[0], dims[0]])
     } else {
         Ok(dims)
     }
 }
 
-fn is_vector_shape(shape: &[usize]) -> bool {
+fn is_row_vector_shape(shape: &[usize]) -> bool {
     match shape.len() {
         0 => true,
         1 => true,
-        2 => shape[0] == 1 || shape[1] == 1,
+        2 => shape[0] <= 1,
         _ => false,
     }
 }
@@ -485,7 +528,8 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             | Value::Num(_)
             | Value::Int(_)
             | Value::GpuTensor(_) => default_empty_double(),
-            Value::Object(_)
+            Value::ObjectArray(_)
+            | Value::Object(_)
             | Value::HandleObject(_)
             | Value::Listener(_)
             | Value::Symbolic(_)
@@ -497,6 +541,11 @@ fn empty_value_like(proto: Option<&Value>) -> BuiltinResult<Value> {
             | Value::Closure(_)
             | Value::ClassRef(_)
             | Value::MException(_)
+            | Value::Future(_)
+            | Value::Task(_)
+            | Value::Pool(_)
+            | Value::Job(_)
+            | Value::Foreign(_)
             | Value::OutputList(_) => default_empty_double(),
         },
         None => default_empty_double(),
@@ -509,7 +558,7 @@ fn default_empty_double() -> BuiltinResult<Value> {
         .map_err(|e| cell_error_with_message(format!("cell: {e}"), &CELL_ERROR_INTERNAL))
 }
 
-fn parse_intvalue(value: &IntValue, context: &str) -> BuiltinResult<usize> {
+fn parse_intvalue(value: &IntValue, _context: &str) -> BuiltinResult<usize> {
     let raw = match value {
         IntValue::I8(v) => *v as i128,
         IntValue::I16(v) => *v as i128,
@@ -521,10 +570,7 @@ fn parse_intvalue(value: &IntValue, context: &str) -> BuiltinResult<usize> {
         IntValue::U64(v) => *v as i128,
     };
     if raw < 0 {
-        return Err(cell_error_with_message(
-            format!("{context}: size inputs must be non-negative integers"),
-            &CELL_ERROR_INVALID_SIZE,
-        ));
+        return Ok(0);
     }
     if raw as u128 > usize::MAX as u128 {
         return Err(cell_error_with_message(
@@ -550,10 +596,7 @@ fn parse_numeric(value: f64, context: &str) -> BuiltinResult<usize> {
         ));
     }
     if rounded < 0.0 {
-        return Err(cell_error_with_message(
-            format!("{context}: size inputs must be non-negative integers"),
-            &CELL_ERROR_INVALID_SIZE,
-        ));
+        return Ok(0);
     }
     if rounded > (1u64 << 53) as f64 {
         return Err(cell_error_with_message(
@@ -561,7 +604,7 @@ fn parse_numeric(value: f64, context: &str) -> BuiltinResult<usize> {
             &CELL_ERROR_INVALID_SIZE,
         ));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(cell_error_with_message(
             "cell: requested size exceeds platform limits",
             &CELL_ERROR_INVALID_SIZE,
@@ -591,6 +634,11 @@ pub(crate) mod tests {
         assert!(labels.contains(&"C = cell()"));
         assert!(labels.contains(&"C = cell(sz)"));
         assert!(labels.contains(&"C = cell(m, n, ..., \"like\", prototype)"));
+        assert_eq!(CELL_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            CELL_INTEGER_CAPABILITIES[0].inputs[0].classes,
+            crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+        );
     }
 
     fn expect_cell_with<F>(value: Value, expected_shape: &[usize], mut check: F)
@@ -630,7 +678,7 @@ pub(crate) mod tests {
         expect_cell_with(value, expected_shape, |element| match element {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty double array, found {other:?}"),
         });
@@ -643,9 +691,43 @@ pub(crate) mod tests {
         expect_cell(result, &[0, 0]);
     }
 
+    #[test]
+    fn cell_size_tensor_preserves_typed_integer_bounds() {
+        let dims = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+            .expect("dims");
+        assert_eq!(parse_size_tensor(&dims).unwrap(), vec![2, 3]);
+
+        let scalar = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![4]), vec![1, 1])
+            .expect("scalar");
+        assert_eq!(
+            parse_size_scalar(&Value::Tensor(scalar), "cell").unwrap(),
+            4
+        );
+
+        let negative = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative");
+        assert_eq!(parse_size_tensor(&negative).unwrap(), vec![0, 0]);
+
+        assert!(parse_size_scalar(&Value::Num(usize::MAX as f64), "cell").is_err());
+        assert!(parse_size_scalar(&Value::Num((usize::MAX as f64) + 1.0), "cell").is_err());
+    }
+
+    #[test]
+    fn cell_size_tensor_reads_native_single_storage() {
+        let dims = Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).expect("single dims");
+        assert_eq!(parse_size_tensor(&dims).unwrap(), vec![2, 3]);
+
+        let scalar = Tensor::from_f32(vec![4.0], vec![1, 1]).expect("single scalar");
+        assert_eq!(
+            parse_size_scalar(&Value::Tensor(scalar), "cell").unwrap(),
+            4
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_requires_prototype() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = cell_builtin(vec![Value::from("like")])
             .unwrap_err()
             .to_string();
@@ -675,17 +757,18 @@ pub(crate) mod tests {
     #[test]
     fn cell_with_column_size_vector() {
         let tensor = Tensor::new(vec![4.0, 1.0], vec![2, 1]).unwrap();
-        let result = cell_builtin(vec![Value::Tensor(tensor)]).expect("cell([4; 1])");
-        expect_cell(result, &[4, 1]);
+        let error = cell_builtin(vec![Value::Tensor(tensor)]).unwrap_err();
+        assert!(error.message().contains("row vector"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_accepts_gpu_size_vector() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload size vector");
@@ -698,22 +781,23 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn cell_wgpu_size_vector_and_like() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let tensor = Tensor::new(vec![2.0, 3.0, 1.0], vec![1, 3]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload size vector");
         let result = cell_builtin(vec![Value::GpuTensor(handle)]).expect("cell(wgpu size)");
-        expect_cell(result, &[2, 3, 1]);
+        expect_cell(result, &[2, 3]);
 
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let proto_view = runmat_accelerate_api::HostTensorView {
-            data: &proto.data,
+            data: &proto.materialize_f64(),
             shape: &proto.shape,
         };
         let proto_handle = provider.upload(&proto_view).expect("upload prototype");
@@ -740,19 +824,97 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn cell_with_single_element_vector_is_column() {
+    fn cell_with_single_element_vector_is_square() {
         let tensor = Tensor::new(vec![4.0], vec![1, 1]).unwrap();
         let result = cell_builtin(vec![Value::Tensor(tensor)]).expect("cell([4])");
-        expect_cell(result, &[4, 1]);
+        expect_cell(result, &[4, 4]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn cell_rejects_negative() {
-        let err = cell_builtin(vec![Value::Num(-1.0)])
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("non-negative"), "unexpected error: {err}");
+    fn cell_clamps_negative_sizes_to_zero() {
+        expect_cell(
+            cell_builtin(vec![Value::Num(-1.0)]).expect("negative square"),
+            &[0, 0],
+        );
+        expect_cell(
+            cell_builtin(vec![
+                Value::Int(IntValue::I64(-7)),
+                Value::Int(IntValue::U8(3)),
+            ])
+            .expect("negative dimension"),
+            &[0, 3],
+        );
+    }
+
+    #[test]
+    fn cell_accepts_all_eight_integer_size_classes_exactly() {
+        use runmat_value::IntegerStorage;
+
+        let storages = [
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ];
+        for storage in storages {
+            let dims = Tensor::new_integer(storage, vec![1, 2]).expect("integer size vector");
+            expect_cell(
+                cell_builtin(vec![Value::Tensor(dims)]).expect("integer cell size"),
+                &[2, 3],
+            );
+        }
+    }
+
+    #[test]
+    fn cell_ignores_trailing_singleton_dimensions_after_second() {
+        expect_cell(
+            cell_builtin(vec![
+                Value::Int(IntValue::U8(3)),
+                Value::Int(IntValue::U8(1)),
+                Value::Int(IntValue::U8(1)),
+                Value::Int(IntValue::U8(1)),
+            ])
+            .expect("trailing singletons"),
+            &[3, 1],
+        );
+    }
+
+    #[test]
+    fn cell_rejects_logical_size_controls() {
+        assert!(cell_builtin(vec![Value::Bool(true)]).is_err());
+        let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
+        assert!(cell_builtin(vec![Value::LogicalArray(logical)]).is_err());
+    }
+
+    #[test]
+    fn cell_extensions_follow_compatibility_mode() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
+        expect_cell(cell_builtin(Vec::new()).expect("cell() shorthand"), &[0, 0]);
+        let like = cell_builtin(vec![Value::from("like"), Value::Num(1.0)]).unwrap_err();
+        assert_eq!(
+            like.identifier(),
+            Some("RunMat:compatibility:CellLikeExtension")
+        );
+        let resident = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 388,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
+        let gpu = cell_builtin(vec![Value::GpuTensor(resident.clone())]).unwrap_err();
+        assert_eq!(
+            gpu.identifier(),
+            Some("RunMat:compatibility:CellGpuSizeExtension")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -765,6 +927,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_infers_shape_from_prototype() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
         let result = cell_builtin(args).expect("cell('like', tensor)");
@@ -774,6 +937,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_logical_uses_logical_empty() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let logical = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
         let args = vec![
             Value::Num(2.0),
@@ -793,6 +957,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_cell_prototype_produces_empty_cell_elements() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let proto = crate::make_cell_with_shape(Vec::new(), vec![0, 0]).unwrap();
         let args = vec![Value::Num(1.0), Value::from("like"), proto.clone()];
         let result = cell_builtin(args).expect("cell(1,'like',cell)");
@@ -808,6 +973,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_is_case_insensitive() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let proto = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let result = cell_builtin(vec![Value::from("LIKE"), Value::Tensor(proto)])
             .expect("cell('LIKE', ...)");
@@ -817,6 +983,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_rejects_multiple_keywords() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let proto = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = cell_builtin(vec![
             Value::Num(1.0),
@@ -833,10 +1000,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cell_like_gpu_prototype_falls_back_to_host() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload prototype");

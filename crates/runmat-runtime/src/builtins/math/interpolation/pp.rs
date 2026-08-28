@@ -1,4 +1,4 @@
-use runmat_builtins::{StructValue, Tensor, Value};
+use runmat_value::{StructValue, Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
@@ -95,9 +95,9 @@ pub async fn query_points(value: Value, name: &'static str) -> BuiltinResult<Que
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
-    let shape = canonical_shape(&tensor.shape, tensor.data.len());
+    let shape = canonical_shape(&tensor.shape, tensor_len(&tensor));
     Ok(QueryPoints {
-        values: tensor.data,
+        values: tensor::tensor_into_values_f64(tensor),
         shape,
     })
 }
@@ -110,13 +110,13 @@ pub async fn vector_from_value(
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
-    if !is_vector_shape(&tensor.shape) && tensor.data.len() > 1 {
+    if !is_vector_shape(&tensor.shape) && tensor_len(&tensor) > 1 {
         return Err(interp_error(
             name,
             format!("{name}: {label} must be a vector"),
         ));
     }
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
 }
 
 pub async fn series_from_values(
@@ -138,7 +138,7 @@ pub async fn implicit_series_from_values(
     let y_host = dispatcher::gather_if_needed_async(&y_value).await?;
     let y_tensor = tensor::value_into_tensor_for(name, y_host)
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
-    let n = first_non_singleton_len(&y_tensor).unwrap_or(y_tensor.data.len());
+    let n = first_non_singleton_len(&y_tensor).unwrap_or_else(|| tensor_len(&y_tensor));
     let x: Vec<f64> = (1..=n).map(|value| value as f64).collect();
     series_from_tensor(x, y_tensor, name)
 }
@@ -150,25 +150,26 @@ fn series_from_tensor(
 ) -> BuiltinResult<NumericSeries> {
     validate_breaks(&x, name)?;
     let n = x.len();
-    if y_tensor.data.len() != n && !y_tensor.data.len().is_multiple_of(n) {
+    let y_len = tensor_len(&y_tensor);
+    if y_len != n && !y_len.is_multiple_of(n) {
         return Err(interp_error(
             name,
             format!("{name}: Y length must match X or have X as its first dimension"),
         ));
     }
 
-    let y_shape = canonical_shape(&y_tensor.shape, y_tensor.data.len());
-    let (series, trailing_shape) = if y_tensor.data.len() == n && is_vector_shape(&y_shape) {
+    let y_shape = canonical_shape(&y_tensor.shape, y_len);
+    let (series, trailing_shape) = if y_len == n && is_vector_shape(&y_shape) {
         (1, Vec::new())
     } else if y_shape.first().copied() == Some(n) {
-        let series = y_tensor.data.len() / n;
+        let series = y_len / n;
         let trailing = if y_shape.len() > 1 {
             y_shape[1..].to_vec()
         } else {
             vec![series]
         };
         (series, trailing)
-    } else if y_tensor.data.len() == n {
+    } else if y_len == n {
         (1, Vec::new())
     } else {
         return Err(interp_error(
@@ -177,9 +178,11 @@ fn series_from_tensor(
         ));
     };
 
+    let y = tensor::tensor_into_values_f64(y_tensor);
+
     Ok(NumericSeries {
         x,
-        y: y_tensor.data,
+        y,
         series,
         trailing_shape,
     })
@@ -348,15 +351,17 @@ pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<Pi
             format!("{name}: malformed pp dimensions"),
         ));
     }
-    if coefs_tensor.data.len() != pieces * dim * order {
+    let coefs_len = tensor_len(&coefs_tensor);
+    if coefs_len != pieces * dim * order {
         return Err(interp_error(
             name,
             format!("{name}: malformed pp coefficients"),
         ));
     }
+    let coefs = tensor::tensor_into_values_f64(coefs_tensor);
     Ok(PiecewisePolynomial {
         breaks,
-        coefs: coefs_tensor.data,
+        coefs,
         pieces,
         order,
         dim,
@@ -454,9 +459,13 @@ fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
 }
 
 fn first_non_singleton_len(tensor: &Tensor) -> Option<usize> {
-    canonical_shape(&tensor.shape, tensor.data.len())
+    canonical_shape(&tensor.shape, tensor_len(tensor))
         .into_iter()
         .find(|&dim| dim > 1)
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor::tensor_element_len(tensor)
 }
 
 pub(super) fn is_vector_shape(shape: &[usize]) -> bool {
@@ -733,6 +742,7 @@ fn validate_finite_coefs(coefs: &[f64], name: &'static str) -> BuiltinResult<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_value::IntegerStorage;
 
     fn scalar_series(y: &[f64]) -> NumericSeries {
         NumericSeries {
@@ -741,6 +751,65 @@ mod tests {
             series: 1,
             trailing_shape: Vec::new(),
         }
+    }
+
+    fn mirrorless_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("typed integer tensor")
+    }
+
+    #[test]
+    fn query_points_read_typed_integer_storage_length_and_values() {
+        let query_tensor = mirrorless_integer_tensor(IntegerStorage::U16(vec![1, 3]), vec![1, 2]);
+
+        let query =
+            futures::executor::block_on(query_points(Value::Tensor(query_tensor), "interp1"))
+                .expect("query points");
+
+        assert_eq!(query.shape, vec![1, 2]);
+        assert_eq!(query.values, vec![1.0, 3.0]);
+    }
+
+    #[test]
+    fn implicit_series_reads_typed_integer_storage_length_and_values() {
+        let y_tensor =
+            mirrorless_integer_tensor(IntegerStorage::I16(vec![1, 4, 9, 10, 40, 90]), vec![3, 2]);
+
+        let series = futures::executor::block_on(implicit_series_from_values(
+            Value::Tensor(y_tensor),
+            "interp1",
+        ))
+        .expect("implicit series");
+
+        assert_eq!(series.x, vec![1.0, 2.0, 3.0]);
+        assert_eq!(series.y, vec![1.0, 4.0, 9.0, 10.0, 40.0, 90.0]);
+        assert_eq!(series.series, 2);
+        assert_eq!(series.trailing_shape, vec![2]);
+    }
+
+    #[test]
+    fn pp_from_value_reads_typed_integer_coefficients_without_mirror() {
+        let breaks = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("breaks");
+        let coefs = mirrorless_integer_tensor(IntegerStorage::I16(vec![0, 0, 2, 1]), vec![1, 4]);
+        let pieces = mirrorless_integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
+        let order = mirrorless_integer_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]);
+        let dim = mirrorless_integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
+
+        let mut st = StructValue::new();
+        st.insert("form", Value::String("pp".to_string()));
+        st.insert("breaks", Value::Tensor(breaks));
+        st.insert("coefs", Value::Tensor(coefs));
+        st.insert("pieces", Value::Tensor(pieces));
+        st.insert("order", Value::Tensor(order));
+        st.insert("dim", Value::Tensor(dim));
+
+        let pp = futures::executor::block_on(pp_from_value(Value::Struct(st), "ppval"))
+            .expect("pp struct");
+
+        assert_eq!(pp.breaks, vec![1.0, 2.0]);
+        assert_eq!(pp.coefs, vec![0.0, 0.0, 2.0, 1.0]);
+        assert_eq!(pp.pieces, 1);
+        assert_eq!(pp.order, 4);
+        assert_eq!(pp.dim, 1);
     }
 
     #[test]
@@ -755,7 +824,10 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        assert!(tensor.data.windows(2).all(|pair| pair[1] >= pair[0]));
+        assert!(tensor
+            .materialize_f64()
+            .windows(2)
+            .all(|pair| pair[1] >= pair[0]));
     }
 
     #[test]
@@ -770,8 +842,8 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        assert!((tensor.data[0] - 2.25).abs() < 1e-10);
-        assert!((tensor.data[1] - 6.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[0] - 2.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[1] - 6.25).abs() < 1e-10);
     }
 
     #[test]
@@ -792,10 +864,10 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 2, 2]);
-        assert_eq!(tensor.data.len(), 4);
-        assert!((tensor.data[0] - 2.25).abs() < 1e-10);
-        assert!((tensor.data[1] - 6.25).abs() < 1e-10);
-        assert!((tensor.data[2] - 225.0).abs() < 1e-10);
-        assert!((tensor.data[3] - 625.0).abs() < 1e-10);
+        assert_eq!(tensor.materialize_f64().len(), 4);
+        assert!((tensor.materialize_f64()[0] - 2.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[1] - 6.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[2] - 225.0).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[3] - 625.0).abs() < 1e-10);
     }
 }

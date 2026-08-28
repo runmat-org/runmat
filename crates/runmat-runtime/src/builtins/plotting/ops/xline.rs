@@ -1,21 +1,67 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ReferenceLine, ReferenceLineOrientation};
+use runmat_value::NumericScalar;
+use runmat_value::{Tensor, Value};
 
 use super::plotting_error;
 use super::state::{append_active_plot, register_reference_line_handle, PlotRenderOptions};
 use super::style::{
-    color_from_token, looks_like_option_name, parse_line_style_args, value_as_bool, value_as_f64,
-    value_as_string, LineAppearance, LineStyleParseOptions,
+    color_from_token, looks_like_option_name, parse_line_style_args, value_as_f64, value_as_string,
+    LineAppearance, LineStyleParseOptions,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "xline";
+
+const XLINE_INTEGER_COORDINATE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented for reference-line coordinates.",
+    }];
+const XLINE_INTEGER_COLOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Color",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer RGB components are accepted when every component is in the documented interval from zero through one.",
+    }];
+const XLINE_INTEGER_LINE_WIDTH_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "LineWidth",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer line widths are accepted when the scalar is finite and positive.",
+    }];
+const XLINE_INTEGER_VISIBLE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Visible",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Numeric visibility values must be exactly zero or one.",
+    }];
+pub const XLINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "h = xline(integer_x, ...)", inputs: &XLINE_INTEGER_COORDINATE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Coordinates cross the graphics floating-point boundary after numeric classification; returned graphics handles are double." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = xline(..., 'Color', integer_rgb)", inputs: &XLINE_INTEGER_COLOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Validated RGB components cross the renderer color boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = xline(..., 'LineWidth', integer_width)", inputs: &XLINE_INTEGER_LINE_WIDTH_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The validated positive width crosses the renderer scalar boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = xline(..., 'Visible', integer_visible)", inputs: &XLINE_INTEGER_VISIBLE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The integer is classified exactly as zero or one before the graphics state is updated." },
+];
 
 const XLINE_OUTPUT_HANDLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -143,12 +189,13 @@ pub const XLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "xline",
     category = "plotting",
-    summary = "Draw vertical reference lines on current or specified axes.",
+    summary = "Draw vertical reference lines on the current axes.",
     keywords = "xline,reference,line,plotting",
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::xline::XLINE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::xline::XLINE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::xline"
 )]
 pub fn xline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -222,14 +269,10 @@ pub(crate) fn reference_line_builtin(
     if handles.len() == 1 {
         Ok(Value::Num(handles[0]))
     } else {
-        Ok(Value::Tensor(Tensor {
-            data: handles.clone(),
-            integer_data: None,
-            rows: 1,
-            cols: handles.len(),
-            shape: vec![1, handles.len()],
-            dtype: runmat_builtins::NumericDType::F64,
-        }))
+        Ok(Value::Tensor(
+            Tensor::new(handles.clone(), vec![1, handles.len()])
+                .expect("reference line handle row"),
+        ))
     }
 }
 
@@ -289,13 +332,9 @@ fn parse_reference_line_options(
                     }
                 }
                 "visible" => {
-                    visible = value_as_bool(&args[idx + 1])
-                        .or_else(|| {
-                            value_as_string(&args[idx + 1]).map(|s| {
-                                !matches!(s.trim().to_ascii_lowercase().as_str(), "off" | "false")
-                            })
-                        })
-                        .ok_or_else(|| reference_line_error(builtin, "Visible must be boolean"))?;
+                    visible = visible_from_value(&args[idx + 1]).ok_or_else(|| {
+                        reference_line_error(builtin, "Visible must be 'on', 'off', 0, or 1")
+                    })?;
                 }
                 _ => unreachable!(),
             }
@@ -361,6 +400,61 @@ fn parse_reference_line_options(
     })
 }
 
+fn visible_from_value(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(value) => Some(*value),
+        Value::Num(value) if *value == 0.0 => Some(false),
+        Value::Num(value) if *value == 1.0 => Some(true),
+        Value::Int(value) => match value.try_to_u64()? {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        },
+        Value::Tensor(tensor) if tensor.len() == 1 => {
+            visible_from_numeric_scalar(tensor.numeric_value_at(0)?)
+        }
+        _ => match value_as_string(value)?.trim().to_ascii_lowercase().as_str() {
+            "on" => Some(true),
+            "off" => Some(false),
+            _ => None,
+        },
+    }
+}
+
+fn visible_from_numeric_scalar(value: NumericScalar) -> Option<bool> {
+    match value {
+        NumericScalar::F64(0.0) => Some(false),
+        NumericScalar::F64(1.0) => Some(true),
+        NumericScalar::F32(0.0) => Some(false),
+        NumericScalar::F32(1.0) => Some(true),
+        NumericScalar::I8(value) => visible_from_i128(value as i128),
+        NumericScalar::I16(value) => visible_from_i128(value as i128),
+        NumericScalar::I32(value) => visible_from_i128(value as i128),
+        NumericScalar::I64(value) => visible_from_i128(value as i128),
+        NumericScalar::U8(value) => visible_from_u128(value as u128),
+        NumericScalar::U16(value) => visible_from_u128(value as u128),
+        NumericScalar::U32(value) => visible_from_u128(value as u128),
+        NumericScalar::U64(value) => visible_from_u128(value as u128),
+        _ => None,
+    }
+}
+
+fn visible_from_i128(value: i128) -> Option<bool> {
+    match value {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
+fn visible_from_u128(value: u128) -> Option<bool> {
+    match value {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
 fn coordinates_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
@@ -377,19 +471,20 @@ fn coordinates_from_value(value: &Value, builtin: &'static str) -> BuiltinResult
     }
     let tensor =
         Tensor::try_from(value).map_err(|err| reference_line_error(builtin, err.to_string()))?;
-    if tensor.data.is_empty() {
+    if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(reference_line_error(
             builtin,
             "coordinate vector cannot be empty",
         ));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor_utils::tensor_into_values_f64(tensor);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(reference_line_error(
             builtin,
             "coordinate values must be finite",
         ));
     }
-    Ok(tensor.data)
+    Ok(values)
 }
 
 fn reference_line_error(builtin: &'static str, msg: impl Into<String>) -> crate::RuntimeError {
@@ -416,6 +511,14 @@ mod tests {
 
     fn tensor(data: &[f64]) -> Tensor {
         Tensor::new_2d(data.to_vec(), 1, data.len()).unwrap()
+    }
+
+    fn integer_tensor(data: &[i16]) -> Tensor {
+        Tensor::new_integer(
+            runmat_value::IntegerStorage::I16(data.to_vec()),
+            vec![1, data.len()],
+        )
+        .unwrap()
     }
 
     #[test]
@@ -475,7 +578,33 @@ mod tests {
         let _guard = setup();
         let handles = xline_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))]).unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
-        assert_eq!(tensor.data.len(), 3);
+        assert_eq!(tensor.materialize_f64().len(), 3);
+    }
+
+    #[test]
+    fn xline_reads_typed_integer_coordinates_exactly() {
+        let _guard = setup();
+        let handles = xline_builtin(vec![Value::Tensor(integer_tensor(&[1, 2, 3]))]).unwrap();
+        let tensor = Tensor::try_from(&handles).unwrap();
+        assert_eq!(tensor.materialize_f64().len(), 3);
+    }
+
+    #[test]
+    fn xline_visible_accepts_only_exact_numeric_zero_or_one() {
+        let _guard = setup();
+        xline_builtin(vec![
+            Value::Num(1.0),
+            Value::String("Visible".into()),
+            Value::Int(runmat_value::IntValue::U64(1)),
+        ])
+        .expect("integer one is visible");
+        let error = xline_builtin(vec![
+            Value::Num(2.0),
+            Value::String("Visible".into()),
+            Value::Int(runmat_value::IntValue::I8(2)),
+        ])
+        .expect_err("integer two is not a visibility value");
+        assert!(error.message.contains("0, or 1"));
     }
 
     #[test]

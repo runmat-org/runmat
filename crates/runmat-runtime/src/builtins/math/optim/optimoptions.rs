@@ -3,21 +3,62 @@
 use std::collections::VecDeque;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, LogicalArray, StructValue, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::canonical_option_name;
 use crate::builtins::math::optim::type_resolvers::optim_options_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "optimoptions";
+
+const INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "optimoptions-integer-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "optimoptions with native-class integer option values is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:OptimoptionsIntegerOptionExtension"),
+};
+const RESIDENT_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "optimoptions-resident-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "optimoptions with explicit gpuArray option values is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:OptimoptionsResidentOptionExtension"),
+};
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [INTEGER_OPTION_EXTENSION, RESIDENT_OPTION_EXTENSION];
+
+const INTEGER_FLOATING_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "floating option value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Optimization tolerances are documented in floating classes; typed integers are gated and must convert exactly.",
+    }];
+const INTEGER_STRUCTURAL_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "count or logical option value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed iteration counts and logical flags are RunMat-only option-builder inputs parsed exactly before normalized storage.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "options = optimoptions(___, floating_name, integer_value, ___)", inputs: &INTEGER_FLOATING_OPTION_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat's supported compatibility subset normalizes accepted integer tolerances to double only after an exact representability check." },
+    BuiltinIntegerCapabilityDescriptor { form: "options = optimoptions(___, structural_name, integer_value, ___)", inputs: &INTEGER_STRUCTURAL_OPTION_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Counts use exact integer-to-usize parsing and 0/1 logical controls become logical fields; current RunMat returns a struct rather than MATLAB's options object." },
+];
 
 const OPTIMOPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "options",
@@ -198,9 +239,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(optim_options_type),
     descriptor(crate::builtins::math::optim::optimoptions::OPTIMOPTIONS_DESCRIPTOR),
+    extensions(crate::builtins::math::optim::optimoptions::EXTENSIONS),
+    integer_capabilities(crate::builtins::math::optim::optimoptions::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::optim::optimoptions"
 )]
 async fn optimoptions_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_optimoptions_extensions(&rest)?;
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
         gathered.push(gather_if_needed_async(&value).await.map_err(|err| {
@@ -290,6 +334,28 @@ async fn optimoptions_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 
     Ok(Value::Struct(options))
+}
+
+fn ensure_optimoptions_extensions(args: &[Value]) -> BuiltinResult<()> {
+    for (index, value) in args.iter().enumerate() {
+        let is_payload = index > 0 || matches!(value, Value::Struct(_));
+        if !is_payload {
+            continue;
+        }
+        if crate::builtins::common::validation::value_contains_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGER_OPTION_EXTENSION,
+                NAME,
+            )?;
+        }
+        if crate::builtins::common::validation::value_contains_explicit_gpu(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RESIDENT_OPTION_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn optimoptions_error_with(
@@ -632,6 +698,27 @@ fn positive_finite_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
 }
 
 fn positive_integer_scalar(field: &str, value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        if let Some(parsed) = integer.try_to_usize() {
+            if parsed == 0 {
+                return Err(optimoptions_error_with(
+                    &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                    format!("optimoptions: option {field} must be a finite positive scalar"),
+                ));
+            }
+            return Ok(parsed);
+        }
+        if integer.try_to_i64().is_some_and(|value| value < 0) {
+            return Err(optimoptions_error_with(
+                &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                format!("optimoptions: option {field} must be a finite positive scalar"),
+            ));
+        }
+        return Err(optimoptions_error_with(
+            &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!("optimoptions: option {field} is too large"),
+        ));
+    }
     let parsed = positive_finite_scalar(field, value)?;
     if parsed.fract() != 0.0 {
         return Err(optimoptions_error_with(
@@ -649,10 +736,20 @@ fn positive_integer_scalar(field: &str, value: &Value) -> BuiltinResult<usize> {
 }
 
 fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
+    if crate::builtins::common::validation::value_contains_native_integer_class(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64(value)
+    {
+        return Err(optimoptions_error_with(
+            &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!("optimoptions: integer option {field} must be exactly representable as double"),
+        ));
+    }
     let parsed = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
             if data[0] == 0 {
                 0.0
@@ -678,13 +775,22 @@ fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
 }
 
 fn logical_value(field: &str, value: &Value) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(optimoptions_error_with(
+                &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                format!("optimoptions: option {field} must be logical 0 or 1"),
+            )),
+        };
+    }
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => Ok(data[0] != 0),
         Value::Num(n) => logical_from_number(field, *n),
-        Value::Int(i) => logical_from_number(field, i.to_f64()),
-        Value::Tensor(Tensor { data, .. }) if data.len() == 1 => {
-            logical_from_number(field, data[0])
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            logical_from_number(field, tensor::tensor_value_f64(tensor, 0))
         }
         Value::String(s) => logical_from_text(field, s),
         Value::StringArray(sa) if sa.data.len() == 1 => logical_from_text(field, &sa.data[0]),
@@ -791,9 +897,11 @@ fn lookup_case_insensitive<'a>(options: &'a StructValue, name: &str) -> Option<&
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn run_optimoptions(rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(optimoptions_builtin(rest))
@@ -1128,6 +1236,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn optimoptions_default_skipping_compares_normalized_values() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let first = run_optimoptions(vec![
             Value::from("fsolve"),
             Value::from("MaxFunEvals"),
@@ -1234,6 +1343,165 @@ mod tests {
             Value::Num(1.5),
         ])
         .expect_err("noninteger MaxIter should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:optimoptions:InvalidOptionValue")
+        );
+    }
+
+    #[test]
+    fn optimoptions_numeric_options_read_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let max_iter =
+            Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
+
+        let options = struct_result(
+            run_optimoptions(vec![
+                Value::from("fsolve"),
+                Value::from("MaxIter"),
+                Value::Tensor(max_iter),
+            ])
+            .expect("optimoptions"),
+        );
+        assert_eq!(num_field(&options, "MaxIter"), 5.0);
+    }
+
+    #[test]
+    fn optimoptions_strict_mode_rejects_typed_integer_option_before_normalization() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let max_iter =
+            Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("MaxIter");
+
+        let error = run_optimoptions(vec![
+            Value::from("fsolve"),
+            Value::from("MaxIter"),
+            Value::Tensor(max_iter),
+        ])
+        .expect_err("typed integer option is a RunMat-only extension");
+
+        assert_eq!(
+            error.identifier(),
+            INTEGER_OPTION_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn optimoptions_rejects_wide_integer_tolerance_before_float_conversion() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tolerance =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+                .expect("TolX");
+
+        let error = run_optimoptions(vec![
+            Value::from("fsolve"),
+            Value::from("TolX"),
+            Value::Tensor(tolerance),
+        ])
+        .expect_err("wide integer tolerance cannot cross exactly");
+
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:optimoptions:InvalidOptionValue")
+        );
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn optimoptions_automatic_resident_option_gathers_and_explicit_option_is_gated() {
+        test_support::with_test_provider(|provider| {
+            let values = [0.25];
+            let shape = [1, 1];
+            let automatic = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &shape,
+                })
+                .expect("automatic upload");
+            let automatic =
+                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let options = struct_result(
+                run_optimoptions(vec![
+                    Value::from("fsolve"),
+                    Value::from("TolX"),
+                    Value::GpuTensor(automatic),
+                ])
+                .expect("automatic option gathers"),
+            );
+            assert_eq!(num_field(&options, "TolX"), 0.25);
+
+            let explicit = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &shape,
+                })
+                .expect("explicit upload");
+            let explicit =
+                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = run_optimoptions(vec![
+                Value::from("fsolve"),
+                Value::from("TolX"),
+                Value::GpuTensor(explicit),
+            ])
+            .expect_err("explicit option is gated before gather");
+            assert_eq!(
+                error.identifier(),
+                RESIDENT_OPTION_EXTENSION.error_identifier
+            );
+        });
+    }
+
+    #[test]
+    fn optimoptions_rejects_negative_typed_integer_options_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let max_iter =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
+
+        let err = run_optimoptions(vec![
+            Value::from("fsolve"),
+            Value::from("MaxIter"),
+            Value::Tensor(max_iter),
+        ])
+        .expect_err("negative MaxIter should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:optimoptions:InvalidOptionValue")
+        );
+    }
+
+    #[test]
+    fn optimoptions_logical_options_read_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
+            .expect("SpecifyObjectiveGradient");
+
+        let options = struct_result(
+            run_optimoptions(vec![
+                Value::from("fminunc"),
+                Value::from("SpecifyObjectiveGradient"),
+                Value::Tensor(gradient),
+            ])
+            .expect("optimoptions"),
+        );
+        assert_eq!(
+            options.fields.get("SpecifyObjectiveGradient"),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn optimoptions_rejects_wide_typed_integer_logicals_despite_poisoned_mirror() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let gradient =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("SpecifyObjectiveGradient");
+
+        let err = run_optimoptions(vec![
+            Value::from("fminunc"),
+            Value::from("SpecifyObjectiveGradient"),
+            Value::Tensor(gradient),
+        ])
+        .expect_err("wide integer is not a logical scalar");
         assert_eq!(
             err.identifier(),
             Some("RunMat:optimoptions:InvalidOptionValue")

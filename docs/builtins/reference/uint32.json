@@ -4,11 +4,11 @@
   "keywords": ["uint32", "cast", "integer", "conversion", "numeric"],
   "summary": "Convert values to unsigned 32-bit integer class.",
   "gpu_support": {
-    "elementwise": false,
+    "elementwise": true,
     "reduction": false,
     "precisions": ["f32", "f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs gather for saturating conversion and are re-uploaded when possible."
+    "notes": "Real gpuArray inputs use the provider's native integer-cast operation and return resident uint32 storage."
   },
   "fusion": {
     "elementwise": false,
@@ -21,13 +21,14 @@
     "unit": "builtins::math::elementwise::uint32::tests",
     "integration": null
   },
-  "description": "`uint32(X)` converts numeric, logical, character, symbolic-constant, and gatherable gpuArray inputs to unsigned 32-bit integer values using saturating rounded conversion.",
+  "description": "`uint32(X)` converts numeric, logical, character, symbolic-constant, and real gpuArray inputs to unsigned 32-bit integer values using saturating rounded conversion.",
   "behaviors": [
     "Rounds fractional numeric values to the nearest integer.",
     "Clamps negative values and `NaN` to `0`.",
     "Clamps values larger than `intmax('uint32')` to `4294967295`.",
-    "Preserves array shape and marks tensor output as `uint32`.",
-    "Rejects complex, string, cell, struct, object, and function-handle inputs."
+    "Converts all eight integer classes directly from native storage without a floating-point intermediate.",
+    "Preserves array shape. A complex host input remains complex when its converted imaginary component is zero.",
+    "Real gpuArray inputs return provider-owned native uint32 storage; complex gpuArray conversion requires provider support for paired complex-integer storage."
   ],
   "examples": [
     {
@@ -56,8 +57,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/uint32.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/uint32.rs"
   },
-  "gpu_residency": "GPU inputs gather for conversion and return a host uint32 result.",
+  "gpu_residency": "Real gpuArray inputs remain resident and return native uint32 storage owned by the same provider.",
   "gpu_behavior": [
-    "There is no provider-native uint32 storage hook yet; gpuArray inputs gather to host and return a host uint32 result."
+    "The active provider performs real integer conversion through its native cast hook.",
+    "Paired-complex gpuArray conversion preserves exact components, class, owner, and residency through an owner-resolved fallback when a direct provider cast is unavailable."
   ]
 }

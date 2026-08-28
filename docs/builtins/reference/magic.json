@@ -13,7 +13,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Computed on the host CPU. GPU inputs are gathered and results are returned as host tensors."
+    "notes": "Computed on the host CPU. Automatically resident inputs gather transparently; explicit gpuArray input is unsupported."
   },
   "fusion": {
     "elementwise": false,
@@ -26,11 +26,11 @@
     "unit": "builtins::array::creation::magic::tests",
     "integration": null
   },
-  "description": "`magic(n)` returns an `n`-by-`n` matrix containing `1:n^2` with equal row, column, and main-diagonal sums. Construction rules across odd/even orders follow MATLAB semantics.",
+  "description": "`magic(n)` returns a double `n`-by-`n` matrix. The order is `floor(real(double(n(1))))`, so array and complex inputs use their first real element. Construction rules across odd/even orders follow MATLAB semantics.",
   "behaviors": [
-    "`magic(n)` requires a single non-negative integer scalar `n`.",
+    "`magic(n)` accepts documented numeric and character classes, selects the first real element, floors it, and requires the resulting order to be non-negative and representable.",
     "`magic(1)` returns `1`, while `magic(0)` returns an empty `0 x 0` matrix.",
-    "`magic(2)` is undefined and raises an error (no 2x2 magic square exists).",
+    "`magic(2)` returns the documented degenerate matrix `[1 3;4 2]`, which is not a true magic square.",
     "Odd, doubly-even (`n % 4 == 0`), and singly-even (`n % 4 == 2`) orders each use MATLAB's standard construction so results match MATLAB outputs."
   ],
   "examples": [
@@ -51,12 +51,12 @@
   ],
   "faqs": [
     {
-      "question": "Why does `magic(2)` fail?",
-      "answer": "No 2x2 magic square exists, so MATLAB (and RunMat) report an error for order 2."
+      "question": "Is `magic(2)` a true magic square?",
+      "answer": "No. It returns `[1 3;4 2]` for compatibility, even though no true 2x2 magic square exists."
     },
     {
-      "question": "Does `magic` accept a size vector?",
-      "answer": "No. `magic` accepts a single scalar order. Use `ones`, `zeros`, or `eye` when you need a size vector form."
+      "question": "What happens when `n` is an array?",
+      "answer": "The first element controls the order after taking its real part and flooring it. Use `ones`, `zeros`, or `eye` when you need a size-vector form."
     },
     {
       "question": "How do I move the result to the GPU?",
@@ -135,6 +135,6 @@
   },
   "gpu_residency": "`magic` always runs on the host CPU today. If you need the result on the GPU, wrap the call in `gpuArray(...)`.",
   "gpu_behavior": [
-    "RunMat gathers any GPU-resident inputs before evaluating `magic` and returns a host tensor. No acceleration provider hooks are defined for this builtin yet."
+    "RunMat transparently gathers automatically resident inputs before evaluating `magic` and returns a host tensor. Explicit gpuArray input is rejected because the documented API does not support it."
   ]
 }

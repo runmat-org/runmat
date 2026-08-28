@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "This text-only helper runs on the host. Numeric and provider-resident values are rejected before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -23,13 +23,18 @@
     "unit": "builtins::io::http::compat::tests",
     "integration": null
   },
-  "description": "Decode percent-encoded URL text.",
+  "description": "`urldecode(text)` decodes percent-encoded URL text. It is a RunMat language extension for scripts that need URL text utilities.",
   "behaviors": [
-    "Accepts MATLAB text inputs such as string scalars and character row vectors for path, name, or URL arguments where applicable.",
-    "Runs on the host using the active RunMat filesystem, environment, or HTTP abstraction as appropriate.",
-    "Reports MATLAB-style runtime errors for unsupported argument shapes or unavailable host capabilities."
+    "Accepts a string scalar or character row vector and returns decoded text.",
+    "Leaves ordinary characters unchanged and decodes valid percent-encoded bytes.",
+    "Numeric values, including native integer values, are not text and are rejected before provider access."
   ],
   "examples": [],
   "faqs": [],
-  "links": []
+  "links": [
+    {
+      "label": "MATLAB Language Extensions",
+      "url": "/docs/runtime/getting-started/language-extensions"
+    }
+  ]
 }

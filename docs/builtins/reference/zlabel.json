@@ -16,9 +16,9 @@
   "description": "`zlabel` sets or updates z-axis label text and returns a text handle for styling/property edits, following MATLAB-compatible axes-label workflows.",
   "behaviors": [
     "The returned value is a text handle that can be queried and updated through `get` and `set`.",
-    "String scalars, string arrays, and cell arrays can all be used to build multiline z-axis labels in MATLAB-style workflows.",
-    "Font and text styling properties flow through the shared plotting text-property system, so `get` and `set` work on the returned handle.",
-    "Z-axis labels are subplot-local and stay attached to the axes they were created for."
+    "String scalars, string arrays, cell arrays, and numeric scalars can be used as label text. Native integer scalars use their exact decimal spelling.",
+    "`FontSize` accepts single, double, and all eight native integer classes; values must be positive and finite.",
+    "Z-axis labels are subplot-local and stay attached to the axes they were created for. RunMat mode additionally accepts typed-integer aliases for encoded axes handles."
   ],
   "examples": [
     {

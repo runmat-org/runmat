@@ -1,10 +1,3 @@
----
-title: "Replay & Export"
-category: "Plotting System"
-section: "8.3"
-last_updated: "May 28, 2026"
----
-
 # Replay & Export
 
 Replay and export both start from a figure. 

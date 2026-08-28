@@ -8,7 +8,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "gpuArray inputs are gathered to the host before bytes are swapped."
+    "notes": "Automatic resident inputs gather transparently and preserve exact class and shape. Explicit gpuArray fallback is available only when RunMat extensions are enabled."
   },
   "fusion": {
     "elementwise": false,
@@ -24,10 +24,12 @@
   "description": "`swapbytes(X)` reverses the byte order of each numeric element while preserving the input numeric class.",
   "behaviors": [
     "Supports scalar integer values and scalar doubles.",
-    "Supports dense `double`, `single`, `uint8`, `uint16`, and `uint32` tensors.",
+    "Supports dense `double`, `single`, and all eight native integer classes, including full-width `int64` and `uint64` values.",
     "`uint8` values are unchanged because they contain one byte.",
     "Floating-point values are reinterpreted by their IEEE bytes, byte-swapped, and returned in the same class.",
-    "Logical, complex, string, cell, struct, and object inputs raise errors."
+    "Integer outputs preserve input class, shape, and exact byte-reversed values for all eight integer classes.",
+    "Logical, complex, string, cell, struct, and object inputs raise errors.",
+    "Automatically resident inputs gather transparently. Explicit gpuArray input uses the same host fallback only when RunMat extensions are enabled."
   ],
   "examples": [
     {
@@ -39,6 +41,16 @@
       "description": "Swap every element of an unsigned integer array",
       "input": "y = swapbytes(uint16([hex2dec('1234') hex2dec('00ff')]))",
       "output": "y = uint16([hex2dec('3412') hex2dec('ff00')])"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `swapbytes` preserve integer class?",
+      "answer": "Yes. Every native integer class is byte-swapped directly in authoritative storage and returned with the same class and shape. Eight-bit values are unchanged because each element contains only one byte."
+    },
+    {
+      "question": "What happens with resident inputs?",
+      "answer": "Automatic residency is transparent: RunMat gathers, swaps bytes exactly on the host, and returns the host result. An explicitly requested gpuArray fallback is an additional capability and requires RunMat extensions to be enabled."
     }
   ],
   "links": [

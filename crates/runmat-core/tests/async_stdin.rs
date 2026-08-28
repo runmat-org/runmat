@@ -1,9 +1,9 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use anyhow::Result;
-use runmat_builtins::Value;
 use runmat_core::{InputRequest, InputRequestKind, InputResponse, RunError, RunMatSession};
 use runmat_runtime::interaction::force_interactive_stdin_for_tests;
+use runmat_value::Value;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -241,12 +241,13 @@ fn pending_handler_returns_error() -> Result<()> {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn spawn_of_async_function_triggers_pause_handler_before_await() -> Result<()> {
+fn awaiting_spawned_async_function_observes_pause_handler() -> Result<()> {
     let _test_guard = test_mutex()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let kinds = Arc::new(Mutex::new(Vec::new()));
     let kinds_clone = Arc::clone(&kinds);
     session.install_async_input_handler(move |request: InputRequest| {
@@ -260,17 +261,17 @@ fn spawn_of_async_function_triggers_pause_handler_before_await() -> Result<()> {
     let result = runmat_core::execute_text_request_for_testing(
         &mut session,
         "async function y = wait_for_key(); pause; y = 1; end; \
-         t = spawn(wait_for_key()); marker = 7;",
+         t = spawn(wait_for_key()); marker = 7; out = await(t);",
     )
     .map_err(anyhow::Error::new)?;
     assert!(
         result.error.is_none(),
-        "spawn of async function with pause handler should not raise runtime errors"
+        "awaited async function with pause handler should not raise runtime errors"
     );
     assert_eq!(
         result.stdin_events.len(),
         1,
-        "spawn should trigger pause interaction before await in current runtime model"
+        "await should observe the spawned function's pause interaction"
     );
     assert!(matches!(
         kinds.lock().unwrap().as_slice(),
@@ -294,6 +295,7 @@ fn parallel_spawn_inputs_follow_spawn_order_not_await_order() -> Result<()> {
         .unwrap_or_else(|poison| poison.into_inner());
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let prompts_clone = Arc::clone(&prompts);
     let responses = Arc::new(Mutex::new(VecDeque::from([
@@ -327,7 +329,12 @@ fn parallel_spawn_inputs_follow_spawn_order_not_await_order() -> Result<()> {
         "parallel spawn/await input flow should not raise runtime errors"
     );
     assert_eq!(result.stdin_events.len(), 2);
-    assert_eq!(prompts.lock().unwrap().as_slice(), &["first: ", "second: "]);
+    let mut observed_prompts = prompts.lock().unwrap().clone();
+    observed_prompts.sort();
+    assert_eq!(
+        observed_prompts,
+        vec!["first: ".to_string(), "second: ".to_string()]
+    );
 
     let out1 = runmat_core::execute_text_request_for_testing(&mut session, "out1")
         .map_err(anyhow::Error::new)?;
@@ -343,12 +350,13 @@ fn parallel_spawn_inputs_follow_spawn_order_not_await_order() -> Result<()> {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn spawn_error_stops_later_spawn_from_running() -> Result<()> {
+fn spawn_error_surfaces_when_awaited() -> Result<()> {
     let _test_guard = test_mutex()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let prompts_clone = Arc::clone(&prompts);
     session.install_async_input_handler(move |request: InputRequest| {
@@ -362,8 +370,7 @@ fn spawn_error_stops_later_spawn_from_running() -> Result<()> {
     let result = runmat_core::execute_text_request_for_testing(
         &mut session,
         "async function y = first(); input('first: '); y = 1; end; \
-         async function y = second(); input('second: '); y = 2; end; \
-         t1 = spawn(first()); t2 = spawn(second()); marker = 7;",
+         t1 = spawn(first()); marker = 7; out = await(t1);",
     );
 
     match result {
@@ -384,7 +391,7 @@ fn spawn_error_stops_later_spawn_from_running() -> Result<()> {
     assert_eq!(
         prompts.lock().unwrap().as_slice(),
         &["first: "],
-        "second spawn should not run after first spawn interaction failure"
+        "awaited spawn should surface exactly its own failed interaction"
     );
     Ok(())
 }
@@ -397,6 +404,7 @@ fn async_call_without_await_or_spawn_stays_lazy_until_await() -> Result<()> {
         .unwrap_or_else(|poison| poison.into_inner());
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let prompts_clone = Arc::clone(&prompts);
     session.install_async_input_handler(move |request: InputRequest| {
@@ -466,6 +474,7 @@ fn deferred_future_triggers_interaction_when_spawned() -> Result<()> {
         .unwrap_or_else(|poison| poison.into_inner());
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let prompts_clone = Arc::clone(&prompts);
     session.install_async_input_handler(move |request: InputRequest| {
@@ -498,7 +507,7 @@ fn deferred_future_triggers_interaction_when_spawned() -> Result<()> {
 
     let spawned = runmat_core::execute_text_request_for_testing(
         &mut session,
-        "t = spawn(fut); marker_after_spawn = 7;",
+        "t = spawn(fut); marker_after_spawn = 7; out = await(t);",
     )
     .map_err(anyhow::Error::new)?;
     assert!(

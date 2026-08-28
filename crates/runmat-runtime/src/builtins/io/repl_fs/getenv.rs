@@ -10,17 +10,19 @@ use crate::builtins::common::env as runtime_env;
 use std::env;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, StringArray, StructValue, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, call_builtin_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::getenv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -122,6 +124,30 @@ pub const GETENV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &GETENV_ERRORS,
 };
 
+pub const GETENV_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "getenv-character-matrix-name",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "getenv with a multirow character-matrix name is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GetenvCharacterMatrixNameExtension"),
+};
+
+pub const GETENV_CELL_STRING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "getenv-cell-string-name",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "getenv with string scalars inside a cell-array name is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GetenvCellStringNameExtension"),
+};
+
+pub const GETENV_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [GETENV_CHAR_MATRIX_EXTENSION, GETENV_CELL_STRING_EXTENSION];
+
+pub const GETENV_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "getenv accepts host text names and returns text or a string dictionary. All eight integer classes and provider-resident numeric values reject without implicit text conversion, gather, provider access, or environment lookup.",
+    };
+
 fn getenv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     getenv_error_with_message(error.message, error)
 }
@@ -156,34 +182,51 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::getenv_type),
     descriptor(crate::builtins::io::repl_fs::getenv::GETENV_DESCRIPTOR),
+    extensions(crate::builtins::io::repl_fs::getenv::GETENV_EXTENSIONS),
+    integer_audit(crate::builtins::io::repl_fs::getenv::GETENV_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::getenv"
 )]
 async fn getenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match args.len() {
-        0 => Ok(getenv_all()),
-        1 => {
-            let gathered = gather_if_needed_async(&args[0])
-                .await
-                .map_err(map_control_flow)?;
-            getenv_one(gathered).await
-        }
+        0 => getenv_all().await,
+        1 => getenv_one(args.into_iter().next().expect("one argument")).await,
         _ => Err(getenv_error(&GETENV_ERROR_TOO_MANY_INPUTS)),
     }
 }
 
-fn getenv_all() -> Value {
-    let mut st = StructValue::new();
-    for (name, value) in runtime_env::vars() {
-        st.fields
-            .insert(name, Value::CharArray(CharArray::new_row(&value)));
-    }
-    Value::Struct(st)
+async fn getenv_all() -> BuiltinResult<Value> {
+    let mut entries: Vec<(String, String)> = runtime_env::vars();
+    entries.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    let shape = vec![entries.len(), 1];
+    let keys = StringArray::new(
+        entries.iter().map(|(name, _)| name.clone()).collect(),
+        shape.clone(),
+    )
+    .map_err(|err| {
+        getenv_error_with_message(
+            format!("{}: {err}", GETENV_ERROR_INTERNAL.message),
+            &GETENV_ERROR_INTERNAL,
+        )
+    })?;
+    let values = StringArray::new(entries.into_iter().map(|(_, value)| value).collect(), shape)
+        .map_err(|err| {
+            getenv_error_with_message(
+                format!("{}: {err}", GETENV_ERROR_INTERNAL.message),
+                &GETENV_ERROR_INTERNAL,
+            )
+        })?;
+    call_builtin_async(
+        "dictionary",
+        &[Value::StringArray(keys), Value::StringArray(values)],
+    )
+    .await
+    .map_err(map_control_flow)
 }
 
 async fn getenv_one(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::CharArray(array) => getenv_from_char_array(array),
-        Value::String(s) => Ok(Value::String(read_env_string(&s))),
+        Value::String(s) => Ok(Value::CharArray(CharArray::new_row(&read_env_string(&s)))),
         Value::StringArray(sa) => getenv_from_string_array(sa),
         Value::Cell(ca) => getenv_from_cell_array(ca).await,
         _ => Err(getenv_error(&GETENV_ERROR_INVALID_TYPE)),
@@ -210,6 +253,11 @@ fn getenv_from_char_array(array: CharArray) -> BuiltinResult<Value> {
         let value = CharArray::new_row(&read_env_string(&name));
         return Ok(Value::CharArray(value));
     }
+
+    crate::compatibility::ensure_builtin_extension_enabled(
+        &GETENV_CHAR_MATRIX_EXTENSION,
+        BUILTIN_NAME,
+    )?;
 
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
@@ -241,23 +289,25 @@ fn getenv_from_string_array(array: StringArray) -> BuiltinResult<Value> {
     Ok(Value::StringArray(result))
 }
 
-async fn getenv_from_cell_array(array: runmat_builtins::CellArray) -> BuiltinResult<Value> {
+async fn getenv_from_cell_array(array: runmat_value::CellArray) -> BuiltinResult<Value> {
+    for cell in &array.data {
+        match cell {
+            Value::CharArray(ca) if ca.rows == 1 => {}
+            Value::String(_) => crate::compatibility::ensure_builtin_extension_enabled(
+                &GETENV_CELL_STRING_EXTENSION,
+                BUILTIN_NAME,
+            )?,
+            _ => return Err(getenv_error(&GETENV_ERROR_CELL_ELEMENT_TYPE)),
+        }
+    }
     let mut values: Vec<Value> = Vec::with_capacity(array.data.len());
     for cell in &array.data {
-        let gathered = gather_if_needed_async(cell)
-            .await
-            .map_err(map_control_flow)?;
-        let resolved = match gathered {
-            Value::CharArray(ca) => {
-                if ca.rows != 1 {
-                    return Err(getenv_error(&GETENV_ERROR_CELL_ELEMENT_TYPE));
-                }
-                Value::CharArray(CharArray::new_row(&read_env_string(&char_row_to_string(
-                    &ca, 0,
-                ))))
-            }
-            Value::String(s) => Value::String(read_env_string(&s)),
-            _ => return Err(getenv_error(&GETENV_ERROR_CELL_ELEMENT_TYPE)),
+        let resolved = match cell {
+            Value::CharArray(ca) => Value::CharArray(CharArray::new_row(&read_env_string(
+                &char_row_to_string(ca, 0),
+            ))),
+            Value::String(s) => Value::String(read_env_string(s)),
+            _ => unreachable!("cell entries validated before environment lookup"),
         };
         values.push(resolved);
     }
@@ -331,7 +381,7 @@ fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
-    use runmat_builtins::{CharArray, StringArray, Value};
+    use runmat_value::{CharArray, IntValue, StringArray, Value};
 
     fn getenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::getenv_builtin(args))
@@ -368,14 +418,17 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn getenv_string_missing_variable_returns_empty_string() {
+    fn getenv_string_scalar_returns_character_vector() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         env::remove_var("RUNMAT_TEST_GETENV_MISSING");
         let input = Value::String("RUNMAT_TEST_GETENV_MISSING".to_string());
         let result = getenv_builtin(vec![input]).expect("getenv");
         match result {
-            Value::String(s) => assert!(s.is_empty()),
-            other => panic!("expected string output, got {other:?}"),
+            Value::CharArray(array) => {
+                assert_eq!((array.rows, array.cols), (1, 0));
+                assert!(array.data.is_empty());
+            }
+            other => panic!("expected character-vector output, got {other:?}"),
         }
     }
 
@@ -406,6 +459,7 @@ pub(crate) mod tests {
     #[test]
     fn getenv_char_matrix_handles_multiple_rows() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         env::set_var("RUN1", "first");
         env::set_var("RUN2", "second-value");
         let names = CharArray::new(vec!['R', 'U', 'N', '1', 'R', 'U', 'N', '2'], 2, 4)
@@ -446,6 +500,7 @@ pub(crate) mod tests {
     #[test]
     fn getenv_char_matrix_trims_trailing_spaces() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         env::set_var("RUNMAT_TEST_TRIM1", "value1");
         env::set_var("RUNMAT_TEST_TRIM2", "value-two");
         let names = char_array_from_rows(&[
@@ -471,6 +526,7 @@ pub(crate) mod tests {
     #[test]
     fn getenv_cell_array_preserves_element_types() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         env::set_var("RUNMAT_TEST_CELL1", "one");
         env::set_var("RUNMAT_TEST_CELL2", "two");
         let cell_input = make_cell(
@@ -528,27 +584,74 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn getenv_returns_struct_with_all_variables() {
+    fn getenv_no_argument_returns_string_dictionary() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         env::set_var("RUNMAT_TEST_STRUCT", "struct-value");
         let result = getenv_builtin(Vec::new()).expect("getenv");
-        match result {
-            Value::Struct(sv) => {
-                let value = sv
-                    .fields
-                    .get("RUNMAT_TEST_STRUCT")
-                    .expect("struct field missing");
-                match value {
-                    Value::CharArray(ca) => {
-                        let text: String = ca.data.iter().collect();
-                        assert_eq!(text, "struct-value");
-                    }
-                    other => panic!("expected char array field, got {other:?}"),
-                }
-            }
-            other => panic!("expected struct result, got {other:?}"),
-        }
+        let Value::Object(dictionary) = result else {
+            panic!("expected dictionary object");
+        };
+        assert!(dictionary.is_class("dictionary"));
+        let Value::Cell(keys) = dictionary.properties.get("Keys").expect("dictionary keys") else {
+            panic!("expected dictionary key cells");
+        };
+        let Value::Cell(values) = dictionary
+            .properties
+            .get("Values")
+            .expect("dictionary values")
+        else {
+            panic!("expected dictionary value cells");
+        };
+        let index = keys
+            .data
+            .iter()
+            .position(|value| value == &Value::String("RUNMAT_TEST_STRUCT".to_string()))
+            .expect("environment key");
+        assert_eq!(
+            values.data[index],
+            Value::String("struct-value".to_string())
+        );
         env::remove_var("RUNMAT_TEST_STRUCT");
+    }
+
+    #[test]
+    fn getenv_rejects_all_integer_name_classes_without_conversion() {
+        let values = [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ];
+        for value in values {
+            let err = getenv_builtin(vec![Value::Int(value)]).expect_err("integer name");
+            assert!(err.message().contains("NAME must be"));
+        }
+        assert_eq!(
+            GETENV_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+    }
+
+    #[test]
+    fn getenv_character_matrix_and_cell_string_extensions_are_mode_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let matrix = CharArray::new(vec!['A', 'B'], 2, 1).expect("matrix");
+        let err = getenv_builtin(vec![Value::CharArray(matrix)]).expect_err("matrix extension");
+        assert_eq!(
+            err.identifier(),
+            GETENV_CHAR_MATRIX_EXTENSION.error_identifier
+        );
+
+        let cell = make_cell(vec![Value::String("PATH".to_string())], 1, 1).expect("cell");
+        let err = getenv_builtin(vec![cell]).expect_err("cell string extension");
+        assert_eq!(
+            err.identifier(),
+            GETENV_CELL_STRING_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

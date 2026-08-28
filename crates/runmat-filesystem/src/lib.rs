@@ -987,9 +987,11 @@ mod tests {
     }
 
     fn comparable_path(path: impl AsRef<Path>) -> PathBuf {
+        let path = path.as_ref();
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         #[cfg(windows)]
         {
-            let text = path.as_ref().to_string_lossy();
+            let text = canonical.to_string_lossy();
             if let Some(stripped) = text.strip_prefix(r"\\?\UNC\") {
                 return PathBuf::from(format!(r"\\{stripped}"));
             }
@@ -1000,7 +1002,7 @@ mod tests {
         }
         #[cfg(not(windows))]
         {
-            path.as_ref().to_path_buf()
+            canonical
         }
     }
 
@@ -1429,7 +1431,7 @@ mod tests {
 
     #[test]
     fn sync_helpers_work_inside_async_executor() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("nested").join("file.txt");
         let parent = path.parent().unwrap().to_path_buf();

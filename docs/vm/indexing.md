@@ -1,10 +1,3 @@
----
-title: "Indexing Subsystem"
-category: "Virtual Machine (VM)"
-section: "3.3"
-last_updated: "May 28, 2026"
----
-
 # Indexing Subsystem
 
 The VM indexing subsystem executes MATLAB-style indexing after the compiler has already classified the operation. It handles scalar access, multidimensional slicing, `end` expressions, cell arrays, logical arrays, strings, GPU tensors, and object `subsref`/`subsasgn` dispatch.

@@ -36,6 +36,8 @@
     "Operates on the first two dimensions; trailing dimensions are handled as independent pages.",
     "Accepts scalar, vector, matrix, or paged inputs of any size, including empty dimensions.",
     "Logical inputs remain logical, and complex values keep their real/imaginary components.",
+    "All eight integer classes preserve their exact values and class; masked entries become a zero of that same class.",
+    "Native typed-integer diagonal offsets are decoded exactly as structural selectors and must fit the runtime index range.",
     "Scalars are treated as `1×1` matrices and honour negative offsets (`k < 0` yields zero).",
     "gpuArray inputs stay on the device when the provider exposes a native `tril` hook; otherwise RunMat performs a gather → compute → upload cycle."
   ],
@@ -85,7 +87,7 @@
     },
     {
       "question": "Does `tril` change the class of character arrays?",
-      "answer": "Character arrays are converted to their numeric codes (double precision) before the triangular mask is applied, matching MATLAB's behaviour."
+      "answer": "Character arrays remain character arrays. Entries above the selected diagonal become null characters while retained entries keep their original values."
     }
   ],
   "links": [

@@ -1,0 +1,24 @@
+{
+  "title": "bitxor",
+  "category": "logical/bit",
+  "keywords": ["bitxor", "bitwise", "xor", "integer", "gpuArray"],
+  "summary": "Compute the bitwise exclusive OR of integer-valued arrays.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "Documented gpuArray input is uint8, uint16, or uint32 and uses exact owner-aware fallback with resident output."
+  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 2, "constants": "none"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::logical::bit::integer::integer_tests"},
+  "description": "`C = bitxor(A,B)` computes a bitwise exclusive OR. Compatible array sizes use implicit expansion, while the optional `assumedtype` interprets integer-valued double input using a named integer class.",
+  "behaviors": [
+    "All eight integer classes are supported on the host and preserve their class.",
+    "Inputs must share an integer class unless the companion is an allowed scalar double.",
+    "Logical inputs produce logical output and compatible nonscalar sizes use MATLAB implicit expansion.",
+    "Supported gpuArray forms return resident output; signed, 64-bit, and assumedtype GPU forms are rejected in MATLAB-compatible mode."
+  ],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"}
+}

@@ -5,13 +5,18 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::structs::type_resolvers::struct_type;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StructValue, Value,
+use crate::builtins::common::tensor;
+use runmat_builtins::catalog::definitions::{
+    STRUCT_ERROR_ASSEMBLE_FAILED, STRUCT_ERROR_CELL_SIZE_MISMATCH, STRUCT_ERROR_EMPTY_ARRAY_FAILED,
+    STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR, STRUCT_ERROR_FIELD_NAME_EMPTY,
+    STRUCT_ERROR_FIELD_NAME_SCALAR, STRUCT_ERROR_FIELD_NAME_START_CHAR,
+    STRUCT_ERROR_FIELD_NAME_TYPE, STRUCT_ERROR_INVALID_SINGLE_INPUT, STRUCT_ERROR_NAME_VALUE_PAIRS,
+    STRUCT_ERROR_SIZE_OVERFLOW, STRUCT_ERROR_STRUCT_ARRAY_CONTENTS,
+    STRUCT_ERROR_STRUCT_ARRAY_COPY_FAILED,
 };
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StructValue, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -54,179 +59,6 @@ enum FieldValue {
 
 const BUILTIN_NAME: &str = "struct";
 
-const STRUCT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scalar struct or struct array.",
-}];
-
-const STRUCT_INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
-const STRUCT_INPUTS_TEMPLATE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "template",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Existing struct/struct-array template or empty array for struct([]).",
-}];
-const STRUCT_INPUTS_PAIRS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "field",
-        ty: BuiltinParamType::PropertyName,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Field name.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Field value or cell array of field values.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value_pairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional field/value pairs.",
-    },
-];
-
-const STRUCT_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "S = struct()",
-        inputs: &STRUCT_INPUTS_EMPTY,
-        outputs: &STRUCT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = struct(template)",
-        inputs: &STRUCT_INPUTS_TEMPLATE,
-        outputs: &STRUCT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = struct(field, value, ...)",
-        inputs: &STRUCT_INPUTS_PAIRS,
-        outputs: &STRUCT_OUTPUT,
-    },
-];
-
-const STRUCT_ERROR_INVALID_SINGLE_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.INVALID_SINGLE_INPUT",
-    identifier: Some("RunMat:struct:InvalidSingleInput"),
-    when: "Single input is neither struct, struct-array cell, nor empty numeric/logical array.",
-    message:
-        "struct: expected name/value pairs, an existing struct or struct array, or [] to create an empty struct array",
-};
-
-const STRUCT_ERROR_NAME_VALUE_PAIRS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.NAME_VALUE_PAIRS",
-    identifier: Some("RunMat:struct:NameValuePairs"),
-    when: "Name/value arguments are not supplied in complete pairs.",
-    message: "struct: expected name/value pairs",
-};
-
-const STRUCT_ERROR_CELL_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.CELL_SIZE_MISMATCH",
-    identifier: Some("RunMat:struct:CellSizeMismatch"),
-    when: "Cell value inputs for struct-array construction do not share the same shape.",
-    message: "struct: cell inputs must have matching sizes",
-};
-
-const STRUCT_ERROR_SIZE_OVERFLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.SIZE_OVERFLOW",
-    identifier: Some("RunMat:struct:SizeOverflow"),
-    when: "Requested struct-array size exceeds platform limits.",
-    message: "struct: struct array size exceeds platform limits",
-};
-
-const STRUCT_ERROR_ASSEMBLE_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.ASSEMBLE_FAILED",
-    identifier: Some("RunMat:struct:AssembleFailed"),
-    when: "Internal struct-array assembly failed.",
-    message: "struct: failed to assemble struct array",
-};
-
-const STRUCT_ERROR_EMPTY_ARRAY_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.EMPTY_ARRAY_FAILED",
-    identifier: Some("RunMat:struct:EmptyArrayFailed"),
-    when: "Internal empty struct-array creation failed.",
-    message: "struct: failed to create empty struct array",
-};
-
-const STRUCT_ERROR_STRUCT_ARRAY_CONTENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.STRUCT_ARRAY_CONTENTS",
-    identifier: Some("RunMat:struct:StructArrayContents"),
-    when: "Single-argument struct-array cell input contains non-struct values.",
-    message: "struct: single argument cell input must contain structs",
-};
-
-const STRUCT_ERROR_STRUCT_ARRAY_COPY_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.STRUCT_ARRAY_COPY_FAILED",
-    identifier: Some("RunMat:struct:StructArrayCopyFailed"),
-    when: "Copying a single-argument struct-array cell input failed.",
-    message: "struct: failed to copy struct array",
-};
-
-const STRUCT_ERROR_FIELD_NAME_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.FIELD_NAME_TYPE",
-    identifier: Some("RunMat:struct:FieldNameType"),
-    when: "Field name is not a string scalar or 1xN character vector.",
-    message: "struct: field names must be strings or character vectors",
-};
-
-const STRUCT_ERROR_FIELD_NAME_SCALAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.FIELD_NAME_SCALAR",
-    identifier: Some("RunMat:struct:FieldNameScalar"),
-    when: "Field name char/string-array input is not scalar.",
-    message: "struct: field names must be scalar string arrays or character vectors",
-};
-
-const STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.FIELD_NAME_CHAR_VECTOR",
-    identifier: Some("RunMat:struct:FieldNameCharVector"),
-    when: "Character-array field name input is not a 1-by-N character vector.",
-    message: "struct: field names must be 1-by-N character vectors",
-};
-
-const STRUCT_ERROR_FIELD_NAME_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.FIELD_NAME_EMPTY",
-    identifier: Some("RunMat:struct:FieldNameEmpty"),
-    when: "Field name is empty.",
-    message: "struct: field names must be nonempty",
-};
-
-const STRUCT_ERROR_FIELD_NAME_START_CHAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRUCT.FIELD_NAME_START_CHAR",
-    identifier: Some("RunMat:struct:FieldNameStartChar"),
-    when: "Field name is not a valid MATLAB identifier.",
-    message: "struct: field names must be valid MATLAB identifiers",
-};
-
-const STRUCT_ERRORS: [BuiltinErrorDescriptor; 13] = [
-    STRUCT_ERROR_INVALID_SINGLE_INPUT,
-    STRUCT_ERROR_NAME_VALUE_PAIRS,
-    STRUCT_ERROR_CELL_SIZE_MISMATCH,
-    STRUCT_ERROR_SIZE_OVERFLOW,
-    STRUCT_ERROR_ASSEMBLE_FAILED,
-    STRUCT_ERROR_EMPTY_ARRAY_FAILED,
-    STRUCT_ERROR_STRUCT_ARRAY_CONTENTS,
-    STRUCT_ERROR_STRUCT_ARRAY_COPY_FAILED,
-    STRUCT_ERROR_FIELD_NAME_TYPE,
-    STRUCT_ERROR_FIELD_NAME_SCALAR,
-    STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR,
-    STRUCT_ERROR_FIELD_NAME_EMPTY,
-    STRUCT_ERROR_FIELD_NAME_START_CHAR,
-];
-
-pub const STRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRUCT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRUCT_ERRORS,
-};
-
 fn struct_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     struct_error_with_message(error.message, error)
 }
@@ -244,11 +76,7 @@ fn struct_error_with_message(
 
 #[runtime_builtin(
     name = "struct",
-    category = "structs/core",
-    summary = "Create scalar structs or struct arrays from field/value inputs.",
-    keywords = "struct,structure,name-value,record",
-    type_resolver(struct_type),
-    descriptor(crate::builtins::structs::core::r#struct::STRUCT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::r#struct"
 )]
 async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -257,7 +85,9 @@ async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         1 => match rest.into_iter().next().unwrap() {
             Value::Struct(existing) => Ok(Value::Struct(existing.clone())),
             Value::Cell(cell) => clone_struct_array(&cell),
-            Value::Tensor(tensor) if tensor.data.is_empty() => empty_struct_array(),
+            Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => {
+                empty_struct_array()
+            }
             Value::LogicalArray(logical) if logical.data.is_empty() => empty_struct_array(),
             other => Err(struct_error_with_message(
                 format!(
@@ -462,7 +292,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
     use runmat_accelerate_api::GpuTensorHandle;
-    use runmat_builtins::{CellArray, IntValue, StringArray, StructValue, Tensor};
+    use runmat_value::{CellArray, IntValue, StringArray, StructValue, Tensor};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
@@ -497,6 +327,17 @@ pub(crate) mod tests {
             }
             other => panic!("expected empty struct array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn struct_uses_typed_integer_storage_to_detect_empty_input() {
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::U64(Vec::new()), vec![0, 0]).unwrap();
+
+        assert!(matches!(
+            run_struct(vec![Value::Tensor(tensor)]).unwrap(),
+            Value::Cell(_)
+        ));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -637,19 +478,13 @@ pub(crate) mod tests {
         for bad in [
             "_hidden".to_string(),
             "for".to_string(),
+            "éclair".to_string(),
             "a".repeat(MATLAB_NAME_LENGTH_MAX + 1),
         ] {
             let err =
                 error_message(run_struct(vec![Value::from(bad), Value::Num(1.0)]).unwrap_err());
             assert!(err.contains("valid MATLAB identifiers"));
         }
-
-        let Value::Struct(s) =
-            run_struct(vec![Value::from("éclair"), Value::Num(1.0)]).expect("unicode field name")
-        else {
-            panic!("expected struct value");
-        };
-        assert!(s.fields.contains_key("éclair"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -732,6 +567,7 @@ pub(crate) mod tests {
             shape: vec![2, 2],
             device_id: 1,
             buffer_id: 99,
+            descriptor: Default::default(),
         };
         let args = vec![Value::from("data"), Value::GpuTensor(handle.clone())];
         let Value::Struct(s) = run_struct(args).expect("struct") else {
@@ -747,11 +583,13 @@ pub(crate) mod tests {
             shape: vec![1, 1],
             device_id: 2,
             buffer_id: 11,
+            descriptor: Default::default(),
         };
         let second = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: 2,
             buffer_id: 12,
+            descriptor: Default::default(),
         };
         let cell = CellArray::new(
             vec![

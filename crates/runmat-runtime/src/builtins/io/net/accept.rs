@@ -2,11 +2,15 @@
 
 use once_cell::sync::OnceCell;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, StructValue, Value};
 
 use super::tcpserver::{default_user_data, server_handle, TcpServerState, HANDLE_ID_FIELD};
 use crate::builtins::common::spec::{
@@ -139,6 +143,26 @@ pub const ACCEPT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ACCEPT_ERRORS,
 };
+
+const ACCEPT_TIMEOUT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Timeout",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat's safe additive accept API documents a nonnegative scalar timeout in every integer class, or a floating scalar including positive Inf.",
+    }];
+pub const ACCEPT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "client = accept(server, \"Timeout\", integer_timeout)",
+        inputs: &ACCEPT_TIMEOUT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The timeout crosses one explicit binary64-seconds boundary and must fit std::time::Duration; networking and its returned client handle remain host-only, while resident scalar controls gather before validation.",
+    }];
 
 pub(crate) const CLIENT_HANDLE_FIELD: &str = "__tcpclient_id";
 
@@ -329,6 +353,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "accept,tcpserver,tcpclient",
     type_resolver(crate::builtins::io::type_resolvers::accept_type),
     descriptor(crate::builtins::io::net::accept::ACCEPT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::net::accept::ACCEPT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::net::accept"
 )]
 pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -405,8 +430,12 @@ fn extract_server_id(value: &Value) -> BuiltinResult<u64> {
                 )
             })?;
             let id = match id_value {
-                Value::Int(IntValue::U64(id)) => *id,
-                Value::Int(iv) => iv.to_i64() as u64,
+                Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
+                    accept_flow(
+                        &ACCEPT_ERROR_INVALID_SERVER,
+                        "accept: tcpserver struct has invalid internal identifier",
+                    )
+                })?,
                 other => {
                     return Err(accept_flow(
                         &ACCEPT_ERROR_INVALID_SERVER,
@@ -494,13 +523,21 @@ pub(crate) enum TimeoutParseError {
     NonFinite,
     #[error("Timeout must be non-negative")]
     Negative,
+    #[error("Timeout exceeds the supported host duration range")]
+    OutOfRange,
 }
 
 pub(crate) fn parse_timeout_value(value: &Value) -> Result<f64, TimeoutParseError> {
     let timeout = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                int.to_f64()
+            } else {
+                crate::builtins::common::tensor::tensor_value_f64(t, 0)
+            }
+        }
         Value::Tensor(_) => {
             return Err(TimeoutParseError::NonScalar);
         }
@@ -511,6 +548,9 @@ pub(crate) fn parse_timeout_value(value: &Value) -> Result<f64, TimeoutParseErro
     }
     if timeout.is_sign_negative() {
         return Err(TimeoutParseError::Negative);
+    }
+    if timeout.is_finite() && Duration::try_from_secs_f64(timeout).is_err() {
+        return Err(TimeoutParseError::OutOfRange);
     }
     Ok(timeout)
 }
@@ -526,6 +566,12 @@ fn validate_timeout(timeout: f64) -> BuiltinResult<()> {
         return Err(accept_flow(
             &ACCEPT_ERROR_INVALID_NAME_VALUE,
             "accept: Timeout must be non-negative",
+        ));
+    }
+    if timeout.is_finite() && Duration::try_from_secs_f64(timeout).is_err() {
+        return Err(accept_flow(
+            &ACCEPT_ERROR_INVALID_NAME_VALUE,
+            "accept: Timeout exceeds the supported host duration range",
         ));
     }
     Ok(())
@@ -669,7 +715,7 @@ pub(crate) mod tests {
         remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
     };
     use super::*;
-    use runmat_builtins::Value;
+    use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;
     use std::thread;
     use std::time::Duration;
@@ -696,6 +742,16 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    #[test]
+    fn typed_negative_server_handle_is_rejected() {
+        let mut server = StructValue::new();
+        server
+            .fields
+            .insert(SERVER_FIELD.to_string(), Value::Int(IntValue::I8(-1)));
+        let err = extract_server_id(&Value::Struct(server)).unwrap_err();
+        assert_error_identifier(err, ACCEPT_ERROR_INVALID_SERVER.identifier.unwrap());
+    }
+
     fn run_accept(server: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(accept_builtin(server, rest))
     }
@@ -711,6 +767,54 @@ pub(crate) mod tests {
         assert!(labels.contains(&"client = accept(server)"));
         assert!(labels.contains(&"client = accept(server, \"Timeout\", timeout)"));
         assert!(labels.contains(&"client = accept(server, Name, Value, ...)"));
+        assert_eq!(ACCEPT_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            ACCEPT_INTEGER_CAPABILITIES[0].inputs[0].classes,
+            crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+        );
+    }
+
+    #[test]
+    fn typed_timeout_parser_accepts_all_integer_classes_and_rejects_bounds() {
+        for value in [
+            IntValue::I8(30),
+            IntValue::I16(30),
+            IntValue::I32(30),
+            IntValue::I64(30),
+            IntValue::U8(30),
+            IntValue::U16(30),
+            IntValue::U32(30),
+            IntValue::U64(30),
+        ] {
+            assert_eq!(
+                parse_timeout_value(&Value::Int(value)).expect("integer timeout"),
+                30.0
+            );
+        }
+        for storage in [
+            IntegerStorage::I8(vec![30]),
+            IntegerStorage::I16(vec![30]),
+            IntegerStorage::I32(vec![30]),
+            IntegerStorage::I64(vec![30]),
+            IntegerStorage::U8(vec![30]),
+            IntegerStorage::U16(vec![30]),
+            IntegerStorage::U32(vec![30]),
+            IntegerStorage::U64(vec![30]),
+        ] {
+            let typed = Tensor::new_integer(storage, vec![1, 1]).expect("timeout");
+            assert_eq!(
+                parse_timeout_value(&Value::Tensor(typed)).expect("tensor timeout"),
+                30.0
+            );
+        }
+        assert!(matches!(
+            parse_timeout_value(&Value::Int(IntValue::I16(-1))),
+            Err(TimeoutParseError::Negative)
+        ));
+        assert!(matches!(
+            parse_timeout_value(&Value::Int(IntValue::U64(u64::MAX))),
+            Err(TimeoutParseError::OutOfRange)
+        ));
     }
 
     fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -741,6 +845,7 @@ pub(crate) mod tests {
     #[test]
     fn accept_establishes_client_connection() {
         let _guard = net_guard();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -749,6 +854,7 @@ pub(crate) mod tests {
         .expect("tcpserver");
         let port = match struct_field(&server_value, "ServerPort") {
             Value::Int(iv) => iv.to_i64() as u16,
+            Value::Num(value) => *value as u16,
             other => panic!("expected ServerPort int, got {other:?}"),
         };
 
@@ -783,6 +889,7 @@ pub(crate) mod tests {
     #[test]
     fn accept_times_out_when_no_client_connects() {
         let _guard = net_guard();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -802,6 +909,7 @@ pub(crate) mod tests {
     #[test]
     fn accept_rejects_invalid_timeout_name_value() {
         let _guard = net_guard();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -821,6 +929,7 @@ pub(crate) mod tests {
     #[test]
     fn accept_respects_per_call_timeout_override() {
         let _guard = net_guard();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let server_value = run_tcpserver(
             Value::from("127.0.0.1"),
             Value::Int(IntValue::I32(0)),
@@ -829,6 +938,7 @@ pub(crate) mod tests {
         .expect("tcpserver");
         let port = match struct_field(&server_value, "ServerPort") {
             Value::Int(iv) => iv.to_i64() as u16,
+            Value::Num(value) => *value as u16,
             other => panic!("expected ServerPort int, got {other:?}"),
         };
 
@@ -839,7 +949,7 @@ pub(crate) mod tests {
 
         let client = run_accept(
             server_value.clone(),
-            vec![Value::from("Timeout"), Value::Num(1.0)],
+            vec![Value::from("Timeout"), Value::Int(IntValue::U8(1))],
         )
         .expect("accept");
         handle.join().expect("join");

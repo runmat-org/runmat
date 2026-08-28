@@ -1,10 +1,3 @@
----
-title: "Fusion Engine & Residency Management"
-category: "GPU Acceleration & Fusion Engine"
-section: "4.1"
-last_updated: "May 28, 2026"
----
-
 # Fusion Engine & Residency Management
 
 The fusion engine identifies semantic regions that can run as a single accelerated unit. MIR analysis first marks fusion-capable statement runs, the bytecode compiler maps those semantic candidates onto VM instruction windows, and runtime planning reconciles those windows with a bytecode-derived `AccelGraph`. Once a plan is accepted, the interpreter can skip a span of ordinary bytecode and push a GPU-resident result instead.
@@ -104,14 +97,22 @@ Residency cleanup is recursive. The VM clears GPU handles inside cells, structs,
 
 ## Auto-Promotion
 
-Auto-promotion chooses when host tensors should become GPU tensors before or during built-in execution. The policy considers value shape, provider availability, calibrated thresholds, built-in residency policy, and whether any operand is already GPU-resident. Chain-aware promotion keeps operations on the device once a chain has started, avoiding repeated host/device round trips.
+Auto-promotion chooses when host tensors should become GPU tensors before or during built-in execution. Provider feasibility is normalized first. A shared local planner then compares complete CPU and provider candidates, including preparation, transfer, allocation, queueing, execution, synchronization, download, and downstream materialization costs. Calibrated thresholds, profile observations, existing residency, and fusion opportunities remain useful priors, but they no longer force a placement by themselves.
+
+Residency accounting walks nested cells, structs, objects, object arrays, closures, handle objects, and output lists. Repeated GPU handles are counted once, cross-device handles require an explicit transition, and host or device mutation invalidates the stale copy. Small host-resident fusion groups can therefore fall back before upload or compilation, while a profitable resident chain remains on its provider.
+
+When execution exposes more than one candidate region, placement evaluates the regions as one bounded graph instead of making unrelated per-operation choices. It distinguishes where a candidate executes from where its result will reside, accounts for transfer boundaries and simultaneously live intermediates, and admits work only within known host/provider memory, scratch, queue, cancellation, and scheduler-allocation limits. Unknown WebGPU total memory remains explicitly unknown rather than becoming a fabricated budget.
 
 ## Barriers and Fallbacks
 
-Fusion is not required for correctness. If a group has a barrier, stack mismatch, unsupported shape, provider error, or unavailable device, execution falls back to ordinary VM bytecode. Sink operations can gather values immediately when runtime semantics require host materialization.
+Fusion is not required for correctness. If a group has a barrier, stack mismatch, unsupported shape, provider error, unavailable device, exhausted planning budget, or resource-admission failure, execution falls back to ordinary VM bytecode. Automatic provider candidates must stage results transactionally: the VM restores its original operands on a pre-commit failure and publishes stack or workspace results only after provider execution succeeds, so fallback never replays a committed effect. Sink operations can gather values immediately when runtime semantics require host materialization.
+
+Provider feasibility is checked without executing a candidate. Unsupported operation identities, element types, storage/layout combinations, ranks, shapes, and resource requirements produce structured rejection codes. Placement diagnostics retain bounded, correlated events with stable reason tokens so these fallbacks can be inspected without recording source text or runtime values.
+
+Each fusion attempt uses one correlation from the VM gate through input preparation, provider selection, shader generation when applicable, uploads, dispatch, kernel execution, synchronization when a real readback occurs, and completion or fallback. Timing remains stage-specific: synchronous host dispatch can report its measured duration, while providers that do not expose device or asynchronous queue timing emit an explicit unavailable reason instead of attributing the whole provider call to kernel execution. A feasibility rejection is recorded before shader generation, transfer, or dispatch, and ordinary bytecode remains the semantic fallback.
 
 ## Tuning
 
-The acceleration layer exposes runtime knobs for thresholds, calibration, and backend tuning. The exact set is backend-dependent, but the important policy is stable: small or synchronization-heavy work remains on CPU; large elementwise, reduction, matrix, image, and signal workloads are candidates for GPU execution.
+The acceleration layer exposes runtime knobs for calibration and backend tuning. The exact set is backend-dependent, but the important policy is stable: small or synchronization-heavy work remains on CPU; large or already-resident elementwise, reduction, matrix, image, and signal workloads are provider candidates when their complete risk-adjusted cost clears the placement margins.
 
 From here, provider execution is covered in [wgpu Backend & Accelerate Provider](/docs/runtime/gpu/wgpu).

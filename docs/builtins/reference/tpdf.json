@@ -6,16 +6,18 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "elementwise",
-    "notes": "GPU inputs are gathered to host for compatibility until a provider hook exists."
+    "notes": "When no provider PDF hook exists, inputs gather once and the class-preserving result returns through the input's owning provider."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
   "tested": { "unit": "builtins::stats::summary::distributions::tests", "integration": null },
   "description": "`tpdf(x,nu)` evaluates the probability density of the Student's t distribution with `nu` degrees of freedom at `x`.",
   "behaviors": [
-    "`x` and `nu` may be scalars or matching-size numeric arrays.",
+    "Documented `x` and `nu` inputs are single or double scalars and arrays. Inputs may have the same size, or either input may be scalar.",
+    "The result is single when either documented floating input is single; otherwise it is double.",
+    "RunMat mode additionally accepts logical and all eight native integer classes. Integer values must be exactly representable at the binary64 PDF boundary.",
     "Scalar inputs broadcast over matching-size array inputs.",
     "Nonpositive or `NaN` degrees of freedom produce `NaN` elementwise.",
     "`nu = Inf` uses the standard normal density."
@@ -23,6 +25,7 @@
   "examples": [{ "description": "Cauchy density at zero", "input": "y = tpdf(0, 1)" }],
   "faqs": [{ "question": "What is `nu`?", "answer": "`nu` is the degrees-of-freedom parameter for the Student's t distribution." }],
   "links": [{ "label": "tcdf", "url": "./tcdf" }, { "label": "tinv", "url": "./tinv" }, { "label": "trnd", "url": "./trnd" }],
+  "gpu_residency": "Resident inputs preserve their floating precision and return through the provider that owns the input. When no direct provider PDF kernel is available, the values gather once for host evaluation and the result is restored to that owner.",
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/stats/summary/distributions.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions.rs"

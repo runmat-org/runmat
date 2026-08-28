@@ -1,15 +1,20 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_thread_local::runmat_thread_local;
+use runmat_value::{CellArray, NumericDType, StructValue, Tensor, Value};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::builtins::common::path_search::{file_candidates, path_is_file};
+use crate::builtins::common::tensor;
 use crate::console::{record_console_line, ConsoleStream};
 use crate::{BuiltinResult, RuntimeError};
 
@@ -19,12 +24,13 @@ const DBSTACK_OUTPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Call-stack entries as a 1-by-N cell row of scalar structs.",
+        description:
+            "Call-stack entries in RunMat's column-cell representation of a structure array.",
     },
     BuiltinParamDescriptor {
         name: "I",
         ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
+        arity: BuiltinParamArity::Required,
         default: None,
         description: "Current workspace index within the returned stack.",
     },
@@ -35,40 +41,113 @@ const DBSTACK_STACK_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescripto
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Call-stack entries as a 1-by-N cell row of scalar structs.",
+    description: "Call-stack entries in RunMat's column-cell representation of a structure array.",
 }];
 
-const DBSTACK_INPUTS: [BuiltinParamDescriptor; 2] = [
+const DBSTACK_N_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of leading stack entries to omit.",
+}];
+
+const DBSTACK_OPTION_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "option",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "`-completenames` requests full source paths.",
+}];
+
+const DBSTACK_OPTION_N_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "`-completenames` requests full source paths.",
+    },
     BuiltinParamDescriptor {
         name: "n",
         ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Optional,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of leading stack entries to omit.",
+    },
+];
+
+const DBSTACK_N_OPTION_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
         default: None,
         description: "Number of leading stack entries to omit.",
     },
     BuiltinParamDescriptor {
         name: "option",
         ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
+        arity: BuiltinParamArity::Required,
         default: None,
-        description: "`-completenames` is accepted for MATLAB command compatibility.",
+        description: "`-completenames` requests full source paths.",
     },
 ];
 
-const DBSTACK_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+const DBSTACK_SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
     BuiltinSignatureDescriptor {
         label: "dbstack",
         inputs: &[],
         outputs: &[],
     },
     BuiltinSignatureDescriptor {
-        label: "ST = dbstack(n, '-completenames')",
-        inputs: &DBSTACK_INPUTS,
+        label: "ST = dbstack",
+        inputs: &[],
         outputs: &DBSTACK_STACK_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "[ST,I] = dbstack(...)",
-        inputs: &DBSTACK_INPUTS,
+        label: "ST = dbstack(n)",
+        inputs: &DBSTACK_N_INPUT,
+        outputs: &DBSTACK_STACK_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "ST = dbstack('-completenames')",
+        inputs: &DBSTACK_OPTION_INPUT,
+        outputs: &DBSTACK_STACK_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "ST = dbstack('-completenames', n)",
+        inputs: &DBSTACK_OPTION_N_INPUTS,
+        outputs: &DBSTACK_STACK_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "ST = dbstack(n, '-completenames')",
+        inputs: &DBSTACK_N_OPTION_INPUTS,
+        outputs: &DBSTACK_STACK_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[ST,I] = dbstack",
+        inputs: &[],
+        outputs: &DBSTACK_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[ST,I] = dbstack(n)",
+        inputs: &DBSTACK_N_INPUT,
+        outputs: &DBSTACK_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[ST,I] = dbstack('-completenames')",
+        inputs: &DBSTACK_OPTION_INPUT,
+        outputs: &DBSTACK_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[ST,I] = dbstack('-completenames', n)",
+        inputs: &DBSTACK_OPTION_N_INPUTS,
+        outputs: &DBSTACK_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[ST,I] = dbstack(n, '-completenames')",
+        inputs: &DBSTACK_N_OPTION_INPUTS,
         outputs: &DBSTACK_OUTPUTS,
     },
 ];
@@ -220,6 +299,13 @@ pub const DEBUG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescri
     message: "debugger helper: invalid input",
 };
 
+pub const DEBUG_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DEBUG.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:dbstack:TooManyOutputs"),
+    when: "More than two outputs are requested from dbstack.",
+    message: "dbstack: too many output arguments",
+};
+
 pub const DEBUG_ERROR_NO_CURRENT_FILE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEBUG.NO_CURRENT_FILE",
     identifier: Some("RunMat:NoCurrentFile"),
@@ -249,12 +335,42 @@ pub const DEBUG_ERRORS: [BuiltinErrorDescriptor; 5] = [
     DEBUG_ERROR_FILE_READ,
 ];
 
+pub const DBSTACK_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    DEBUG_ERROR_TOO_MANY_INPUTS,
+    DEBUG_ERROR_TOO_MANY_OUTPUTS,
+    DEBUG_ERROR_INVALID_INPUT,
+    DEBUG_ERROR_NO_CURRENT_FILE,
+    DEBUG_ERROR_FILE_NOT_FOUND,
+    DEBUG_ERROR_FILE_READ,
+];
+
 pub const DBSTACK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DBSTACK_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DEBUG_ERRORS,
+    errors: &DBSTACK_ERRORS,
 };
+
+const DBSTACK_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "n is an exact nonnegative scalar count of leading stack entries to omit; values outside the host indexing domain reject.",
+    }];
+
+pub const DBSTACK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ST or [ST, I] = dbstack(n) or dbstack('-completenames', n)",
+        inputs: &DBSTACK_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The skip count is parsed from exact scalar storage. Stack line and workspace-index fields follow the debugger's host metadata representation rather than n's input class.",
+    }];
 
 pub const DBTYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DBTYPE_SIGNATURES,
@@ -353,34 +469,57 @@ fn text_value(value: &Value) -> Option<String> {
 
 fn integer_value(value: &Value) -> Option<usize> {
     match value {
-        Value::Num(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => Some(*n as usize),
-        Value::Int(int) => usize::try_from(int.to_i64()).ok(),
-        _ => None,
+        Value::Num(n) => nonnegative_platform_usize(*n),
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == NumericDType::F64
+                && tensor::tensor_element_len(tensor) == 1 =>
+        {
+            nonnegative_platform_usize(tensor::tensor_value_f64(tensor, 0))
+        }
+        _ => tensor::scalar_integer_value(value).and_then(|int| int.try_to_usize()),
     }
 }
 
-fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, index: usize) -> Value {
+fn nonnegative_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
+}
+
+fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bool) -> Value {
     let mut st = StructValue::new();
-    st.insert("file", Value::String(frame.file.clone()));
+    let file = if complete_names {
+        frame.file.clone()
+    } else {
+        Path::new(&frame.file)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&frame.file)
+            .to_string()
+    };
+    st.insert("file", Value::String(file));
     st.insert("name", Value::String(frame.function.clone()));
     st.insert("line", Value::Num(frame.line as f64));
-    st.insert("I", Value::Num(index as f64));
     Value::Struct(st)
 }
 
-fn cell_row(values: Vec<Value>) -> BuiltinResult<Value> {
+fn cell_column(values: Vec<Value>) -> BuiltinResult<Value> {
     if values.is_empty() {
         return Ok(Value::Cell(CellArray::new(Vec::new(), 0, 0).map_err(
             |err| debug_error("debugger", &DEBUG_ERROR_INVALID_INPUT, &err),
         )?));
     }
-    let cols = values.len();
-    Ok(Value::Cell(CellArray::new(values, 1, cols).map_err(
+    let rows = values.len();
+    Ok(Value::Cell(CellArray::new(values, rows, 1).map_err(
         |err| debug_error("debugger", &DEBUG_ERROR_INVALID_INPUT, &err),
     )?))
 }
 
-fn stack_value(skip: usize) -> BuiltinResult<Value> {
+fn stack_value(skip: usize, complete_names: bool) -> BuiltinResult<Value> {
     let mut frames = crate::debug_context::current_frames();
     if frames.is_empty() {
         if let Some(source) = crate::source_context::current_source_info() {
@@ -398,37 +537,41 @@ fn stack_value(skip: usize) -> BuiltinResult<Value> {
     let entries = frames
         .iter()
         .skip(skip)
-        .enumerate()
-        .map(|(idx, frame)| stack_struct(frame, idx + 1))
+        .map(|frame| stack_struct(frame, complete_names))
         .collect::<Vec<_>>();
-    cell_row(entries)
+    cell_column(entries)
 }
 
-fn parse_dbstack_args(args: &[Value]) -> BuiltinResult<usize> {
-    let mut skip = 0usize;
-    for arg in args {
-        if let Some(text) = text_value(arg) {
-            if text.trim().eq_ignore_ascii_case("-completenames") {
-                continue;
-            }
-            if let Ok(n) = text.trim().parse::<usize>() {
-                skip = n;
-                continue;
-            }
-            return Err(debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, text));
-        }
-        if let Some(n) = integer_value(arg) {
-            skip = n;
-            continue;
-        }
-        return Err(debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, ""));
+fn parse_dbstack_args(args: &[Value]) -> BuiltinResult<(usize, bool)> {
+    if args.len() > 2 {
+        return Err(debug_error("dbstack", &DEBUG_ERROR_TOO_MANY_INPUTS, ""));
     }
-    Ok(skip)
+    match args {
+        [] => Ok((0, false)),
+        [arg] if is_complete_names(arg) => Ok((0, true)),
+        [arg] => integer_value(arg)
+            .map(|skip| (skip, false))
+            .ok_or_else(|| debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, "")),
+        [option, n] if is_complete_names(option) => integer_value(n)
+            .map(|skip| (skip, true))
+            .ok_or_else(|| debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, "")),
+        [n, option] if is_complete_names(option) => integer_value(n)
+            .map(|skip| (skip, true))
+            .ok_or_else(|| debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, "")),
+        _ => Err(debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, "")),
+    }
+}
+
+fn is_complete_names(value: &Value) -> bool {
+    text_value(value).is_some_and(|text| text.trim().eq_ignore_ascii_case("-completenames"))
 }
 
 pub(crate) fn dispatch_dbstack(args: Vec<Value>) -> BuiltinResult<Value> {
-    let skip = parse_dbstack_args(&args)?;
-    let stack = stack_value(skip)?;
+    let (skip, complete_names) = parse_dbstack_args(&args)?;
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
+        return Err(debug_error("dbstack", &DEBUG_ERROR_TOO_MANY_OUTPUTS, ""));
+    }
+    let stack = stack_value(skip, complete_names)?;
     match crate::output_count::current_output_count() {
         Some(0) => {
             record_console_line(ConsoleStream::Stdout, format_stack_for_display(&stack));
@@ -467,7 +610,8 @@ fn format_stack_for_display(stack: &Value) -> String {
                 .fields
                 .get("line")
                 .and_then(|value| match value {
-                    Value::Num(n) => Some(*n as usize),
+                    Value::Num(n) => nonnegative_platform_usize(*n),
+                    Value::Int(int) => int.try_to_usize(),
                     _ => None,
                 })
                 .unwrap_or(0);
@@ -540,7 +684,7 @@ pub(crate) fn dispatch_mislocked(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn empty_breakpoint_list() -> BuiltinResult<Value> {
-    cell_row(Vec::new())
+    cell_column(Vec::new())
 }
 
 pub(crate) fn dispatch_dbstatus(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -660,7 +804,7 @@ pub(crate) fn dispatch_getcallinfo(args: Vec<Value>) -> BuiltinResult<Value> {
     info.insert("name", Value::String(current.function));
     info.insert("file", Value::String(current.file));
     info.insert("line", Value::Num(current.line as f64));
-    info.insert("stack", stack_value(0)?);
+    info.insert("stack", stack_value(0, false)?);
     Ok(Value::Struct(info))
 }
 
@@ -669,6 +813,7 @@ pub(crate) fn dispatch_getcallinfo(args: Vec<Value>) -> BuiltinResult<Value> {
     category = "introspection",
     summary = "Return or display the active RunMat call stack.",
     descriptor(self::DBSTACK_DESCRIPTOR),
+    integer_capabilities(self::DBSTACK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::debugging"
 )]
 fn dbstack_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -776,13 +921,85 @@ fn getcallinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_hir::SourceId;
+    use runmat_types::SourceId;
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn cell_len(value: &Value) -> usize {
         let Value::Cell(cell) = value else {
             panic!("expected cell row, got {value:?}");
         };
         cell.data.len()
+    }
+
+    #[test]
+    fn typed_debug_offsets_preserve_platform_representable_uint64() {
+        assert_eq!(integer_value(&Value::Int(IntValue::U64(3))), Some(3));
+        assert_eq!(
+            integer_value(&Value::Int(IntValue::U64(u64::MAX))),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert_eq!(integer_value(&Value::Int(IntValue::I64(-1))), None);
+        assert_eq!(integer_value(&Value::Num(1.5)), None);
+        assert_eq!(integer_value(&Value::Num(usize::MAX as f64 + 1.0)), None);
+        if usize::BITS == 64 {
+            assert_eq!(integer_value(&Value::Num(usize::MAX as f64)), None);
+        }
+    }
+
+    #[test]
+    fn dbstack_accepts_every_exact_integer_scalar_class() {
+        for storage in [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ] {
+            let scalar = Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar");
+            assert_eq!(
+                parse_dbstack_args(&[Value::Tensor(scalar)]).unwrap(),
+                (0, false)
+            );
+        }
+        let scalar_double = Tensor::new(vec![0.0], vec![1, 1]).expect("double scalar");
+        assert_eq!(
+            parse_dbstack_args(&[Value::Tensor(scalar_double)]).unwrap(),
+            (0, false)
+        );
+    }
+
+    #[test]
+    fn dbstack_accepts_documented_option_orders_and_rejects_duplicates() {
+        assert!(parse_dbstack_args(&[Value::Num(1.0), Value::Num(2.0)]).is_err());
+        assert_eq!(
+            parse_dbstack_args(&[Value::Num(1.0), Value::String("-completenames".into())]).unwrap(),
+            (1, true)
+        );
+        assert_eq!(
+            parse_dbstack_args(&[Value::String("-completenames".into()), Value::Num(1.0)]).unwrap(),
+            (1, true)
+        );
+        assert!(parse_dbstack_args(&[
+            Value::String("-completenames".into()),
+            Value::String("-completenames".into())
+        ])
+        .is_err());
+        assert!(parse_dbstack_args(&[
+            Value::Num(1.0),
+            Value::String("-completenames".into()),
+            Value::String("-completenames".into())
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn dbstack_rejects_more_than_two_outputs() {
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let err = dispatch_dbstack(Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:dbstack:TooManyOutputs"));
     }
 
     #[test]
@@ -806,6 +1023,20 @@ mod tests {
         assert_eq!(st.fields.get("name"), Some(&Value::String("worker".into())));
         assert_eq!(
             st.fields.get("file"),
+            Some(&Value::String("worker.m".into()))
+        );
+        assert_eq!(cell.shape, vec![1, 1]);
+        assert_eq!(st.fields.len(), 3);
+        let complete =
+            dispatch_dbstack(vec![Value::String("-completenames".into())]).expect("complete names");
+        let Value::Cell(complete) = complete else {
+            panic!("expected cell column");
+        };
+        let Value::Struct(complete_frame) = &complete.data[0] else {
+            panic!("expected stack struct");
+        };
+        assert_eq!(
+            complete_frame.fields.get("file"),
             Some(&Value::String("/tmp/worker.m".into()))
         );
     }
@@ -856,7 +1087,7 @@ mod tests {
             Value::String("2:3".to_string()),
         ]))
         .expect("dbtype");
-        assert!(matches!(result, Value::Tensor(t) if t.data.is_empty()));
+        assert!(matches!(result, Value::Tensor(t) if t.materialize_f64().is_empty()));
     }
 
     #[test]

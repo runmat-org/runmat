@@ -1,14 +1,18 @@
 //! MATLAB-compatible `bounds` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::keyword_of;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -51,11 +55,11 @@ const INPUT_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
 };
 
 const INPUT_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nanflag",
+    name: "missingflag",
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Optional,
-    default: Some("\"omitnan\""),
-    description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    default: Some("\"omitmissing\""),
+    description: "Missing-value handling mode.",
 };
 
 const INPUTS_A: [BuiltinParamDescriptor; 1] = [INPUT_A];
@@ -80,12 +84,12 @@ const BOUNDS_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
         outputs: &OUTPUTS,
     },
     BuiltinSignatureDescriptor {
-        label: "[S, L] = bounds(A, nanflag)",
+        label: "[S, L] = bounds(A, missingflag)",
         inputs: &INPUTS_A_NANFLAG,
         outputs: &OUTPUTS,
     },
     BuiltinSignatureDescriptor {
-        label: "[S, L] = bounds(A, dim, nanflag)",
+        label: "[S, L] = bounds(A, dim, missingflag)",
         inputs: &INPUTS_A_DIM_NANFLAG,
         outputs: &OUTPUTS,
     },
@@ -94,7 +98,7 @@ const BOUNDS_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
 const BOUNDS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.BOUNDS.INVALID_ARGUMENT",
     identifier: Some("RunMat:bounds:InvalidArgument"),
-    when: "Dimension selectors, nanflags, or argument ordering are invalid.",
+    when: "Dimension selectors, missing flags, or argument ordering are invalid.",
     message: "bounds: invalid argument",
 };
 
@@ -115,6 +119,35 @@ pub const BOUNDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &BOUNDS_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Ordinary real arrays accept all eight integer storage classes; complex-integer ordering remains a separately tracked conformance question.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[S, L] = bounds(A, dim_or_vecdim, missingflag)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Both extrema preserve the integer input class; resident inputs currently gather through the shared min/max implementation and both exact results are re-uploaded.",
+    }];
+
 #[runtime_builtin(
     name = "bounds",
     category = "math/reduction",
@@ -122,6 +155,7 @@ pub const BOUNDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "bounds,min,max,reduction,omitnan",
     type_resolver(bounds_type),
     descriptor(crate::builtins::math::reduction::bounds::BOUNDS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::reduction::bounds::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::bounds"
 )]
 async fn bounds_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -151,6 +185,11 @@ impl BoundsEvaluation {
 
 async fn evaluate_bounds(value: Value, rest: &[Value]) -> BuiltinResult<BoundsEvaluation> {
     let rest = normalize_bounds_args(rest)?;
+    let gpu_provider = match &value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)
+            .or_else(runmat_accelerate_api::provider),
+        _ => None,
+    };
     let value = match value {
         Value::GpuTensor(handle) => Value::Tensor(
             gpu_helpers::gather_tensor_async(&handle)
@@ -165,10 +204,30 @@ async fn evaluate_bounds(value: Value, rest: &[Value]) -> BuiltinResult<BoundsEv
     let max_eval = super::max::evaluate(value, &rest)
         .await
         .map_err(|err| map_bounds_reduction_error("max", err))?;
-    Ok(BoundsEvaluation {
+    let mut evaluation = BoundsEvaluation {
         smallest: min_eval.into_value(),
         largest: max_eval.into_value(),
-    })
+    };
+    if let Some(provider) = gpu_provider {
+        evaluation.smallest = upload_bounds_value(provider, evaluation.smallest)?;
+        evaluation.largest = upload_bounds_value(provider, evaluation.largest)?;
+    }
+    Ok(evaluation)
+}
+
+fn upload_bounds_value(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let logical = matches!(value, Value::Bool(_) | Value::LogicalArray(_));
+    let tensor = tensor::value_into_tensor_for("bounds", value)
+        .map_err(|error| bounds_internal(format!("GPU result conversion failed: {error}")))?;
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|error| bounds_internal(format!("GPU result upload failed: {error}")))?;
+    if logical {
+        runmat_accelerate_api::set_handle_logical(&handle, true);
+    }
+    Ok(Value::GpuTensor(handle))
 }
 
 fn normalize_bounds_args(rest: &[Value]) -> BuiltinResult<Vec<Value>> {
@@ -209,7 +268,7 @@ fn map_bounds_reduction_error(label: &str, err: RuntimeError) -> RuntimeError {
 }
 
 fn empty_placeholder() -> Value {
-    Value::Tensor(runmat_builtins::Tensor::new(Vec::new(), vec![0, 0]).unwrap())
+    Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap())
 }
 
 fn bounds_error(
@@ -235,15 +294,15 @@ fn bounds_internal(detail: impl AsRef<str>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::Tensor;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
     }
 
     #[test]
-    fn bounds_descriptor_declares_runtime_nanflag_default() {
-        assert_eq!(INPUT_NANFLAG.default, Some("\"omitnan\""));
+    fn bounds_descriptor_declares_runtime_missingflag_default() {
+        assert_eq!(INPUT_NANFLAG.default, Some("\"omitmissing\""));
     }
 
     #[tokio::test]
@@ -253,11 +312,11 @@ mod tests {
         let Value::Tensor(mins) = result.smallest else {
             panic!("expected min tensor");
         };
-        assert_eq!(mins.data, vec![1.0, 2.0]);
+        assert_eq!(mins.materialize_f64(), vec![1.0, 2.0]);
         let Value::Tensor(maxes) = result.largest else {
             panic!("expected max tensor");
         };
-        assert_eq!(maxes.data, vec![3.0, 4.0]);
+        assert_eq!(maxes.materialize_f64(), vec![3.0, 4.0]);
     }
 
     #[tokio::test]
@@ -276,6 +335,38 @@ mod tests {
         let result = evaluate_bounds(input, &[Value::from("all")]).await.unwrap();
         assert_eq!(result.smallest, Value::Num(-1.0));
         assert_eq!(result.largest, Value::Num(5.0));
+    }
+
+    #[tokio::test]
+    async fn bounds_preserves_exact_integer_extrema_for_dimensions_and_all() {
+        let large = 9_007_199_254_740_992_u64;
+        let input = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![large + 1, large, u64::MAX, 7]),
+                vec![2, 2],
+            )
+            .unwrap(),
+        );
+
+        let reduced = evaluate_bounds(input.clone(), &[]).await.unwrap();
+        let Value::Tensor(minima) = reduced.smallest else {
+            panic!("expected integer minima tensor");
+        };
+        let Value::Tensor(maxima) = reduced.largest else {
+            panic!("expected integer maxima tensor");
+        };
+        assert_eq!(
+            minima.integer_storage(),
+            Some(&IntegerStorage::U64(vec![large, 7]))
+        );
+        assert_eq!(
+            maxima.integer_storage(),
+            Some(&IntegerStorage::U64(vec![large + 1, u64::MAX]))
+        );
+
+        let all = evaluate_bounds(input, &[Value::from("all")]).await.unwrap();
+        assert_eq!(all.smallest, Value::Int(IntValue::U64(7)));
+        assert_eq!(all.largest, Value::Int(IntValue::U64(u64::MAX)));
     }
 
     #[tokio::test]
@@ -298,5 +389,39 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert_eq!(values[0], Value::Num(1.0));
         assert_eq!(values[1], Value::Num(4.0));
+    }
+
+    #[test]
+    fn bounds_integer_gpu_fallback_preserves_exact_class_and_residency() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_993_u64;
+            let tensor = Tensor::new_integer(
+                IntegerStorage::U64(vec![wide + 2, wide, u64::MAX, 7]),
+                vec![2, 2],
+            )
+            .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let result =
+                futures::executor::block_on(evaluate_bounds(Value::GpuTensor(handle), &[]))
+                    .expect("bounds");
+            for (value, expected) in [
+                (result.smallest, vec![wide, 7]),
+                (result.largest, vec![wide + 2, u64::MAX]),
+            ] {
+                let Value::GpuTensor(result_handle) = &value else {
+                    panic!("expected resident integer bound");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(result_handle),
+                    Some(runmat_accelerate_api::IntegerElementType::U64)
+                );
+                let gathered =
+                    crate::builtins::common::test_support::gather(value).expect("gather bound");
+                assert_eq!(
+                    gathered.integer_storage(),
+                    Some(&IntegerStorage::U64(expected))
+                );
+            }
+        });
     }
 }

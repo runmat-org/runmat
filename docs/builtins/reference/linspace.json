@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Uses provider `linspace` hooks when available (implemented by the WGPU backend); otherwise falls back to uploading a host-generated sequence to keep residency intact."
+    "notes": "Uses the exact owning provider's `linspace` hook when available; otherwise generates on the host and restores the result to that owner when the provider can represent the output class."
   },
   "fusion": {
     "elementwise": false,
@@ -34,12 +34,13 @@
   "description": "`linspace(a, b, n)` returns `n` linearly spaced points between `a` and `b`, inclusive. Default point count and row-vector output behavior follow MATLAB semantics.",
   "behaviors": [
     "`linspace(a, b)` is equivalent to `linspace(a, b, 100)`.",
-    "`linspace(a, b, 0)` returns a `1×0` empty double row vector.",
+    "`linspace(a, b, 0)` returns a `1×0` empty row vector whose floating class follows the endpoints.",
     "`linspace(a, b, 1)` returns `b`.",
     "`linspace(a, b, 2)` returns `[a b]`.",
     "Complex end points are supported; the real and imaginary parts are interpolated independently.",
-    "Inputs may be scalars, `1×1` tensors, or GPU scalars (`gpuArray` handles).",
-    "The third argument must be a finite, non-negative integer."
+    "Endpoints may be single- or double-precision scalars, `1×1` tensors, or GPU scalars; integer and logical endpoints are rejected.",
+    "The third argument may be a floating scalar or any of the eight integer classes. Finite floating counts are floored, non-positive counts produce an empty row vector, and infinite or platform-oversized counts raise an error.",
+    "A `NaN` count produces a `1×1` row vector containing `NaN`."
   ],
   "examples": [
     {
@@ -74,11 +75,11 @@
     },
     {
       "question": "Can I request zero points?",
-      "answer": "Yes. `linspace(a, b, 0)` returns a `1×0` empty row vector."
+      "answer": "Yes. Zero and negative counts return a `1×0` empty row vector."
     },
     {
       "question": "Does the third argument need to be an integer?",
-      "answer": "Yes. Non-integer or negative counts raise an error, just like MATLAB."
+      "answer": "No. RunMat floors a finite floating count, accepts exact scalar counts from every integer class, and maps non-positive counts to an empty result. Infinite and platform-oversized counts raise an error."
     },
     {
       "question": "Does `linspace` support complex inputs?",
@@ -90,11 +91,11 @@
     },
     {
       "question": "Can I pass GPU scalars?",
-      "answer": "Yes. GPU endpoints are gathered once to compute the sequence. The result stays on the GPU as long as a provider is available and the endpoints are real."
+      "answer": "Yes. RunMat reads each endpoint through its exact owning provider. Real sequences use that provider's `linspace` hook when available; host-generated real or complex results are restored to the owner when it can represent the output class. Endpoints owned by different devices are rejected."
     },
     {
       "question": "What precision is used?",
-      "answer": "RunMat mirrors MATLAB and returns double-precision vectors. Providers may choose to specialise future hooks for other precisions."
+      "answer": "Double endpoints produce double output. If either endpoint is single precision, RunMat produces single output; a provider must support that precision to keep a restored result resident."
     },
     {
       "question": "How does `linspace` differ from the colon operator?",
@@ -122,7 +123,7 @@
     },
     {
       "question": "Can I use linspace with GPU arrays in RunMat?",
-      "answer": "Yes. Pass GPU scalars to `linspace` and the result will be a GPU-resident array, avoiding unnecessary host-device transfers."
+      "answer": "Yes. Pass compatible GPU scalars from one device. RunMat preserves their owning provider and provenance, using direct generation or one host-generation-and-restore fallback when possible."
     }
   ],
   "links": [
@@ -199,8 +200,8 @@
     "label": "`crates/runmat-runtime/src/builtins/array/creation/linspace.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/linspace.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` yourself in RunMat. When either endpoint already resides on the GPU, RunMat keeps the generated sequence on the device to preserve residency for downstream operations. When the active provider implements the dedicated `linspace` hook (the WGPU backend does), the sequence is generated directly on-device. If no acceleration provider is registered, or if a provider lacks the hook, the runtime emits the values on the host and uploads them once, preserving correctness with a modest transfer.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray` yourself in RunMat. A resident endpoint selects its exact owning provider; endpoints from different devices are rejected. The runtime prefers that owner's `linspace` hook for real sequences. If direct generation is unavailable, it generates on the host and restores the result to the same owner when the provider supports the required real or complex class and precision; otherwise the correctly typed result remains on the host.",
   "gpu_behavior": [
-    "If either endpoint is already resident on the GPU, RunMat keeps the result on the device whenever the active acceleration provider supports uploading host buffers. Providers may additionally implement the optional `linspace` hook to generate the sequence entirely on device. Until then, RunMat generates the sequence on the host and performs a single upload so downstream kernels can consume the GPU data without extra gathers."
+    "GPU endpoints are downloaded only through their exact owner. For real output, RunMat first offers generation to that owner's `linspace` hook and validates the returned handle's shape, device, owner, precision, and non-aliasing. Otherwise it generates on the host and restores the result to the source owner when representable, preserving explicit or automatic provenance; complex output follows the same gather-and-restore rule."
   ]
 }

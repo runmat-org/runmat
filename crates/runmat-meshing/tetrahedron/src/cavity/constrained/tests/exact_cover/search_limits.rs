@@ -66,3 +66,24 @@ fn exact_cover_trace_reports_volume_overflow_dead_end() {
         })
     );
 }
+
+#[test]
+fn exact_cover_recursive_search_checks_cancellation() {
+    struct Cancelled;
+    impl runmat_meshing_core::MeshingCancellationSignal for Cancelled {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+    }
+    let cavity = two_tetrahedron_bipyramid_cavity();
+    let candidates = [ConstrainedCavityRefillTetrahedron {
+        node_ids: [0, 1, 2, 3],
+        volume_m3: 1.0 / 6.0,
+        aspect_ratio: 1.0,
+        exact_scaled_jacobian: 0.4,
+    }];
+    let mut search = BoundaryExactCoverSearch::new(&cavity, &candidates, 1.0e-12);
+
+    assert!(search.search_with_trace_controlled(&Cancelled, 1).is_err());
+    assert_eq!(search.attempts, 1);
+}

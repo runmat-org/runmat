@@ -8,7 +8,7 @@
     "performance",
     "gpu"
   ],
-  "summary": "Measure function-handle execution time by repeated evaluation with MATLAB-compatible `timeit` behavior.",
+  "summary": "Measure function-handle execution time by repeated evaluation.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -27,7 +27,7 @@
     "unit": "builtins::timing::timeit::tests",
     "integration": "builtins::timing::timeit::tests::timeit_measures_time"
   },
-  "description": "`t = timeit(f)` repeatedly evaluates zero-argument function handle `f` and returns timing statistics in seconds. It supports MATLAB-compatible optional output-count control for invoked function calls.",
+  "description": "`t = timeit(f)` repeatedly evaluates zero-argument function handle `f` and returns the median execution time in seconds. The optional output count controls how many outputs are requested from each invocation.",
   "behaviors": [
     "Executes `f` repeatedly, adjusting the inner loop count until a single batch takes at least a few milliseconds or the function is slow enough.",
     "Collects multiple samples (at least seven batches) and returns the median per-invocation time, which is robust against outliers.",
@@ -63,43 +63,43 @@
   "faqs": [
     {
       "question": "What does `timeit` return?",
-      "answer": "— A scalar double containing the median runtime per invocation in seconds."
+      "answer": "A scalar double containing the median runtime per invocation in seconds."
     },
     {
       "question": "How many runs does `timeit` perform?",
-      "answer": "— It automatically selects a loop count so each batch lasts a few milliseconds, collecting at least seven batches."
+      "answer": "It automatically selects a loop count so each batch lasts a few milliseconds, collecting at least seven batches."
     },
     {
       "question": "Does `timeit` synchronise GPU kernels?",
-      "answer": "— No. Insert `wait(gpuDevice)` inside the handle when you need explicit synchronisation."
+      "answer": "No. Insert `wait(gpuDevice)` inside the handle when you need explicit synchronisation."
     },
     {
       "question": "Can I time functions that require inputs?",
-      "answer": "— Yes. Capture them in the handle, for example `timeit(@() myfun(A, B))`."
+      "answer": "Yes. Capture them in the handle, for example `timeit(@() myfun(A, B))`."
     },
     {
       "question": "How do I time a function with multiple outputs?",
-      "answer": "— Pass `timeit(@() svd(A), 3)` to mirror MATLAB’s call signature. RunMat dispatches the handle with the requested output count and discards returned values."
+      "answer": "Pass `timeit(@() svd(A), 3)`. The runtime requests three outputs from the handle and discards the returned values. Native integer output counts are available in `runmat` compatibility mode."
     },
     {
       "question": "Why do successive runs differ slightly?",
-      "answer": "— Normal system jitter, cache effects, and GPU scheduling can change runtimes slightly; the median mitigates outliers."
+      "answer": "Normal system jitter, cache effects, and GPU scheduling can change runtimes slightly; the median mitigates outliers."
     },
     {
       "question": "Can `timeit` time scripts?",
-      "answer": "— Wrap the script body in a function handle so it becomes zero-argument, then call `timeit` on that handle."
+      "answer": "Wrap the script body in a function handle so it becomes zero-argument, then call `timeit` on that handle."
     },
     {
       "question": "Does `timeit` participate in fusion or JIT tiers?",
-      "answer": "— It simply executes the provided handle; any tiering or fusion happens inside the timed function."
+      "answer": "It executes the provided handle; any tiering or fusion happens inside the timed function."
     },
     {
       "question": "What happens if the function errors?",
-      "answer": "— The error is propagated immediately and timing stops, matching MATLAB behaviour."
+      "answer": "The error is propagated immediately and timing stops."
     },
     {
       "question": "Is there a limit on runs?",
-      "answer": "— Yes. `timeit` caps the inner loop at about one million iterations to avoid runaway measurements."
+      "answer": "Yes. `timeit` caps the inner loop at about one million iterations to avoid runaway measurements."
     }
   ],
   "links": [

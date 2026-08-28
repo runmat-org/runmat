@@ -1,14 +1,15 @@
 //! MATLAB-compatible `uigetfile` builtin.
 
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use std::path::PathBuf;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, Value,
 };
 use runmat_filesystem::{OpenFileDialogRequest, OpenFileDialogSelection};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, Value};
 
 use super::file_dialog::{
     default_filters, ensure_same_directory, parse_filter_spec, scalar_text, selected_path_parts,
@@ -232,6 +233,13 @@ pub const UIGETFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &UIGETFILE_ERRORS,
 };
 
+pub const UIGETFILE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "uigetfile accepts textual filter, title, path, and option inputs. Its filter-index output is an integer-valued double scalar, not a native integer-class boundary.",
+    };
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::uigetfile")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
@@ -316,6 +324,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "sink",
     type_resolver(crate::builtins::io::type_resolvers::uigetfile_type),
     descriptor(crate::builtins::io::repl_fs::uigetfile::UIGETFILE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::uigetfile::UIGETFILE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::uigetfile"
 )]
 async fn uigetfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -478,8 +487,8 @@ fn selected_outputs(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use runmat_builtins::Tensor;
     use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
+    use runmat_value::Tensor;
     use std::io::{self, ErrorKind};
     use std::path::Path;
     use std::sync::{Arc, Mutex};

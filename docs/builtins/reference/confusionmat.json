@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Label matching and count accumulation run on CPU."
+    "notes": "MATLAB does not document full gpuArray support for confusionmat. RunMat mode accepts resident inputs as an explicit extension, gathers them to host, and performs exact label matching and count accumulation on CPU."
   },
   "fusion": {
     "elementwise": false,
@@ -30,11 +30,11 @@
   "description": "`confusionmat(group,grouphat)` compares true class labels in `group` with predicted labels in `grouphat` and returns a matrix whose rows are true classes and columns are predicted classes.",
   "behaviors": [
     "`group` and `grouphat` must contain the same number of labels.",
-    "Numeric, logical, string, character-row, categorical, and cell-string labels are supported. Text label families can be mixed between string, char, cell-string, and categorical inputs.",
+    "MATLAB-compatible inputs are single, double, logical, string, character-row, categorical, and cell-string labels. In RunMat mode, all eight typed-integer classes are also accepted as an explicit extension, without conversion through floating point. Text label families can be mixed between string, char, cell-string, and categorical inputs.",
     "Without an explicit order, numeric labels are sorted ascending, text labels follow first appearance across `group` then `grouphat`, categorical labels follow category order for observed categories, and logical labels are ordered false then true.",
     "`confusionmat(group,grouphat,'Order',order)` uses the supplied class order, requires every nonmissing label in `group` and `grouphat` to appear in `order`, and includes zero rows or columns for extra order labels that do not appear in the data.",
     "Rows with missing true or predicted labels are omitted. Numeric `NaN`, empty text, and `<missing>` text are treated as missing labels.",
-    "`[C,order] = confusionmat(...)` returns the class labels corresponding to the rows and columns of `C`, preserving the label family of the inferred or explicit order."
+    "`[C,order] = confusionmat(...)` returns the class labels corresponding to the rows and columns of `C`. Typed-integer extension inputs preserve their exact class and values in `order`, including int64 and uint64 values above flintmax."
   ],
   "examples": [
     {

@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 const CALL_METHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -42,28 +43,6 @@ const CALL_METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatur
     outputs: &CALL_METHOD_OUTPUT,
 }];
 
-const CALL_METHOD_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    BuiltinErrorDescriptor {
-        code: "RM.CALL_METHOD.NAME_INVALID",
-        identifier: Some("RunMat:CallMethodNameInvalid"),
-        when: "The method name is empty or missing.",
-        message: "call_method: method name must not be empty",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.CALL_METHOD.RECEIVER_INVALID",
-        identifier: Some("RunMat:InvalidObjectDispatch"),
-        when: "Receiver is not an object or handle object.",
-        message: "call_method: requires object receiver",
-    },
-];
-
-pub const CALL_METHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CALL_METHOD_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &CALL_METHOD_ERRORS,
-};
-
 pub(crate) const CALL_METHOD_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.CALL_METHOD.NAME_INVALID",
     identifier: Some("RunMat:CallMethodNameInvalid"),
@@ -78,6 +57,18 @@ pub(crate) const CALL_METHOD_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor =
         when: "Receiver is not an object or handle object.",
         message: "call_method: requires object receiver",
     };
+
+const CALL_METHOD_ERRORS: [BuiltinErrorDescriptor; 2] = [
+    CALL_METHOD_ERROR_NAME_INVALID,
+    CALL_METHOD_ERROR_RECEIVER_INVALID,
+];
+
+pub const CALL_METHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CALL_METHOD_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+    errors: &CALL_METHOD_ERRORS,
+};
 
 pub(crate) async fn dispatch_call_method(
     base: Value,

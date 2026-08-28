@@ -18,8 +18,25 @@ impl WgpuProvider {
         output_shape: &[usize],
         len: usize,
     ) -> Result<GpuTensorHandle> {
+        self.fused_elementwise_with_telemetry_and_storage_exec(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            GpuTensorStorage::Real,
+        )
+    }
+
+    pub(crate) fn fused_elementwise_with_telemetry_and_storage_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        output_storage: GpuTensorStorage,
+    ) -> Result<GpuTensorHandle> {
         let start = Instant::now();
-        let result = self.fused_elementwise_exec(shader, inputs, output_shape, len);
+        let result = self.fused_elementwise_exec(shader, inputs, output_shape, len, output_storage);
         if result.is_ok() {
             let elapsed = start.elapsed();
             self.telemetry.record_fused_elementwise_duration(elapsed);
@@ -235,7 +252,7 @@ impl WgpuProvider {
         let (bind_hits, bind_misses) = self.bind_group_cache.counters();
         let mut by_layout: Vec<runmat_accelerate_api::BindGroupLayoutTelemetry> = Vec::new();
         let per = self.bind_group_cache.per_layout_counters();
-        if let Ok(tags) = self.bind_group_layout_tags.lock() {
+        if let Ok(tags) = self.device_caches.bind_group_layout_tags.lock() {
             for (ptr, (h, m)) in per {
                 let tag = tags
                     .get(&ptr)

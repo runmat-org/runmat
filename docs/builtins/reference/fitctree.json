@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Classification tree fitting runs on CPU."
+    "notes": "Classification tree fitting runs on CPU. Provider-resident inputs use a RunMat-only, compatibility-gated gather fallback; MATLAB-compatible mode rejects them before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -31,10 +31,13 @@
   "behaviors": [
     "`fitctree(X,Y)` fits a classification tree with observations in rows of `X` and class labels in `Y`.",
     "Table input supports `fitctree(Tbl,ResponseVarName)`, `fitctree(Tbl,formula)`, and `fitctree(Tbl,Y)`. Formula support covers additive predictor lists such as `Y ~ A + B`.",
-    "`Y` can contain numeric, logical, string, char, or cell-string labels. The predicted label output preserves the label family.",
+    "`Y` can contain numeric, logical, string, char, cell-string, or any of the eight signed and unsigned integer label classes. Integer grouping identity and class are preserved exactly in `ClassNames` and prediction, including adjacent `int64` or `uint64` labels above `flintmax`.",
+    "Typed-integer matrix predictors and table numeric predictor variables are a compatibility-gated RunMat extension. Every value must be exactly representable in binary64 before statistical computation; inexact wide integers are rejected rather than rounded.",
+    "Typed-integer `Weights` and numeric name-value controls are a separate compatibility-gated RunMat extension and use the same exact binary64 boundary. MATLAB-compatible mode accepts the documented floating forms and rejects these integer extensions.",
     "Name-value options `ClassNames`, `PredictorNames`, `ResponseName`, `MaxNumSplits`, `MinLeafSize`, `MinParentSize`, `SplitCriterion`, `Weights`, and `ScoreTransform` are accepted.",
     "`SplitCriterion` supports `gdi` and `deviance`. `ScoreTransform` currently accepts `none`.",
-    "Rows containing `NaN` in predictors, response, or zero weights are omitted before fitting; `Inf` values and negative weights are rejected.",
+    "Rows with missing responses, zero weights, or all predictor values missing are omitted. Rows with only some missing predictors remain available for split evaluation on observed variables. `Inf` values and negative weights are rejected.",
+    "Host and table fitting remain CPU operations. Resident input support is reported as `GatherFallback` and is independently gated as a RunMat extension before download.",
     "Categorical predictors, pruning, surrogate splits, cross-validation, prior/cost matrices, and hyperparameter optimization are not implemented yet and raise explicit errors instead of silently producing partial models.",
     "The returned object exposes `ResponseName`, `PredictorNames`, `ClassNames`, `CategoricalPredictors`, `ScoreTransform`, `NumObservations`, `NumPredictors`, `NumNodes`, `NumSplits`, and `ModelParameters` properties."
   ],

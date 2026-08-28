@@ -118,7 +118,7 @@ fn sequence_heuristics_disabled() -> bool {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::*;
     use runmat_accelerate::simple_provider;

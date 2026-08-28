@@ -19,7 +19,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "`surf` uses the shared surface pipeline. GPU-friendly inputs can stay resident through the rendering path when the plotting device is available."
+    "notes": "`surf` retains exact owner-aware source data for graphics properties and scene persistence while GPU-friendly inputs can stay resident through the floating rendering path when the plotting device is available."
   },
   "fusion": {
     "elementwise": false,
@@ -35,6 +35,7 @@
   "description": "`surf` creates shaded 3-D surfaces from vector axes plus height data, meshgrid coordinates, or full parametric coordinate matrices. It returns a surface handle and follows MATLAB-compatible argument and property behavior.",
   "behaviors": [
     "`surf(Z)` uses implicit axes, while `surf(X, Y, Z)` accepts vector axes, meshgrid-style coordinate matrices, or full parametric coordinate matrices, following MATLAB `surf` call forms.",
+    "`XData`, `YData`, and `ZData` retain native single, double, or integer class, exact values, and shape. Vertex generation, color preparation, and rendering are explicit floating boundaries and do not replace that authoritative scene data.",
     "The returned value is a surface handle that can be inspected and updated through `get` and `set`.",
     "Surface plots naturally interact with `view`, `zlabel`, `colorbar`, `colormap`, and `shading` because they all operate on the same subplot-local axes state.",
     "GPU-backed surface rendering is the preferred path when exported vector-axis buffers and the shared plotting device are available; full host coordinate matrices render through the same CPU surface path used for parametric surfaces.",

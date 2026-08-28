@@ -31,11 +31,17 @@ impl WgpuProvider {
         &self,
         handle: &GpuTensorHandle,
     ) -> Option<WgpuBufferRef> {
-        self.get_entry(handle).ok().map(|entry| WgpuBufferRef {
+        let entry = self.get_entry_raw(handle).ok()?;
+        if entry.integer_type().is_some()
+            || entry.storage != runmat_accelerate_api::GpuTensorStorage::Real
+        {
+            return None;
+        }
+        Some(WgpuBufferRef {
             buffer: entry.buffer,
             len: entry.len,
             shape: entry.shape,
-            element_size: self.element_size,
+            element_size: entry.element_type.element_size(),
             precision: match entry.precision {
                 NumericPrecision::F32 => ProviderPrecision::F32,
                 NumericPrecision::F64 => ProviderPrecision::F64,

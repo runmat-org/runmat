@@ -8,20 +8,103 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 
 use log::debug;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_time::unix_timestamp_ns;
+use runmat_value::{IntValue, StructValue, Tensor, Value};
 
 use crate::builtins::stats::type_resolvers::rng_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rng";
+const MATLAB_SEED_UPPER_BOUND: u64 = 1_u64 << 32;
+
+const RNG_WIDE_SEED_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rng-wide-seed",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rng seeds at or above 2^32 are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RngWideSeedExtension"),
+};
+
+const RNG_TYPED_STATE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rng-typed-state-fields",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rng state structures with native integer fields are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RngTypedStateFieldsExtension"),
+};
+
+pub const RNG_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [RNG_WIDE_SEED_EXTENSION, RNG_TYPED_STATE_EXTENSION];
+
+const RNG_INTEGER_SEED_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "seed",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented seed is a nonnegative integer below 2^32; native integer scalars are read exactly before the range check.",
+    }];
+
+const RNG_WIDE_INTEGER_SEED_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "seed",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat mode extends the seed domain through u64; native typed values remain exact even above flintmax.",
+    }];
+
+const RNG_INTEGER_STATE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Seed/State fields",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB-compatible restoration consumes a structure returned by rng; accepting independently constructed native-integer state fields is a separately gated RunMat extension.",
+    }];
+
+pub const RNG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "s = rng(integer_seed[, generator]) where seed < 2^32",
+        inputs: &RNG_INTEGER_SEED_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The exact seed configures the shared host stream and provider state hook; generator sequence/state parity is a general RNG-engine conformance gap, not an implicit integer conversion boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "s = rng(wide_integer_seed[, generator])",
+        inputs: &RNG_WIDE_INTEGER_SEED_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "This RunMat-only form is gated before stream mutation and retains an exact typed Seed field when a binary64 field would round.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "s = rng(state_with_integer_fields)",
+        inputs: &RNG_INTEGER_STATE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The independently gated extension validates Seed and State words exactly in their native integer classes.",
+    },
+];
 
 const RNG_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "s",
@@ -228,6 +311,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "rng,seed,twister,shuffle,state",
     type_resolver(rng_type),
     descriptor(crate::builtins::stats::random::rng::RNG_DESCRIPTOR),
+    extensions(crate::builtins::stats::random::rng::RNG_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::random::rng::RNG_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::random::rng"
 )]
 async fn rng_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -235,6 +320,8 @@ async fn rng_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         let current = random::snapshot()?;
         return snapshot_to_value(current);
     }
+
+    ensure_rng_state_extensions(&args)?;
 
     let previous = random::snapshot()?;
     let command = parse_command(&args)?;
@@ -269,7 +356,11 @@ fn parse_single_arg(arg: &Value) -> BuiltinResult<ParsedCommand> {
     }
     match arg {
         Value::Struct(_) => Ok(ParsedCommand::Restore(snapshot_from_value(arg)?)),
-        _ => Ok(ParsedCommand::Seed(parse_seed_scalar(arg, "rng: seed")?)),
+        _ => {
+            let seed = parse_seed_scalar(arg, "rng: seed")?;
+            ensure_direct_seed_range(seed)?;
+            Ok(ParsedCommand::Seed(seed))
+        }
     }
 }
 
@@ -279,6 +370,7 @@ fn parse_double_args(first: &Value, second: &Value) -> BuiltinResult<ParsedComma
         return parse_keyword(&keyword, generator);
     }
     let seed = parse_seed_scalar(first, "rng: seed")?;
+    ensure_direct_seed_range(seed)?;
     let _ = parse_generator(second)?;
     Ok(ParsedCommand::Seed(seed))
 }
@@ -328,14 +420,18 @@ fn apply_command(command: ParsedCommand) -> BuiltinResult<()> {
 
 fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
     let mut struct_value = StructValue::new();
-    let seed_value = snapshot.seed.unwrap_or(DEFAULT_USER_SEED) as f64;
+    let seed = snapshot.seed.unwrap_or(DEFAULT_USER_SEED);
+    let seed_value =
+        if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&IntValue::U64(seed)) {
+            Value::Num(seed as f64)
+        } else {
+            Value::Int(IntValue::U64(seed))
+        };
     struct_value.fields.insert(
         "Type".to_string(),
         Value::String(snapshot.algorithm.as_str().to_string()),
     );
-    struct_value
-        .fields
-        .insert("Seed".to_string(), Value::Num(seed_value));
+    struct_value.fields.insert("Seed".to_string(), seed_value);
     let lo = (snapshot.state & 0xFFFF_FFFF) as f64;
     let hi = (snapshot.state >> 32) as f64;
     let tensor = Tensor::new(vec![lo, hi], vec![1, 2])
@@ -414,16 +510,12 @@ fn parse_generator_keyword(keyword: &str) -> BuiltinResult<RngAlgorithm> {
 
 fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
     match value {
-        Value::Int(i) => {
-            let v = i.to_i64();
-            if v < 0 {
-                return Err(rng_error_with(
-                    &RNG_ERROR_SEED_NONNEGATIVE,
-                    format!("{label}: seed must be non-negative"),
-                ));
-            }
-            Ok(v as u64)
-        }
+        Value::Int(i) => i.try_to_u64().ok_or_else(|| {
+            rng_error_with(
+                &RNG_ERROR_SEED_NONNEGATIVE,
+                format!("{label}: seed must be non-negative"),
+            )
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(rng_error_with(
@@ -452,7 +544,18 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
             }
             Ok(rounded as u64)
         }
-        Value::Tensor(t) if t.data.len() == 1 => parse_seed_scalar(&Value::Num(t.data[0]), label),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                int.try_to_u64().ok_or_else(|| {
+                    rng_error_with(
+                        &RNG_ERROR_SEED_NONNEGATIVE,
+                        format!("{label}: seed must be non-negative"),
+                    )
+                })
+            } else {
+                parse_seed_scalar(&Value::Num(tensor::tensor_value_f64(t, 0)), label)
+            }
+        }
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Err(rng_error_with(
             &RNG_ERROR_INVALID_ARGUMENT,
             format!("{label}: expected a numeric seed"),
@@ -464,14 +567,69 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
     }
 }
 
+fn ensure_direct_seed_range(seed: u64) -> BuiltinResult<()> {
+    if seed >= MATLAB_SEED_UPPER_BOUND {
+        crate::compatibility::ensure_builtin_extension_enabled(&RNG_WIDE_SEED_EXTENSION, NAME)?;
+    }
+    Ok(())
+}
+
+fn ensure_rng_state_extensions(args: &[Value]) -> BuiltinResult<()> {
+    if let [Value::Struct(state)] = args {
+        let has_native_integer_field = ["Seed", "seed", "State", "state"]
+            .into_iter()
+            .filter_map(|name| state.fields.get(name))
+            .any(crate::builtins::common::validation::value_has_native_integer_class);
+        if has_native_integer_field {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &RNG_TYPED_STATE_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
     match value {
-        Value::Tensor(t) => match t.data.len() {
-            1 => parse_state_scalar(&Value::Num(t.data[0])),
+        Value::Tensor(t) => match tensor::element_count(&t.shape) {
+            1 => {
+                if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                    int.try_to_u64().ok_or_else(|| {
+                        rng_error_with(
+                            &RNG_ERROR_INVALID_ARGUMENT,
+                            "rng: State must be non-negative",
+                        )
+                    })
+                } else {
+                    parse_state_scalar(&Value::Num(tensor::tensor_value_f64(t, 0)))
+                }
+            }
             2 => {
-                let lo = parse_state_word(t.data[0], "rng: State[1]")?;
-                let hi = parse_state_word(t.data[1], "rng: State[2]")?;
-                Ok(lo | ((hi as u64) << 32))
+                let (lo, hi) = if let Some(storage) = t.integer_storage() {
+                    let lo = storage.value_at(0).ok_or_else(|| {
+                        rng_error_with(
+                            &RNG_ERROR_INVALID_ARGUMENT,
+                            "rng: State tensor must contain one or two elements",
+                        )
+                    })?;
+                    let hi = storage.value_at(1).ok_or_else(|| {
+                        rng_error_with(
+                            &RNG_ERROR_INVALID_ARGUMENT,
+                            "rng: State tensor must contain one or two elements",
+                        )
+                    })?;
+                    (
+                        parse_state_word_int(lo, "rng: State[1]")?,
+                        parse_state_word_int(hi, "rng: State[2]")?,
+                    )
+                } else {
+                    (
+                        parse_state_word(tensor::tensor_value_f64(t, 0), "rng: State[1]")?,
+                        parse_state_word(tensor::tensor_value_f64(t, 1), "rng: State[2]")?,
+                    )
+                };
+                Ok(lo | (hi << 32))
             }
             _ => Err(rng_error_with(
                 &RNG_ERROR_INVALID_ARGUMENT,
@@ -500,22 +658,33 @@ fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
             }
             Ok(rounded as u64)
         }
-        Value::Int(i) => {
-            let v = i.to_i64();
-            if v < 0 {
-                Err(rng_error_with(
-                    &RNG_ERROR_INVALID_ARGUMENT,
-                    "rng: State must be non-negative",
-                ))
-            } else {
-                Ok(v as u64)
-            }
-        }
+        Value::Int(i) => i.try_to_u64().ok_or_else(|| {
+            rng_error_with(
+                &RNG_ERROR_INVALID_ARGUMENT,
+                "rng: State must be non-negative",
+            )
+        }),
         other => Err(rng_error_with(
             &RNG_ERROR_INVALID_ARGUMENT,
             format!("rng: unsupported State value {other:?}"),
         )),
     }
+}
+
+fn parse_state_word_int(value: IntValue, label: &str) -> BuiltinResult<u64> {
+    let word = value.try_to_u64().ok_or_else(|| {
+        rng_error_with(
+            &RNG_ERROR_INVALID_ARGUMENT,
+            format!("{label}: must be non-negative"),
+        )
+    })?;
+    if word > u32::MAX as u64 {
+        return Err(rng_error_with(
+            &RNG_ERROR_INVALID_ARGUMENT,
+            format!("{label}: must fit in uint32"),
+        ));
+    }
+    Ok(word)
 }
 
 fn parse_state_word(value: f64, label: &str) -> BuiltinResult<u64> {
@@ -576,9 +745,9 @@ fn sync_provider_state(state: u64) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
-    use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -617,6 +786,131 @@ pub(crate) mod tests {
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
         let seq2 = random::generate_uniform(5, "rng test").expect("uniform");
         assert_eq!(seq1, seq2);
+    }
+
+    #[test]
+    fn rng_integer_seed_and_state_preserve_full_uint64_range() {
+        assert_eq!(
+            parse_seed_scalar(&Value::Int(IntValue::U64(u64::MAX)), "rng: seed")
+                .expect("uint64 seed"),
+            u64::MAX
+        );
+        assert_eq!(
+            parse_state_scalar(&Value::Int(IntValue::U64(u64::MAX))).expect("uint64 state"),
+            u64::MAX
+        );
+        assert!(parse_seed_scalar(&Value::Int(IntValue::I64(-1)), "rng: seed").is_err());
+    }
+
+    #[test]
+    fn rng_wide_seed_is_gated_and_query_preserves_exact_seed() {
+        let _guard = random::test_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        random::reset_rng();
+        let wide = (1_u64 << 53) + 1;
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(rng_builtin(vec![Value::Int(IntValue::U64(wide))]))
+                .expect_err("wide seed must gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:RngWideSeedExtension")
+            );
+        }
+        {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            block_on(rng_builtin(vec![Value::Int(IntValue::U64(wide))])).expect("RunMat wide seed");
+            let Value::Struct(snapshot) = block_on(rng_builtin(Vec::new())).expect("snapshot")
+            else {
+                panic!("expected snapshot struct");
+            };
+            assert_eq!(
+                snapshot.fields.get("Seed"),
+                Some(&Value::Int(IntValue::U64(wide)))
+            );
+        }
+    }
+
+    #[test]
+    fn rng_typed_state_fields_are_an_independent_extension() {
+        let mut state = StructValue::new();
+        state
+            .fields
+            .insert("Type".to_string(), Value::from("twister"));
+        state
+            .fields
+            .insert("Seed".to_string(), Value::Int(IntValue::U32(7)));
+        state.fields.insert(
+            "State".to_string(),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U32(vec![1, 2]), vec![1, 2])
+                    .expect("state words"),
+            ),
+        );
+        let value = || Value::Struct(state.clone());
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(rng_builtin(vec![value()])).expect_err("typed state must gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:RngTypedStateFieldsExtension")
+            );
+        }
+        {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            block_on(rng_builtin(vec![value()])).expect("typed state extension");
+        }
+    }
+
+    #[test]
+    fn rng_integer_capabilities_cover_public_and_extended_seed_domains() {
+        assert_eq!(RNG_INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(
+            RNG_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert!(RNG_INTEGER_CAPABILITIES[1..].iter().all(|capability| {
+            capability.inputs[0].availability == BuiltinIntegerInputAvailability::RunMatOnly
+        }));
+    }
+
+    #[test]
+    fn rng_typed_integer_tensor_seed_and_state_are_exact() {
+        let seed =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("seed");
+        assert_eq!(
+            parse_seed_scalar(&Value::Tensor(seed), "rng: seed").expect("typed seed"),
+            u64::MAX
+        );
+
+        let scalar_state =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("state");
+        assert_eq!(
+            parse_state_scalar(&Value::Tensor(scalar_state)).expect("typed state"),
+            u64::MAX
+        );
+
+        let word_state = Tensor::new_integer(
+            IntegerStorage::U64(vec![u32::MAX as u64, u32::MAX as u64]),
+            vec![1, 2],
+        )
+        .expect("state words");
+        assert_eq!(
+            parse_state_scalar(&Value::Tensor(word_state)).expect("typed state words"),
+            u64::MAX
+        );
+
+        let negative_seed =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("seed");
+        assert!(parse_seed_scalar(&Value::Tensor(negative_seed), "rng: seed").is_err());
+
+        let wide_word = Tensor::new_integer(
+            IntegerStorage::U64(vec![u32::MAX as u64 + 1, 0]),
+            vec![1, 2],
+        )
+        .expect("state word");
+        assert!(parse_state_scalar(&Value::Tensor(wide_word)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -711,8 +1005,9 @@ pub(crate) mod tests {
             block_on(rng_builtin(vec![Value::Int(IntValue::U32(9))])).expect("rng");
             let handle = provider.random_uniform(&[4, 1]).expect("gpu uniform");
             let host_after_gpu = random::generate_uniform(4, "rng provider sync").expect("uniform");
-            let gpu = block_on(download_handle_async(provider, &handle)).expect("download");
-            assert_eq!(gpu.data, host_after_gpu);
+            let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
+            assert_eq!(gpu.materialize_f64(), host_after_gpu);
+            provider.free(&handle).expect("free uniform handle");
         });
     }
 
@@ -730,10 +1025,10 @@ pub(crate) mod tests {
         let handle = provider
             .random_uniform(&[1, 6])
             .expect("wgpu random uniform");
-        let gpu = block_on(download_handle_async(provider, &handle)).expect("wgpu download");
+        let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("wgpu gather");
         let host = random::generate_uniform(6, "rng wgpu parity").expect("host uniform sequence");
-        assert_eq!(gpu.data.len(), host.len());
-        for (idx, value) in gpu.data.iter().enumerate() {
+        assert_eq!(gpu.len(), host.len());
+        for (idx, value) in gpu.materialize_f64().iter().enumerate() {
             assert!(value.is_finite(), "gpu value at {idx} not finite: {value}");
             assert!(
                 *value >= 0.0 && *value < 1.0,

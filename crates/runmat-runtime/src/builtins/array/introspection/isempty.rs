@@ -8,9 +8,11 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
+use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::isempty")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -49,6 +51,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "metadata",
     type_resolver(bool_scalar_type),
     descriptor(crate::builtins::array::introspection::isempty::ISEMPTY_DESCRIPTOR),
+    integer_audit(crate::builtins::array::introspection::isempty::ISEMPTY_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::introspection::isempty"
 )]
 async fn isempty_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -90,6 +93,7 @@ pub const ISEMPTY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISEMPTY_ERRORS,
 };
+pub const ISEMPTY_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "isempty is a universal shape predicate; integer class and values are irrelevant and resident shape metadata is read without gathering payload data." };
 
 async fn value_is_empty(value: &Value) -> crate::BuiltinResult<bool> {
     Ok(value_numel(value).await? == 0)
@@ -106,7 +110,8 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{CellArray, CharArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CellArray, CharArray, Tensor};
 
     #[test]
     fn isempty_type_returns_bool() {
@@ -163,7 +168,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_string_array_zero_rows_is_true() {
-        let array = runmat_builtins::StringArray::new(Vec::new(), vec![0, 2]).unwrap();
+        let array = runmat_value::StringArray::new(Vec::new(), vec![0, 2]).unwrap();
         let result = isempty_builtin(Value::StringArray(array)).expect("isempty");
         assert_eq!(result, Value::Bool(true));
     }
@@ -176,11 +181,11 @@ pub(crate) mod tests {
             let non_empty_tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
 
             let empty_view = runmat_accelerate_api::HostTensorView {
-                data: &empty_tensor.data,
+                data: &empty_tensor.materialize_f64(),
                 shape: &empty_tensor.shape,
             };
             let non_empty_view = runmat_accelerate_api::HostTensorView {
-                data: &non_empty_tensor.data,
+                data: &non_empty_tensor.materialize_f64(),
                 shape: &non_empty_tensor.shape,
             };
 
@@ -207,7 +212,7 @@ pub(crate) mod tests {
 
         let empty_tensor = Tensor::new(Vec::new(), vec![0, 4]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &empty_tensor.data,
+            data: &empty_tensor.materialize_f64(),
             shape: &empty_tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

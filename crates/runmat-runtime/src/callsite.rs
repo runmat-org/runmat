@@ -1,6 +1,6 @@
 use crate::source_context;
-use runmat_hir::{SourceId, Span};
 use runmat_thread_local::runmat_thread_local;
+use runmat_types::{SourceId, Span};
 use std::cell::RefCell;
 
 #[derive(Debug, Clone)]
@@ -16,6 +16,7 @@ runmat_thread_local! {
 
 pub struct CallsiteGuard {
     did_push: bool,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for CallsiteGuard {
@@ -23,15 +24,20 @@ impl Drop for CallsiteGuard {
         if !self.did_push {
             return;
         }
-        CALLSITE_STACK.with(|stack| {
-            let mut stack = stack.borrow_mut();
-            let _ = stack.pop();
-        });
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().callsites.pop();
+        } else {
+            CALLSITE_STACK.with(|stack| {
+                let mut stack = stack.borrow_mut();
+                let _ = stack.pop();
+            });
+        }
     }
 }
 
 pub struct FunctionInputCallsiteGuard {
     did_push: bool,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for FunctionInputCallsiteGuard {
@@ -39,24 +45,41 @@ impl Drop for FunctionInputCallsiteGuard {
         if !self.did_push {
             return;
         }
-        FUNCTION_INPUT_CALLSITE_STACK.with(|stack| {
-            let mut stack = stack.borrow_mut();
-            let _ = stack.pop();
-        });
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().function_input_callsites.pop();
+        } else {
+            FUNCTION_INPUT_CALLSITE_STACK.with(|stack| {
+                let mut stack = stack.borrow_mut();
+                let _ = stack.pop();
+            });
+        }
     }
 }
 
 pub fn push_callsite(source_id: Option<SourceId>, arg_spans: Option<Vec<Span>>) -> CallsiteGuard {
     let Some(arg_spans) = arg_spans else {
-        return CallsiteGuard { did_push: false };
+        return CallsiteGuard {
+            did_push: false,
+            state: None,
+        };
     };
-    CALLSITE_STACK.with(|stack| {
-        stack.borrow_mut().push(CallsiteInfo {
-            source_id,
-            arg_spans,
-        });
-    });
-    CallsiteGuard { did_push: true }
+    let info = CallsiteInfo {
+        source_id,
+        arg_spans,
+    };
+    if let Some(state) = active_state() {
+        state.call.borrow_mut().callsites.push(info);
+        CallsiteGuard {
+            did_push: true,
+            state: Some(state),
+        }
+    } else {
+        CALLSITE_STACK.with(|stack| stack.borrow_mut().push(info));
+        CallsiteGuard {
+            did_push: true,
+            state: None,
+        }
+    }
 }
 
 pub fn push_function_input_callsite(
@@ -64,23 +87,46 @@ pub fn push_function_input_callsite(
     arg_spans: Option<Vec<Span>>,
 ) -> FunctionInputCallsiteGuard {
     let Some(arg_spans) = arg_spans else {
-        return FunctionInputCallsiteGuard { did_push: false };
+        return FunctionInputCallsiteGuard {
+            did_push: false,
+            state: None,
+        };
     };
-    FUNCTION_INPUT_CALLSITE_STACK.with(|stack| {
-        stack.borrow_mut().push(CallsiteInfo {
-            source_id,
-            arg_spans,
-        });
-    });
-    FunctionInputCallsiteGuard { did_push: true }
+    let info = CallsiteInfo {
+        source_id,
+        arg_spans,
+    };
+    if let Some(state) = active_state() {
+        state.call.borrow_mut().function_input_callsites.push(info);
+        FunctionInputCallsiteGuard {
+            did_push: true,
+            state: Some(state),
+        }
+    } else {
+        FUNCTION_INPUT_CALLSITE_STACK.with(|stack| stack.borrow_mut().push(info));
+        FunctionInputCallsiteGuard {
+            did_push: true,
+            state: None,
+        }
+    }
 }
 
 pub fn current_callsite() -> Option<CallsiteInfo> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().callsites.last().cloned();
+    }
     CALLSITE_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
 pub fn current_function_input_callsite() -> Option<CallsiteInfo> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().function_input_callsites.last().cloned();
+    }
     FUNCTION_INPUT_CALLSITE_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
+fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
+    crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
 }
 
 fn clamp_to_char_boundary(s: &str, mut idx: usize) -> usize {

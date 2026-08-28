@@ -3,11 +3,12 @@
 use std::collections::HashSet;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ResolveContext, StringArray, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::identifiers::{
     is_matlab_keyword, is_valid_varname, MATLAB_NAME_LENGTH_MAX,
@@ -94,6 +95,13 @@ pub const GENVARNAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+pub const GENVARNAME_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "genvarname accepts host text names and exclusions only. All eight integer classes and provider-resident numeric values reject without implicit text conversion, gather, or provider access.",
+    };
+
 #[runtime_builtin(
     name = "genvarname",
     category = "strings/core",
@@ -102,6 +110,7 @@ pub const GENVARNAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "gather",
     type_resolver(genvarname_type),
     descriptor(crate::builtins::strings::core::genvarname::GENVARNAME_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::core::genvarname::GENVARNAME_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::core::genvarname"
 )]
 async fn genvarname_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -110,6 +119,11 @@ async fn genvarname_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Val
             &ERROR_INVALID_OPTION,
             "genvarname: expected one or two input arguments",
         ));
+    }
+
+    reject_numeric_text_input(&value, "input")?;
+    if let Some(value) = rest.first() {
+        reject_numeric_text_input(value, "exclusions")?;
     }
 
     let input = gather_if_needed_async(&value)
@@ -124,6 +138,42 @@ async fn genvarname_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Val
         Vec::new()
     };
     genvarname_value(input, exclusions)
+}
+
+fn reject_numeric_text_input(value: &Value, role: &str) -> BuiltinResult<()> {
+    if numeric_or_resident(value) || contains_numeric_or_resident(value) {
+        return Err(error(
+            &ERROR_INVALID_INPUT,
+            format!("genvarname: {role} must contain text only"),
+        ));
+    }
+    Ok(())
+}
+
+fn numeric_or_resident(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::SparseTensor(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::Symbolic(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn contains_numeric_or_resident(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        _ => false,
+    }
 }
 
 fn genvarname_value(value: Value, exclusions: Vec<String>) -> BuiltinResult<Value> {
@@ -437,5 +487,51 @@ mod tests {
         )
         .unwrap();
         assert!(block_on(genvarname_builtin(Value::Cell(bad), Vec::new())).is_err());
+    }
+
+    #[test]
+    fn integer_audit_rejects_all_integer_classes_and_resident_numeric_before_gather() {
+        assert_eq!(
+            GENVARNAME_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        for value in [
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
+        ] {
+            let error = block_on(genvarname_builtin(value.clone(), Vec::new()))
+                .expect_err("integer name input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+            let error = block_on(genvarname_builtin(
+                Value::String("name".into()),
+                vec![value],
+            ))
+            .expect_err("integer exclusion input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        }
+
+        let resident = || {
+            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+                descriptor: Default::default(),
+            })
+        };
+        let error =
+            block_on(genvarname_builtin(resident(), Vec::new())).expect_err("resident name input");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        let error = block_on(genvarname_builtin(
+            Value::String("name".into()),
+            vec![resident()],
+        ))
+        .expect_err("resident exclusion input");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
     }
 }

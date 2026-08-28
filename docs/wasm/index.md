@@ -1,10 +1,3 @@
----
-title: "WASM & TypeScript/JavaScript"
-category: "WebAssembly & TypeScript"
-section: "9.0"
-last_updated: "May 28, 2026"
----
-
 # WASM & TypeScript/JavaScript
 
 Use the `runmat` npm package when embedding RunMat in a browser, web worker, Electron app, or Node-based tool.
@@ -52,7 +45,7 @@ await session.executeRequest({
 
 | Group | Options | Purpose |
 | --- | --- | --- |
-| Runtime | `enableJit`, `language.compat` | Control native-code tiering and MATLAB compatibility mode. |
+| Runtime | `enableJit`, `language.compat` | Control native-code tiering and select the `runmat` (default), `matlab`, or `strict` language policy. |
 | GPU | `enableGpu`, `wgpuPowerPreference`, `wgpuForceFallbackAdapter` | Request WebGPU acceleration and adapter preferences. |
 | Filesystem | `fsProvider` | Provide file I/O for `load`, `save`, scripts, and path execution. |
 | Plotting | `plotCanvas`, `scatterTargetPoints`, `surfaceVertexBudget` | Attach a canvas and tune plotting LOD defaults. |
@@ -147,6 +140,16 @@ await session.setInputHandler(async (request) => {
 ```
 
 `session.cancelExecution()` cooperatively interrupts a running request. Use `session.dispose()` when tearing down a REPL, editor pane, worker, or notebook kernel.
+
+## Package-Aware Tests
+
+The npm package exports test preparation and execution from `runmat/testing`. Rust/WASM owns manifest test-layout parsing, frozen source identity, semantic discovery, selectors, immutable plan construction, scheduling, retries, lifecycle, result merging, reports, plugins, and coverage. JavaScript hosts supply filesystem bytes and Web Worker lifecycle only.
+
+Use `BrowserTestSnapshotPreparer` with a resolved project revision and a session, then submit the returned snapshot and plan through `BrowserTestCoordinatorClient` or `runTests`. Preparation captures MATLAB sources for semantic discovery and all regular files in the selected source/test trees for worker-local fixtures. Symlinks are excluded; snapshots are deterministic and bounded.
+
+Each strong-isolation attempt runs in an independent Web Worker with its own WASM instance, Core session, frozen project handoff, and in-memory filesystem. The coordinator remains outside the executing worker so it can escalate cancellation from cooperative teardown to `Worker.terminate()`, recover after a trap or timeout, and still produce one canonical terminal result. Browser isolation is reported as `worker`, never as an OS process.
+
+Browser artifacts may be retained in IndexedDB, a project filesystem, or downloaded by the host. Reload reconciliation, package-cache access, and UI presentation belong to the embedding application; they do not reinterpret the shared test protocol.
 
 ## Plotting
 

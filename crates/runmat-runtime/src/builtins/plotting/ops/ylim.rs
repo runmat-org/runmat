@@ -1,12 +1,27 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::limits::{limit_value, parse_limit_command, LimitCommand};
 use super::state::{axis_limits_snapshot, set_axis_limits};
 use crate::builtins::plotting::type_resolvers::get_type;
+
+const YLIM_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "limits",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "All eight integer classes are documented for the two-element limits vector.",
+}];
+pub const YLIM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "limits = ylim(integer_limits)", inputs: &YLIM_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat compares same-class integer endpoints exactly, then validates that they remain distinct in the graphics coordinate domain; queried limits are double." }];
 
 const YLIM_OUTPUT_LIMITS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "limits",
@@ -83,6 +98,7 @@ pub const YLIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::ylim::YLIM_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::ylim::YLIM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::ylim"
 )]
 pub fn ylim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -121,18 +137,13 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let _ = ylim_builtin(vec![Value::Tensor(runmat_builtins::Tensor {
-            data: vec![1.0, 5.0],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        })])
+        let _ = ylim_builtin(vec![Value::Tensor(
+            runmat_value::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("y limits"),
+        )])
         .unwrap();
         let _ = ylim_builtin(vec![Value::String("auto".into())]).unwrap();
         let queried = ylim_builtin(Vec::new()).unwrap();
-        let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
-        assert!(tensor.data[0].is_nan() && tensor.data[1].is_nan());
+        let tensor = runmat_value::Tensor::try_from(&queried).unwrap();
+        assert!(tensor.materialize_f64()[0].is_nan() && tensor.materialize_f64()[1].is_nan());
     }
 }

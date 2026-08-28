@@ -1,0 +1,15 @@
+{
+  "title": "caxis",
+  "category": "plotting",
+  "keywords": ["caxis", "clim", "color limits", "colormap", "matlab caxis"],
+  "summary": "Query or set colormap limits using the legacy name for clim.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "`caxis` updates host graphics metadata and exposes no interactive gpuArray input surface."},
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline"},
+  "requires_feature": null,
+  "tested": {"unit": "builtins::plotting::caxis::tests", "integration": "crates/runmat-vm/tests/plotting.rs"},
+  "description": "`caxis` is the legacy name for `clim` and shares its color-limit query, setter, mode, compatibility, and host graphics-state contracts.",
+  "behaviors": ["`caxis()` returns the current explicit color limits as a two-element double row vector.", "`caxis([cmin cmax])` accepts a two-element single or double vector with finite values and `cmin < cmax`.", "The public modes are `auto` and `manual`; `tight` is not a color-limit mode.", "All eight typed integer limit classes are the same RunMat-only extension declared by canonical `clim`, with compatibility rejection before conversion and one deliberate host double graphics boundary when enabled.", "Resident arguments reject without provider dispatch.", "Persistent mode state, computed automatic-limit queries, set-form output arity, and specific-target or multi-target forms remain general graphics-surface gaps."],
+  "examples": [{"description": "Use the legacy alias to set color limits", "input": "imagesc([1 2; 3 4]);\ncaxis([1 4]);"}],
+  "links": [{"label": "clim", "url": "./clim"}, {"label": "colormap", "url": "./colormap"}, {"label": "colorbar", "url": "./colorbar"}],
+  "source": {"label": "`crates/runmat-runtime/src/builtins/plotting/ops/caxis.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/caxis.rs"}
+}

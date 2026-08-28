@@ -1,0 +1,24 @@
+[package]
+name = "runmat-meshing-execution"
+version = "0.6.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../../LICENSE.md"
+description = "Narrow execution and artifact bridge for deterministic RunMat meshing"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-execution-runner = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-meshing-core = { workspace = true }
+runmat-meshing-curve = { workspace = true }
+runmat-meshing-surface = { workspace = true }
+runmat-meshing-tetrahedron = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+runmat-geometry-fixtures = { workspace = true }

@@ -4,15 +4,39 @@ use num_bigint::BigInt;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    SymbolicExpr, Value,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{SymbolicExpr, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::{is_valid_identifier, symbolic_expr_to_value, text_scalar, value_to_symbolic_scalar};
 
 const BUILTIN_NAME: &str = "sym";
+
+const SYM_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "value",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The current RunMat symbolic implementation accepts integer scalars from every native class.",
+}];
+pub const SYM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "S = sym(integer_scalar)",
+        inputs: &SYM_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The scalar is converted directly from authoritative integer storage to an arbitrary-precision symbolic integer; no binary floating-point boundary is crossed. Numeric-array symbolic construction remains outside the current scalar implementation.",
+    }];
 
 const SYM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -79,6 +103,7 @@ pub const SYM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     summary = "Create a scalar symbolic variable or constant.",
     keywords = "sym,symbolic,variable,algebra",
     descriptor(crate::builtins::math::symbolic::sym::SYM_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::symbolic::sym::SYM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::symbolic::sym"
 )]
 async fn sym_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

@@ -35,24 +35,28 @@ impl WgpuProvider {
             None => None,
         };
 
+        let eigenvalues_data = eigenvalues_tensor.materialize_f64();
+        let diagonal_data = diagonal_tensor.materialize_f64();
+        let right_data = right_tensor.materialize_f64();
+        let left_data = left_tensor.as_ref().map(Tensor::materialize_f64);
         let eigenvalues = self.upload_exec(&HostTensorView {
-            data: &eigenvalues_tensor.data,
+            data: &eigenvalues_data,
             shape: &eigenvalues_tensor.shape,
         })?;
         let diagonal = self.upload_exec(&HostTensorView {
-            data: &diagonal_tensor.data,
+            data: &diagonal_data,
             shape: &diagonal_tensor.shape,
         })?;
         let right = self.upload_exec(&HostTensorView {
-            data: &right_tensor.data,
+            data: &right_data,
             shape: &right_tensor.shape,
         })?;
-        let left = match left_tensor {
-            Some(tensor) => Some(self.upload_exec(&HostTensorView {
-                data: &tensor.data,
+        let left = match (left_tensor, left_data) {
+            (Some(tensor), Some(data)) => Some(self.upload_exec(&HostTensorView {
+                data: &data,
                 shape: &tensor.shape,
             })?),
-            None => None,
+            _ => None,
         };
 
         if compute_left && left.is_none() {
@@ -199,12 +203,7 @@ impl WgpuProvider {
         }
 
         let staging_size = std::mem::size_of::<u32>() as u64;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-issymmetric-staging"),
-            size: staging_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(staging_size, "runmat-issymmetric-staging");
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -309,12 +308,7 @@ impl WgpuProvider {
         );
 
         let staging_size = (std::mem::size_of::<u32>() * 2) as u64;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-bandwidth-staging"),
-            size: staging_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(staging_size, "runmat-bandwidth-staging");
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

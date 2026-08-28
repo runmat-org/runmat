@@ -68,6 +68,7 @@ pub(crate) struct SessionConfig {
 
 impl SessionConfig {
     pub(crate) fn from_options(opts: &InitOptions) -> Self {
+        let language_compat = parse_language_compat(opts.language_compat.as_deref());
         Self {
             enable_jit: opts.enable_jit.unwrap_or(false) && cfg!(feature = "jit"),
             verbose: opts.verbose.unwrap_or(false),
@@ -79,15 +80,15 @@ impl SessionConfig {
             wgpu_force_fallback_adapter: opts.wgpu_force_fallback_adapter.unwrap_or(false),
             auto_offload: AutoOffloadOptions::default(),
             emit_fusion_plan: opts.emit_fusion_plan.unwrap_or(false),
-            language_compat: parse_language_compat(opts.language_compat.as_deref()),
+            language_compat,
             gpu_buffer_pool_max_per_key: opts.gpu_buffer_pool_max_per_key,
             callstack_limit: opts
                 .callstack_limit
-                .unwrap_or(runmat_vm::DEFAULT_CALLSTACK_LIMIT),
+                .unwrap_or(runmat_runtime::context::DEFAULT_CALLSTACK_LIMIT),
             error_namespace: opts
                 .error_namespace
                 .clone()
-                .unwrap_or_else(|| runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string()),
+                .unwrap_or_else(|| error_namespace_for_compat(language_compat).to_string()),
         }
     }
 
@@ -114,6 +115,13 @@ impl SessionConfig {
     }
 }
 
+pub(crate) fn error_namespace_for_compat(mode: CompatMode) -> &'static str {
+    match mode {
+        CompatMode::Matlab => "MATLAB",
+        CompatMode::RunMat | CompatMode::Strict => "RunMat",
+    }
+}
+
 pub(crate) fn apply_plotting_overrides(opts: &InitOptions) {
     if let Some(points) = opts.scatter_target_points {
         set_scatter_target_points(points);
@@ -126,7 +134,7 @@ pub(crate) fn apply_plotting_overrides(opts: &InitOptions) {
 pub(crate) fn parse_language_compat(input: Option<&str>) -> CompatMode {
     input
         .and_then(parse_language_compat_from_str)
-        .unwrap_or(CompatMode::Matlab)
+        .unwrap_or(CompatMode::RunMat)
 }
 
 pub(crate) fn parse_telemetry_run_kind(value: Option<&str>) -> TelemetryRunKind {
@@ -141,8 +149,10 @@ pub(crate) fn parse_telemetry_run_kind(value: Option<&str>) -> TelemetryRunKind 
 pub(crate) fn parse_language_compat_from_str(value: &str) -> Option<CompatMode> {
     if value.eq_ignore_ascii_case("strict") {
         Some(CompatMode::Strict)
-    } else if value.eq_ignore_ascii_case("matlab") || value.eq_ignore_ascii_case("runmat") {
+    } else if value.eq_ignore_ascii_case("matlab") {
         Some(CompatMode::Matlab)
+    } else if value.eq_ignore_ascii_case("runmat") {
+        Some(CompatMode::RunMat)
     } else {
         None
     }
@@ -161,5 +171,41 @@ pub(crate) fn parse_power_preference(input: Option<&str>) -> AccelPowerPreferenc
         Some(ref value) if value.contains("low") => AccelPowerPreference::LowPower,
         Some(ref value) if value.contains("high") => AccelPowerPreference::HighPerformance,
         _ => AccelPowerPreference::Auto,
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn language_compat_defaults_to_runmat() {
+        assert_eq!(parse_language_compat(None), CompatMode::RunMat);
+    }
+
+    #[wasm_bindgen_test]
+    fn language_compat_modes_remain_distinct() {
+        assert_eq!(parse_language_compat(Some("runmat")), CompatMode::RunMat);
+        assert_eq!(parse_language_compat(Some("matlab")), CompatMode::Matlab);
+        assert_eq!(parse_language_compat(Some("strict")), CompatMode::Strict);
+        assert_eq!(parse_language_compat_from_str("unknown"), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn language_mode_derives_the_default_error_namespace() {
+        let matlab = InitOptions {
+            language_compat: Some("matlab".to_string()),
+            ..Default::default()
+        };
+        let runmat = InitOptions::default();
+        assert_eq!(
+            SessionConfig::from_options(&matlab).error_namespace,
+            "MATLAB"
+        );
+        assert_eq!(
+            SessionConfig::from_options(&runmat).error_namespace,
+            "RunMat"
+        );
     }
 }

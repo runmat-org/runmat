@@ -15,6 +15,40 @@ pub use contracts::artifact::{
 };
 pub use contracts::backend::{select_volume_backend, MeshBackendKind, MeshBackendSelection};
 pub use contracts::boundary::{BoundaryMeshInput, BoundaryMeshTriangle};
+pub use contracts::canonical::{
+    build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,
+    solver_boundary_edge_identity, solver_boundary_face_identity, solver_midside_node_identity,
+    solver_volume_element_identity, sort_solver_node_exact_parameters,
+    validate_solver_mesh_topology, verify_stage_manifest_closure, AlgorithmVersionSet,
+    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, CacheAdmissionDecision,
+    CancellationPolicy, CanonicalEntityRange, CanonicalMeshingContract, ContactPair,
+    CurveQualityTargets, ElementOrder, EncodedMeshingChunk, ErrorDistribution,
+    FieldTopologyLocation, FieldTopologyMap, GeometricWitness, GeometryRevisionRef,
+    GeometryTolerancePolicy, InvariantEvidence, MaterialInterface, MeshNeighbor, MeshRegion,
+    MeshingCancellationSignal, MeshingCanonicalLimits, MeshingCapabilityRequirement,
+    MeshingChunkDescriptor, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream,
+    MeshingChunkedPayload, MeshingContractError, MeshingDiagnosticEntry, MeshingDiagnosticValue,
+    MeshingEvidence, MeshingFailure, MeshingFailureCategory, MeshingInputKind, MeshingInputRef,
+    MeshingJoinIdentity, MeshingManifestDisposition, MeshingOperation, MeshingPartitionDescriptor,
+    MeshingPartitionIdentity, MeshingPartitionKind, MeshingPartitionResultRef, MeshingProgress,
+    MeshingQualityTargets, MeshingRequest, MeshingResourceBudget, MeshingResourceUsage,
+    MeshingStageEvidence, MeshingStageIdentity, MeshingStageKind, MeshingStageManifest,
+    MeshingStageResultIdentity, MeshingStageResultKind, MeshingValidationIdentity,
+    MeshingWorkloadRequest, MeshingWorkloadResult, MetricCombinationRule, MetricContribution,
+    MetricContributionScope, MetricFieldRequest, MetricSourceKind, MetricTensor3, NeverCancelled,
+    PersistentEntityId, PersistentEntityKind, PlatformBuildIdentity, SizingResolutionEvidence,
+    SolverBoundaryEdge, SolverBoundaryFace, SolverEntityTransfer, SolverMeshAdaptationCell,
+    SolverMeshAdaptationKind, SolverMeshAdaptationLineage, SolverMeshAdaptationMark,
+    SolverMeshAdaptationMutation, SolverMeshArtifact, SolverMeshNode, SolverMeshTopology,
+    SolverMeshTransferMap, SolverNodeExactParameter, SolverTransferMethod, SolverTransferSource,
+    SolverVolumeElement, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
+    ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION, MESHING_EVIDENCE_SCHEMA_VERSION,
+    MESHING_FAILURE_SCHEMA_VERSION, MESHING_IDENTITY_SCHEMA_VERSION,
+    MESHING_PROGRESS_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    MESHING_STAGE_MANIFEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
+    SOLVER_MESH_ADAPTATION_LINEAGE_SCHEMA_VERSION, SOLVER_MESH_TRANSFER_SCHEMA_VERSION,
+    TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+};
 pub use contracts::options::{
     AdaptiveMeshingOptions, MeshElementOrder, MeshKindRequest, MeshProfile, MeshRefinementOptions,
     MeshTargetSize, MeshValidationPolicyOptions, RefinementConvergenceOptions,
@@ -39,7 +73,8 @@ pub use predicate::{
     point_triangle_distance, ray_triangle_intersection, tetrahedron_centroid,
     tetrahedron_circumsphere, tetrahedron_circumsphere_contains_point,
     tetrahedron_edge_aspect_ratio, tetrahedron_signed_volume, tetrahedron_volume, triangle_area,
-    triangle_centroid, Point3, PointInClosedSurface, RayTriangleHit, Tetrahedron3, Triangle3,
+    triangle_centroid, PlanarPredicateError, PlanarPredicatePoint, Point3, PointInClosedSurface,
+    PredicateSign, RayTriangleHit, Tetrahedron3, Triangle3,
 };
 pub use quality::boundary::{
     evaluate_boundary_quality_candidate, BoundaryQualityCandidateConstraints,

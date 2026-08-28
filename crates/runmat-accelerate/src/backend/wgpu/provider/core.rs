@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Result};
 use bytemuck::{bytes_of, Pod};
-#[cfg(not(target_arch = "wasm32"))]
 use futures::channel::oneshot;
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
+use runmat_accelerate_api::{
+    GpuTensorHandle, GpuTensorStorage, IntegerElementType, NumericElementType, ProviderPrecision,
+};
 #[cfg(target_arch = "wasm32")]
 use runmat_time::Instant;
 use std::sync::atomic::Ordering as AtomicOrdering;
@@ -15,15 +16,15 @@ use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 use super::backend_shared::NEXT_SUBMISSION_ID;
-use super::backend_types::{BufferEntry, WgpuProvider};
+use super::backend_types::{BufferEntry, NumericBufferRegistration, WgpuProvider};
 use crate::backend::wgpu::residency::BufferUsageClass;
+use crate::backend::wgpu::types::NumericPrecision;
 use crate::fusion::active_fusion;
 
 impl WgpuProvider {
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) async fn map_readback_bytes(
         &self,
-        staging: wgpu::Buffer,
+        staging: Arc<wgpu::Buffer>,
         size_bytes: u64,
         context: &str,
     ) -> Result<Vec<u8>> {
@@ -47,12 +48,13 @@ impl WgpuProvider {
         out.copy_from_slice(&data);
         drop(data);
         staging.unmap();
+        self.recycle_readback_buffer(size_bytes, staging);
         Ok(out)
     }
 
     pub(super) fn map_readback_bytes_sync(
         &self,
-        staging: wgpu::Buffer,
+        staging: Arc<wgpu::Buffer>,
         size_bytes: u64,
         context: &str,
     ) -> Result<Vec<u8>> {
@@ -67,6 +69,12 @@ impl WgpuProvider {
         }
     }
     pub(super) const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
+    // Keep enough reusable storage for common tensor shapes while reserving
+    // native resource capacity for pipelines, uniforms, and transient command
+    // buffers. This is deliberately conservative across software and integrated
+    // D3D12 adapters, whose resource ceilings can be substantially lower than
+    // those of discrete GPUs.
+    pub(super) const BUFFER_RESIDENCY_MAX_TOTAL: usize = 16;
     pub(super) const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
     pub(super) const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
     pub(super) const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
@@ -75,6 +83,72 @@ impl WgpuProvider {
     pub(crate) fn device_ref(&self) -> &wgpu::Device {
         self.device.as_ref()
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_buffer_count(&self) -> usize {
+        self.buffers.lock().expect("buffer mutex poisoned").len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_buffer_ptr(&self, handle: &GpuTensorHandle) -> Option<usize> {
+        self.buffers
+            .lock()
+            .ok()
+            .and_then(|buffers| buffers.get(&handle.buffer_id).cloned())
+            .map(|entry| Arc::as_ptr(&entry.buffer) as usize)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_pooled_buffer_counts(&self) -> (usize, usize) {
+        (
+            self.buffer_residency.pooled_count(),
+            self.buffer_residency.max_total(),
+        )
+    }
+
+    /// Close the logical session and return unaliased storage allocations to
+    /// the physical device pool.
+    ///
+    /// Buffer-backed caches are cleared first so their `Arc` references cannot
+    /// prevent reclamation. This is also invoked from `Drop`, making cleanup
+    /// independent of whether every caller explicitly freed every handle.
+    pub(super) fn recycle_session_buffers(&self) {
+        self.bind_group_cache.clear();
+        self.kernel_resources.clear();
+        if let Ok(mut cache) = self.pow2_of.lock() {
+            cache.clear();
+        }
+        if let Ok(mut cache) = self.moments_cache.lock() {
+            cache.clear();
+        }
+
+        let entries = self
+            .buffers
+            .lock()
+            .map(|mut buffers| buffers.drain().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for (buffer_id, entry) in entries {
+            let handle = GpuTensorHandle {
+                shape: entry.shape.clone(),
+                device_id: self.runtime_device_id,
+                buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    entry.element_type,
+                    entry.storage,
+                ),
+            };
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+
+            let poolable_by_size = entry.len > 0
+                && self.buffer_residency_max_poolable_bytes > 0
+                && entry.allocated_bytes <= self.buffer_residency_max_poolable_bytes;
+            if poolable_by_size && Arc::strong_count(&entry.buffer) == 1 {
+                self.buffer_residency
+                    .release(entry.usage, entry.allocated_bytes, entry.buffer);
+            }
+        }
+    }
+
     pub(crate) fn queue_ref(&self) -> &wgpu::Queue {
         self.queue.as_ref()
     }
@@ -127,6 +201,36 @@ impl WgpuProvider {
         storage: GpuTensorStorage,
         usage: BufferUsageClass,
     ) -> GpuTensorHandle {
+        let element_type = match self.precision {
+            NumericPrecision::F32 => NumericElementType::F32,
+            NumericPrecision::F64 => NumericElementType::F64,
+        };
+        self.register_numeric_buffer(
+            buffer,
+            NumericBufferRegistration {
+                shape,
+                len,
+                physical_element_type: element_type,
+                storage,
+                allocated_bytes: (len as u64).saturating_mul(element_type.element_size() as u64),
+                usage,
+            },
+        )
+    }
+
+    pub(super) fn register_numeric_buffer(
+        &self,
+        buffer: Arc<wgpu::Buffer>,
+        registration: NumericBufferRegistration,
+    ) -> GpuTensorHandle {
+        let NumericBufferRegistration {
+            shape,
+            len,
+            physical_element_type: element_type,
+            storage,
+            allocated_bytes,
+            usage,
+        } = registration;
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -135,7 +239,13 @@ impl WgpuProvider {
             len,
             shape: shape.clone(),
             storage,
-            precision: self.precision,
+            element_type,
+            precision: match element_type.precision() {
+                Some(ProviderPrecision::F32) => NumericPrecision::F32,
+                Some(ProviderPrecision::F64) => NumericPrecision::F64,
+                None => self.precision,
+            },
+            allocated_bytes,
             usage,
             last_submission_id: None,
         };
@@ -143,16 +253,44 @@ impl WgpuProvider {
             .lock()
             .expect("buffer mutex poisoned")
             .insert(id, entry);
-        log::trace!("wgpu register id={} len={} shape={:?}", id, len, &shape);
+        log::trace!(
+            "wgpu register id={} len={} shape={:?} element_type={:?} storage={:?}",
+            id,
+            len,
+            &shape,
+            element_type,
+            storage
+        );
         let handle = GpuTensorHandle {
             shape,
             device_id: self.runtime_device_id,
             buffer_id: id,
+            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(element_type, storage),
         };
-        runmat_accelerate_api::set_handle_logical(&handle, false);
-        runmat_accelerate_api::set_handle_storage(&handle, storage);
+        runmat_accelerate_api::clear_handle_metadata(&handle);
         runmat_accelerate_api::clear_handle_transpose(&handle);
         handle
+    }
+
+    pub(super) fn register_integer_buffer(
+        &self,
+        buffer: Arc<wgpu::Buffer>,
+        shape: Vec<usize>,
+        len: usize,
+        element_type: IntegerElementType,
+        allocated_bytes: u64,
+    ) -> GpuTensorHandle {
+        self.register_numeric_buffer(
+            buffer,
+            NumericBufferRegistration {
+                shape,
+                len,
+                physical_element_type: element_type.into(),
+                storage: GpuTensorStorage::Real,
+                allocated_bytes,
+                usage: BufferUsageClass::Generic,
+            },
+        )
     }
 
     pub(super) fn remember_matmul_sources(
@@ -204,6 +342,56 @@ impl WgpuProvider {
     pub(super) fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
         self.create_storage_buffer_for_usage(BufferUsageClass::Generic, len, label)
             .0
+    }
+
+    pub(super) fn create_storage_buffer_bytes(
+        &self,
+        size_bytes: u64,
+        label: &str,
+    ) -> Arc<wgpu::Buffer> {
+        self.buffer_residency
+            .acquire_storage_bytes(self.device_ref(), size_bytes, label)
+            .0
+    }
+
+    pub(super) fn create_readback_buffer(&self, size_bytes: u64, label: &str) -> Arc<wgpu::Buffer> {
+        self.buffer_residency
+            .acquire_readback(self.device_ref(), size_bytes, label)
+            .0
+    }
+
+    pub(super) fn recycle_readback_buffer(&self, size_bytes: u64, buffer: Arc<wgpu::Buffer>) {
+        let poolable_by_size = self.buffer_residency_max_poolable_bytes > 0
+            && size_bytes <= self.buffer_residency_max_poolable_bytes;
+        if poolable_by_size && Arc::strong_count(&buffer) == 1 {
+            self.buffer_residency
+                .release(BufferUsageClass::Readback, size_bytes, buffer);
+        }
+    }
+
+    /// Allocate a raw-word buffer used by exact integer kernels. Integer
+    /// storage is packed as u32 words, independently of float precision.
+    pub(super) fn create_integer_word_buffer(
+        &self,
+        words: usize,
+        label: &str,
+    ) -> Result<Arc<wgpu::Buffer>> {
+        let bytes = (words as u64)
+            .checked_mul(std::mem::size_of::<u32>() as u64)
+            .ok_or_else(|| anyhow!("{label}: integer buffer size overflow"))?;
+        if bytes > self.adapter_limits.max_buffer_size {
+            return Err(anyhow!("{label}: integer buffer exceeds GPU limits"));
+        }
+        Ok(Arc::new(self.device.create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some(label),
+                size: bytes.max(4),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )))
     }
 
     pub(super) fn uniform_buffer<T: Pod>(&self, data: &T, label: &str) -> wgpu::Buffer {
@@ -315,6 +503,24 @@ impl WgpuProvider {
         submission_id
     }
     pub(super) fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
+        let entry = self.get_entry_raw(handle)?;
+        if let Some(element_type) = entry.integer_type() {
+            return Err(anyhow!(
+                "native {:?} gpuArray buffers require an integer provider kernel; floating-point dispatch is not permitted",
+                element_type
+            ));
+        }
+        if entry.precision != self.precision {
+            return Err(anyhow!(
+                "native {:?} gpuArray buffer requires a precision-aware provider kernel; {:?} dispatch is not permitted",
+                entry.element_type,
+                self.precision
+            ));
+        }
+        Ok(entry)
+    }
+
+    pub(super) fn get_entry_raw(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         if handle.device_id != self.runtime_device_id {
             return Err(anyhow!(
                 "handle device mismatch: expected {}, got {}",
@@ -335,10 +541,28 @@ impl WgpuProvider {
                 } else {
                     entry.storage
                 },
+                element_type: entry.element_type,
                 precision: entry.precision,
+                allocated_bytes: entry.allocated_bytes,
                 usage: entry.usage,
                 last_submission_id: entry.last_submission_id,
             })
             .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
+    }
+
+    pub(super) fn get_entry_for_storage_move(
+        &self,
+        handle: &GpuTensorHandle,
+        operation: &str,
+    ) -> Result<BufferEntry> {
+        let entry = self.get_entry_raw(handle)?;
+        if entry.integer_type().is_none() && entry.precision != self.precision {
+            return Err(anyhow!(
+                "{operation}: native {:?} gpuArray buffer requires a precision-aware provider kernel; {:?} dispatch is not permitted",
+                entry.element_type,
+                self.precision
+            ));
+        }
+        Ok(entry)
     }
 }

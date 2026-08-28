@@ -37,6 +37,7 @@
     "Two-dimensional inputs (row/column vectors and matrices) are returned unchanged.",
     "Zero-length dimensions are preserved; only length-one axes are removed.",
     "Scalar values remain scalars.",
+    "Numeric storage is only reshaped: single, double, and all eight integer classes preserve their native class and exact payload, including wide integer values.",
     "GPU arrays stay resident on the device where possible; the runtime only gathers when it cannot infer the shape."
   ],
   "examples": [

@@ -9,7 +9,7 @@
     "like",
     "logical"
   ],
-  "summary": "Create identity matrices and N-D identity tensors in MATLAB and RunMat.",
+  "summary": "Create identity matrices with an exact requested class, sparsity, and residency.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Uses provider identity allocation hooks when available; otherwise materialises the identity tensor on the host and uploads it."
+    "notes": "For a resident `'like'` prototype, RunMat uses that handle's owning provider. Real floating identities use the provider hook when it preserves the prototype representation; logical, complex, and integer identities use typed host upload when necessary."
   },
   "fusion": {
     "elementwise": false,
@@ -31,15 +31,16 @@
     "unit": "builtins::array::creation::eye::tests",
     "integration": "builtins::array::creation::eye::tests::eye_gpu_like_alloc"
   },
-  "description": "`eye` creates identity matrices (and higher-dimensional identity tensors) with ones on the leading diagonal and zeros elsewhere. Scalar, vector, matrix, and N-D sizing forms, including `'logical'` and `'like'` options, follow MATLAB semantics.",
+  "description": "`eye` creates a two-dimensional identity matrix with ones on the leading diagonal and zeros elsewhere. MATLAB-compatible mode supports scalar dimensions, two scalar dimensions, a row size vector with at most two elements, a documented typename, and the `'like'` form. RunMat's older implicit-prototype, column-size-vector, and N-D forms remain available only when RunMat extensions are enabled.",
   "behaviors": [
     "`eye()` returns the scalar `1`.",
     "`eye(n)` returns an `n × n` double-precision identity matrix.",
-    "`eye(m, n, ...)` returns an `m × n × ...` tensor whose first two dimensions form an identity slice that is replicated across all trailing dimensions.",
-    "`eye(sz)` accepts a size vector (row or column) and returns an array with `size(I) == sz`.",
-    "`eye(A)` matches the size of `A`. Logical, complex, and GPU prototypes preserve their logical/complex/device traits; other inputs default to double precision for MATLAB parity.",
-    "`eye(___, 'logical')` returns a logical identity tensor instead of double precision.",
-    "`eye(___, 'like', prototype)` matches the numeric flavour and device residency of `prototype`, including GPU handles."
+    "`eye(m, n)` returns an `m × n` identity matrix. Negative finite integer dimensions are treated as zero; noninteger, nonfinite, or platform-unrepresentable dimensions are rejected before allocation.",
+    "`eye(sz)` accepts a row size vector with no more than two elements. A one-element vector requests a square matrix.",
+    "`eye(___, typename)` supports `double`, `single`, `logical`, and all eight signed and unsigned integer class names.",
+    "`eye(___, 'like', prototype)` uses `prototype` for class, complexity, sparsity, and applicable device residency, but never for output shape. With no dimensions, the result is 1 × 1.",
+    "Dense integer identities and real or logical sparse identities retain exact storage. Complex sparse prototypes remain a representation gap because RunMat's sparse value type does not yet carry complex values.",
+    "`eye(A)`, column size vectors, and more than two dimensions are explicit RunMat extensions rather than MATLAB-compatible syntax."
   ],
   "examples": [
     {
@@ -53,9 +54,9 @@
       "output": "J =\n     1     0     0     0\n     0     1     0     0"
     },
     {
-      "description": "Replicating an identity matrix across pages",
-      "input": "K = eye(2, 3, 2)   % Two 2x3 identity slices stacked along the third dimension",
-      "output": "K(:, :, 1) =\n     1     0     0\n     0     1     0\n\nK(:, :, 2) =\n     1     0     0\n     0     1     0"
+      "description": "Creating an exact unsigned integer identity matrix",
+      "input": "K = eye(2, 3, 'uint64')",
+      "output": "K =\n  2x3 uint64 matrix\n     1     0     0\n     0     1     0"
     },
     {
       "description": "Creating a logical identity mask",
@@ -82,7 +83,7 @@
     },
     {
       "question": "Can `eye` generate higher-dimensional identity tensors?",
-      "answer": "Yes. Extra dimensions replicate the identity slice. For example, `eye(2, 3, 4)` creates four `2 × 3` identity matrices stacked along the third dimension."
+      "answer": "Only as a RunMat extension. MATLAB-compatible mode accepts at most two dimensions; extension mode retains the older replicated-slice N-D behavior."
     },
     {
       "question": "What happens if I request zero-sized dimensions?",
@@ -90,15 +91,15 @@
     },
     {
       "question": "Is single precision supported?",
-      "answer": "Not yet. Requesting `'single'` currently reports an error. Use `'like'` with a single-precision prototype once single-precision support lands."
+      "answer": "Yes. Use `eye(..., 'single')` or a single-precision `'like'` prototype."
     },
     {
       "question": "Does `eye(A)` match the class of `A`?",
-      "answer": "For logical, complex, and GPU prototypes, yes—`eye(A)` behaves like `eye(size(A), 'like', A)`. Other numeric inputs produce double precision to mirror MATLAB's default."
+      "answer": "The implicit `eye(A)` form is a RunMat extension. Portable code should provide dimensions and write `eye(size(A), 'like', A)`; `'like'` controls representation and does not infer shape."
     },
     {
       "question": "How efficient is the GPU path?",
-      "answer": "Providers with dedicated identity allocation avoid host involvement entirely. Providers without the hook fall back to a single host upload, which is still efficient for typical sizes."
+      "answer": "RunMat routes a resident prototype through its owning provider and validates the returned owner, device, shape, storage, class metadata, and precision. Exact typed upload is used when a provider identity hook cannot represent the requested logical, complex, or integer result."
     }
   ],
   "links": [
@@ -179,8 +180,8 @@
     "label": "`crates/runmat-runtime/src/builtins/array/creation/eye.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/eye.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` yourself in RunMat. The fusion planner keeps data on the GPU whenever it determines that downstream work will benefit from staying on the device. The `eye` builtin respects that residency: if the planner or user requests GPU output (via `'like'`), it will either construct the identity tensor directly on the device (when the provider implements `eye`) or generate it on the host and upload it as a single transfer.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray` yourself in RunMat. The fusion planner keeps data on the GPU whenever downstream work benefits from staying on the device. With a resident `'like'` prototype, `eye` routes construction through that handle's owning provider and preserves supported representation metadata.",
   "gpu_behavior": [
-    "When the result should live on a GPU (either because the prototype is a GPU tensor or the `'like'` argument references one), RunMat first asks the active acceleration provider for an identity buffer via the `eye` / `eye_like` hooks. The WGPU backend implements these hooks directly; simpler providers may return `Err`, in which case the runtime materialises the identity tensor on the host, performs a single upload, and returns a `GpuTensorHandle`. Because the allocation happens in one step, the auto-offload planner can keep subsequent fused expressions resident on the device without extra gathers."
+    "For a resident `'like'` prototype, RunMat first resolves the handle's owning provider. A compatible real floating result can use the provider `eye` hook; exact integer, logical, or complex construction can use one typed host upload. RunMat validates the new handle before returning it and otherwise gathers the prototype and produces a host result instead of silently returning the wrong device or class."
   ]
 }

@@ -10,6 +10,7 @@ mod refill;
 pub(super) use refill::exact_cover_refill_from_on_demand_interior_mates;
 pub(super) use refill::{
     boundary_node_exact_cover_refill_candidate, exact_cover_refill_from_candidate_tetrahedra,
+    on_demand_interior_mate_faces_for_trace,
 };
 mod search;
 pub(super) use search::*;

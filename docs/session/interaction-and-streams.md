@@ -1,10 +1,3 @@
----
-title: "Interaction & Streams"
-category: "Session Engine"
-section: "7.5"
-last_updated: "May 28, 2026"
----
-
 # Interaction & Streams
 
 The session installs per-execution runtime guards so host-visible output is captured as structured data instead of leaking through global process state.

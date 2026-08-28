@@ -10,13 +10,20 @@ use crate::builtins::introspection::type_resolvers::{
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{
-    handle_class_name, handle_is_logical, handle_precision, provider_for_handle, ProviderPrecision,
+    handle_integer_type, handle_is_logical, handle_precision, handle_storage, GpuTensorStorage,
+    ProviderPrecision,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::introspection::underlying_type"
@@ -144,9 +151,17 @@ const IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID: BuiltinErrorDescriptor = Built
     when: "Second argument is not a string scalar or row character vector.",
     message: "isUnderlyingType: TYPENAME must be a string scalar or character vector",
 };
+const IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IS_UNDERLYING_TYPE.PROVIDER_PAYLOAD_MISMATCH",
+    identifier: Some("RunMat:isUnderlyingType:ProviderPayloadMismatch"),
+    when: "A resident input carries contradictory physical class metadata.",
+    message: "isUnderlyingType: resident input has contradictory physical class metadata",
+};
 
-const IS_UNDERLYING_TYPE_ERRORS: [BuiltinErrorDescriptor; 1] =
-    [IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID];
+const IS_UNDERLYING_TYPE_ERRORS: [BuiltinErrorDescriptor; 2] = [
+    IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID,
+    IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD,
+];
 
 pub const UNDERLYING_TYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &UNDERLYING_TYPE_SIGNATURES,
@@ -161,6 +176,28 @@ pub const IS_UNDERLYING_TYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &IS_UNDERLYING_TYPE_ERRORS,
 };
+const UNDERLYING_TYPE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "The query reports the exact signedness and width of host or resident integer storage.",
+    }];
+pub const UNDERLYING_TYPE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "typename = underlyingType(integer_X)",
+        inputs: &UNDERLYING_TYPE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Returns a host string scalar from coherent dtype metadata without reading or gathering payload values.",
+    }];
+const IS_UNDERLYING_TYPE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The predicate inspects the exact signedness and width of host or resident integer storage." }];
+pub const IS_UNDERLYING_TYPE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isUnderlyingType(integer_X, typename)", inputs: &IS_UNDERLYING_TYPE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Returns a host logical scalar from authoritative dtype metadata without reading or gathering payload values." }];
 
 #[runtime_builtin(
     name = "underlyingType",
@@ -170,10 +207,13 @@ pub const IS_UNDERLYING_TYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "metadata",
     type_resolver(underlying_type_type),
     descriptor(crate::builtins::introspection::underlying_type::UNDERLYING_TYPE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::underlying_type::UNDERLYING_TYPE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::underlying_type"
 )]
 fn underlying_type_builtin(value: Value) -> BuiltinResult<String> {
-    Ok(underlying_type_for_value(&value))
+    underlying_type_for_value_checked(&value)
 }
 
 #[runtime_builtin(
@@ -184,46 +224,108 @@ fn underlying_type_builtin(value: Value) -> BuiltinResult<String> {
     accel = "metadata",
     type_resolver(is_underlying_type_type),
     descriptor(crate::builtins::introspection::underlying_type::IS_UNDERLYING_TYPE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::underlying_type::IS_UNDERLYING_TYPE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::underlying_type"
 )]
 fn is_underlying_type_builtin(value: Value, typename: Value) -> BuiltinResult<Value> {
     let requested = parse_type_name(&typename)?;
-    Ok(Value::Bool(underlying_type_matches(
+    Ok(Value::Bool(underlying_type_matches_checked(
         &value,
         requested.as_str(),
-    )))
+    )?))
 }
 
 /// Return the canonical underlying MATLAB data type for a runtime value.
+#[cfg(test)]
 pub(crate) fn underlying_type_for_value(value: &Value) -> String {
+    underlying_type_for_value_checked(value).unwrap_or_else(|_| class_name_for_value(value))
+}
+
+fn underlying_type_for_value_checked(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::Tensor(tensor) => tensor.dtype.class_name().to_string(),
-        Value::SparseTensor(_) => "double".to_string(),
-        Value::ComplexTensor(_) | Value::Complex(_, _) | Value::Num(_) => "double".to_string(),
-        Value::Int(iv) => iv.class_name().to_string(),
-        Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
-        Value::GpuTensor(handle) => {
-            if handle_is_logical(handle) {
-                "logical".to_string()
-            } else if let Some(class_name) = handle_class_name(handle) {
-                class_name
-            } else {
-                match handle_precision(handle)
-                    .or_else(|| provider_for_handle(handle).map(|provider| provider.precision()))
-                    .unwrap_or(ProviderPrecision::F64)
-                {
-                    ProviderPrecision::F32 => "single".to_string(),
-                    ProviderPrecision::F64 => "double".to_string(),
-                }
-            }
-        }
-        _ => class_name_for_value(value),
+        Value::Tensor(tensor) => Ok(tensor.numeric_dtype().class_name().to_string()),
+        Value::SparseTensor(sparse) => Ok(sparse.class_name().to_string()),
+        Value::ComplexTensor(tensor) => Ok(tensor.numeric_dtype().class_name().to_string()),
+        Value::Complex(_, _) | Value::Num(_) => Ok("double".to_string()),
+        Value::Int(iv) => Ok(iv.class_name().to_string()),
+        Value::Bool(_) | Value::LogicalArray(_) => Ok("logical".to_string()),
+        Value::GpuTensor(handle) => gpu_underlying_type(handle),
+        _ => Ok(class_name_for_value(value)),
     }
 }
 
+fn gpu_underlying_type(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<String> {
+    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| metadata_error("no acceleration provider owns the input handle"))?;
+    let integer = handle_integer_type(handle);
+    let logical = handle_is_logical(handle);
+    let precision = handle_precision(handle);
+    let storage = handle_storage(handle);
+    let structurally_valid = if logical {
+        integer.is_none()
+            && precision == Some(owner.precision())
+            && storage == GpuTensorStorage::Real
+    } else if integer.is_some() {
+        precision.is_none() && storage == GpuTensorStorage::Real
+    } else {
+        precision == Some(owner.precision())
+            && matches!(
+                storage,
+                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
+            )
+    };
+    if !structurally_valid
+        || !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+            handle, precision, integer, logical,
+        )
+    {
+        return Err(metadata_error(
+            "resident class metadata contradicts physical storage metadata",
+        ));
+    }
+    Ok(if logical {
+        "logical"
+    } else if let Some(integer) = integer {
+        match integer {
+            runmat_accelerate_api::IntegerElementType::I8 => "int8",
+            runmat_accelerate_api::IntegerElementType::I16 => "int16",
+            runmat_accelerate_api::IntegerElementType::I32 => "int32",
+            runmat_accelerate_api::IntegerElementType::I64 => "int64",
+            runmat_accelerate_api::IntegerElementType::U8 => "uint8",
+            runmat_accelerate_api::IntegerElementType::U16 => "uint16",
+            runmat_accelerate_api::IntegerElementType::U32 => "uint32",
+            runmat_accelerate_api::IntegerElementType::U64 => "uint64",
+        }
+    } else {
+        match precision.expect("validated floating precision") {
+            ProviderPrecision::F32 => "single",
+            ProviderPrecision::F64 => "double",
+        }
+    }
+    .to_string())
+}
+
+fn metadata_error(detail: &str) -> RuntimeError {
+    build_runtime_error(format!("isUnderlyingType: {detail}"))
+        .with_builtin(BUILTIN_IS_UNDERLYING_TYPE)
+        .with_identifier(
+            IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD
+                .identifier
+                .expect("isUnderlyingType provider-payload descriptor identifier"),
+        )
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
+}
+
 pub(crate) fn underlying_type_matches(value: &Value, typename: &str) -> bool {
+    underlying_type_matches_checked(value, typename).unwrap_or(false)
+}
+
+fn underlying_type_matches_checked(value: &Value, typename: &str) -> BuiltinResult<bool> {
     let requested = typename.trim();
-    !requested.is_empty() && underlying_type_for_value(value) == requested
+    Ok(!requested.is_empty() && underlying_type_for_value_checked(value)? == requested)
 }
 
 fn parse_type_name(value: &Value) -> BuiltinResult<String> {
@@ -250,9 +352,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        CellArray, CharArray, IntValue, LogicalArray, NumericDType, ObjectInstance, StringArray,
-        StructValue, Tensor,
+    use runmat_value::{
+        CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+        LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor,
     };
 
     #[test]
@@ -284,6 +386,78 @@ pub(crate) mod tests {
             underlying_type_for_value(&Value::String("abc".into())),
             "string"
         );
+    }
+
+    #[test]
+    fn underlying_type_reports_typed_sparse_integer_class() {
+        let sparse = runmat_value::SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::I64(vec![i64::MIN]),
+        )
+        .expect("int64 sparse");
+
+        assert_eq!(
+            underlying_type_for_value(&Value::SparseTensor(sparse)),
+            "int64"
+        );
+    }
+
+    #[test]
+    fn underlying_type_reports_every_typed_complex_integer_class() {
+        let cases = [
+            (
+                "int8",
+                IntegerStorage::I8(vec![-1]),
+                IntegerStorage::I8(vec![2]),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![-3]),
+                IntegerStorage::I16(vec![4]),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![-5]),
+                IntegerStorage::I32(vec![6]),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![-7]),
+                IntegerStorage::I64(vec![8]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U8(vec![2]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![3]),
+                IntegerStorage::U16(vec![4]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![5]),
+                IntegerStorage::U32(vec![6]),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![7]),
+                IntegerStorage::U64(vec![8]),
+            ),
+        ];
+
+        for (expected, real, imag) in cases {
+            let storage = IntegerComplexStorage::new(real, imag).expect("matching components");
+            let value = Value::ComplexTensor(
+                ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex"),
+            );
+            assert_eq!(underlying_type_for_value(&value), expected);
+            assert!(underlying_type_matches(&value, expected));
+        }
     }
 
     #[test]
@@ -358,18 +532,12 @@ pub(crate) mod tests {
 
     #[test]
     fn underlying_type_uses_gpu_metadata_without_gather() {
-        test_support::with_test_provider(|provider| {
+        test_support::with_f32_test_provider(|provider| {
             let tensor =
                 Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], NumericDType::F32).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_precision(
-                &handle,
-                runmat_accelerate_api::ProviderPrecision::F32,
-            );
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload");
+            runmat_accelerate_api::set_handle_class_name(&handle, "single");
 
             assert_eq!(
                 underlying_type_builtin(Value::GpuTensor(handle.clone())).expect("underlying"),
@@ -384,26 +552,53 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn underlying_type_reports_integer_gpu_class_metadata() {
+    fn underlying_type_reports_integer_gpu_class_from_native_provider_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|_| {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
             let tensor = Tensor::new(vec![1.2, -3.7, 123456.0], vec![3, 1]).unwrap();
-            let value = crate::dispatcher::call_builtin(
+            let handle = match crate::dispatcher::call_builtin(
                 "gpuArray",
                 &[Value::Tensor(tensor), Value::from("int32")],
             )
-            .expect("gpuArray int32");
+            .expect("gpuArray int32 native upload")
+            {
+                Value::GpuTensor(handle) => handle,
+                other => panic!("expected gpu tensor, got {other:?}"),
+            };
 
             assert_eq!(
-                underlying_type_builtin(value.clone()).expect("underlying"),
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(runmat_accelerate_api::IntegerElementType::I32)
+            );
+            assert_eq!(
+                underlying_type_builtin(Value::GpuTensor(handle.clone())).expect("underlying"),
                 "int32"
             );
             assert_eq!(
-                is_underlying_type_builtin(value.clone(), Value::from("int32")).expect("predicate"),
+                is_underlying_type_builtin(Value::GpuTensor(handle), Value::from("int32"))
+                    .expect("predicate"),
                 Value::Bool(true)
             );
+        });
+    }
+
+    #[test]
+    fn underlying_type_rejects_contradictory_resident_integer_class_metadata() {
+        test_support::with_test_provider(|_| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(
+                runmat_accelerate_api::provider().expect("test provider"),
+                &tensor,
+            )
+            .unwrap();
+            runmat_accelerate_api::set_handle_class_name(&handle, "double");
+            let error = underlying_type_builtin(Value::GpuTensor(handle))
+                .expect_err("contradictory class metadata must reject");
             assert_eq!(
-                is_underlying_type_builtin(value, Value::from("double")).expect("predicate"),
-                Value::Bool(false)
+                error.identifier(),
+                Some("RunMat:isUnderlyingType:ProviderPayloadMismatch")
             );
         });
     }
@@ -413,7 +608,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

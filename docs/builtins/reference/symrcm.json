@@ -34,7 +34,7 @@
   "description": "`r = symrcm(A)` returns a permutation vector for reordering symmetric or structurally symmetric matrices to reduce bandwidth. Use `A(r, r)` to obtain a tighter band structure, matching MATLAB-compatible ordering behavior.",
   "behaviors": [
     "Treats the input as an undirected graph based on the pattern of `A + A'`. Any value that is not exactly zero (including `NaN` or `Inf`) creates an edge; diagonal entries are ignored because they do not affect bandwidth.",
-    "Accepts numeric, logical, and complex matrices. Logical and integer inputs are promoted to double precision internally, and complex entries are considered nonzero when either the real or imaginary component is nonzero.",
+    "Accepts numeric, logical, and complex matrices. Integer entries are tested for zero directly in their native storage, and complex entries are considered nonzero when either the real or imaginary component is nonzero.",
     "Requires a square matrix (scalars and the empty matrix are allowed). Inputs with more than two non-singleton dimensions raise an error, matching MATLAB matrix semantics.",
     "Processes disconnected components independently. Each component starts from a minimum degree vertex, runs a Cuthill-McKee breadth-first search, and the component ordering is reversed to produce the symmetric variant.",
     "Returns a row vector of 1-based indices. Fully diagonal or zero matrices produce the identity permutation."

@@ -1,0 +1,36 @@
+[package]
+name = "runmat-aot"
+version = "0.6.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "RunMat native AOT archive, target, and system-link orchestration"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+build = "build.rs"
+
+[dependencies]
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-core = { workspace = true }
+runmat-builtins = { workspace = true }
+runmat-mir = { workspace = true }
+runmat-native-codegen = { workspace = true, features = ["compiler"] }
+runmat-types = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+target-lexicon = { workspace = true }
+tempfile = "3.12"
+thiserror = { workspace = true }
+zstd = "0.13"
+
+[target.'cfg(windows)'.dependencies]
+ar_archive_writer = "0.5.2"
+cc = "1.2"
+object = { version = "0.37.3", default-features = false, features = ["read"] }
+
+[dev-dependencies]
+runmat-runtime = { workspace = true, features = ["plot-core"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

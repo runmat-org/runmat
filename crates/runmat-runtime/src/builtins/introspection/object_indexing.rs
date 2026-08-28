@@ -1,8 +1,15 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::MemberAccess;
+use runmat_value::{NumericScalar, Value};
 use std::sync::OnceLock;
 
 pub(crate) const NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD: &str = "numArgumentsFromSubscript";
@@ -77,6 +84,26 @@ pub const SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SUBSREF_ERRORS,
 };
 
+const SUBSREF_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "payload subscripts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer selectors may be carried in the indexing payload passed to an overloaded object method.",
+    }];
+pub const SUBSREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "out = subsref(obj, kind, integer_payload)",
+        inputs: &SUBSREF_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat forwards authoritative selector values to the object's subsref implementation without numeric conversion. The method determines output class and overflow behavior; integer primitive receivers are not object dispatch targets.",
+    }];
+
 const SUBSASGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
     ty: BuiltinParamType::Any,
@@ -148,6 +175,34 @@ pub const SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SUBSASGN_ERRORS,
 };
 
+const SUBSASGN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "payload subscripts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer selectors may be carried in the indexing payload passed to an overloaded object method.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "rhs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Assigned integer values are forwarded to the object's subsasgn implementation with their exact class, shape, and residency.",
+    },
+];
+pub const SUBSASGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "obj = subsasgn(obj, kind, integer_payload, integer_rhs)",
+        inputs: &SUBSASGN_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat forwards selectors and the authoritative integer right-hand side without conversion. The class method owns assignment conversion, overflow, and returned-receiver semantics.",
+    }];
+
 const NUM_ARGUMENTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "n",
     ty: BuiltinParamType::NumericScalar,
@@ -207,10 +262,18 @@ const NUM_ARGUMENTS_ERROR_CONTEXT: BuiltinErrorDescriptor = BuiltinErrorDescript
     message: "numArgumentsFromSubscript: invalid indexing context",
 };
 
-const NUM_ARGUMENTS_ERRORS: [BuiltinErrorDescriptor; 3] = [
+const NUM_ARGUMENTS_ERROR_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUM_ARGUMENTS_FROM_SUBSCRIPT.COUNT_NOT_EXACT_DOUBLE",
+    identifier: Some("RunMat:numArgumentsFromSubscript:CountNotExactDouble"),
+    when: "The computed argument count cannot be represented exactly by the documented double scalar output.",
+    message: "numArgumentsFromSubscript: result exceeds exact double range",
+};
+
+const NUM_ARGUMENTS_ERRORS: [BuiltinErrorDescriptor; 4] = [
     NUM_ARGUMENTS_ERROR_ARGUMENT,
     NUM_ARGUMENTS_ERROR_SUBSTRUCT,
     NUM_ARGUMENTS_ERROR_CONTEXT,
+    NUM_ARGUMENTS_ERROR_COUNT,
 ];
 
 pub const NUM_ARGUMENTS_FROM_SUBSCRIPT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -219,6 +282,35 @@ pub const NUM_ARGUMENTS_FROM_SUBSCRIPT_DESCRIPTOR: BuiltinDescriptor = BuiltinDe
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &NUM_ARGUMENTS_ERRORS,
 };
+
+const NUM_ARGUMENTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The indexing target may be an array of any integer class; ordinary array cases use only exact shape and container metadata.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "S.subs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer scalar and vector subscripts are validated directly from authoritative storage, including full-width positive uint64 selectors, without binary64 conversion.",
+    },
+];
+
+pub const NUM_ARGUMENTS_FROM_SUBSCRIPT_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "n = numArgumentsFromSubscript(integer_A, S_with_integer_subscripts, indexingContext)",
+    inputs: &NUM_ARGUMENTS_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::Double,
+    overflow: BuiltinIntegerOverflowRule::Error,
+    backend: BuiltinIntegerBackendRule::HostAndGpu,
+    overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+    notes: "Metadata-decidable target extents do not gather resident payloads. The structural count crosses to double only after exact-range validation.",
+}];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IndexingContext {
@@ -241,13 +333,13 @@ pub(crate) fn ensure_indexing_context_classes_registered() {
 }
 
 fn register_indexing_context_class(name: &str) {
-    runmat_builtins::register_class(runmat_builtins::ClassDef {
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         name: name.to_string(),
         parent: None,
         properties: std::collections::HashMap::new(),
         methods: std::collections::HashMap::new(),
     });
-    runmat_builtins::register_class_enumerations(
+    crate::class_registry::register_class_enumerations(
         name,
         [
             INDEXING_CONTEXT_STATEMENT.to_string(),
@@ -340,7 +432,7 @@ fn parse_subscript_levels(value: &Value) -> crate::BuiltinResult<Vec<SubscriptLe
 }
 
 fn parse_subscript_level(
-    struct_value: &runmat_builtins::StructValue,
+    struct_value: &runmat_value::StructValue,
 ) -> crate::BuiltinResult<SubscriptLevel> {
     let kind_value = struct_value.fields.get("type").ok_or_else(|| {
         num_args_error(
@@ -422,11 +514,42 @@ fn single_subscript_count(
             Ok(1)
         }
         Value::Int(value) => {
-            validate_positive_integer_subscript(value.to_i64() as f64)?;
-            Ok(1)
+            if value.try_to_u64().is_some_and(|value| value >= 1) {
+                Ok(1)
+            } else {
+                Err(num_args_error(
+                    &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                    "numeric subscripts must be finite positive integers",
+                ))
+            }
         }
         Value::Tensor(tensor) => {
-            validate_numeric_subscript_values(&tensor.data)?;
+            for index in 0..tensor.len() {
+                let value = tensor.numeric_value_at(index).ok_or_else(|| {
+                    num_args_error(
+                        &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                        "numeric subscript storage is invalid",
+                    )
+                })?;
+                match value {
+                    NumericScalar::F64(value) => validate_positive_integer_subscript(value)?,
+                    NumericScalar::F32(value) => {
+                        validate_positive_integer_subscript(f64::from(value))?
+                    }
+                    value => {
+                        if value
+                            .into_int_value()
+                            .and_then(|value| value.try_to_u64())
+                            .is_none_or(|value| value < 1)
+                        {
+                            return Err(num_args_error(
+                                &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                                "numeric subscripts must be finite positive integers",
+                            ));
+                        }
+                    }
+                }
+            }
             checked_shape_element_count(&tensor.shape)
         }
         Value::LogicalArray(array) => Ok(array.data.iter().filter(|&&bit| bit != 0).count()),
@@ -462,13 +585,6 @@ fn validate_positive_integer_subscript(value: f64) -> crate::BuiltinResult<()> {
             "numeric subscripts must be finite positive integers",
         ))
     }
-}
-
-fn validate_numeric_subscript_values(values: &[f64]) -> crate::BuiltinResult<()> {
-    for &value in values {
-        validate_positive_integer_subscript(value)?;
-    }
-    Ok(())
 }
 
 fn checked_shape_element_count(shape: &[usize]) -> crate::BuiltinResult<usize> {
@@ -551,7 +667,7 @@ async fn dispatch_num_arguments_overload(
 ) -> crate::BuiltinResult<Option<Value>> {
     let args = vec![target, subscript, indexing_context];
     if let Some((method, owner)) =
-        runmat_builtins::lookup_method(&class_name, NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD)
+        crate::class_registry::lookup_method(&class_name, NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD)
     {
         let owner_member = format!("{owner}.{NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD}");
         let mut candidates = vec![method.function_name];
@@ -631,10 +747,8 @@ pub(crate) async fn dispatch_subsref(
                             _ => None,
                         };
                         if let Some(field) = field {
-                            return crate::call_builtin_async_with_outputs(
-                                "getfield",
-                                &[receiver, Value::String(field)],
-                                crate::current_requested_outputs(),
+                            return crate::builtins::structs::core::getfield::get_member_value(
+                                receiver, &field,
                             )
                             .await;
                         }
@@ -722,6 +836,9 @@ pub(crate) async fn dispatch_subsasgn(
     summary = "Dispatch overloaded object indexing reads.",
     keywords = "subsref,indexing,classdef,object",
     descriptor(crate::builtins::introspection::object_indexing::SUBSREF_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::object_indexing::SUBSREF_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
 pub async fn subsref_builtin(
@@ -738,6 +855,9 @@ pub async fn subsref_builtin(
     summary = "Dispatch overloaded object indexing writes.",
     keywords = "subsasgn,indexing,classdef,object",
     descriptor(crate::builtins::introspection::object_indexing::SUBSASGN_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::introspection::object_indexing::SUBSASGN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
 pub async fn subsasgn_builtin(
@@ -756,6 +876,9 @@ pub async fn subsasgn_builtin(
     keywords = "numArgumentsFromSubscript,substruct,subsref,subsasgn,indexing,classdef,object",
     descriptor(
         crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_DESCRIPTOR
+    ),
+    integer_capabilities(
+        crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_INTEGER_CAPABILITIES
     ),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
@@ -779,18 +902,30 @@ pub async fn num_arguments_from_subscript_builtin(
         }
     }
     let levels = parse_subscript_levels(&subscript)?;
-    Ok(Value::Num(
-        default_num_arguments(&target, &levels, context)? as f64,
-    ))
+    Ok(Value::Num(exact_count_as_f64(default_num_arguments(
+        &target, &levels, context,
+    )?)?))
+}
+
+fn exact_count_as_f64(count: usize) -> crate::BuiltinResult<f64> {
+    if count != 0 {
+        let significant_bits = usize::BITS - count.leading_zeros();
+        let discarded_bits = significant_bits.saturating_sub(f64::MANTISSA_DIGITS);
+        if count.trailing_zeros() < discarded_bits {
+            return Err(num_args_error(
+                &NUM_ARGUMENTS_ERROR_COUNT,
+                format!("argument count {count} cannot be represented exactly as double"),
+            ));
+        }
+    }
+    Ok(count as f64)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        Access, CellArray, ClassDef, MethodDef, ObjectInstance, StructValue, Tensor,
-    };
+    use runmat_value::{CellArray, IntValue, ObjectInstance, StructValue, Tensor};
     use std::collections::HashMap;
 
     fn substruct(kind: &str, subs: Value) -> Value {
@@ -817,6 +952,43 @@ mod tests {
             target, subscript, context,
         ))
         .expect_err("numArgumentsFromSubscript should fail")
+    }
+
+    #[test]
+    fn typed_scalar_subscripts_do_not_round_or_saturate() {
+        assert_eq!(
+            single_subscript_count(
+                &Value::Num(0.0),
+                &Value::Int(IntValue::U64(u64::MAX)),
+                0,
+                true
+            )
+            .expect("positive uint64 subscript"),
+            1
+        );
+        assert!(
+            single_subscript_count(&Value::Num(0.0), &Value::Int(IntValue::I64(-1)), 0, true)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn num_arguments_integer_metadata_and_double_boundary_are_explicit() {
+        assert_eq!(NUM_ARGUMENTS_FROM_SUBSCRIPT_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            NUM_ARGUMENTS_FROM_SUBSCRIPT_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::Double
+        );
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_eq!(
+                exact_count_as_f64(9_007_199_254_740_992).expect("exact count"),
+                9_007_199_254_740_992.0
+            );
+            let error =
+                exact_count_as_f64(9_007_199_254_740_993).expect_err("count is not exact binary64");
+            assert_eq!(error.identifier(), NUM_ARGUMENTS_ERROR_COUNT.identifier);
+        }
     }
 
     #[test]
@@ -899,6 +1071,7 @@ mod tests {
             shape: vec![2, 3],
             device_id: 0,
             buffer_id: 99,
+            descriptor: Default::default(),
         });
         let descriptor = substruct(
             crate::OBJECT_INDEX_BRACE,
@@ -953,6 +1126,7 @@ mod tests {
             shape: vec![usize::MAX, 2],
             device_id: 0,
             buffer_id: 99,
+            descriptor: Default::default(),
         });
         let descriptor = substruct(
             crate::OBJECT_INDEX_BRACE,
@@ -1010,23 +1184,23 @@ mod tests {
         let mut methods = HashMap::new();
         methods.insert(
             NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.to_string(),
-            MethodDef {
+            crate::class_registry::RuntimeMethod {
                 name: NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.to_string(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
-                access: Access::Public,
+                access: MemberAccess::Public,
                 function_name: format!("OverIdx.{NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD}"),
                 implicit_class_argument: None,
             },
         );
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: base.to_string(),
             parent: None,
             properties: HashMap::new(),
             methods,
         });
-        runmat_builtins::register_class(ClassDef {
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: child.to_string(),
             parent: Some(base.to_string()),
             properties: HashMap::new(),

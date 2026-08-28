@@ -1,0 +1,33 @@
+{
+  "title": "fea.results",
+  "category": "fea",
+  "keywords": ["fea", "results", "fields", "modes", "snapshots"],
+  "summary": "Query a persisted RunMat FEA run for post-processing.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" },
+  "description": "`fea.results(runOrRunId, Name, Value, ...)` returns a `fea.Results` object for a persisted run. Passing an existing `fea.Results` object without options returns that object.",
+  "behaviors": [
+    "The required first input is a persisted run-id text scalar, a single-run `fea.RunResult`, or an existing `fea.Results` object. A sweep result must be queried through one of its per-study run ids.",
+    "`Fields` or `IncludeFields` and `DiagnosticCodes` accept text scalars, string arrays, or cells of text. Inclusion flags accept logical scalars or exact numeric zero and one; other numeric values and resident controls are rejected before artifact lookup.",
+    "`ModeIndices` and `TransientSnapshotIndices` are positive, one-based exact structural vectors. All eight integer classes and ordinary integral doubles are accepted; zero, negative, fractional, nonfinite, out-of-range, matrix-shaped, and resident selectors are rejected before artifact lookup.",
+    "Omitted field and diagnostic lists mean no filtering. Omitted mode and snapshot selectors include every available item. Inclusion flags default to true.",
+    "Field values, frequencies, times, residuals, rates, ratios, and other physics quantities retain binary64 representation. Shapes, element/component counts, byte sizes, mode/snapshot indexes, iteration counts, fingerprints, and other structural metadata remain exact typed integers.",
+    "The query and argument-decoding path is host-side and performs no provider gather. Stored device references are returned as metadata rather than executed. Persisted results do not intrinsically require native OCCT."
+  ],
+  "options": [
+    "`Fields` or `IncludeFields`: field-id text list; default empty.",
+    "`IncludeFieldValues` or `FieldValues`: logical or exact numeric 0/1; default true.",
+    "`IncludeDiagnostics`: logical or exact numeric 0/1; default true.",
+    "`DiagnosticCodes`: diagnostic-code text list; default empty.",
+    "`IncludeModalResults`: logical or exact numeric 0/1; default true.",
+    "`ModeIndices`: positive one-based exact structural vector; default empty.",
+    "`IncludeTransientResults`: logical or exact numeric 0/1; default true.",
+    "`TransientSnapshotIndices`: positive one-based exact structural vector; default empty.",
+    "`IncludeNonlinearResults`: logical or exact numeric 0/1; default true.",
+    "`IncludeElectromagneticResults`: logical or exact numeric 0/1; default true."
+  ],
+  "examples": [{ "description": "Select the first and third modes", "input": "results = fea.results(run, \"ModeIndices\", uint64([1 3]), \"IncludeDiagnostics\", false);" }],
+  "faqs": [{ "question": "Are result indexes zero-based?", "answer": "No. The RunMat scripting builtin accepts and exposes one-based mode and snapshot indexes; the internal host operation translates them to its storage representation." }],
+  "links": [{ "label": "FEA operation reference", "url": "../../fea/operation-reference" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

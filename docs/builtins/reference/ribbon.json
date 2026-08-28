@@ -33,6 +33,7 @@
     "`ribbon(Y)` uses implicit x coordinates `1:size(Y,1)` and creates one surface ribbon per column of `Y`.",
     "`ribbon(Y,width)` uses the supplied positive finite ribbon width around each column center.",
     "`ribbon(X,Y)` and `ribbon(X,Y,width)` use `X` as the x coordinates for each row of `Y`; `numel(X)` must match the number of rows in `Y`.",
+    "All eight integer classes are accepted for `X`, `Y`, and `width`. Source `XData` and `ZData` retain authoritative native storage on the surface object, while the renderer materializes floating geometry only at its explicit graphics boundary.",
     "Vector `Y` input, including row-vector input, creates a single ribbon surface.",
     "`NaN` height values are preserved in the surface `ZData`, allowing callers to represent missing or interrupted ribbon geometry.",
     "The axes-target form `ribbon(ax,...)` renders into the supplied axes handle.",

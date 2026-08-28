@@ -12,6 +12,8 @@ use glam::{Vec3, Vec4};
 use std::fmt::Write;
 use std::sync::Arc;
 
+use super::NumericPlotData;
+
 /// High-performance GPU-accelerated 3D surface plot
 #[derive(Debug, Clone)]
 pub struct SurfacePlot {
@@ -22,6 +24,12 @@ pub struct SurfacePlot {
     /// Optional full coordinate grids for parametric surfaces where X/Y are not separable axes.
     pub x_grid: Option<Vec<Vec<f64>>>,
     pub y_grid: Option<Vec<Vec<f64>>>,
+    /// Authoritative source payloads retained independently of renderer-domain
+    /// floating grids. Graphics properties and scene persistence prefer these
+    /// values so native single and integer class, shape, and exact values survive.
+    source_x: Option<NumericPlotData>,
+    source_y: Option<NumericPlotData>,
+    source_z: Option<NumericPlotData>,
     /// Grid resolution for rendering/index generation (kept even for GPU-backed plots).
     x_len: usize,
     y_len: usize,
@@ -303,6 +311,31 @@ impl Default for ShadingMode {
 }
 
 impl SurfacePlot {
+    pub fn source_data(
+        &self,
+    ) -> (
+        Option<&NumericPlotData>,
+        Option<&NumericPlotData>,
+        Option<&NumericPlotData>,
+    ) {
+        (
+            self.source_x.as_ref(),
+            self.source_y.as_ref(),
+            self.source_z.as_ref(),
+        )
+    }
+
+    pub fn set_source_data(
+        &mut self,
+        x: Option<NumericPlotData>,
+        y: Option<NumericPlotData>,
+        z: Option<NumericPlotData>,
+    ) {
+        self.source_x = x;
+        self.source_y = y;
+        self.source_z = z;
+    }
+
     pub async fn export_scene_grid_data(
         &self,
     ) -> Result<(Vec<f64>, Vec<f64>, Vec<Vec<f64>>), String> {
@@ -413,6 +446,17 @@ impl SurfacePlot {
             }
         }
 
+        let x_source = NumericPlotData::from_f64(x_data.clone(), vec![1, x_data.len()])?;
+        let y_source = NumericPlotData::from_f64(y_data.clone(), vec![1, y_data.len()])?;
+        let z_rows = z_data.first().map_or(0, Vec::len);
+        let z_cols = z_data.len();
+        let z_source = NumericPlotData::from_f64(
+            z_data
+                .iter()
+                .flat_map(|column| column.iter().copied())
+                .collect(),
+            vec![z_rows, z_cols],
+        )?;
         Ok(Self {
             x_len: x_data.len(),
             y_len: y_data.len(),
@@ -421,6 +465,9 @@ impl SurfacePlot {
             z_data: Some(z_data),
             x_grid: None,
             y_grid: None,
+            source_x: Some(x_source),
+            source_y: Some(y_source),
+            source_z: Some(z_source),
             colormap: ColorMap::default(),
             shading_mode: ShadingMode::default(),
             wireframe: false,
@@ -457,12 +504,37 @@ impl SurfacePlot {
         validate_coordinate_grids(&x_grid, &y_grid, &z_grid)?;
         let x_len = z_grid.len();
         let y_len = z_grid.first().map_or(0, Vec::len);
+        let source_shape = vec![y_len, x_len];
+        let x_source = NumericPlotData::from_f64(
+            x_grid
+                .iter()
+                .flat_map(|column| column.iter().copied())
+                .collect(),
+            source_shape.clone(),
+        )?;
+        let y_source = NumericPlotData::from_f64(
+            y_grid
+                .iter()
+                .flat_map(|column| column.iter().copied())
+                .collect(),
+            source_shape.clone(),
+        )?;
+        let z_source = NumericPlotData::from_f64(
+            z_grid
+                .iter()
+                .flat_map(|column| column.iter().copied())
+                .collect(),
+            source_shape,
+        )?;
         Ok(Self {
             x_data: (0..x_len).map(|i| i as f64 + 1.0).collect(),
             y_data: (0..y_len).map(|i| i as f64 + 1.0).collect(),
             z_data: Some(z_grid),
             x_grid: Some(x_grid),
             y_grid: Some(y_grid),
+            source_x: Some(x_source),
+            source_y: Some(y_source),
+            source_z: Some(z_source),
             x_len,
             y_len,
             colormap: ColorMap::default(),
@@ -506,6 +578,9 @@ impl SurfacePlot {
             z_data: None,
             x_grid: None,
             y_grid: None,
+            source_x: None,
+            source_y: None,
+            source_z: None,
             x_len,
             y_len,
             colormap: ColorMap::default(),
@@ -575,6 +650,26 @@ impl SurfacePlot {
         self.z_data = Some(z_data);
         self.x_grid = None;
         self.y_grid = None;
+        self.source_x = Some(NumericPlotData::from_f64(
+            self.x_data.clone(),
+            vec![1, self.x_data.len()],
+        )?);
+        self.source_y = Some(NumericPlotData::from_f64(
+            self.y_data.clone(),
+            vec![1, self.y_data.len()],
+        )?);
+        self.source_z = self
+            .z_data
+            .as_ref()
+            .map(|grid| {
+                NumericPlotData::from_f64(
+                    grid.iter()
+                        .flat_map(|column| column.iter().copied())
+                        .collect(),
+                    vec![self.y_len, self.x_len],
+                )
+            })
+            .transpose()?;
         self.reset_source_data();
         Ok(())
     }
@@ -595,6 +690,34 @@ impl SurfacePlot {
         self.y_grid = Some(y_grid);
         self.x_len = x_len;
         self.y_len = y_len;
+        let source_shape = vec![y_len, x_len];
+        self.source_x = Some(NumericPlotData::from_f64(
+            self.x_grid
+                .as_ref()
+                .expect("coordinate grid installed")
+                .iter()
+                .flat_map(|column| column.iter().copied())
+                .collect(),
+            source_shape.clone(),
+        )?);
+        self.source_y = Some(NumericPlotData::from_f64(
+            self.y_grid
+                .as_ref()
+                .expect("coordinate grid installed")
+                .iter()
+                .flat_map(|column| column.iter().copied())
+                .collect(),
+            source_shape.clone(),
+        )?);
+        self.source_z = Some(NumericPlotData::from_f64(
+            self.z_data
+                .as_ref()
+                .expect("coordinate grid installed")
+                .iter()
+                .flat_map(|column| column.iter().copied())
+                .collect(),
+            source_shape,
+        )?);
         self.reset_source_data();
         Ok(())
     }

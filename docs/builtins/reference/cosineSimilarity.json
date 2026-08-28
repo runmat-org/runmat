@@ -28,16 +28,19 @@
     "unit": "builtins::strings::text_analytics::similarity::tests",
     "integration": null
   },
-  "description": "`cosineSimilarity` compares rows of numeric matrices directly, or compares `tokenizedDocument`, `bagOfWords`, and `bagOfNgrams` inputs using tf-idf weighting derived from the first document or bag input.",
+  "description": "`cosineSimilarity` compares rows of numeric matrices directly, or compares `tokenizedDocument`, `bagOfWords`, and `bagOfNgrams` inputs using tf-idf weighting derived from the first document or bag input. MATLAB documents double numeric matrices; RunMat mode separately gates single, logical, typed-integer, and resident matrix extensions.",
   "behaviors": [
     "`cosineSimilarity(M)` returns pairwise row cosine similarities for the rows of `M` as a real sparse matrix.",
     "`cosineSimilarity(M1, M2)` returns an `m1`-by-`m2` sparse matrix comparing each row of `M1` to each row of `M2`; both matrices must have the same number of columns.",
+    "All eight real or typed-complex integer classes are a RunMat-only extension and require each component to be exactly representable at the binary64 norm and inner-product boundary; aligned values above `flintmax` are accepted when their significant bits fit binary64.",
+    "Single, logical, and provider-resident numeric matrices are independent RunMat-only extensions.",
     "`cosineSimilarity(documents)` accepts RunMat `tokenizedDocument` objects and raw row word vectors; non-tokenized arrays must be row vectors representing one document.",
     "`cosineSimilarity(documents, queries)` encodes query documents using the vocabulary and inverse-document-frequency weights derived from `documents`.",
     "`cosineSimilarity(bag)` and `cosineSimilarity(bag, queries)` accept RunMat `bagOfWords` and `bagOfNgrams` compatibility objects and use their stored counts and terms.",
-    "Real numeric and text-model results are returned as RunMat `SparseTensor` values. Zero-norm rows produce stored `NaN` similarities, matching the mathematical undefined cosine case.",
+    "Real numeric and text-model results are returned as RunMat `SparseTensor` values. The public MATLAB reference does not specify zero-norm behavior; RunMat returns stored `NaN` similarities because the cosine quotient is mathematically undefined when either norm is zero.",
     "Complex matrix inputs use the Hermitian inner product. RunMat does not yet have a complex sparse value type, so complex results are returned as a dense `ComplexTensor` compatibility fallback rather than MATLAB's sparse complex matrix representation.",
-    "`gpuArray` inputs are gathered before evaluation because RunMat sparse output is currently host-resident and provider-resident sparse similarity kernels are tracked by the GPU fast-path audit."
+    "`gpuArray` inputs are gathered before evaluation because RunMat sparse output is currently host-resident and provider-resident sparse similarity kernels are tracked by the GPU fast-path audit.",
+    "Sparse-complex output, table adapters, and tall or distributed execution remain explicit general representation/container gaps rather than integer-storage gaps."
   ],
   "examples": [
     {
@@ -71,6 +74,10 @@
     }
   ],
   "links": [
+    {
+      "label": "MATLAB cosineSimilarity documentation",
+      "url": "https://www.mathworks.com/help/textanalytics/ref/cosinesimilarity.html"
+    },
     {
       "label": "tokenizedDocument",
       "url": "./tokenizedDocument"

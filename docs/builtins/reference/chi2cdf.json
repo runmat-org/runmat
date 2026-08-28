@@ -6,9 +6,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
-    "broadcasting": "matlab",
-    "notes": "gpuArray inputs are gathered to the host reference path."
+    "precisions": ["f32", "f64"],
+    "broadcasting": "scalar-or-same-size",
+    "notes": "Resident floating inputs use the host reference path and restore the result to the first owning provider. Resident integer input follows the same fallback in RunMat mode."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline" },
   "requires_feature": null,
@@ -19,6 +19,8 @@
   "description": "`chi2cdf(x,nu)` evaluates the chi-square CDF at `x` for degrees of freedom `nu`. `chi2cdf(x,nu,\"upper\")` returns the complementary upper-tail probability.",
   "behaviors": [
     "`x` and `nu` support scalar expansion and matching array shapes.",
+    "Typed-integer `x` and `nu` values from all eight classes are mode-gated RunMat extensions and must lie within the exact-integer binary64 range.",
+    "Single-precision inputs produce single-precision output; otherwise output is double precision.",
     "`nu` must be positive; invalid parameters produce `NaN` outputs.",
     "Negative `x` values return zero for the lower tail and one for the upper tail.",
     "The computation uses regularized incomplete gamma functions."

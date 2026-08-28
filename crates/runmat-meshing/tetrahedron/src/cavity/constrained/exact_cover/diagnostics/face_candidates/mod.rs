@@ -1,9 +1,6 @@
 use super::*;
 
 #[cfg(test)]
-mod mates;
-
-#[cfg(test)]
 pub(crate) fn diagnostic_boundary_exact_cover_face_candidate_sources(
     cavity: &ConstrainedCavity,
     boundary_nodes: &[ConstrainedCavityNode],

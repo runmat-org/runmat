@@ -2,12 +2,15 @@
 pub(crate) mod all;
 pub(crate) mod any;
 pub(crate) mod bounds;
+pub(crate) mod complex_cumulative_extrema;
 pub(crate) mod cummax;
 pub(crate) mod cummin;
 pub(crate) mod cumprod;
 pub(crate) mod cumsum;
 pub(crate) mod cumtrapz;
 pub(crate) mod diff;
+pub(crate) mod floating_cumulative_arithmetic;
+pub(crate) mod floating_cumulative_extrema;
 pub(crate) mod gradient;
 pub(crate) mod integer_native;
 pub(crate) mod integration_common;

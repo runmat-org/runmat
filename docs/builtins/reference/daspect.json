@@ -25,6 +25,7 @@
     "daspect('auto')",
     "daspect('manual')",
     "ratio = daspect(ax)",
+    "mode = daspect(ax, 'mode')",
     "daspect(ax, ratioOrMode)"
   ],
   "examples": [
@@ -39,6 +40,10 @@
   ],
   "notes": [
     "`daspect([dx dy dz])` sets `DataAspectRatioMode` to `manual`.",
+    "Ratio and mode setter forms are statement-only and do not return a value; assigning an output from a setter is rejected.",
+    "MATLAB documents all eight integer classes as well as single and double ratio vectors. RunMat validates integer shape and positivity from authoritative storage, then crosses once into the double-valued graphics property.",
+    "Logical, complex, nonvector, and GPU-resident ratio inputs are rejected without provider access.",
+    "RunMat's numeric or typed-integer encoded axes handles are available only through the `daspect-numeric-axes-handle-alias` extension; the public MATLAB contract uses an Axes object.",
     "`daspect('auto')` and `set(gca,'DataAspectRatioMode','auto')` preserve the stored ratio but return display bounds to automatic aspect fitting.",
     "RunMat applies manual X/Y data aspect ratios to 2-D display bounds and X/Y/Z data aspect ratios to 3-D camera-fit bounds."
   ],
@@ -61,5 +66,7 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/daspect.rs"
   },
   "gpu_residency": "`daspect` is axes metadata only. It does not gather, upload, or mutate numeric GPU buffers; rendering applies the stored aspect metadata through the normal plot camera/bounds path.",
-  "limitations": []
+  "limitations": [
+    "RunMat currently represents axes with numeric aliases; strict compatibility mode therefore rejects explicit numeric target aliases."
+  ]
 }

@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Class discovery and label matching run on CPU."
+    "notes": "Class discovery and label matching run on the CPU. Automatic residency gathers transparently; explicit gpuArray host fallback is a declared RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -25,16 +25,17 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::stats::summary::encoding::tests",
-    "integration": "crates/runmat-vm/tests/stats_ml.rs"
+    "integration": "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs"
   },
   "description": "`onehotencode(A,featureDim)` expands labels in `A` into one-hot vectors along `featureDim`.",
   "behaviors": [
     "`featureDim` must identify a singleton dimension in `A`; dimensions beyond `ndims(A)` are padded with singleton dimensions.",
     "Categorical inputs infer classes from the full category order, including categories not observed in the input values.",
     "Noncategorical inputs require `ClassNames`; class names must be unique and match the input label type.",
-    "`OutputType` supports `double`, `single`, and `logical`; `single` is represented with RunMat's numeric tensor storage.",
+    "The positional typename supports `double`, `single`, `logical`, and all eight integer output classes. `OutputType` and `Typename` name-value aliases are declared RunMat extensions.",
+    "Numeric labels and `ClassNames` retain exact native identity, so adjacent `int64` and `uint64` labels above `flintmax` do not collapse.",
     "Missing labels and labels not listed in `ClassNames` encode as all-`NaN` feature vectors for numeric output.",
-    "Logical output cannot represent missing labels or labels excluded by `ClassNames` and raises an error in those cases."
+    "Logical and integer output cannot represent missing labels or labels excluded by `ClassNames` and raises an error in those cases."
   ],
   "examples": [
     {

@@ -91,7 +91,7 @@ pub fn builtin_function_impl(args: TokenStream, input: TokenStream) -> TokenStre
     let expanded = quote! {
         #fn_vis fn #fn_name(#fn_inputs) #fn_output #fn_block
 
-        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> runmat_builtins::BuiltinFuture {
+        fn #wrapper_ident(args: &[runmat_value::Value]) -> runmat_builtins::BuiltinFuture {
             let args = args.to_vec();
             Box::pin(async move { #call_expr })
         }

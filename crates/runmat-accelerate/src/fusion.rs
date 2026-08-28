@@ -7,7 +7,8 @@ use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
 
 use runmat_accelerate_api::ReductionFlavor;
-use runmat_builtins::Value;
+use runmat_runtime::builtins::common::tensor::tensor_element_len;
+use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::{
@@ -544,7 +545,9 @@ fn value_is_placeholder(graph: &AccelGraph, vid: ValueId) -> bool {
         return false;
     };
     match constant {
-        Value::Tensor(t) => t.data.is_empty(),
+        // Native integer tensors may intentionally have no f64 mirror.  Their
+        // authoritative storage (and thus their emptiness) is the typed buffer.
+        Value::Tensor(t) => tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
         Value::StringArray(sa) => sa.data.is_empty(),
         Value::CharArray(ca) => ca.data.is_empty(),
@@ -945,6 +948,20 @@ fn log_plan_stack_pattern(stage: &str, plan: &FusionGroupPlan, graph: &AccelGrap
 }
 
 impl FusionGroupPlan {
+    /// Float WGSL fusion kernels cannot consume the provider's native integer
+    /// buffers.  Keep this check on the plan as well as at execution time: a
+    /// constant otherwise becomes an f32/f64 WGSL literal before the executor
+    /// gets a chance to reject the fusion.
+    pub fn has_native_integer_constants(&self) -> bool {
+        self.const_values
+            .values()
+            .chain(self.constants.values())
+            .any(|value| {
+                matches!(value, Value::Int(_))
+                    || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
+            })
+    }
+
     fn new(index: usize, group: FusionGroup, graph: &AccelGraph) -> Self {
         let node_set: HashSet<NodeId> = group.nodes.iter().copied().collect();
         let mut seen_inputs: HashMap<ValueId, usize> = HashMap::new();
@@ -1372,7 +1389,12 @@ impl FusionGroupPlan {
         // - Elementwise: require WGSL generation at plan time.
         // - Reduction: require WGSL generation at plan time as well.
         // - Other kinds: executed via provider paths.
-        let supported = if plan.kernel.kind.is_elementwise() {
+        let supported = if plan.has_native_integer_constants() {
+            // Fusion WGSL has only floating scalar literals today.  Do not let
+            // integer constants reach generation, where they would be rounded
+            // while formatting an f32/f64 literal.
+            false
+        } else if plan.kernel.kind.is_elementwise() {
             // Keep scalar ops on the VM/runtime scalar path. Fusing scalar elementwise
             // spans can materialize scalar GPU handles that later leak into scalar-only
             // VM coercion boundaries.
@@ -1511,6 +1533,9 @@ impl FusionGroupPlan {
     }
 
     pub fn generate_wgsl(&self, scalar_ty: &str) -> Option<String> {
+        if self.has_native_integer_constants() {
+            return None;
+        }
         self.generate_wgsl_for_output(self.output?, scalar_ty)
     }
 
@@ -1553,14 +1578,15 @@ impl FusionGroupPlan {
         // hypot is not a WGSL builtin; define it explicitly.
         // Use the scaling form max*sqrt(1+(min/max)²) to avoid overflow when
         // a² or b² exceeds the representable range.
-        // Guard against Inf inputs: Inf/Inf = NaN, so return hi early when
-        // it is already infinite (IEEE 754 requires hypot(Inf,*) = Inf).
+        // Match MATLAB's NaN precedence before guarding against Inf/Inf in the
+        // scaled formula.
         if scalar_ty == "f32" {
             shader.push_str("fn isNan(x: f32) -> bool { let bits = bitcast<u32>(x); return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u; }\n");
             shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
             shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n");
             shader.push_str(concat!(
                 "fn hypot(a: f32, b: f32) -> f32 {\n",
+                "    if isNan(a) || isNan(b) { return a + b; }\n",
                 "    let lo = min(abs(a), abs(b));\n",
                 "    let hi = max(abs(a), abs(b));\n",
                 "    if hi == 0.0 { return 0.0; }\n",
@@ -1575,6 +1601,7 @@ impl FusionGroupPlan {
             shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n");
             shader.push_str(concat!(
                 "fn hypot(a: f64, b: f64) -> f64 {\n",
+                "    if isNan(a) || isNan(b) { return a + b; }\n",
                 "    let lo = min(abs(a), abs(b));\n",
                 "    let hi = max(abs(a), abs(b));\n",
                 "    if hi == f64(0.0) { return f64(0.0); }\n",
@@ -1634,6 +1661,9 @@ impl FusionGroupPlan {
         output_ids: &[ValueId],
         scalar_ty: &str,
     ) -> Option<String> {
+        if self.has_native_integer_constants() {
+            return None;
+        }
         if output_ids.is_empty() {
             return None;
         }
@@ -1708,6 +1738,9 @@ impl FusionGroupPlan {
     }
 
     pub fn generate_wgsl_for_output(&self, output_id: ValueId, scalar_ty: &str) -> Option<String> {
+        if self.has_native_integer_constants() {
+            return None;
+        }
         if !self.kernel.kind.is_elementwise() {
             return None;
         }
@@ -1763,6 +1796,9 @@ impl FusionGroupPlan {
     }
 
     pub fn generate_reduction_wgsl(&self, scalar_ty: &str) -> Option<String> {
+        if self.has_native_integer_constants() {
+            return None;
+        }
         if !self.kernel.kind.is_reduction() {
             return None;
         }
@@ -1792,12 +1828,7 @@ impl FusionGroupPlan {
                     Value::Num(n) if *n >= 1.0 => {
                         axis = (*n as usize).saturating_sub(1);
                     }
-                    Value::Int(i) => {
-                        let val = i.to_f64();
-                        if val >= 1.0 {
-                            axis = (val as usize).saturating_sub(1);
-                        }
-                    }
+                    Value::Int(_) => return None,
                     _ => {}
                 }
             }
@@ -1809,13 +1840,7 @@ impl FusionGroupPlan {
                         axis = (*n as usize).saturating_sub(1);
                         break;
                     }
-                    Value::Int(i) => {
-                        let val = i.to_f64();
-                        if val >= 1.0 {
-                            axis = (val as usize).saturating_sub(1);
-                            break;
-                        }
-                    }
+                    Value::Int(_) => return None,
                     _ => {}
                 }
             }
@@ -1845,16 +1870,12 @@ impl FusionGroupPlan {
                         format!("{:?}", *n as f32)
                     }
                 }
-                Value::Int(i) => {
-                    let f = i.to_f64();
-                    if scalar_ty == "f64" {
-                        format!("f64({})", f)
-                    } else {
-                        format!("{:?}", f as f32)
-                    }
-                }
-                Value::Tensor(t) if t.data.len() == 1 => {
-                    let scalar = t.data[0];
+                Value::Int(_) => return None,
+                Value::Tensor(t) if t.integer_storage().is_none() && t.len() == 1 => {
+                    let scalar = t
+                        .numeric_value_at(0)
+                        .expect("validated floating scalar tensor")
+                        .materialize_f64();
                     if scalar_ty == "f64" {
                         format!("f64({})", scalar)
                     } else {
@@ -2126,7 +2147,7 @@ fn detect_centered_gram(
         };
         let denom_const = match &denom_info.constant {
             Some(Value::Num(v)) => Some(*v),
-            Some(Value::Int(i)) => Some(i.to_f64()),
+            Some(Value::Int(_)) => None,
             _ => None,
         };
         if denom_const.is_some_and(|v| v == 0.0) {
@@ -2859,8 +2880,14 @@ fn resolve_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<f64> {
 fn value_info_scalar(info: &ValueInfo) -> Option<f64> {
     match &info.constant {
         Some(Value::Num(v)) => Some(*v),
-        Some(Value::Int(i)) => Some(i.to_f64()),
-        Some(Value::Tensor(t)) if t.data.len() == 1 => Some(t.data[0]),
+        // Float fusion pattern matching must not establish eligibility by
+        // rounding a native integer scalar.
+        Some(Value::Int(_)) => None,
+        // Do not establish eligibility for a floating fusion by reading the
+        // lossy f64 mirror of a native integer tensor.
+        Some(Value::Tensor(t)) if t.integer_storage().is_none() && t.len() == 1 => t
+            .numeric_value_at(0)
+            .map(runmat_value::NumericScalar::materialize_f64),
         Some(Value::LogicalArray(arr)) if arr.data.len() == 1 => Some(arr.data[0] as f64),
         Some(Value::Bool(flag)) => Some(if *flag { 1.0 } else { 0.0 }),
         _ => None,
@@ -2956,9 +2983,10 @@ fn builtin_expr(
             let rhs = exprs.get(inputs.get(1)?).cloned()?;
             // When rhs is infinite and lhs is finite, MATLAB sign-corrects: returns lhs when
             // signs match, rhs (±Inf) when they differ. The general formula produces NaN here
-            // (inf * 0 = NaN), so we must short-circuit.
+            // (inf * 0 = NaN), so we must short-circuit. A zero divisor is a separate
+            // documented convention: mod(lhs, 0) returns lhs.
             return Some(format!(
-                "select(({lhs} - {rhs} * floor({lhs} / {rhs})), select({rhs}, {lhs}, ({lhs} == 0.0 || sign({lhs}) == sign({rhs}))), (isInf({rhs}) && isFinite({lhs})))"
+                "select(select(({lhs} - {rhs} * floor({lhs} / {rhs})), select({rhs}, {lhs}, ({lhs} == 0.0 || sign({lhs}) == sign({rhs}))), (isInf({rhs}) && isFinite({lhs}))), {lhs}, ({rhs} == 0.0))"
             ));
         }
         "rem" => {
@@ -3183,7 +3211,12 @@ fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<V
     }
     let info = graph.value(vid)?;
     match &info.constant {
-        Some(Value::Tensor(tensor)) if !tensor.data.is_empty() => Some(tensor.data.clone()),
+        // Axis and dimension vectors feed floating shader literals below, so
+        // native integer tensors must take the normal unfused path rather than
+        // being derived from their f64 mirror.
+        Some(Value::Tensor(tensor)) if tensor.integer_storage().is_none() && !tensor.is_empty() => {
+            Some(tensor.materialize_f64())
+        }
         Some(Value::LogicalArray(arr)) if !arr.data.is_empty() => Some(
             arr.data
                 .iter()
@@ -3191,7 +3224,7 @@ fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<V
                 .collect(),
         ),
         Some(Value::Bool(flag)) => Some(vec![if *flag { 1.0 } else { 0.0 }]),
-        Some(Value::Int(iv)) => Some(vec![iv.to_f64()]),
+        Some(Value::Int(_)) => None,
         Some(Value::Num(num)) => Some(vec![*num]),
         _ => None,
     }
@@ -3488,7 +3521,8 @@ mod tests {
         AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan,
         PrimitiveOp, ValueId, ValueInfo, ValueOrigin, VarKind,
     };
-    use runmat_builtins::{Type, Value};
+    use runmat_builtins::Type;
+    use runmat_value::{IntValue, Value};
     use std::collections::HashMap as StdHashMap;
 
     fn simple_elementwise_graph() -> AccelGraph {
@@ -3743,6 +3777,83 @@ mod tests {
         let wgsl = group_plan.generate_wgsl("f32").expect("wgsl");
         assert!(wgsl.contains("@compute"));
         assert!(group_plan.group.element_count().is_some());
+    }
+
+    #[test]
+    fn wide_integer_constant_declines_float_fusion_before_wgsl_generation() {
+        let mut graph = simple_elementwise_graph();
+        let wide = u64::MAX;
+        let poisoned_f64_mirror = wide as f64;
+        assert_eq!(poisoned_f64_mirror, (wide - 1) as f64);
+        graph.values.push(ValueInfo {
+            id: 3,
+            origin: ValueOrigin::Constant,
+            ty: Type::Num,
+            shape: ShapeInfo::Scalar,
+            constant: Some(Value::Int(IntValue::U64(wide))),
+        });
+        graph.nodes[0].inputs = vec![0, 3];
+
+        let groups = detect_fusion_groups(&graph);
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        let group = &plan.groups[0];
+        assert!(group.has_native_integer_constants());
+        assert!(!group.kernel.supported);
+        assert!(group.generate_wgsl("f32").is_none());
+    }
+
+    #[test]
+    fn all_native_integer_constant_classes_decline_float_fusion() {
+        for constant in [
+            IntValue::I8(7),
+            IntValue::I16(7),
+            IntValue::I32(7),
+            IntValue::I64(i64::MAX),
+            IntValue::U8(7),
+            IntValue::U16(7),
+            IntValue::U32(7),
+            IntValue::U64(u64::MAX),
+        ] {
+            let mut graph = simple_elementwise_graph();
+            graph.values.push(ValueInfo {
+                id: 3,
+                origin: ValueOrigin::Constant,
+                ty: Type::Num,
+                shape: ShapeInfo::Scalar,
+                constant: Some(Value::Int(constant)),
+            });
+            graph.nodes[0].inputs = vec![0, 3];
+
+            let groups = detect_fusion_groups(&graph);
+            let plan = FusionPlan::from_graph(&graph, &groups);
+            let group = &plan.groups[0];
+            assert!(group.has_native_integer_constants());
+            assert!(!group.kernel.supported);
+            assert!(group.generate_wgsl("f32").is_none());
+        }
+    }
+
+    #[test]
+    fn native_integer_tensor_constants_decline_float_fusion() {
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![1_u64 << 63]),
+            vec![1, 1],
+        )
+        .expect("integer tensor");
+        let value = Value::Tensor(tensor);
+        let info = ValueInfo {
+            id: 99,
+            origin: ValueOrigin::Constant,
+            ty: Type::Num,
+            shape: ShapeInfo::Tensor(vec![Some(1), Some(1)]),
+            constant: Some(value.clone()),
+        };
+
+        assert_eq!(value_info_scalar(&info), None);
+        let mut graph = simple_elementwise_graph();
+        graph.values.push(info);
+        assert!(!value_is_placeholder(&graph, 99));
+        assert_eq!(resolve_numeric_vector_constant(&graph, 99), None);
     }
 
     #[test]

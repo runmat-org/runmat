@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Executes on the CPU; GPU-resident inputs are gathered before padding so behaviour matches MATLAB."
+    "notes": "Text inputs are host-only. Automatically placed numeric length controls gather transparently; explicit gpuArray length controls are unsupported."
   },
   "fusion": {
     "elementwise": false,
@@ -26,12 +26,12 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::strings::transform::pad::tests",
-    "integration": "builtins::strings::transform::pad::tests::pad_cell_array_mixed_content"
+    "integration": "integer_pattern_and_string_transform_semantics"
   },
   "description": "`pad` extends string/char/cellstr text values to requested lengths by adding fill characters on left, right, or both sides, using MATLAB-compatible defaults and option parsing.",
   "behaviors": [
     "Without a target length, `pad` extends each element to match the longest text in the input.",
-    "Providing a numeric target guarantees a minimum length; existing text that already meets or exceeds the target is returned unchanged.",
+    "Providing a nonnegative scalar target guarantees a minimum length; single, double, and all eight integer classes are accepted from authoritative native storage, and existing text that already meets or exceeds the target is returned unchanged.",
     "Direction keywords (`'left'`, `'right'`, `'both'`) are case-insensitive; `'right'` is the default. When an odd number of pad characters is required for `'both'`, the extra character is appended to the end.",
     "`padChar` must be a single character (string scalar or 1×1 char array). The default is a space.",
     "Character arrays remain rectangular. Each row is padded independently and then widened with spaces so the array keeps MATLAB’s column-major layout.",
@@ -101,7 +101,7 @@
     },
     {
       "question": "Will `pad` run on the GPU in the future?",
-      "answer": "Possibly, but today it always gathers to the CPU. Providers may add device-side implementations later, and the behaviour documented here will remain the reference."
+      "answer": "The text operation is host-only. Automatically placed numeric length controls gather transparently, while explicit gpuArray length controls reject."
     }
   ],
   "links": [
@@ -162,8 +162,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/transform/pad.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/pad.rs"
   },
-  "gpu_residency": "No. Text data in RunMat lives on the host today. If text happens to originate from a GPU computation, `pad` automatically gathers it before padding, so you never have to manage residency manually for this builtin.",
+  "gpu_residency": "Text data is host-only. Automatically placed numeric length controls gather transparently; explicit gpuArray length controls reject before gather.",
   "gpu_behavior": [
-    "`pad` always executes on the CPU. When an argument (or a value nested inside a cell array) lives on the GPU, RunMat gathers it, performs the padding step, and produces a host result or re-wraps the padded value inside the cell. No provider hooks exist yet for string padding, so providers and fusion planners treat `pad` as a sink that terminates device residency."
+    "`pad` executes on the CPU. Numeric resident values in the text role reject without provider access, while an admitted automatic length control gathers through its owning provider."
   ]
 }

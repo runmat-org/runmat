@@ -1,9 +1,15 @@
 pub mod compile;
 pub mod instr;
 pub mod program;
+mod region;
+
+/// Portable schema for serialized [`Bytecode`] payloads.
+pub const BYTECODE_SCHEMA_VERSION: u16 = 3;
+/// Portable schema for serialized [`FunctionRegistry`] payloads.
+pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 3;
 
 pub use compile::{compile, compile_semantic_function_registry};
-pub use instr::{ArgSpec, EmitLabel, EndExpr, Instr, StackEffect};
+pub use instr::{EmitLabel, Instr, StackEffect};
 pub use program::{
     AsyncMetadata, AwaitSite, Bytecode, FunctionBytecode, FunctionRegistry, SpawnSite,
 };
@@ -11,3 +17,4 @@ pub use program::{
 pub use program::{
     FusionCandidateGroup, FusionInstructionKind, FusionInstructionWindow, FusionMetadata,
 };
+pub use region::{BytecodeRegion, BytecodeRegionBoundary};

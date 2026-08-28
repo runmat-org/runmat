@@ -6,15 +6,21 @@
 //! is the duty cycle expressed as a percentage: the output is `+1` over the
 //! first `duty/100 * 2*pi` of every period and `-1` over the remainder.
 
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -23,6 +29,25 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "square";
 const TWO_PI: f64 = 2.0 * PI;
+
+const SQUARE_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "square-nonfloating-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "square with an integer or logical argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SquareNonfloatingInputExtension"),
+};
+
+const SQUARE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "square-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interactive square gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SquareGpuInputExtension"),
+};
+
+pub const SQUARE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    SQUARE_NONFLOATING_INPUT_EXTENSION,
+    SQUARE_GPU_INPUT_EXTENSION,
+];
 
 const SQUARE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -128,6 +153,15 @@ pub const SQUARE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SQUARE_ERRORS,
 };
 
+const SQUARE_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "t", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The compatibility target documents single and double sample times. RunMat mode admits typed integers only when every value is exactly representable at the binary64 waveform boundary." }];
+const SQUARE_INTEGER_DUTY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "duty", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The compatibility target documents single and double duty cycles. RunMat mode admits a typed integer scalar from 0 through 100 behind the nonfloating-input gate." }];
+pub const SQUARE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "Y = square(integer_t)", inputs: &SQUARE_INTEGER_T_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer samples cross one checked binary64 phase boundary and produce a same-shaped double waveform. Automatic residency may gather transparently; explicit gpuArray input has its own extension gate." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = square(t, integer_duty)", inputs: &SQUARE_INTEGER_DUTY_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The scalar duty cycle controls the floating waveform threshold; output class and shape follow the supported t path." },
+];
+
 fn square_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     square_error_with_message(error.message, error)
 }
@@ -191,9 +225,46 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
     keywords = "square,waveform,signal processing,duty cycle,periodic",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::square::SQUARE_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::square::SQUARE_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::square::SQUARE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::square"
 )]
 async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
+        || varargin
+            .iter()
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SQUARE_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if varargin.len() <= 1
+        && (is_supported_nonfloating_argument(&t)
+            || varargin.iter().any(is_supported_nonfloating_argument))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SQUARE_NONFLOATING_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &t,
+        &SQUARE_NONFLOATING_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "sample-time",
+    )
+    .await?;
+    if let Some(duty) = varargin.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            duty,
+            &SQUARE_NONFLOATING_INPUT_EXTENSION,
+            BUILTIN_NAME,
+            "duty-cycle",
+        )
+        .await?;
+    }
     let duty = parse_duty(&varargin).await?;
     match t {
         Value::GpuTensor(handle) => square_gpu(handle, duty).await,
@@ -204,6 +275,21 @@ async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> 
             Err(square_error(&SQUARE_ERROR_INVALID_INPUT))
         }
         other => square_real(other, duty),
+    }
+}
+
+fn is_supported_nonfloating_argument(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => !matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F64 | NumericDType::F32
+        ),
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        }
+        _ => false,
     }
 }
 
@@ -246,12 +332,26 @@ fn square_real(value: Value, duty: f64) -> BuiltinResult<Value> {
 }
 
 fn square_tensor(tensor: Tensor, duty: f64) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&value| square_scalar(value, duty))
-        .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, &err))?;
+    let storage = match storage {
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| square_scalar(f64::from(value), duty) as f32)
+                .collect(),
+        ),
+        storage => NumericStorage::F64(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(|value| square_scalar(value, duty))
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, &err))
 }
 
@@ -259,7 +359,8 @@ fn square_tensor(tensor: Tensor, duty: f64) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     fn call(t: Value) -> BuiltinResult<Value> {
         block_on(square_builtin(t, Vec::new()))
@@ -331,24 +432,28 @@ mod tests {
         let tensor = Tensor::new(data.clone(), vec![1, n]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
         assert_eq!(result.shape, vec![1, n]);
-        for (idx, &value) in result.data.iter().enumerate() {
+        for (idx, &value) in result.materialize_f64().iter().enumerate() {
             assert!(
                 value == 1.0 || value == -1.0,
                 "index {idx}: expected only +-1 values, got {value}"
             );
         }
         // Each sample must agree with the elementwise formula.
-        for (&t, &y) in data.iter().zip(result.data.iter()) {
+        for (&t, &y) in data.iter().zip(result.materialize_f64().iter()) {
             assert_eq!(y, square_scalar(t, 50.0));
         }
         // The wave is +1 across the first half period, then -1 across the second
         // half. The final sample lands on the period boundary (t = 2*pi) and wraps
         // back to phi = 0 -> +1.
-        assert_eq!(result.data[0], 1.0);
+        assert_eq!(result.materialize_f64()[0], 1.0);
         let toggle_point = data.iter().position(|&t| t >= PI).unwrap();
-        assert!(result.data[..toggle_point].iter().all(|&v| v == 1.0));
-        assert!(result.data[toggle_point..n - 1].iter().all(|&v| v == -1.0));
-        assert_eq!(*result.data.last().unwrap(), 1.0);
+        assert!(result.materialize_f64()[..toggle_point]
+            .iter()
+            .all(|&v| v == 1.0));
+        assert!(result.materialize_f64()[toggle_point..n - 1]
+            .iter()
+            .all(|&v| v == -1.0));
+        assert_eq!(*result.materialize_f64().last().unwrap(), 1.0);
     }
 
     #[test]
@@ -388,7 +493,7 @@ mod tests {
         let result =
             expect_tensor(call_with_duty(Value::Tensor(tensor), Value::Num(25.0)).unwrap());
         let threshold = PI / 2.0;
-        for (idx, (&t, &y)) in data.iter().zip(result.data.iter()).enumerate() {
+        for (idx, (&t, &y)) in data.iter().zip(result.materialize_f64().iter()).enumerate() {
             let expected = if t < threshold { 1.0 } else { -1.0 };
             assert_eq!(y, expected, "index {idx}, t={t}");
         }
@@ -420,13 +525,58 @@ mod tests {
 
     #[test]
     fn square_int_and_logical_promote_to_double() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         assert_eq!(expect_num(call(Value::Int(IntValue::I32(0))).unwrap()), 1.0);
         assert_eq!(expect_num(call(Value::Bool(true)).unwrap()), 1.0);
 
         let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
         assert_eq!(result.shape, vec![1, 2]);
-        assert_eq!(result.data, vec![1.0, 1.0]);
+        assert_eq!(result.materialize_f64(), vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn square_extensions_follow_compatibility_mode() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                call(Value::Int(IntValue::I16(0))).expect_err("MATLAB mode rejects integer input");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SquareNonfloatingInputExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(call(Value::Int(IntValue::I16(0))).is_ok());
+        }
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 0,
+            buffer_id: 9_300_004,
+            descriptor: Default::default(),
+        };
+        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = call(Value::GpuTensor(handle))
+            .expect_err("MATLAB mode rejects explicit interactive gpuArray input before gather");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:SquareGpuInputExtension")
+        );
+    }
+
+    #[test]
+    fn square_preserves_native_single_storage() {
+        let input =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0, 4.0]), vec![1, 2]).unwrap();
+        let result = expect_tensor(call(Value::Tensor(input)).unwrap());
+        assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(
+            result.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, -1.0])
+        );
     }
 
     #[test]
@@ -455,6 +605,6 @@ mod tests {
         let tensor = Tensor::new(vec![0.0, PI / 2.0, PI, 3.0 * PI / 2.0], vec![2, 2]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
         assert_eq!(result.shape, vec![2, 2]);
-        assert_eq!(result.data, vec![1.0, 1.0, -1.0, -1.0]);
+        assert_eq!(result.materialize_f64(), vec![1.0, 1.0, -1.0, -1.0]);
     }
 }

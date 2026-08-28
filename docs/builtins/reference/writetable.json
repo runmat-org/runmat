@@ -3,13 +3,13 @@
   "category": "io/tabular",
   "keywords": ["writetable", "table", "csv", "delimited text", "WriteVariableNames"],
   "summary": "Write a table to a delimited text file.",
-  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Table data is serialized on the host."},
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Table data is serialized on the host. Automatically resident values gather transparently; explicit gpuArray input requires RunMat mode."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests"},
   "description": "`writetable(T, filename)` writes table variables to a delimited text file.",
-  "behaviors": ["`\"Delimiter\"` controls the field separator and defaults to comma.", "`\"WriteVariableNames\"` controls header emission and defaults to true.", "Fields containing delimiters, quotes, or newlines are CSV-quoted."],
-  "examples": [{"description": "Write CSV", "input": "bytes = writetable(T, 'out.csv')", "output": "bytes = number of bytes written"}],
-  "links": [{"label": "readtable", "url": "./readtable"}, {"label": "writetimetable", "url": "./writetimetable"}],
+  "behaviors": ["`\"Delimiter\"` controls the field separator and defaults to comma.", "`\"WriteVariableNames\"` controls header emission and defaults to true.", "Fields containing delimiters, quotes, or newlines are CSV-quoted.", "Variables from all eight native integer classes are serialized with their exact decimal values.", "A typed-integer `WriteVariableNames` value, explicit `gpuArray` input, and the bytes-written output are available in RunMat mode."],
+  "examples": [{"description": "Write CSV", "input": "writetable(T, 'out.csv')"}],
+  "links": [{"label": "MATLAB language extensions", "url": "/docs/runtime/getting-started/language-extensions"}, {"label": "readtable", "url": "./readtable"}, {"label": "writetimetable", "url": "./writetimetable"}],
   "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
 }

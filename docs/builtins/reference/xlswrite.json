@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Spreadsheet files are written on the host. gpuArray inputs are gathered before serialization."
+    "notes": "Spreadsheet files are written on the host. Automatically resident values gather transparently; explicit gpuArray input requires RunMat mode."
   },
   "fusion": {
     "elementwise": false,
@@ -42,9 +42,11 @@
     "When the destination workbook already exists and was created by RunMat `xlswrite`, `xlswrite` preserves supported existing worksheets and cells outside the overwritten range.",
     "Existing unmarked Excel workbooks are rejected instead of being flattened into RunMat's minimal workbook representation; this avoids silently discarding formulas, macros, styles, charts, images, or workbook metadata.",
     "Numeric sheet selectors are one-based worksheet ordinals. Missing ordinal sheets are created as `SheetN` placeholders so later `xlsread(filename, N, ...)` calls address the same worksheet.",
-    "Numeric, sparse, logical, string, character, and heterogeneous cell inputs are supported. Cell contents must be scalar spreadsheet values.",
+    "Numeric, sparse, logical, string, character, and heterogeneous cell inputs are supported. Values from all eight native integer classes serialize exactly; cell contents must be scalar spreadsheet values.",
+    "A numeric worksheet index may use any native integer class and is decoded exactly.",
     "A1 ranges may use absolute markers such as `$B$2:$C$3`; malformed range endpoints are rejected.",
     "The legacy `'-basic'` mode flag is accepted as a no-op because RunMat writes spreadsheets directly rather than using Excel COM automation.",
+    "RunMat mode accepts a numeric row and column vector in the range position and accepts explicit `gpuArray` input; both are gated before file access.",
     "`status = xlswrite(...)` returns true on success. `[status,message] = xlswrite(...)` captures write failures as false plus a diagnostic struct with `message` and `identifier` fields."
   ],
   "examples": [
@@ -81,6 +83,10 @@
   ],
   "links": [
     {
+      "label": "MATLAB language extensions",
+      "url": "/docs/runtime/getting-started/language-extensions"
+    },
+    {
       "label": "xlsread",
       "url": "./xlsread"
     },
@@ -101,8 +107,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/tabular/xlswrite.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/xlswrite.rs"
   },
-  "gpu_residency": "`xlswrite` consumes host-side file data. gpuArray inputs are gathered before writing; outputs are CPU-resident status/message values.",
+  "gpu_residency": "`xlswrite` consumes host-side file data. Automatically resident values gather transparently; explicit `gpuArray` input requires RunMat mode. Outputs are host status/message values.",
   "gpu_behavior": [
-    "`xlswrite` performs file I/O and spreadsheet serialization on the CPU. It is not fusible and does not call acceleration provider hooks."
+    "`xlswrite` performs host file I/O. Automatic residency is gathered through the owning provider, while explicit device intent is compatibility-gated before provider or file access."
   ]
 }

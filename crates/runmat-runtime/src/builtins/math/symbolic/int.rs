@@ -2,12 +2,18 @@
 
 use num_traits::Zero;
 use runmat_builtins::{
-    symbolic::SymbolicFunction, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, SymbolicExpr, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_builtins::{
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{SymbolicExpr, SymbolicFunction, Value};
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::{
@@ -169,6 +175,26 @@ pub const INT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &INT_ERRORS,
 };
 
+const INT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "expr, a, or b",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Scalar numeric constants are admitted only when the current symbolic constant representation can retain them exactly.",
+    }];
+pub const INT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "F = int(integer_expr_or_bound, ...)",
+        inputs: &INT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "This is symbolic integration of a numeric constant, not the integer datatype conversion surface. Wide constants that cannot enter the current symbolic binary64 constant node exactly reject rather than aliasing.",
+    }];
+
 #[derive(Debug)]
 struct IntArgs {
     variable: String,
@@ -182,9 +208,14 @@ struct IntArgs {
     summary = "Evaluate scalar symbolic indefinite and definite integrals.",
     keywords = "int,symbolic,integration,calculus,definite integral",
     descriptor(crate::builtins::math::symbolic::int::INT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::symbolic::int::INT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::symbolic::int"
 )]
 async fn int_builtin(expr: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_exact_symbolic_integer(&expr, &INT_ERRORS[0])?;
+    for value in &rest {
+        ensure_exact_symbolic_integer(value, &INT_ERRORS[2])?;
+    }
     let expr = value_to_symbolic_scalar(&expr).ok_or_else(|| int_error(&INT_ERRORS[0]))?;
     let args = parse_int_args(&expr, &rest)?;
     let result = if let Some(integral) = integrate_expr(&expr, &args.variable) {
@@ -201,6 +232,21 @@ async fn int_builtin(expr: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     };
 
     Ok(symbolic_expr_to_value(result.simplify()))
+}
+
+fn ensure_exact_symbolic_integer(
+    value: &Value,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64(value)
+    {
+        return Err(int_error_with_detail(
+            error,
+            "integer constant is not exactly representable by the current symbolic scalar storage",
+        ));
+    }
+    Ok(())
 }
 
 fn parse_int_args(expr: &SymbolicExpr, rest: &[Value]) -> BuiltinResult<IntArgs> {
@@ -275,7 +321,7 @@ fn is_known_option(name: &str) -> bool {
 fn validate_option_value(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::Bool(_) | Value::Num(_) | Value::Int(_) | Value::String(_) => Ok(()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => Ok(()),
         _ if text_scalar(value).is_some() => Ok(()),
         _ => Err(int_error(&INT_ERRORS[3])),
     }
@@ -515,6 +561,7 @@ fn int_error_with_detail(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn x() -> SymbolicExpr {
         SymbolicExpr::variable("x")
@@ -601,6 +648,22 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:int:InvalidOption"));
+    }
+
+    #[tokio::test]
+    async fn option_validation_reads_typed_integer_scalar_tensor() {
+        let expr = SymbolicExpr::function(SymbolicFunction::Cos, x());
+        let option_value =
+            Tensor::new_integer(IntegerStorage::I8(vec![1]), vec![1, 1]).expect("option value");
+
+        let err = int_builtin(
+            Value::Symbolic(expr),
+            vec![Value::String("Hold".into()), Value::Tensor(option_value)],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:int:InvalidOption"));
+        assert!(err.message().contains("option 'Hold' is not yet supported"));
     }
 
     #[tokio::test]

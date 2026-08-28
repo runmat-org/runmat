@@ -4,8 +4,9 @@ use std::char;
 use std::iter::Peekable;
 use std::str::Chars;
 
-use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, StringArray, Value};
+use runmat_value::{IntValue, IntegerStorage, LogicalArray, StringArray, Value};
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER: &str = "RunMat:format:UnsupportedSpecifier";
@@ -1084,14 +1085,21 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
                     output.push(Value::Int(integer_storage_value(storage, index)));
                 }
             } else {
-                for &elem in &tensor.data {
+                let values = tensor::tensor_values_f64_cow(&tensor);
+                for &elem in values.as_ref() {
                     output.push(Value::Num(elem));
                 }
             }
         }
         Value::ComplexTensor(tensor) => {
-            for &(re, im) in &tensor.data {
-                output.push(Value::Complex(re, im));
+            if tensor.integer_storage().is_some() {
+                for index in 0..tensor::complex_tensor_element_len(&tensor) {
+                    output.push(Value::String(tensor.format_element(index)));
+                }
+            } else {
+                for &(re, im) in &tensor.materialize_f64() {
+                    output.push(Value::Complex(re, im));
+                }
             }
         }
         Value::LogicalArray(LogicalArray { data, .. }) => {
@@ -1143,6 +1151,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         Value::MException(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::SparseTensor(_)
         | Value::Struct(_)
@@ -1151,7 +1160,12 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
-        | Value::ClassRef(_) => {
+        | Value::ClassRef(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Foreign(_) => {
             return Err(format_error(format!(
                 "{context}: unsupported argument type"
             )));
@@ -1189,7 +1203,10 @@ fn int_value_to_decimal(value: &IntValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{get_display_format, set_display_format, FormatMode};
+    use runmat_value::{
+        get_display_format, set_display_format, FormatMode, IntegerComplexStorage, NumericStorage,
+        Tensor,
+    };
 
     #[test]
     fn format_variadic_supports_thousands_grouping_flag() {
@@ -1221,7 +1238,7 @@ mod tests {
 
     #[test]
     fn typed_integer_tensors_keep_exact_values_through_formatting() {
-        let tensor = runmat_builtins::Tensor::new_integer(
+        let tensor = runmat_value::Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
             vec![1, 2],
         )
@@ -1241,6 +1258,38 @@ mod tests {
             )
             .expect("formatted integer values"),
             format!("{} ffffffffffffffff {}", u64::MAX, 1_u64 << 63)
+        );
+    }
+
+    #[test]
+    fn native_single_tensors_flatten_from_authoritative_storage() {
+        let tensor =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.5]), vec![1, 2])
+                .expect("single tensor");
+        let flattened =
+            futures::executor::block_on(flatten_arguments(&[Value::Tensor(tensor)], "sprintf"))
+                .expect("flattened arguments");
+        assert_eq!(flattened, vec![Value::Num(1.25), Value::Num(-2.5)]);
+    }
+
+    #[test]
+    fn typed_complex_integer_tensors_keep_exact_values_through_string_formatting() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching complex integer storage");
+        let tensor = runmat_value::ComplexTensor::new_integer(storage, vec![1, 2])
+            .expect("complex integer tensor");
+        let flattened = futures::executor::block_on(flatten_arguments(
+            &[Value::ComplexTensor(tensor)],
+            "sprintf",
+        ))
+        .expect("flattened arguments");
+
+        assert_eq!(
+            format_variadic("%s %s", &flattened).expect("formatted complex integer values"),
+            format!("{}+7i {}", u64::MAX, 1_u64 << 63)
         );
     }
 }

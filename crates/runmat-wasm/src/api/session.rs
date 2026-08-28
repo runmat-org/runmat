@@ -29,6 +29,7 @@ use runmat_runtime::builtins::plotting::{
 use runmat_runtime::builtins::wasm_registry;
 use runmat_runtime::data::{
     dataset_root, read_array_payload_async, read_array_slice_payload_async, read_manifest_async,
+    DataArrayValues,
 };
 use runmat_runtime::geometry::{
     GeometryInspectPayload, GeometryPreviewBudgetPayload, GeometryPreviewBudgetPolicyPayload,
@@ -49,6 +50,7 @@ use crate::api::streams::js_input_request;
 use crate::runtime::config::{
     parse_language_compat_from_str, parse_workspace_export_mode, SessionConfig,
 };
+use crate::runtime::execution::BrowserExecutionService;
 use crate::runtime::gpu::{capture_memory_usage, GpuStatus};
 use crate::runtime::logging::init_logging_once;
 use crate::runtime::state::{
@@ -62,23 +64,25 @@ use crate::wire::errors::{
 use crate::wire::payloads::{
     compute_data_preview_slice, estimate_data_array_bytes, infer_dataset_class_name,
     parse_data_materialize_options_wire, parse_materialize_options, parse_materialize_target,
-    DataMaterializedVariablePayload, ExecutionPayload, FusionPlanPayload,
+    DataArrayPreviewPayload, DataMaterializedVariablePayload, ExecutionPayload, FusionPlanPayload,
     MaterializedVariablePayload, MemoryUsagePayload, StatsPayload, WorkspaceEntryPayload,
-    WorkspacePayload, WorkspacePreviewPayload,
+    WorkspacePayload,
 };
-use crate::wire::value::MAX_DATA_PREVIEW;
+use crate::wire::value::{integer_json_value, MAX_DATA_PREVIEW};
 
 #[wasm_bindgen]
 pub struct RunMatWasm {
-    session: RefCell<RunMatSession>,
+    pub(crate) session: RefCell<RunMatSession>,
     config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
-    active_interrupt: RefCell<Option<Arc<AtomicBool>>>,
+    pub(crate) active_interrupt: RefCell<Option<Arc<AtomicBool>>>,
     telemetry_sink: Option<Arc<dyn TelemetrySink>>,
+    package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
+    execution_service: std::rc::Rc<BrowserExecutionService>,
 }
 
-struct WasmInterruptGuard<'a> {
+pub(crate) struct WasmInterruptGuard<'a> {
     slot: &'a RefCell<Option<Arc<AtomicBool>>>,
     _runtime_guard: runmat_runtime::interrupt::InterruptGuard,
 }
@@ -89,7 +93,7 @@ impl Drop for WasmInterruptGuard<'_> {
     }
 }
 
-fn install_wasm_interrupt(
+pub(crate) fn install_wasm_interrupt(
     slot: &RefCell<Option<Arc<AtomicBool>>>,
     handle: Arc<AtomicBool>,
 ) -> WasmInterruptGuard<'_> {
@@ -130,6 +134,8 @@ impl RunMatWasm {
         config: SessionConfig,
         gpu_status: GpuStatus,
         telemetry_sink: Option<Arc<dyn TelemetrySink>>,
+        package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
+        execution_service: std::rc::Rc<BrowserExecutionService>,
     ) -> Self {
         Self {
             session: RefCell::new(session),
@@ -138,10 +144,12 @@ impl RunMatWasm {
             disposed: Cell::new(false),
             active_interrupt: RefCell::new(None),
             telemetry_sink,
+            package_cache,
+            execution_service,
         }
     }
 
-    fn ensure_not_disposed(&self) -> Result<(), JsValue> {
+    pub(crate) fn ensure_not_disposed(&self) -> Result<(), JsValue> {
         if self.disposed.get() {
             return Err(js_error("RunMat session has been disposed"));
         }
@@ -810,6 +818,23 @@ struct ExecuteRequestPayload {
 
 #[wasm_bindgen]
 impl RunMatWasm {
+    #[wasm_bindgen(js_name = packageCacheSnapshot)]
+    pub async fn package_cache_snapshot_js(&self) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let Some(cache) = self.package_cache.as_ref() else {
+            return Ok(JsValue::NULL);
+        };
+        let snapshot = cache
+            .snapshot()
+            .await
+            .map_err(|error| js_error(&format!("Package cache snapshot failed: {error}")))?;
+        serde_wasm_bindgen::to_value(&snapshot).map_err(|error| {
+            js_error(&format!(
+                "Package cache snapshot serialization failed: {error}"
+            ))
+        })
+    }
+
     #[wasm_bindgen(js_name = executeRequest)]
     pub async fn execute_request_js(&self, request_value: JsValue) -> Result<JsValue, JsValue> {
         let request_payload: ExecuteRequestPayload = serde_wasm_bindgen::from_value(request_value)
@@ -1184,6 +1209,7 @@ impl RunMatWasm {
         web_sys::console::log_1(
             &format!("RunMat wasm: builtins registered ({builtin_count})").into(),
         );
+        let installed_handoff = self.session.borrow().project_handoff().cloned();
         let config = self.config.borrow();
         let consent = config.telemetry_consent;
         let mut session = RunMatSession::with_options(config.enable_jit, config.verbose)
@@ -1198,6 +1224,12 @@ impl RunMatWasm {
         session.set_compat_mode(config.language_compat);
         session.set_callstack_limit(config.callstack_limit);
         session.set_error_namespace(config.error_namespace.clone());
+        session.install_execution_services(self.execution_service.clone());
+        if let Some(handoff) = installed_handoff {
+            session
+                .install_project_handoff(handoff)
+                .map_err(|err| js_error(&format!("Failed to restore project handoff: {err}")))?;
+        }
         if self.telemetry_sink.is_some() {
             session.set_telemetry_platform_info(TelemetryPlatformInfo {
                 os: Some("web".to_string()),
@@ -1214,6 +1246,80 @@ impl RunMatWasm {
         runtime_reset_plot_state();
         runtime_invalidate_surface_revisions();
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = installProjectHandoff)]
+    pub fn install_project_handoff_js(&self, value: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let handoff: runmat_package::FrozenProjectHandoff =
+            serde_wasm_bindgen::from_value(value)
+                .map_err(|err| js_error(&format!("Project handoff parse failed: {err}")))?;
+        let revision = self
+            .session
+            .borrow_mut()
+            .install_project_handoff(handoff)
+            .map_err(|err| js_error(&format!("Project handoff validation failed: {err}")))?;
+        serde_wasm_bindgen::to_value(&revision)
+            .map_err(|err| js_error(&format!("Project revision serialization failed: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = clearProjectHandoff)]
+    pub fn clear_project_handoff_js(&self) -> Result<(), JsValue> {
+        self.ensure_not_disposed()?;
+        self.session.borrow_mut().clear_project_handoff();
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = projectRevision)]
+    pub fn project_revision_js(&self) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let Some(revision) = self.session.borrow().project_revision() else {
+            return Ok(JsValue::NULL);
+        };
+        serde_wasm_bindgen::to_value(&revision)
+            .map_err(|err| js_error(&format!("Project revision serialization failed: {err}")))
+    }
+
+    /// Return semantic discovery for the exact caller-frozen run snapshot.
+    /// The Core session verifies it against the installed project handoff
+    /// before static analysis; no browser filesystem rediscovery occurs.
+    #[wasm_bindgen(js_name = discoverTests)]
+    pub fn discover_tests_js(&self, value: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let snapshot: runmat_test::discovery::FrozenTestRunSnapshot =
+            serde_wasm_bindgen::from_value(value)
+                .map_err(|err| js_error(&format!("Test snapshot parse failed: {err}")))?;
+        let discovery = self
+            .session
+            .borrow()
+            .discover_tests(&snapshot)
+            .map_err(|err| js_error(&format!("Test discovery failed: {err}")))?;
+        serde_wasm_bindgen::to_value(&discovery)
+            .map_err(|err| js_error(&format!("Test discovery serialization failed: {err}")))
+    }
+
+    /// Discover and construct the selected immutable plan through the same
+    /// Core authority used by native hosts.
+    #[wasm_bindgen(js_name = prepareTests)]
+    pub fn prepare_tests_js(
+        &self,
+        snapshot: JsValue,
+        selector: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let snapshot: runmat_test::discovery::FrozenTestRunSnapshot =
+            serde_wasm_bindgen::from_value(snapshot)
+                .map_err(|err| js_error(&format!("Test snapshot parse failed: {err}")))?;
+        let selector: runmat_test::descriptor::TestSelector =
+            serde_wasm_bindgen::from_value(selector)
+                .map_err(|err| js_error(&format!("Test selector parse failed: {err}")))?;
+        let prepared = self
+            .session
+            .borrow()
+            .prepare_tests(&snapshot, &selector)
+            .map_err(|err| js_error(&format!("Test preparation failed: {err}")))?;
+        serde_wasm_bindgen::to_value(&prepared)
+            .map_err(|err| js_error(&format!("Test preparation serialization failed: {err}")))
     }
 
     #[wasm_bindgen(js_name = cancelExecution)]
@@ -1239,6 +1345,14 @@ impl RunMatWasm {
         } else {
             warn!("RunMat wasm: ignoring unknown language compat mode '{mode}'");
         }
+    }
+
+    #[wasm_bindgen(js_name = "setErrorNamespace")]
+    pub fn set_error_namespace(&self, namespace: String) {
+        if self.disposed.get() {
+            return;
+        }
+        self.session.borrow_mut().set_error_namespace(namespace);
     }
 
     #[wasm_bindgen(js_name = setInputHandler)]
@@ -1443,7 +1557,12 @@ impl RunMatWasm {
                     ))
                 })?,
             };
-        let values = payload.values.preview_f64(limit);
+        let values = data_array_preview_json(&payload.values, limit);
+        let value_text = values
+            .iter()
+            .map(json_value_text)
+            .collect::<Vec<_>>()
+            .join(", ");
         let response = DataMaterializedVariablePayload {
             name: array.to_string(),
             class_name: infer_dataset_class_name(meta.shape.len()).to_string(),
@@ -1452,16 +1571,12 @@ impl RunMatWasm {
             is_gpu: false,
             residency: WorkspaceResidency::Cpu.as_str(),
             size_bytes: Some(estimate_data_array_bytes(&meta.shape, &meta.dtype)),
-            preview: Some(WorkspacePreviewPayload {
+            preview: Some(DataArrayPreviewPayload {
                 values: values.clone(),
                 truncated: values.len() < total_elements,
             }),
-            value_text: values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
-            value_json: JsonValue::Array(values.into_iter().map(JsonValue::from).collect()),
+            value_text,
+            value_json: JsonValue::Array(values),
         };
         serde_wasm_bindgen::to_value(&response).map_err(|err| {
             js_error(&format!(
@@ -1643,5 +1758,62 @@ impl RunMatWasm {
             set_js_stdin_handler(None);
             clear_figure_event_callback_state();
         }
+    }
+}
+
+fn data_array_preview_json(values: &DataArrayValues, limit: usize) -> Vec<JsonValue> {
+    macro_rules! integer_values {
+        ($values:expr, $variant:ident) => {
+            $values
+                .iter()
+                .take(limit)
+                .map(|value| integer_json_value(&runmat_value::IntValue::$variant(*value)))
+                .collect()
+        };
+    }
+
+    match values {
+        DataArrayValues::F64(values) => values
+            .iter()
+            .take(limit)
+            .copied()
+            .map(JsonValue::from)
+            .collect(),
+        DataArrayValues::F32(values) => values
+            .iter()
+            .take(limit)
+            .copied()
+            .map(JsonValue::from)
+            .collect(),
+        DataArrayValues::I8(values) => integer_values!(values, I8),
+        DataArrayValues::I16(values) => integer_values!(values, I16),
+        DataArrayValues::I32(values) => integer_values!(values, I32),
+        DataArrayValues::I64(values) => integer_values!(values, I64),
+        DataArrayValues::U8(values) => integer_values!(values, U8),
+        DataArrayValues::U16(values) => integer_values!(values, U16),
+        DataArrayValues::U32(values) => integer_values!(values, U32),
+        DataArrayValues::U64(values) => integer_values!(values, U64),
+    }
+}
+
+fn json_value_text(value: &JsonValue) -> String {
+    value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string())
+}
+
+#[cfg(test)]
+mod data_array_preview_tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn single_preview_preserves_values_and_limit() {
+        let preview = data_array_preview_json(&DataArrayValues::F32(vec![1.25, -3.5, 9.0]), 2);
+        assert_eq!(
+            preview,
+            vec![JsonValue::from(1.25_f32), JsonValue::from(-3.5_f32)]
+        );
     }
 }

@@ -1,12 +1,30 @@
 {
   "title": "findgroups",
   "category": "array/grouping",
-  "keywords": ["findgroups", "groups", "table", "categorical"],
-  "summary": "Find groups and return group numbers.",
-  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Grouping runs on the host."},
+  "keywords": ["findgroups", "groups", "table", "categorical", "integer", "missing"],
+  "summary": "Assign sorted group numbers while preserving exact grouping identifiers.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "MATLAB does not document gpuArray support for findgroups. RunMat can gather resident grouping data only when the resident-input extension is enabled."},
   "tested": {"unit": "builtins::array::grouping::tests"},
-  "description": "`G = findgroups(A)` assigns one-based group IDs to matching nonmissing values in `A`; missing values receive NaN group IDs.",
-  "behaviors": ["Supports numeric, logical, string, cell, categorical, datetime/duration, multiple grouping inputs, and table variable grouping.", "Group IDs are assigned in sorted group-key order."],
-  "examples": [{"description": "Group strings", "input": "G = findgroups([\"b\";\"a\";\"b\"])", "output": "G = [2; 1; 2]"}],
+  "description": "`G = findgroups(A)` assigns one-based double group numbers in sorted unique-key order. Numeric grouping includes all eight integer classes, whose values are compared exactly. Missing strings, empty character vectors, NaN, NaT, and undefined categorical values produce NaN in G.",
+  "behaviors": [
+    "A must be a scalar or vector. G has the same size and row-or-column orientation as A.",
+    "`findgroups(A1,...,AN)` groups sorted unique tuples. Every input vector must have the same size, and a missing value in any role makes the corresponding G element NaN.",
+    "`[G,ID] = findgroups(A)` returns sorted unique identifiers in A's class. Integer IDs preserve authoritative values above flintmax.",
+    "`[G,ID1,...,IDN] = findgroups(A1,...,AN)` preserves each identifier output's corresponding input class.",
+    "`[G,TID] = findgroups(T)` groups all supported table variables and preserves their names and classes in TID.",
+    "Supported grouping variables are numeric, logical, string, cell arrays of character vectors, categorical, datetime, duration, and calendarDuration. Sparse and complex grouping variables reject explicitly.",
+    "Matrix-as-columns grouping, `findgroups(T,selector)`, timetable input, and resident input are independent gated RunMat extensions. The table selector form accepts exactly one selector and never ignores trailing arguments."
+  ],
+  "examples": [
+    {"description": "Group strings", "input": "G = findgroups([\"b\";\"a\";\"b\"])", "output": "G = [2; 1; 2]"},
+    {"description": "Group exact integers", "input": "A = uint64([9007199254740992 9007199254740993 9007199254740992]);\n[G,ID] = findgroups(A)", "output": "G = [1 2 1]\nID = uint64([9007199254740992 9007199254740993])"}
+  ],
+  "faqs": [
+    {"question": "Are group numbers integer-typed?", "answer": "No. G contains positive integer-valued doubles and NaN for missing rows. Integer grouping identifiers retain their integer class in ID or TID."},
+    {"question": "Are integer values converted to double for grouping?", "answer": "No. RunMat compares authoritative signed or unsigned integer values directly, including values above flintmax."},
+    {"question": "Can I pass a matrix as A?", "answer": "MATLAB documents grouping vectors. RunMat can interpret matrix columns as grouping roles only when the matrix-as-columns extension is enabled."},
+    {"question": "Can findgroups consume GPU-resident data?", "answer": "Only in RunMat extension mode. The gate is checked recursively before any resident input or table variable is gathered."},
+    {"question": "Does findgroups accept timetables?", "answer": "Timetable input is a separate RunMat extension. Its identifier output is currently an ordinary table of selected variable values; row times are not grouping variables."}
+  ],
   "source": {"label": "`crates/runmat-runtime/src/builtins/array/grouping.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/grouping.rs"}
 }

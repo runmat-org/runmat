@@ -36,10 +36,12 @@
     "`xlsread(filename)` reads the first worksheet. If the filename has no extension, `.xlsx` is appended.",
     "`xlsread(filename, range)` reads an Excel A1 range such as `\"C4:C19\"` from the first worksheet.",
     "`xlsread(filename, sheet)` selects a worksheet by name or one-based numeric index.",
+    "A numeric worksheet index may use any native integer class and is decoded exactly before selecting the worksheet.",
     "`xlsread(filename, sheet, range)` combines worksheet and range selection.",
     "The legacy `'-basic'` mode flag is accepted as a no-op because RunMat always uses its host spreadsheet parser rather than Excel COM automation.",
     "The numeric output trims leading and trailing rows/columns that contain no numeric cells, then fills nonnumeric cells inside the numeric rectangle with `NaN`.",
     "`[num, txt, raw] = xlsread(...)` returns text cells in `txt` and mixed number/string/logical cells in `raw`.",
+    "RunMat mode accepts a numeric row and column vector in the range position and accepts explicit `gpuArray` selectors; both are gated before file access.",
     "Excel callback/process-function modes are not supported and raise a descriptive argument error."
   ],
   "examples": [
@@ -71,6 +73,10 @@
     }
   ],
   "links": [
+    {
+      "label": "MATLAB language extensions",
+      "url": "/docs/runtime/getting-started/language-extensions"
+    },
     {
       "label": "readmatrix",
       "url": "./readmatrix"

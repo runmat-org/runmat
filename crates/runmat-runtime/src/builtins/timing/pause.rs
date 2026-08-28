@@ -2,11 +2,15 @@
 
 use once_cell::sync::Lazy;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, LogicalArray, Tensor, Value};
 use std::sync::RwLock;
 
 use crate::builtins::common::gpu_helpers;
@@ -14,6 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 use crate::builtins::plotting;
 use crate::builtins::timing::type_resolvers::pause_type;
@@ -67,6 +72,36 @@ impl Default for PauseState {
 }
 
 const BUILTIN_NAME: &str = "pause";
+
+const GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pause-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pause with an explicit GPU-resident argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PauseGpuInputExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_INPUT_EXTENSION];
+
+const INTEGER_DURATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "duration",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target explicitly lists every built-in integer class for the nonnegative real duration.",
+    }];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "pause(integer_duration)",
+        inputs: &INTEGER_DURATION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The integer scalar is validated from authoritative storage and crosses one explicit seconds/timer boundary; pause returns no integer data. Explicit resident arguments are independently gated before provider access, while internal automatic residency remains transparent.",
+    }];
 
 const PAUSE_OUTPUT_EMPTY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -194,6 +229,8 @@ enum PauseWait {
     sink = true,
     type_resolver(pause_type),
     descriptor(crate::builtins::timing::pause::PAUSE_DESCRIPTOR),
+    extensions(crate::builtins::timing::pause::EXTENSIONS),
+    integer_capabilities(crate::builtins::timing::pause::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::timing::pause"
 )]
 async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -327,6 +364,10 @@ async fn wasm_sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
 }
 
 async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
+    if matches!(arg, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&GPU_INPUT_EXTENSION, BUILTIN_NAME)?;
+    }
     let host_value = gpu_helpers::gather_value_async(arg)
         .await
         .map_err(|e| pause_error_with_message(format!("pause: {e}"), &PAUSE_ERROR_GATHER_FAILED))?;
@@ -373,6 +414,7 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
+        | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -383,6 +425,11 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Foreign(_)
         | Value::OutputList(_) => Err(pause_error_with_message(
             PAUSE_ERROR_INVALID_ARG.message,
             &PAUSE_ERROR_INVALID_ARG,
@@ -427,16 +474,17 @@ fn parse_numeric(value: f64) -> Result<PauseArgument, RuntimeError> {
 }
 
 fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, RuntimeError> {
-    if tensor.data.is_empty() {
+    let len = tensor.len();
+    if len == 0 {
         return Ok(PauseArgument::Wait(PauseWait::Default));
     }
-    if tensor.data.len() != 1 {
+    if len != 1 {
         return Err(pause_error_with_message(
             PAUSE_ERROR_INVALID_ARG.message,
             &PAUSE_ERROR_INVALID_ARG,
         ));
     }
-    parse_numeric(tensor.data[0])
+    parse_numeric(tensor_utils::tensor_value_f64(&tensor, 0))
 }
 
 fn parse_logical(logical: LogicalArray) -> Result<PauseArgument, RuntimeError> {
@@ -483,7 +531,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LogicalArray, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
@@ -545,7 +593,7 @@ pub(crate) mod tests {
         reset_state(true);
         let result = block_on(pause_builtin(Vec::new())).expect("pause()");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -557,7 +605,7 @@ pub(crate) mod tests {
         reset_state(true);
         let result = block_on(pause_builtin(vec![Value::Num(0.0)])).expect("pause(0)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -570,9 +618,82 @@ pub(crate) mod tests {
         let result =
             block_on(pause_builtin(vec![Value::Int(IntValue::I32(0))])).expect("pause(int)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn pause_tensor_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed pause tensor");
+
+        match parse_tensor(tensor).expect("pause tensor") {
+            PauseArgument::Wait(PauseWait::Seconds(seconds)) => assert_eq!(seconds, 2026.0),
+            other => panic!("expected wait seconds, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pause_accepts_every_integer_duration_class() {
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        reset_state(false);
+        for value in [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ] {
+            let result = block_on(pause_builtin(vec![Value::Int(value)]))
+                .expect("documented integer duration");
+            assert!(matches!(result, Value::Tensor(tensor) if tensor.is_empty()));
+        }
+        reset_state(true);
+    }
+
+    #[test]
+    fn pause_resident_argument_is_gated_before_provider_access() {
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+                descriptor: Default::default(),
+            }
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+        );
+        let error = block_on(pause_builtin(vec![resident])).expect_err("resident pause input");
+
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:PauseGpuInputExtension")
+        );
+    }
+
+    #[test]
+    fn pause_automatically_resident_duration_gathers_in_strict_mode() {
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        reset_state(false);
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("resident duration")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let result = {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                block_on(pause_builtin(vec![Value::GpuTensor(handle.clone())]))
+                    .expect("automatic duration gathers transparently")
+            };
+            assert!(matches!(result, Value::Tensor(tensor) if tensor.is_empty()));
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+        });
+        reset_state(true);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -582,7 +703,7 @@ pub(crate) mod tests {
         reset_state(true);
         let result = block_on(pause_builtin(vec![Value::Num(-0.0)])).expect("pause(-0)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -614,7 +735,7 @@ pub(crate) mod tests {
         let empty = Tensor::zeros(vec![0, 0]);
         let result = block_on(pause_builtin(vec![Value::Tensor(empty)])).expect("pause([])");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -628,7 +749,7 @@ pub(crate) mod tests {
         let result =
             block_on(pause_builtin(vec![Value::LogicalArray(logical)])).expect("pause(true)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -640,7 +761,7 @@ pub(crate) mod tests {
         reset_state(true);
         let result = block_on(pause_builtin(vec![Value::Num(f64::INFINITY)])).expect("pause(Inf)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -653,14 +774,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 block_on(pause_builtin(vec![Value::GpuTensor(handle)])).expect("pause(gpuScalar)");
             match result {
-                Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+                Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
                 other => panic!("expected empty tensor, got {other:?}"),
             }
         });
@@ -680,14 +801,14 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let result =
             block_on(pause_builtin(vec![Value::GpuTensor(handle)])).expect("pause(gpuScalar)");
         match result {
-            Value::Tensor(t) => assert_eq!(t.data.len(), 0),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64().len(), 0),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }

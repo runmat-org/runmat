@@ -365,14 +365,14 @@ impl WebRenderer {
             .unwrap_or(false);
 
         #[cfg(feature = "egui-overlay")]
-        if self.overlay.is_some() {
-            if should_forward_event_to_overlay(
+        if self.overlay.is_some()
+            && should_forward_event_to_overlay(
                 &event,
                 overlay_pointer_captured,
                 self.camera_controller.active_button.is_some(),
-            ) {
-                self.pending_overlay_events.push(event.clone());
-            }
+            )
+        {
+            self.pending_overlay_events.push(event.clone());
         }
         #[cfg(feature = "egui-overlay")]
         if overlay_pointer_captured && self.camera_controller.active_button.is_none() {
@@ -672,11 +672,10 @@ impl WebRenderer {
     pub fn take_host_actions(&mut self) -> Vec<WebSurfaceHostAction> {
         #[cfg(feature = "egui-overlay")]
         {
-            return self
-                .overlay
+            self.overlay
                 .as_mut()
                 .map(|overlay| std::mem::take(&mut overlay.host_actions))
-                .unwrap_or_default();
+                .unwrap_or_default()
         }
 
         #[cfg(not(feature = "egui-overlay"))]

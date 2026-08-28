@@ -1,10 +1,3 @@
----
-title: "Command Line Interface"
-category: "Getting Started"
-section: "1.3"
-last_updated: "July 31, 2026"
----
-
 # RunMat Command Line Interface (CLI)
 
 The RunMat CLI is a fast and easy way to run `.m` files locally, open an interactive REPL, inspect runtime behavior, and work with remote project filesystems.
@@ -106,6 +99,31 @@ runmat run src/main
 
 Execution uses the same session pipeline as other hosts: parse, lower, compile, run, emit streams, update workspace, and report structured diagnostics.
 
+## Compile
+
+Use `runmat compile` to produce a standalone executable for the current host:
+
+```bash
+runmat compile main.m -o main
+./main
+```
+
+Compilation uses the same project/package composition, HIR, MIR, static analysis, builtin catalog, and Native IR as normal execution. Functions in the entry file and configured project source roots are compiled with their stable program identities; list stable cross-directory sources under `[sources].roots` so they are available to static composition. A runtime-only `addpath` cannot retroactively add source code to an already linked executable.
+
+The default `--policy=native-specialized` emits target-native code and links the matching RunMat runtime archive embedded in the `runmat` binary. The result does not require a separate RunMat installation or SDK directory at runtime. `--optimization=none|size|speed` controls native object optimization; speed is the default.
+
+The final host link uses a supported system linker and the native development libraries behind enabled runtime features, such as HDF5. Install those platform dependencies and expose their standard library search paths to the linker; RunMat supplies its own matching execution runtime and does not require a separate RunMat SDK.
+
+Use `--policy=closed-world` when every runtime target can be proven. RunMat links only the exact reachable catalog-backed builtin bindings, uses ordinary archive extraction and platform dead stripping, and omits parser, compiler, VM, JIT, and object-emission code from the resulting executable. The small HIR/MIR operation schema required to decode and verify Native IR remains part of the runtime. If a call can reach an unknown target, a dynamically extensible builtin, or a builtin without an exact native binding, compilation fails with a specific diagnostic; use `native-specialized` when that broader runtime discovery is intentional.
+
+The `dynamic-runtime` and `portable` policy names reserve distinct product contracts and fail clearly until their complete implementations are available: `dynamic-runtime` requires an embedded frontend and dynamic source loader, while `portable` produces a target-independent artifact instead of a host executable. RunMat does not silently approximate one policy with another.
+
+Temporary object, archive, and response-file inputs are private and removed after linking. Use `--keep-temps` for linker diagnosis, `--linker PATH` to select an explicit supported system linker driver, and `--force` to replace an output. Forced replacement preserves the previous executable until the new link succeeds.
+
+Use `--explain-link` to see the exact program functions, builtins, classes, method boundaries, providers, extensions, and runtime families retained by compilation, together with the direct, finite-dynamic, or unknown reason for each edge. Closed-world explanations also name each retained builtin binding variant and its stable native symbol. Use `--link-plan-json PATH` to write the same deterministic report for CI or tooling. The JSON includes the program, runtime archive, builtin catalog, target, policy, capability, and reachability identities used by that compilation; `--force` is required to replace an existing report.
+
+The compiler validates that the embedded runtime matches the current target, native ABI, schema, RunMat version, runtime identity, and builtin catalog before linking. A source build made with ordinary `cargo build` intentionally lacks that large embedded archive; use the two-phase build helper described in [Build System](/docs/runtime/development/build-system) when developing the standalone workflow.
+
 ## Check
 
 Use `runmat check` before running a `.m` script or `.fea` study:
@@ -149,6 +167,9 @@ Common options:
 | `--debug` | Enable debug logging. |
 | `--log-level LEVEL` | Set log verbosity. |
 | `--verbose` | Print more execution detail. |
+| `--offline` | Resolve packages only from locally available content. |
+| `--locked` | Require an existing, current `runmat.lock`. |
+| `--frozen` | Require the lock and prohibit network access or lock mutation. |
 | `--no-jit` | Use the interpreter only. |
 | `--jit-threshold N` | Set the execution count before JIT tiering. |
 | `--jit-opt-level LEVEL` | Set JIT optimization policy. |
@@ -161,6 +182,79 @@ Common options:
 | `--plot-backend BACKEND` | Select plotting backend (auto | wgpu | static | web). |
 
 Configuration is resolved from built-in defaults, project files, environment variables, and CLI flags. CLI flags have the highest precedence. See [Configuration Reference](/docs/runtime/getting-started/config).
+
+## Clusters and Remote Jobs
+
+Cluster administration, enrollment, and durable encrypted jobs use the active Server, organization, and project credentials:
+
+```bash
+runmat cluster list
+runmat cluster create --name workstation-pool --queue default
+runmat cluster enroll CLUSTER_ID --ttl-seconds 900
+runmat cluster nodes CLUSTER_ID
+runmat cluster node-state CLUSTER_ID NODE_ID draining
+
+runmat job submit analysis.m --cluster CLUSTER_ID --trust-identity SHA256_FINGERPRINT --detach
+runmat job list
+runmat job show RUN_ID
+runmat job attach RUN_ID
+runmat job cancel RUN_ID
+
+runmat job recovery keygen --output runmat-recovery.json
+runmat job recovery configure --org ORG_ID --key runmat-recovery.json
+runmat job recovery recover RUN_ID --project PROJECT_ID --key runmat-recovery.json
+```
+
+Every cluster command and every durable job observation/mutation supports `--json`. JSON mode emits one complete stable API object or page and never includes ANSI escapes; human list mode remains stable tab-separated output. Enrollment output contains a single-use secret, so avoid shell history and logs and prefer JSON-to-secret-store automation when scripting it.
+
+The node agent can run in the foreground for diagnosis or install its native systemd, launchd, or Windows service. Generate a dry-run plan before changing a host:
+
+```bash
+runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install --dry-run
+sudo runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install
+```
+
+Service installation persists only non-secret configuration. Enrollment credentials remain in the private state directory, service removal preserves that identity for safe reinstall, and retiring a host requires revoking the node before deleting its state. See `runmat cluster join --help` for platform paths and the foreground enrollment flow.
+
+Organization recovery is optional. The CLI generates and retains the private key locally, sends only its validated public recipient to the Server policy API, and decrypts authorized terminal results or diagnostics on the custodian machine. Once configured, every new submission must carry an envelope for the exact active fingerprint. Keep rotated private keys for the full artifact-retention period. See [Remote Execution](/docs/runtime/execution/remote) for customer-node, hosted-node, browser, draining, and recovery workflows.
+
+## Packages
+
+Package resolution is available directly and is also applied automatically by run, REPL, check, benchmark, and bytecode workflows:
+
+```bash
+runmat package resolve
+runmat package fetch
+runmat package update
+runmat package tree
+runmat package why DEPENDENCY
+runmat package vendor
+runmat package cache status
+runmat package cache gc
+runmat package cache prune
+```
+
+`resolve` creates or refreshes `runmat.lock`; `fetch` fills missing immutable cache content without selecting a newer locked commit; and `update` is the explicit operation that may advance a branch or tag. `tree` and `why` project the same resolved graph used by execution and static analysis. `vendor` writes project-local dependency copies plus a workspace-root `runmat-vendor.json`; frozen execution requires and verifies that record for live path dependencies. See [Projects](/docs/runtime/getting-started/projects) for Git syntax, lock modes, browser behavior, cache recovery, and vendoring.
+
+## Test Projects
+
+`runmat test` discovers MATLAB-style script, function, and class tests semantically, selects them without executing test bodies, freezes the package graph and source revision, and runs the resulting immutable plan:
+
+```bash
+runmat test
+runmat test tests/solver --name convergence --tag fast
+runmat test --jobs 4 --isolation process --report junit
+runmat test --coverage --coverage-format lcov
+runmat test --cluster CLUSTER_ID --project PROJECT_ID --trust-identity SHA256_FINGERPRINT --max-workers 8
+```
+
+Runtime and test dependency groups are resolved together before discovery. The default native isolation is a fresh killable process; `session` and `none` are explicit weaker modes. Reports, captured output, diagnostics, artifacts, retries, cancellation, and coverage are projections of one deterministic event/result stream. Human, JSON, JUnit, and TAP reports are supported, as are JSON, LCOV, Cobertura, and HTML coverage reports. Exact options and defaults are available from `runmat test --help`.
+
+The same portable discovery, plan, coordinator, result, and coverage authorities back `runtests`, browser Web Worker execution, and Desktop. Browser hosts use fresh dedicated Web Workers as their strongest available isolation and preserve selected source and fixture bytes in an immutable worker-local filesystem snapshot.
+
+Remote tests use the same coordinator through the general execution scheduler and encrypted execution control/data plane. `--cluster` overrides `[test.cluster].profile`, `--queue` overrides `[test.cluster].queue`, and `--max-workers` caps concurrent remote fixture groups. A pinned `--trust-identity` is required before protected plan, source, result, event, artifact, or coverage content is encrypted to the admitted endpoint. The Server sees only the coarse execution metadata needed for admission, leases, routing, retention, and billing; it cannot decrypt test content or detailed results.
+
+Remote jobs carry an exact compiled program artifact and frozen package identities inside the encrypted execution bundle, without source bytes or a project handoff. Drivers and workers validate the artifact, target, package graph, and source revision identities and execute it without reconstructing a source tree. Remote tests retain the separate source-project closure they need for fixtures, dynamic test discovery, and source-aware reporting; workers validate and materialize those verified logical objects into a private read-only source root. Package resolution and private-package decryption happen only on the submitting client in both cases, so remote workers need no Git, Server-project, registry, or package-decryption credentials and cannot silently select a different dependency.
 
 ## Color and Terminal Output
 

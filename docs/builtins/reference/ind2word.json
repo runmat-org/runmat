@@ -30,6 +30,7 @@
   "behaviors": [
     "`enc` must be a RunMat `wordEncoding` compatibility object.",
     "`M` may be a numeric scalar or numeric tensor of positive integer indices.",
+    "MATLAB-compatible mode accepts host double index vectors. Native typed-integer vectors, nonvector index arrays, and resident indices are separate `runmat` mode extensions; admitted integer indices are read exactly.",
     "The output is a string array with the same shape as `M`.",
     "Indices must be finite positive integers within the vocabulary size. Invalid, NaN, fractional, zero, negative, or out-of-range indices are rejected with a controlled error."
   ],

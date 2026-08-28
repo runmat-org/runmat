@@ -1,0 +1,94 @@
+{
+  "title": "feval",
+  "category": "introspection",
+  "keywords": [
+    "feval",
+    "function handle",
+    "dynamic dispatch",
+    "varargin",
+    "varargout"
+  ],
+  "summary": "Evaluate a function selected by name or function handle.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "function-specific",
+    "notes": "feval performs no provider operation of its own. GPU admission, kernels, fallback, output residency, and precision are inherited from the selected function."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": null,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "feval_forwards_all_integer_classes_without_conversion",
+    "integration": "runmat-vm/tests/functions.rs and runmat-vm/tests/closures.rs"
+  },
+  "description": "`feval(fun, x1, ..., xM)` evaluates the function selected by the name or function handle `fun` and forwards the requested number of outputs. Argument and result classes, shapes, overflow behavior, and provider residency are defined by the selected function rather than by `feval`.",
+  "behaviors": [
+    "A plain character-vector or string-scalar function name such as `'round'` or `\"round\"` is resolved using the same callable dispatch rules as a direct named call.",
+    "A function handle invokes its bound function identity. Closures preserve their captured values and semantic function identity.",
+    "Input arguments are forwarded without numeric conversion. This includes all eight integer classes, logical values, native single values, complex values, and provider-resident arrays when the selected function supports them.",
+    "The number and classes of outputs are inherited from the selected function and the number of outputs requested by the caller.",
+    "RunMat mode additionally accepts text targets prefixed with `@`, such as `\"@sin\"`, and callable object receivers. Strict compatibility mode rejects those extensions before dispatch."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate a function by its documented plain name",
+      "input": "y = feval('round', pi, 2)",
+      "output": "y = 3.1400"
+    },
+    {
+      "description": "Evaluate a function handle",
+      "input": "f = @max;\ny = feval(f, int32([2 7 4]))",
+      "output": "y = int32(7)"
+    },
+    {
+      "description": "Forward multiple outputs",
+      "input": "[value, index] = feval(@max, uint64([4 9 2]))",
+      "output": "% value and index follow max's documented output rules"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does feval convert integer arguments to double?",
+      "answer": "No. feval forwards each value unchanged. Any conversion, overflow rule, or output-class choice belongs to the selected function."
+    },
+    {
+      "question": "Does feval gather a GPU array?",
+      "answer": "Not by itself. The selected function determines whether a resident input stays on its provider, launches a kernel, falls back through the host, or is rejected."
+    },
+    {
+      "question": "Can I pass the function name without an @ prefix?",
+      "answer": "Yes. A plain function name is the documented text form. An @-prefixed text value is a separate RunMat-mode convenience; an actual function handle such as @sin is supported in compatibility mode."
+    },
+    {
+      "question": "Why can the output type vary?",
+      "answer": "feval is dynamic dispatch. Its output count, class, shape, and residency are exactly those produced by the selected function for the supplied arguments."
+    }
+  ],
+  "links": [
+    {
+      "label": "functions",
+      "url": "./functions"
+    },
+    {
+      "label": "str2func",
+      "url": "./str2func"
+    },
+    {
+      "label": "func2str",
+      "url": "./func2str"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/feval.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/feval.rs"
+  },
+  "gpu_behavior": [
+    "feval does not launch a kernel, gather an input, or upload an output on its own. It passes the original values to the selected callable, whose registered provider contract controls all GPU behavior."
+  ]
+}

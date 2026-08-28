@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Executes directly on the GPU for supported builtin callbacks (sin, cos, abs, exp, log, sqrt, plus, minus, times, rdivide, ldivide) when all inputs are gpuArray values; falls back to host execution for closures, heterogeneous inputs, or unsupported callbacks. Uniform numeric/logical outputs are re-uploaded to the GPU otherwise; complex/character outputs stay on the host."
+    "notes": "Executes directly on the GPU for supported floating builtin callbacks when all inputs are gpuArray values; otherwise gathers exact typed storage, evaluates on the host, and re-uploads uniform numeric or logical output. All eight resident integer classes retain exact input and output storage through fallback."
   },
   "fusion": {
     "elementwise": false,
@@ -30,14 +30,15 @@
     "unit": "builtins::acceleration::gpu::arrayfun::tests",
     "integration": "builtins::acceleration::gpu::arrayfun::tests::arrayfun_gpu_roundtrip"
   },
-  "description": "`arrayfun(func, A1, A2, ...)` evaluates `func` for each element (or element-wise tuple) of the supplied arrays. Inputs must share size (with scalar expansion), `'UniformOutput'` controls array-versus-cell output, and `'ErrorHandler'` provides MATLAB/RunMat-compatible fallback behavior.",
+  "description": "`arrayfun(func, A1, A2, ...)` evaluates a scalar callback for each element or element-wise tuple. Ordinary host inputs must have the same size; the documented gpuArray overload accepts compatible sizes. `UniformOutput` controls array-versus-cell collection, and `ErrorHandler` receives the documented identifier, message, and linear index when a callback fails.",
   "behaviors": [
-    "Accepts function handles, builtin names (character vectors or string scalars), and closures.",
-    "Supports additional scalar parameters: `arrayfun(@(x,c) x + c, A, 5)` passes `5` to every call.",
-    "Honors the `'UniformOutput'` and `'ErrorHandler'` name-value pairs for MATLAB-compatible control flow.",
-    "Handles numeric, logical, character, and complex arrays. Unsupported types raise a descriptive error instructing you to use `cellfun` when appropriate.",
+    "The documented callable form is a function handle. Character-vector and string-scalar callable names are a mode-gated RunMat extension.",
+    "Host arrays require equal sizes. Host scalar expansion is a mode-gated RunMat extension; gpuArray input follows the documented compatible-size expansion rule.",
+    "`UniformOutput` accepts logical true/false or double 1/0. Typed-integer controls reject. With uniform output, every callback or error-handler result must be scalar and retain one data type; all eight integer classes, native single, and complex single are collected without widening.",
+    "Host `UniformOutput` and `ErrorHandler` implement the documented single-output control flow. With gpuArray input these options are a mode-gated RunMat extension because the GPU overload exposes scalar uniform outputs only.",
+    "The current implementation handles numeric, logical, character, string, and complex arrays. Standard multiple-output callbacks and cell, struct, and user-object inputs remain general callback/container gaps.",
     "Empty inputs return empty outputs whose shape matches the first array argument.",
-    "When any input is a `gpuArray`, numeric or logical uniform outputs are uploaded back to the GPU so downstream code retains GPU residency. Complex or character uniform outputs remain on the host until providers add the appropriate buffer support. The current implementation computes on the host and therefore inherits the host's floating-point behaviour."
+    "When any input is a gpuArray, supported builtin callbacks may dispatch directly; otherwise authoritative typed inputs gather for callback evaluation and numeric or logical uniform outputs are uploaded back to the provider. Complex or character uniform outputs remain on the host."
   ],
   "examples": [
     {
@@ -46,8 +47,8 @@
       "output": "B =\n     1     4     9\n    16    25    36"
     },
     {
-      "description": "Passing additional scalar parameters",
-      "input": "A = [1 2 3];\noffset = 10;\nresult = arrayfun(@(x, c) x + c, A, offset)",
+      "description": "Passing equal-sized additional arrays",
+      "input": "A = [1 2 3];\noffset = [10 10 10];\nresult = arrayfun(@(x, c) x + c, A, offset)",
       "output": "result =\n    11    12    13"
     },
     {
@@ -73,7 +74,7 @@
     },
     {
       "question": "What happens when the callback returns mixed types?",
-      "answer": "Set `'UniformOutput', false` so the builtin returns a cell array. When `'UniformOutput'` is `true` every callback invocation must return a numeric, logical, or complex scalar."
+      "answer": "Set `'UniformOutput', false` so the builtin returns a cell array. When `'UniformOutput'` is true, every callback invocation must return a scalar of the same data type; RunMat rejects heterogeneous results instead of promoting them."
     },
     {
       "question": "Can `arrayfun` handle character inputs?",
@@ -119,7 +120,5 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs"
   },
   "gpu_residency": "No. RunMat's auto-offload logic moves tensors to the GPU when profitable. If you do call `gpuArray`, `arrayfun` keeps the result on the GPU for uniform numeric or logical outputs so later operations can continue without gathering. Non-uniform or complex/character results stay on the host until GPU representations are available.",
-  "gpu_behavior": [
-    "When every input is a `gpuArray`, `'UniformOutput'` is `true`, and the callback resolves to one of the supported builtins (`sin`, `cos`, `abs`, `exp`, `log`, `sqrt`, `plus`, `minus`, `times`, `rdivide`, or `ldivide`), RunMat bypasses the host path and dispatches directly to the active provider through the corresponding hooks (`unary_*` or `elem_*`). The builtin acts as a fusion barrier—the fusion planner lowers upstream producers before invoking `arrayfun` because the callback can evaluate arbitrary MATLAB code.\n\nAll other combinations—including closures, callbacks with extra scalar parameters, mixed residency, or `'UniformOutput', false`—gather inputs to the host, execute the callback element-wise, and then upload numeric or logical uniform results back to the GPU so later code continues with device residency. Complex and character uniform outputs remain host-resident until device representations are available. Cell outputs are always host-resident."
-  ]
+  "gpu_behavior": ["When every input is a gpuArray, uniform output is implicit, and the callback resolves to one of the supported builtins (`sin`, `cos`, `abs`, `exp`, `log`, `sqrt`, `plus`, `minus`, `times`, `rdivide`, or `ldivide`), RunMat can dispatch directly through provider hooks. The builtin remains a fusion barrier because arbitrary callback code may execute. Other documented GPU forms use compatible-size typed gather fallback and re-upload uniform numeric or logical results, including exact integer classes. GPU options, host scalar expansion, and text callables are separately mode-gated RunMat extensions; complex, character, and cell outputs remain host-resident."]
 }

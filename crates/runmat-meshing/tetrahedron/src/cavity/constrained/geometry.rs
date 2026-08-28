@@ -1,5 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::BTreeSet;
 
+#[cfg(test)]
 pub(super) fn centroid_of_node_set(
     node_ids: &BTreeSet<u32>,
     node_coordinates: &BTreeMap<u32, [f64; 3]>,

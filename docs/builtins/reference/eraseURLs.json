@@ -1,76 +1,86 @@
 {
   "title": "eraseURLs",
   "category": "strings/transform",
-  "keywords": [
-    "eraseURLs",
-    "strings",
-    "transform",
-    "matlab",
-    "compatibility"
-  ],
-  "summary": "Remove URL substrings from text.",
+  "keywords": ["eraseURLs", "URL", "HTTP", "HTTPS", "tokenizedDocument"],
+  "summary": "Erase HTTP and HTTPS URLs from text and web-address tokens from tokenized documents.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "The documented inputs are host text and tokenizedDocument values. Resident numeric values reject before provider access."
   },
   "fusion": {
     "elementwise": false,
     "reduction": false,
-    "max_inputs": null,
-    "constants": "not applicable",
-    "notes": "Not eligible for fusion; this builtin materializes host text or logical results."
+    "max_inputs": 1,
+    "constants": "inline"
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::strings::transform::compat::tests",
+    "unit": "builtins::strings::transform::compat::tests and builtins::strings::text_analytics::documents::tests",
     "integration": null
   },
-  "description": "s = eraseURLs(text) - Remove URL substrings from text.",
-  "signatures": [
-    {
-      "label": "s = eraseURLs(text)",
-      "inputs": [
-        {
-          "name": "text",
-          "ty": "Any",
-          "arity": "Required",
-          "default": null,
-          "description": "Input text."
-        }
-      ],
-      "outputs": [
-        {
-          "name": "out",
-          "ty": "Any",
-          "arity": "Required",
-          "default": null,
-          "description": "Output value."
-        }
-      ]
-    }
-  ],
+  "description": "`eraseURLs` erases HTTP and HTTPS URLs from documented text containers. Starting with the compatibility target, it also accepts tokenizedDocument input and removes tokens whose type is `web-address`.",
   "behaviors": [
-    "Remove URL substrings from text."
+    "`newStr = eraseURLs(str)` accepts a string array, character vector, or cell array of character vectors and returns the same documented container type.",
+    "`newDocuments = eraseURLs(documents)` removes web-address tokens and preserves the document shape and remaining explicit token type metadata supported by RunMat's object model.",
+    "URL matching is case-insensitive for the HTTP and HTTPS schemes.",
+    "All integer and logical inputs are invalid; no numeric-to-text conversion occurs.",
+    "Multirow character matrices and cells containing strings or nested cells are broader RunMat-only forms with independent compatibility gates.",
+    "RunMat has no resident text storage or eraseURLs provider kernel, so invalid resident numeric values reject without gathering."
   ],
   "examples": [
-    "eraseURLs(\"see https://example.com now\") removes the URL substring."
-  ],
-  "faqs": [],
-  "links": [
     {
-      "label": "string",
-      "url": "./string"
+      "description": "Erase a URL from text",
+      "input": "str = \"For more information, see https://www.mathworks.com\";\nnewStr = eraseURLs(str)",
+      "output": "newStr = \"For more information, see \""
     },
     {
-      "label": "char",
-      "url": "./char"
+      "description": "Erase web-address tokens from documents",
+      "input": "documents = tokenizedDocument(\"Visit https://example.com now\");\nnewDocuments = eraseURLs(documents)",
+      "output": "The resulting document contains the tokens `Visit` and `now`."
     }
   ],
+  "faqs": [
+    {
+      "question": "Does eraseURLs accept tokenizedDocument input?",
+      "answer": "Yes. The compatibility target documents tokenizedDocument input, and RunMat removes tokens whose type is `web-address`."
+    },
+    {
+      "question": "Does eraseURLs remove a bare www address?",
+      "answer": "The documented surface specifies HTTP and HTTPS URLs. RunMat does not advertise bare `www.` matching as MATLAB-compatible behavior."
+    }
+  ],
+  "links": [
+    {
+      "label": "MathWorks eraseURLs documentation",
+      "url": "https://www.mathworks.com/help/textanalytics/ref/eraseurls.html"
+    },
+    {
+      "label": "erasePunctuation",
+      "url": "./erasePunctuation"
+    },
+    {
+      "label": "tokenizedDocument",
+      "url": "./tokenizedDocument"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Documented forms",
+      "input": "newStr = eraseURLs(str)\nnewDocuments = eraseURLs(documents)",
+      "output": "The result preserves the documented text container type or returns tokenized documents."
+    },
+    "points": [
+      "`str` is a string array, character vector, or cell array of character vectors.",
+      "`documents` is a tokenizedDocument array.",
+      "The tokenizedDocument form removes tokens classified as `web-address`."
+    ]
+  },
   "source": {
-    "label": "`crates/runmat-runtime/src/builtins/strings/transform/compat.rs`",
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/compat.rs` and `crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/compat.rs"
-  }
+  },
+  "gpu_residency": "Host-only text processing; no provider hook or resident text representation."
 }

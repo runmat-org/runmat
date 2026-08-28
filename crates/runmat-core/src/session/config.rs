@@ -1,6 +1,63 @@
 use super::*;
 
 impl RunMatSession {
+    pub(crate) fn runtime_context(&self) -> &runmat_runtime::context::RuntimeContext {
+        &self.runtime_context
+    }
+
+    pub(crate) fn configure_runtime_context(&self) {
+        self.runtime_context
+            .set_language_mode(runtime_language_mode(self.compat_mode));
+        self.runtime_context
+            .set_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions());
+        self.runtime_context
+            .set_top_level_await_enabled(self.top_level_await_enabled);
+        self.runtime_context
+            .set_dynamic_eval_enabled(self.dynamic_eval_enabled);
+    }
+
+    /// Replace the root execution service used by this session and every
+    /// nested invocation compiled from it.
+    pub fn install_execution_services(
+        &mut self,
+        services: std::rc::Rc<dyn runmat_runtime::execution::RuntimeExecutionServices>,
+    ) {
+        self.runtime_context = self.runtime_context.clone().with_execution(services);
+    }
+
+    /// Install the host's parallel/resource authority. Placement consumes the
+    /// service's current allocation lease; it does not reserve or schedule
+    /// work independently of that authority.
+    pub fn install_parallel_service(
+        &mut self,
+        service: std::rc::Rc<dyn runmat_runtime::context::RuntimeParallelService>,
+    ) {
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_parallel(service);
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+    }
+
+    /// Return the bounded, portable feedback profile owned by this session.
+    /// The profile contains operation/candidate identities, digests, and
+    /// aggregate counts/timings only; persistence remains an explicit host
+    /// decision.
+    pub fn placement_profile_snapshot(
+        &self,
+    ) -> runmat_accelerate::placement::PlacementProfileSnapshot {
+        self.placement_session.profile_snapshot()
+    }
+
+    /// Restore a compatible bounded placement profile into this session.
+    pub fn restore_placement_profile(
+        &self,
+        profile: runmat_accelerate::placement::PlacementProfileSnapshot,
+    ) -> Result<(), runmat_accelerate::placement::PlacementPlanError> {
+        self.placement_session.restore_profile(profile)
+    }
+
     /// Install an async stdin handler (Phase 2). This is the preferred input path for
     /// poll-driven execution (`ExecuteFuture`).
     ///
@@ -40,6 +97,9 @@ impl RunMatSession {
     /// Request cooperative cancellation for the currently running execution.
     pub fn cancel_execution(&self) {
         self.interrupt_flag.store(true, Ordering::Relaxed);
+        self.runtime_context
+            .execution()
+            .drain_scope(runmat_execution::CancellationReason::User);
     }
 
     /// Shared interrupt flag used by the VM to implement cooperative cancellation.
@@ -67,25 +127,29 @@ impl RunMatSession {
         self.compat_mode
     }
 
-    /// Set the language compatibility mode (`matlab` or `strict`).
+    /// Set the language compatibility mode (`runmat`, `matlab`, or `strict`).
     pub fn set_compat_mode(&mut self, mode: CompatMode) {
         self.compat_mode = mode;
+        self.runtime_context
+            .set_language_mode(runtime_language_mode(mode));
+        self.runtime_context
+            .set_runmat_extensions_enabled(mode.allows_runmat_extensions());
     }
 
     pub fn set_callstack_limit(&mut self, limit: usize) {
         self.callstack_limit = limit;
-        runmat_vm::set_call_stack_limit(limit);
+        self.runtime_context.set_callstack_limit(limit);
     }
 
     pub fn set_error_namespace(&mut self, namespace: impl Into<String>) {
         let namespace = namespace.into();
         let namespace = if namespace.trim().is_empty() {
-            runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string()
+            runmat_runtime::context::DEFAULT_ERROR_NAMESPACE.to_string()
         } else {
             namespace
         };
         self.error_namespace = namespace.clone();
-        runmat_vm::set_error_namespace(&namespace);
+        self.runtime_context.set_error_namespace(namespace.clone());
         runmat_hir::set_error_namespace(&namespace);
     }
 
@@ -109,6 +173,8 @@ impl RunMatSession {
             total_executions = self.stats.total_executions,
             jit_compiled = self.stats.jit_compiled,
             interpreter_fallback = self.stats.interpreter_fallback,
+            native_osr_transfers = self.stats.native_osr_transfers,
+            vectorized_native_regions = self.stats.vectorized_native_regions,
             avg_time_ms = self.stats.average_execution_time_ms,
             total_allocations = gc_stats
                 .total_allocations
@@ -129,13 +195,57 @@ impl RunMatSession {
         );
     }
 
-    #[cfg(feature = "jit")]
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn has_jit(&self) -> bool {
-        self.jit_engine.is_some()
+        self.native_tiering_enabled
     }
 
-    #[cfg(not(feature = "jit"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn has_jit(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use runmat_runtime::context::{
+        ParallelCapability, RuntimeParallelResources, RuntimeParallelService,
+    };
+
+    use super::RunMatSession;
+
+    struct FixedAllocation;
+
+    impl RuntimeParallelService for FixedAllocation {
+        fn supports(&self, _capability: ParallelCapability) -> bool {
+            false
+        }
+
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            RuntimeParallelResources {
+                cpu_millicores_available: 250,
+                memory_available_bytes: Some(4_096),
+                epoch: 7,
+            }
+        }
+    }
+
+    #[test]
+    fn session_exposes_explicit_profile_and_scheduler_composition() {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        assert!(session.placement_profile_snapshot().feedback.is_empty());
+
+        session.install_parallel_service(Rc::new(FixedAllocation));
+        let resources = session
+            .runtime_context()
+            .service_ports()
+            .parallel()
+            .unwrap()
+            .placement_resources();
+        assert_eq!(resources.cpu_millicores_available, 250);
+        assert_eq!(resources.memory_available_bytes, Some(4_096));
+        assert_eq!(resources.epoch, 7);
     }
 }

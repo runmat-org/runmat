@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "GPU inputs can be gathered to the host for the reference implementation. Fusion can keep compatible elementwise expressions on the active provider."
+    "notes": "Floating GPU inputs can participate in fusion. Typed integer and logical gpuArray extensions gather through their owning provider and restore a validated result to the same device when that owner can physically supply the required result precision; otherwise the call rejects instead of silently narrowing."
   },
   "fusion": {
     "elementwise": true,
@@ -34,8 +34,9 @@
   "description": "`r = deg2rad(d)` converts each angle in `d` from degrees to radians using `d*pi/180`, with element-wise behavior matching MATLAB and RunMat.",
   "behaviors": [
     "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
-    "Integer and logical inputs are promoted to double precision before conversion.",
+    "MATLAB documents single and double input. RunMat extension mode additionally accepts logical input and integer values that are exactly representable as double; inexact wide integers are rejected rather than rounded.",
     "Complex inputs are scaled component-wise, matching ordinary multiplication by `pi/180`.",
+    "Single and complex-single inputs preserve single precision.",
     "Output shape matches the input shape.",
     "String inputs are unsupported and raise a builtin-scoped error."
   ],

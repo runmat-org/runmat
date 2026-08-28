@@ -136,7 +136,13 @@ impl RunMatSession {
                 if let Some((values, truncated)) =
                     gather_gpu_preview_values(handle, &value_shape_vec, &options).await?
                 {
-                    preview = Some(WorkspacePreview { values, truncated });
+                    preview = Some(WorkspacePreview {
+                        values: values
+                            .into_iter()
+                            .map(crate::NumericPreviewValue::Float)
+                            .collect(),
+                        truncated,
+                    });
                 }
             }
         } else {

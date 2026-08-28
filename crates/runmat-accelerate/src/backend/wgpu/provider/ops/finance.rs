@@ -377,7 +377,7 @@ fn wgsl_broadcast_index_expression(
 
 #[cfg(test)]
 mod tests {
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::{
         AccelProvider, HostTensorView, ProviderBlackScholesPriceInput,
         ProviderBlackScholesPriceRequest,
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn black_scholes_price_wgpu_broadcasts_resident_inputs() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
 

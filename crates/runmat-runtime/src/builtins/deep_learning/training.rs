@@ -2,16 +2,16 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderAdamUpdateRequest,
     ProviderAdamUpdateResult,
 };
-use runmat_builtins::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
 
 use crate::BuiltinResult;
 
 use super::{
     any_type, autodiff, deep_learning_error, ensure_dlarray_class_registered, gather_args, model,
-    object, parse_name_values, scalar_text, text_or_missing, unsupported_error,
+    object, parse_name_values, positive_usize, scalar_text, text_or_missing, unsupported_error,
 };
-use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::{gpu_helpers, tensor};
 
 const DLUPDATE_MAX_DEPTH: usize = 256;
 
@@ -96,6 +96,7 @@ fn canonical_training_option(name: &str) -> String {
 )]
 pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_dlarray_class_registered();
+    validate_dlarray_data(&data)?;
     let gathered = gather_args(rest).await?;
     if gathered.len() > 1 {
         return Err(deep_learning_error(
@@ -112,6 +113,18 @@ pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinRes
             ("Labels", Value::String(format)),
         ],
     ))
+}
+
+fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
+    if matches!(data, Value::Int(_))
+        || matches!(data, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+    {
+        return Err(deep_learning_error(
+            "dlarray",
+            "dlarray: integer data is not supported; use double, single, logical, or gpuArray data",
+        ));
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -980,7 +993,9 @@ fn gpu_optimizer_state<'a>(
 ) -> BuiltinResult<GpuOptimizerState<'a>> {
     match value {
         Value::GpuTensor(handle) => Ok(GpuOptimizerState::Resident(handle)),
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(GpuOptimizerState::Empty),
+        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0 => {
+            Ok(GpuOptimizerState::Empty)
+        }
         Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(GpuOptimizerState::HostFallback),
         other => Err(deep_learning_error(
             "adamupdate",
@@ -1056,22 +1071,28 @@ impl NumericPayload {
                 repr: NumericRepr::Scalar,
             },
             Value::Tensor(tensor) => {
-                if !matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) {
+                let dtype = tensor.numeric_dtype();
+                if !matches!(dtype, NumericDType::F64 | NumericDType::F32) {
                     return Err(deep_learning_error(
                         "adamupdate",
                         format!(
                             "adamupdate: {label} tensor must be double or single, got {}",
-                            tensor.dtype.class_name()
+                            dtype.class_name()
                         ),
                     ));
                 }
-                ensure_finite(&tensor.data, label)?;
+                let data = tensor
+                    .clone()
+                    .into_numeric_storage()
+                    .map_err(|err| deep_learning_error("adamupdate", err))?
+                    .materialize_f64();
+                ensure_finite(&data, label)?;
                 Self {
-                    data: tensor.data.clone(),
+                    data,
                     shape: tensor.shape.clone(),
-                    repr: NumericRepr::Tensor {
+                    repr: NumericRepr::Dense {
                         shape: tensor.shape.clone(),
-                        dtype: tensor.dtype,
+                        dtype,
                     },
                 }
             }
@@ -1085,11 +1106,13 @@ impl NumericPayload {
                     shape: inner.shape,
                     repr: NumericRepr::Dlarray {
                         inner: Box::new(inner.repr),
-                        format: object
-                            .properties
-                            .get("Format")
-                            .cloned()
-                            .unwrap_or_else(|| Value::String(String::new())),
+                        format: Box::new(
+                            object
+                                .properties
+                                .get("Format")
+                                .cloned()
+                                .unwrap_or_else(|| Value::String(String::new())),
+                        ),
                         labels: Box::new(
                             object
                                 .properties
@@ -1140,13 +1163,13 @@ impl NumericPayload {
 #[derive(Clone)]
 enum NumericRepr {
     Scalar,
-    Tensor {
+    Dense {
         shape: Vec<usize>,
         dtype: NumericDType,
     },
     Dlarray {
         inner: Box<NumericRepr>,
-        format: Value,
+        format: Box<Value>,
         labels: Box<Value>,
     },
 }
@@ -1163,7 +1186,7 @@ impl NumericRepr {
                         .map_err(|err| deep_learning_error("adamupdate", err))
                 }
             },
-            Self::Tensor { shape, dtype } => Tensor::new_with_dtype(data, shape.clone(), *dtype)
+            Self::Dense { shape, dtype } => Tensor::new_with_dtype(data, shape.clone(), *dtype)
                 .map(Value::Tensor)
                 .map_err(|err| deep_learning_error("adamupdate", err)),
             Self::Dlarray {
@@ -1174,7 +1197,7 @@ impl NumericRepr {
                 "dlarray",
                 vec![
                     ("Data", inner.materialize(data)?),
-                    ("Format", format.clone()),
+                    ("Format", format.as_ref().clone()),
                     ("Labels", labels.as_ref().clone()),
                 ],
             )),
@@ -1210,14 +1233,12 @@ fn require_same_shape(
 }
 
 fn positive_iteration(value: &Value) -> BuiltinResult<usize> {
-    let iteration = optional_positive_scalar(std::slice::from_ref(value), 0, 0.0, "iteration")?;
-    if iteration.fract().abs() > f64::EPSILON || iteration > usize::MAX as f64 {
-        return Err(deep_learning_error(
+    positive_usize(value, "adamupdate", "iteration").map_err(|_| {
+        deep_learning_error(
             "adamupdate",
             "adamupdate: iteration must be a positive integer",
-        ));
-    }
-    Ok(iteration as usize)
+        )
+    })
 }
 
 fn optional_finite_scalar(
@@ -1232,8 +1253,16 @@ fn optional_finite_scalar(
     match value {
         Value::Num(n) if n.is_finite() => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 && tensor.data[0].is_finite() => {
-            Ok(tensor.data[0])
+        Value::Tensor(tensor) if crate::builtins::common::tensor::is_scalar_tensor(tensor) => {
+            let n = crate::builtins::common::tensor::tensor_value_f64(tensor, 0);
+            if n.is_finite() {
+                Ok(n)
+            } else {
+                Err(deep_learning_error(
+                    "adamupdate",
+                    format!("adamupdate: {label} must be a finite numeric scalar, got {value:?}"),
+                ))
+            }
         }
         other => Err(deep_learning_error(
             "adamupdate",
@@ -1280,11 +1309,55 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn assert_close(actual: f64, expected: f64) {
         assert!(
             (actual - expected).abs() < 1.0e-10,
             "got {actual}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn adamupdate_iteration_parser_preserves_typed_integer_bounds() {
+        assert_eq!(
+            positive_iteration(&Value::Int(IntValue::U16(7))).unwrap(),
+            7
+        );
+        assert!(positive_iteration(&Value::Int(IntValue::I8(-1))).is_err());
+
+        let exact = (1_u64 << 53) + 1;
+        let typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).expect("iteration");
+        let parsed = positive_iteration(&Value::Tensor(typed));
+        if usize::BITS == 64 {
+            assert_eq!(parsed.unwrap(), exact as usize);
+        } else {
+            assert!(parsed.is_err());
+        }
+
+        let boundary = positive_iteration(&Value::Num(usize::MAX as f64));
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), usize::MAX);
+        }
+        assert!(positive_iteration(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+    }
+
+    #[test]
+    fn adamupdate_payload_preserves_native_single_representation() {
+        let input = Tensor::from_f32(vec![0.1, f32::MAX], vec![1, 2]).expect("single input");
+        let payload = NumericPayload::parse(&Value::Tensor(input), "parameters", true)
+            .expect("single payload");
+        assert_eq!(payload.data, vec![f64::from(0.1_f32), f64::from(f32::MAX)]);
+        let output = payload.materialize(vec![0.25, 0.5]).expect("single output");
+        let Value::Tensor(output) = output else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            runmat_value::NumericStorage::F32(vec![0.25, 0.5])
         );
     }
 
@@ -1336,15 +1409,15 @@ mod tests {
             assert_eq!(updated.shape, shape);
             assert_eq!(avg.shape, shape);
             assert_eq!(avg_sq.shape, shape);
-            assert_close(updated.data[0], 0.990000001);
-            assert_close(updated.data[1], 2.0099999995);
-            assert_close(updated.data[2], 2.9900000003333334);
-            assert_close(avg.data[0], 0.01);
-            assert_close(avg.data[1], -0.02);
-            assert_close(avg.data[2], 0.03);
-            assert_close(avg_sq.data[0], 0.00001);
-            assert_close(avg_sq.data[1], 0.00004);
-            assert_close(avg_sq.data[2], 0.00009);
+            assert_close(updated.materialize_f64()[0], 0.990000001);
+            assert_close(updated.materialize_f64()[1], 2.0099999995);
+            assert_close(updated.materialize_f64()[2], 2.9900000003333334);
+            assert_close(avg.materialize_f64()[0], 0.01);
+            assert_close(avg.materialize_f64()[1], -0.02);
+            assert_close(avg.materialize_f64()[2], 0.03);
+            assert_close(avg_sq.materialize_f64()[0], 0.00001);
+            assert_close(avg_sq.materialize_f64()[1], 0.00004);
+            assert_close(avg_sq.materialize_f64()[2], 0.00009);
         });
     }
 

@@ -36,7 +36,7 @@
   ],
   "examples": [
     {
-      "description": "Create The Compatibility Model",
+      "description": "Creating a word embedding model",
       "input": "emb = fastTextWordEmbedding",
       "output": "`emb.Dimension` is 300."
     },

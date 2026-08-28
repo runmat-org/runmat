@@ -6,7 +6,7 @@ use std::convert::TryInto;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
-fn execute_program(source: &str) -> Vec<runmat_builtins::Value> {
+fn execute_program(source: &str) -> Vec<runmat_value::Value> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
 }
@@ -86,4 +86,32 @@ fn stochastic_evolution_loop_emits_instruction() {
         .instructions
         .iter()
         .any(|instr| matches!(instr, Instr::StochasticEvolution)));
+}
+
+#[test]
+fn stochastic_evolution_loop_preserves_native_single_state() {
+    let vars = execute_program(
+        "
+        M = 2;
+        S = ones(M, 1, 'single');
+        drift = single(0.1);
+        scale = single(0);
+        for t = 1:3
+            Z = randn(M, 1, 'single');
+            S = S .* exp(drift + scale .* Z);
+        end
+        ",
+    );
+    let runmat_value::Value::Tensor(state) = &vars[1] else {
+        panic!("expected evolved tensor state, got {:?}", vars[1]);
+    };
+    assert_eq!(state.numeric_dtype(), runmat_value::NumericDType::F32);
+    let factor = (0.1f32).exp();
+    let expected = factor * factor * factor;
+    for index in 0..state.len() {
+        assert_eq!(
+            state.numeric_value_at(index),
+            Some(runmat_value::NumericScalar::F32(expected))
+        );
+    }
 }

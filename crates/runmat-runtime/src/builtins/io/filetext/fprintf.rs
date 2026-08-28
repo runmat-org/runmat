@@ -3,10 +3,15 @@
 use std::io::Write;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericDType, Value};
 
 use crate::builtins::common::format::{
     decode_escape_sequences, flatten_arguments, format_variadic_with_cursor, ArgCursor,
@@ -15,11 +20,121 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::registry::{self, FileInfo, SharedFileHandle};
 use crate::console::{record_console_output, ConsoleStream};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "fprintf";
+
+const FPRINTF_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fprintf-integer-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integer-class fprintf file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FprintfIntegerIdExtension"),
+};
+const FPRINTF_SINGLE_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fprintf-single-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "single-precision fprintf file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FprintfSingleIdExtension"),
+};
+const FPRINTF_RESIDENT_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fprintf-resident-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "provider-resident fprintf file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FprintfResidentIdExtension"),
+};
+const FPRINTF_INTEGER_FORMAT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fprintf-integer-format",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "numeric integer-code fprintf format specifications are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FprintfIntegerFormatExtension"),
+};
+const FPRINTF_NUMERIC_FORMAT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fprintf-numeric-format",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "numeric-code fprintf format tensors are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FprintfNumericFormatExtension"),
+};
+const FPRINTF_RESIDENT_FORMAT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fprintf-resident-format",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "provider-resident fprintf format specifications are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FprintfResidentFormatExtension"),
+};
+const FPRINTF_STREAM_LABEL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fprintf-stream-label",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "textual stdout and stderr fprintf targets are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FprintfStreamLabelExtension"),
+};
+pub const FPRINTF_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    FPRINTF_INTEGER_ID_EXTENSION,
+    FPRINTF_SINGLE_ID_EXTENSION,
+    FPRINTF_RESIDENT_ID_EXTENSION,
+    FPRINTF_INTEGER_FORMAT_EXTENSION,
+    FPRINTF_NUMERIC_FORMAT_EXTENSION,
+    FPRINTF_RESIDENT_FORMAT_EXTENSION,
+    FPRINTF_STREAM_LABEL_EXTENSION,
+];
+
+const FPRINTF_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents all eight integer classes; integer conversions format authoritative values exactly and arrays traverse in column-major order.",
+    }];
+const FPRINTF_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The compatibility target documents double identifiers; typed integer identifiers are an independently gated extension.",
+    }];
+const FPRINTF_INTEGER_FORMAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "formatSpec",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+        notes: "The compatibility target documents character or string format specifications; numeric code vectors are a gated RunMat extension.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "count = fprintf(formatSpec, integer_data...)",
+        inputs: &FPRINTF_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The host sink returns a double byte count; documented resident data gathers without changing the caller-owned value.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "count = fprintf(integer_fileID, formatSpec, A...)",
+        inputs: &FPRINTF_INTEGER_ID_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The identifier is range-checked exactly before registry access.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "count = fprintf(integer_formatSpec, A...)",
+        inputs: &FPRINTF_INTEGER_FORMAT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer code points are validated exactly before conversion to a host format string.",
+    },
+];
 
 const FPRINTF_OUTPUT_COUNT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "count",
@@ -215,6 +330,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
         ));
     }
 
+    preflight_special_roles(args)?;
     // Gather all arguments to host first
     let mut all: Vec<Value> = Vec::with_capacity(args.len());
     for v in args {
@@ -288,6 +404,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
 
     let format_string =
         decode_escape_sequences("fprintf", &raw_format).map_err(map_control_flow)?;
+    let data_args = coerce_single_integer_string_argument(&format_string, data_args)?;
     let flattened_args = flatten_arguments(&data_args, "fprintf")
         .await
         .map_err(map_control_flow)?;
@@ -307,25 +424,40 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
 fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>> {
     match value {
         Value::Tensor(t) => {
-            let is_row = (t.shape.len() == 2 && t.shape[0] == 1 && t.data.len() == t.shape[1])
-                || (t.shape.len() == 1 && t.data.len() == t.shape[0]);
+            let len = tensor::tensor_element_len(t);
+            let is_row = (t.shape.len() == 2 && t.shape[0] == 1 && len == t.shape[1])
+                || (t.shape.len() == 1 && len == t.shape[0]);
             if is_row {
-                let mut out = String::with_capacity(t.data.len());
-                for &code in &t.data {
-                    if !code.is_finite() {
-                        return Some(Err(
-                            "fprintf: formatSpec must be a character row vector or string scalar"
-                                .to_string(),
-                        ));
-                    }
-                    let v = code as u32;
-                    // Allow full Unicode range; MATLAB chars are UTF-16 but format strings are ASCII-compatible typically
-                    if let Some(ch) = char::from_u32(v) {
-                        out.push(ch);
+                let mut out = String::with_capacity(len);
+                for index in 0..len {
+                    let code = t
+                        .numeric_value_at(index)
+                        .expect("index within authoritative numeric storage");
+                    if let Some(code) = code.into_int_value() {
+                        if let Some(ch) = char_from_int_value(&code) {
+                            out.push(ch);
+                        } else {
+                            return Some(Err(
+                                "fprintf: formatSpec contains invalid character code".to_string(),
+                            ));
+                        }
                     } else {
-                        return Some(Err(
-                            "fprintf: formatSpec contains invalid character code".to_string()
-                        ));
+                        let code = code.materialize_f64();
+                        if !code.is_finite() || code.fract().abs() > f64::EPSILON || code < 0.0 {
+                            return Some(Err(
+                                "fprintf: formatSpec must be a character row vector or string scalar"
+                                    .to_string(),
+                            ));
+                        }
+                        let v = code as u32;
+                        // Allow full Unicode range; MATLAB chars are UTF-16 but format strings are ASCII-compatible typically
+                        if let Some(ch) = char::from_u32(v) {
+                            out.push(ch);
+                        } else {
+                            return Some(Err(
+                                "fprintf: formatSpec contains invalid character code".to_string(),
+                            ));
+                        }
                     }
                 }
                 return Some(Ok(out));
@@ -334,6 +466,191 @@ fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>
         }
         _ => None,
     }
+}
+
+fn preflight_special_roles(args: &[Value]) -> BuiltinResult<()> {
+    if args
+        .first()
+        .is_some_and(|value| match_stream_label(value).is_some())
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FPRINTF_STREAM_LABEL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let (fid_index, format_index) =
+        if args.len() >= 2 && is_fid_candidate(&args[0]) && is_format_value(&args[1]) {
+            (Some(0usize), 1usize)
+        } else {
+            (None, 0usize)
+        };
+    if let Some(index) = fid_index {
+        preflight_fid(&args[index])?;
+    }
+    if let Some(value) = args.get(format_index) {
+        preflight_format(value)?;
+    }
+    Ok(())
+}
+
+fn is_fid_candidate(value: &Value) -> bool {
+    matches!(value, Value::Num(_) | Value::Int(_) | Value::GpuTensor(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.len() == 1)
+}
+
+fn is_format_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
+    ) || matches!(value, Value::Tensor(tensor) if tensor.len() >= 2)
+        || matches!(value, Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() >= 2)
+}
+
+fn preflight_fid(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Int(_) => crate::compatibility::ensure_builtin_extension_enabled(
+            &FPRINTF_INTEGER_ID_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FPRINTF_INTEGER_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FPRINTF_SINGLE_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FPRINTF_RESIDENT_ID_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FPRINTF_INTEGER_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FPRINTF_SINGLE_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn preflight_format(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Int(_) => crate::compatibility::ensure_builtin_extension_enabled(
+            &FPRINTF_INTEGER_FORMAT_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FPRINTF_INTEGER_FORMAT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FPRINTF_NUMERIC_FORMAT_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(_) => crate::compatibility::ensure_builtin_extension_enabled(
+            &FPRINTF_NUMERIC_FORMAT_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FPRINTF_RESIDENT_FORMAT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_integer_type(handle).is_none() {
+                return Ok(());
+            }
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FPRINTF_INTEGER_FORMAT_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        _ => Ok(()),
+    }
+}
+
+fn coerce_single_integer_string_argument(
+    format: &str,
+    mut args: Vec<Value>,
+) -> BuiltinResult<Vec<Value>> {
+    if args.len() != 1 || !has_only_string_conversion(format) {
+        return Ok(args);
+    }
+    let Some(value) = args.pop() else {
+        return Ok(args);
+    };
+    let converted = match value {
+        Value::Int(value) => Value::String(integer_codes_to_string([value])?),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            let storage = tensor.integer_storage().expect("checked integer storage");
+            let values = (0..storage.len()).map(|index| {
+                storage
+                    .value_at(index)
+                    .expect("index within integer format storage")
+            });
+            Value::String(integer_codes_to_string(values)?)
+        }
+        other => other,
+    };
+    Ok(vec![converted])
+}
+
+fn integer_codes_to_string(values: impl IntoIterator<Item = IntValue>) -> BuiltinResult<String> {
+    let mut output = String::new();
+    for value in values {
+        let ch = char_from_int_value(&value).ok_or_else(|| {
+            fprintf_error_with_detail(
+                &FPRINTF_ERROR_FORMAT,
+                "integer %s data contains an invalid character code",
+            )
+        })?;
+        output.push(ch);
+    }
+    Ok(output)
+}
+
+fn has_only_string_conversion(format: &str) -> bool {
+    let mut chars = format.chars().peekable();
+    let mut conversions = Vec::new();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            continue;
+        }
+        if chars.peek() == Some(&'%') {
+            chars.next();
+            continue;
+        }
+        for next in chars.by_ref() {
+            if next.is_ascii_alphabetic() {
+                conversions.push(next);
+                break;
+            }
+        }
+    }
+    conversions == ['s']
+}
+
+fn char_from_int_value(value: &IntValue) -> Option<char> {
+    value
+        .try_to_u64()
+        .and_then(|code| u32::try_from(code).ok())
+        .and_then(char::from_u32)
 }
 
 fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
@@ -348,7 +665,7 @@ fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
             // Only accept numeric codepoint vectors of length >= 2 as formatSpec.
             // This avoids misinterpreting stray 1x1 numerics (e.g., accidental stack values)
             // as a valid format string.
-            if t.data.len() >= 2 {
+            if tensor::tensor_element_len(t) >= 2 {
                 match try_tensor_char_row_as_string(value) {
                     Some(Ok(s)) => Ok(Some(Value::String(s))),
                     Some(Err(e)) => Err(e),
@@ -372,6 +689,8 @@ fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::fprintf_type),
     descriptor(crate::builtins::io::filetext::fprintf::FPRINTF_DESCRIPTOR),
+    extensions(crate::builtins::io::filetext::fprintf::FPRINTF_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::filetext::fprintf::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::filetext::fprintf"
 )]
 async fn fprintf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -492,10 +811,19 @@ fn target_from_fid(fid: i32) -> BuiltinResult<OutputTarget> {
 fn parse_fid(value: &Value) -> Result<i32, String> {
     let scalar = match value {
         Value::Num(n) => *n,
-        Value::Int(int) => int.to_f64(),
+        Value::Int(int) => {
+            return int
+                .try_to_i32()
+                .ok_or_else(|| "fprintf: file identifier is out of range".to_string());
+        }
         Value::Tensor(t) => {
-            if t.shape == vec![1, 1] && t.data.len() == 1 {
-                t.data[0]
+            if t.shape == vec![1, 1] && tensor::is_scalar_tensor(t) {
+                if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                    return int
+                        .try_to_i32()
+                        .ok_or_else(|| "fprintf: file identifier is out of range".to_string());
+                }
+                tensor::tensor_value_f64(t, 0)
             } else {
                 return Err("fprintf: file identifier must be numeric".to_string());
             }
@@ -507,6 +835,9 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
     }
     if (scalar.fract().abs()) > f64::EPSILON {
         return Err("fprintf: file identifier must be an integer".to_string());
+    }
+    if scalar < i32::MIN as f64 || scalar > i32::MAX as f64 {
+        return Err("fprintf: file identifier is out of range".to_string());
     }
     Ok(scalar as i32)
 }
@@ -691,9 +1022,9 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fclose, fopen, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
     use std::io::Read;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
@@ -728,6 +1059,145 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"count = fprintf(formatSpec, A...)"));
         assert!(labels.contains(&"count = fprintf(fid_or_stream, formatSpec, A...)"));
+    }
+
+    #[test]
+    fn fprintf_integer_capabilities_and_special_roles_are_independently_gated() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let fid = preflight_fid(&Value::Int(IntValue::I32(1))).unwrap_err();
+        assert_eq!(
+            fid.identifier(),
+            Some("RunMat:compatibility:FprintfIntegerIdExtension")
+        );
+        let format = Tensor::new_integer(
+            IntegerStorage::U16(vec![b'%' as u16, b'd' as u16]),
+            vec![1, 2],
+        )
+        .expect("format");
+        let format = preflight_format(&Value::Tensor(format)).unwrap_err();
+        assert_eq!(
+            format.identifier(),
+            Some("RunMat:compatibility:FprintfIntegerFormatExtension")
+        );
+    }
+
+    #[test]
+    fn fprintf_resident_integer_format_is_gated_before_gathering() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 904,
+            buffer_id: 904,
+            descriptor: Default::default(),
+        }
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::U16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
+        let args = [Value::Num(1.0), Value::GpuTensor(handle.clone())];
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = preflight_special_roles(&args).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FprintfResidentFormatExtension")
+        );
+    }
+
+    #[test]
+    fn fprintf_all_host_numeric_format_tensors_are_gated_before_gathering() {
+        let double = Tensor::new(vec![b'%' as f64, b'd' as f64], vec![1, 2]).expect("double");
+        let single = Tensor::from_numeric_storage(
+            runmat_value::NumericStorage::F32(vec![b'%' as f32, b'd' as f32]),
+            vec![1, 2],
+        )
+        .expect("single");
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        for format in [double, single] {
+            let error = preflight_format(&Value::Tensor(format)).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:FprintfNumericFormatExtension")
+            );
+        }
+    }
+
+    #[test]
+    fn fprintf_textual_stream_labels_have_an_independent_gate() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = preflight_special_roles(&[
+            Value::from("stderr"),
+            Value::from("failure: %d"),
+            Value::Num(1.0),
+        ])
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FprintfStreamLabelExtension")
+        );
+    }
+
+    #[test]
+    fn fprintf_integer_string_conversion_preserves_character_codes() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![65, 66, 67]), vec![1, 3])
+            .expect("character codes");
+        let args = coerce_single_integer_string_argument("[%s]", vec![Value::Tensor(tensor)])
+            .expect("integer string conversion");
+        assert_eq!(args, vec![Value::String("ABC".to_string())]);
+        assert_eq!(format_with_repetition("[%s]", &args).unwrap(), "[ABC]");
+    }
+
+    #[test]
+    fn fprintf_formats_wide_uint64_without_binary64_rounding() {
+        let value = Value::Int(IntValue::U64(9_007_199_254_740_993));
+        assert_eq!(
+            format_with_repetition("%u", &[value]).unwrap(),
+            "9007199254740993"
+        );
+    }
+
+    #[test]
+    fn fprintf_format_tensor_reads_typed_integer_storage_exactly() {
+        let format = Tensor::new_integer(
+            IntegerStorage::U16(vec![b'%' as u16, b'd' as u16]),
+            vec![1, 2],
+        )
+        .expect("format tensor");
+
+        assert_eq!(
+            coerce_to_format_string(&Value::Tensor(format)).unwrap(),
+            Some(Value::String("%d".to_string()))
+        );
+    }
+
+    #[test]
+    fn fprintf_fid_parser_reads_typed_integer_storage_exactly() {
+        let fid =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("fid tensor");
+        assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("fid");
+        assert!(parse_fid(&Value::Tensor(too_large)).is_err());
+    }
+
+    #[test]
+    fn fprintf_fid_parser_ignores_poisoned_mirrors_for_every_integer_class() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+
+        for storage in classes {
+            let fid = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
+            assert_eq!(parse_fid(&Value::Tensor(fid)).unwrap(), 7);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -804,7 +1274,7 @@ pub(crate) mod tests {
 
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

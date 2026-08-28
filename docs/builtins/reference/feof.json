@@ -13,7 +13,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs entirely on the CPU. Arguments that live on the GPU are gathered automatically, and file handles remain host-resident."
+    "notes": "Runs entirely on the CPU. Provider-resident identifiers are a gated RunMat extension and are gathered only after compatibility preflight; file handles remain host-resident."
   },
   "fusion": {
     "elementwise": false,
@@ -24,15 +24,18 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::io::filetext::feof::tests",
-    "integration": "builtins::io::filetext::feof::tests::feof_returns_true_after_reading_to_end"
+    "integration": "builtins::io::filetext::feof::tests::feof_returns_true_after_a_read_encounters_end_of_file"
   },
-  "description": "`feof(fid)` reports whether the file position indicator for `fid` is at end-of-file. It returns a logical scalar and is typically used to terminate loops that read with `fread`, `fgets`, or related I/O functions under MATLAB semantics.",
+  "description": "`feof(fid)` reports the end-of-file indicator associated with the open file identified by `fid`. It returns a logical scalar. Opening a file initializes the indicator to false; a read that encounters end-of-file sets it, and successful repositioning clears it.",
   "behaviors": [
-    "`tf = feof(fid)` returns logical `1` when the file position indicator is at end-of-file and logical `0` otherwise.",
-    "`fid` must be a non-negative integer returned by `fopen`. Passing an invalid identifier raises the same error message as other file I/O builtins.",
+    "`tf = feof(fid)` returns logical `1` only after a prior read on that open file encountered end-of-file; merely reaching the exact final byte does not set the indicator.",
+    "The MATLAB-compatible identifier form is a finite integer-valued double scalar returned by `fopen`, checked against the runtime i32 identifier range before registry access.",
+    "Typed integer identifiers across all eight built-in integer classes, logical identifiers, and provider-resident identifiers are three independently gated RunMat extensions. Compatibility preflight occurs before provider gathering or registry access.",
     "Standard input/output identifiers (`0`, `1`, `2`) always report `false` because RunMat does not yet expose end-of-file state for those streams.",
-    "`feof` preserves the file position indicator; checking the flag does not modify where subsequent reads continue.",
-    "When a file is empty, `feof` immediately returns `true` because the initial file position coincides with the end of the file."
+    "`feof` only queries registry state: it does not seek, inspect file length, contact a provider after host conversion, or modify the file position.",
+    "A newly opened empty file reports `false`. The first read attempt that encounters end-of-file sets the indicator to true.",
+    "`frewind` and other successful positioning operations clear the end-of-file indicator. Closing the file removes its state with the registry entry.",
+    "The compatibility classification is grounded in the linked public documentation and remains evidence-open for additional release-specific findings."
   ],
   "examples": [
     {
@@ -44,26 +47,26 @@
       "input": "[fid, msg] = fopen('payload.bin', 'rb');\nassert(fid ~= -1, msg);\nwhile ~feof(fid)\n    chunk = fread(fid, 1024, 'uint8');\n    process(chunk);\nend\nfclose(fid)"
     },
     {
-      "description": "Handle empty files gracefully",
-      "input": "[fid, msg] = fopen('empty.txt', 'r');\nassert(fid ~= -1, msg);\nisAtEnd = feof(fid);   % returns true immediately because the file is empty\nfclose(fid)"
+      "description": "Observe read-driven state for an empty file",
+      "input": "[fid, msg] = fopen('empty.txt', 'r');\nassert(fid ~= -1, msg);\nassert(~feof(fid));\nfgets(fid);            % encounters end-of-file\nassert(feof(fid));\nfrewind(fid);\nassert(~feof(fid));\nfclose(fid)"
     },
     {
       "description": "Protect against invalid identifiers",
       "input": "try\n    feof(9999);\ncatch err\n    disp(err.message);\nend"
     },
     {
-      "description": "Guard reads that rely on gpuArray identifiers",
-      "input": "fid = gpuArray(int32(fopen('samples.dat', 'rb')));\ntf = feof(fid);        % argument is gathered automatically before the check"
+      "description": "Checking end-of-file with typed and resident identifiers",
+      "input": "fid = gpuArray(int32(fopen('samples.dat', 'rb')));\ntf = feof(fid);        % resident and typed-integer extension gates apply before gathering"
     }
   ],
   "faqs": [
     {
       "question": "What kind of input does `feof` accept?",
-      "answer": "Pass a scalar numeric file identifier returned by `fopen`. The identifier must be non-negative and finite. Character vectors or strings are not accepted."
+      "answer": "The MATLAB-compatible form is a finite integer-valued double scalar returned by `fopen`. RunMat mode can additionally enable typed integer, logical, and provider-resident identifier extensions. Character vectors and strings are not accepted."
     },
     {
       "question": "Does `feof` move the file position indicator?",
-      "answer": "No. The builtin queries the current position and restores it before returning, so subsequent reads resume where they left off."
+      "answer": "No. The builtin reads the registry's end-of-file flag and performs no seek or length query, so subsequent reads resume exactly where they left off."
     },
     {
       "question": "How does `feof` behave for standard input/output?",
@@ -71,7 +74,7 @@
     },
     {
       "question": "Does `feof` require a previous read attempt to return true?",
-      "answer": "No. RunMat compares the current position against the end of the file. As soon as the indicator reaches the end (for example after reading all bytes or when the file is empty), `feof` returns `true`."
+      "answer": "Yes. Reaching the exact end position is not sufficient. A read operation must attempt to read at end-of-file; successful repositioning such as `frewind` clears the flag."
     },
     {
       "question": "Can I call `feof` on closed files?",
@@ -118,14 +121,22 @@
     {
       "label": "frewind",
       "url": "./frewind"
+    },
+    {
+      "label": "MathWorks feof documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/feof.html"
+    },
+    {
+      "label": "C file end-of-file indicator",
+      "url": "https://en.cppreference.com/w/c/io/feof.html"
     }
   ],
   "source": {
-    "label": "Open an issue",
-    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+    "label": "crates/runmat-runtime/src/builtins/io/filetext/feof.rs",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/feof.rs"
   },
-  "gpu_residency": "No. File identifiers are always owned by the host-side registry maintained by `fopen`. Wrapping a scalar identifier in `gpuArray` does not keep the file handle on the GPU—the runtime gathers the scalar before performing the lookup. This means you can freely mix host and GPU code when driving file I/O loops, and `feof` remains inexpensive regardless of execution tier.",
+  "gpu_residency": "No. File handles and end-of-file state are owned by the host registry. A provider-resident scalar identifier is a gated RunMat extension; compatibility preflight runs before the provider is contacted, then the scalar is gathered for exact identifier validation and the host registry query.",
   "gpu_behavior": [
-    "`feof` is a host-only query. If `fid` resides on the GPU (for example inside a `gpuArray`), RunMat gathers the scalar to host memory before consulting the file registry. File handles always remain on the CPU, so there are no provider hooks or fusion paths for this builtin. The result is produced on the host as a logical scalar that mirrors MATLAB behaviour."
+    "`feof` is a host-only state query with no provider hooks or fusion path. In RunMat extension mode, a resident identifier is compatibility-gated before gathering; the resulting host scalar is range-checked before the registry is queried. The result is always a host logical scalar."
   ]
 }

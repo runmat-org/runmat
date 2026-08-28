@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "The solver runs on the host. Callback functions may still call GPU-aware builtins."
+    "notes": "The solver runs on the host and does not provide native gpuArray or tall-array execution. In RunMat extension mode, resident numeric operands and callback results use a separately gated gather fallback. Strict compatibility mode rejects that extension before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -27,9 +27,11 @@
     "unit": "builtins::math::optim::fzero::tests",
     "integration": "runmat-vm/tests/closures.rs::fzero_returns_optional_function_value"
   },
-  "description": "`x = fzero(fun, x0)` searches near scalar initial point `x0` for a sign-changing bracket, then refines the root with a Brent-style method. `x = fzero(fun, [a b])` uses the supplied bracket directly. Optional outputs follow MATLAB's standard contract: `[x, fval]`, `[x, fval, exitflag]`, and `[x, fval, exitflag, output]`.",
+  "description": "`x = fzero(fun, x0)` searches near a binary32 or binary64 scalar initial point `x0` for a sign-changing bracket, then refines the root with a Brent-style method. `x = fzero(fun, [a b])` uses the supplied bracket directly. Optional outputs follow MATLAB's standard contract: `[x, fval]`, `[x, fval, exitflag]`, and `[x, fval, exitflag, output]`.",
   "behaviors": [
-    "The function handle must return a finite real scalar.",
+    "The function handle must return a finite real scalar. A binary32 initial point or interval is threaded through callback arguments and numeric outputs; when `TolX` is not explicit, either a binary32 initial point or interval or a binary32 initial function value selects `eps('single')` instead of `eps('double')`.",
+    "Strict compatibility mode rejects typed-integer or logical initial points, intervals, and function values. RunMat extension mode accepts those values when every integer converts exactly to binary64.",
+    "Typed-integer option controls are a separately gated RunMat extension. Structural counts such as `MaxIter` and `MaxFunEvals` are validated as exact nonnegative integers rather than rounded through floating point.",
     "Bracket endpoints must have opposite signs unless one endpoint is already a root.",
     "Options are supplied as a struct, usually created with `optimset`. `TolX`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted.",
     "`fval` is the function value at the returned `x`; `exitflag` is 1 for convergence and 0 when the iteration/function-evaluation budget is exhausted.",

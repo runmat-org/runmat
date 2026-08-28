@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Calls the provider's `diff_dim` hook; falls back to host when that hook is unavailable."
+    "notes": "Calls the provider's `diff_dim` hook for real floating storage. Typed integer, logical, and complex gpuArray inputs use owner-resolved host fallbacks and return validated results to the same device only when the owner physically supports the required result precision."
   },
   "fusion": {
     "elementwise": false,
@@ -34,10 +34,10 @@
   "description": "`diff(X)` computes forward finite differences along the first non-singleton dimension by default. Higher-order and explicit-dimension forms follow MATLAB semantics. When `X` is a scalar symbolic expression, `diff` builds a symbolic derivative expression.",
   "behaviors": [
     "`diff(X)` walks along the first non-singleton dimension. Column vectors therefore differentiate down the rows, while row vectors operate across columns.",
-    "`diff(X, N)` computes the Nth forward difference. `N = 0` returns `X` unchanged. Each order reduces the length of the working dimension by one, so the output length becomes `max(len - N, 0)`.",
-    "`diff(X, N, dim)` lets you choose the dimension explicitly. Passing `[]` for `N` or `dim` keeps the defaults, and dimensions larger than `ndims(X)` behave like length-1 axes (so any positive order yields an empty result).",
+    "`diff(X, N)` computes the Nth forward difference without cascading into later dimensions when N exhausts the initially selected dimension. Each positive order reduces that dimension by one, so its output length becomes `max(len - N, 0)`.",
+    "`diff(X, N, dim)` lets you choose the dimension explicitly. Dimensions larger than `ndims(X)` behave like length-1 axes, so any positive order yields an empty result. RunMat extension mode also accepts `N = 0` and empty `N` or `dim` placeholders.",
     "For scalar symbolic inputs, `diff(expr, var)` and `diff(expr, var, N)` return symbolic derivative expressions. `diff(expr, N, var)` is accepted for MATLAB-compatible argument order.",
-    "Real, logical, and character inputs promote to double precision tensors before differencing. Complex inputs retain their complex type, with forward differences applied to both the real and imaginary parts independently.",
+    "Floating and logical data follow their numeric domains. All eight integer classes preserve their input class and use saturating adjacent subtraction. Character data is a named RunMat-only extension that promotes character codes to double.",
     "Empty slices propagate: if the selected dimension has length 0 or 1, the corresponding axis in the output has length 0."
   ],
   "examples": [
@@ -84,11 +84,11 @@
     },
     {
       "question": "How are higher-order differences computed?",
-      "answer": "RunMat applies the first-order forward difference repeatedly. This mirrors MATLAB’s definition and produces the same numerical results."
+      "answer": "RunMat applies the first-order forward difference repeatedly along the initially selected dimension. Current MATLAB behavior does not cascade into a later dimension after that dimension is exhausted."
     },
     {
       "question": "Can I pass `[]` for the order or dimension arguments?",
-      "answer": "Yes. An empty array keeps the default value (`N = 1`, first non-singleton dimension)."
+      "answer": "RunMat extension mode accepts empty placeholders and keeps the default value (`N = 1`, first non-singleton dimension)."
     },
     {
       "question": "Does `diff` support complex numbers?",
@@ -96,11 +96,11 @@
     },
     {
       "question": "What happens for character or logical inputs?",
-      "answer": "Characters and logical values are promoted to double precision differences, matching MATLAB."
+      "answer": "Logical data is supported. Character data is a named RunMat-only extension and promotes character codes to double; integer data instead preserves its class and uses saturating subtraction."
     },
     {
       "question": "Will the GPU path produce the same results as the CPU path?",
-      "answer": "Yes. When a provider lacks a finite-difference kernel, RunMat gathers the data and computes on the CPU to preserve MATLAB semantics exactly. Otherwise, the WGPU backend produces identical results on the GPU."
+      "answer": "Real floating storage can use the provider kernel. Typed integer, logical, complex, and unsupported-provider paths gather through the input owner, compute with the matching host semantics, and restore a validated resident result."
     },
     {
       "question": "What does diff do in MATLAB?",
@@ -120,7 +120,7 @@
     },
     {
       "question": "Does diff support GPU acceleration in RunMat?",
-      "answer": "Yes. `diff` runs on GPU arrays in RunMat. The GPU path produces the same results as the CPU path for both real and complex inputs."
+      "answer": "Yes. Real floating arrays can execute in the provider kernel. Complex, logical, and typed integer arrays currently use owner-preserving host fallbacks rather than a native WGPU difference kernel."
     },
     {
       "question": "Does `diff` support symbolic expressions?",
@@ -205,8 +205,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/reduction/diff.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/diff.rs"
   },
-  "gpu_residency": "Manual `gpuArray` promotion is optional. RunMat keeps tensors on the GPU when providers implement the relevant hooks and the planner predicts a benefit. With the WGPU backend registered, `diff` executes fully on the GPU and returns a device-resident tensor. When the hook is missing, RunMat gathers transparently, computes on the CPU, and keeps residency metadata consistent so fused expressions can re-promote values when profitable.",
+  "gpu_residency": "Manual `gpuArray` promotion is optional. Real floating tensors use `diff_dim` when the owning provider supports it. Typed integer, logical, complex, and unsupported-provider paths gather through that owner, compute on the host, and re-upload a validated result to the same owner and device.",
   "gpu_behavior": [
-    "When the operand already resides on the GPU, RunMat asks the active acceleration provider for a finite-difference kernel via `diff_dim`. The WGPU backend implements this hook, so forward differences execute entirely on the device and the result stays resident on the GPU. Providers that have not wired `diff_dim` yet transparently gather the data, run the CPU implementation, and hand the result back to the planner so subsequent kernels can re-promote it when beneficial."
+    "For real floating storage, RunMat asks the handle's owning provider for `diff_dim` and accepts only a result with matching owner, device, shape, storage, precision, and no integer or logical metadata. Typed integer, logical, complex, and unsupported-provider paths gather explicitly and restore through the same validated owner/device path."
   ]
 }

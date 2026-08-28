@@ -10,13 +10,16 @@
     "[B,TF] = filloutliers(___)",
     "[B,TF,L,U,C] = filloutliers(___)"
   ],
-  "description": "`filloutliers` detects numeric outliers and replaces them using a requested fill method. RunMat supports numeric arrays, default dimension reduction, the common outlier detection methods shared with `isoutlier`, array `OutlierLocations`, and scalar threshold outputs.",
+  "description": "`filloutliers` detects outliers in supported dense real arrays and replaces them using a requested fill method. Documented single and double inputs preserve their class. Typed-integer input is a mode-gated RunMat extension with a deliberate double statistics/result boundary. Integer arrays are admitted only when their exact value span is at most 2^53; wider spans are rejected instead of collapsing distinct observations.",
   "notes": [
     "Supported fill methods are `\"center\"`, `\"clip\"`, `\"previous\"`, `\"next\"`, `\"nearest\"`, `\"linear\"`, and numeric scalar constants.",
     "Supported detection methods are `\"median\"`, `\"mean\"`, `\"quartiles\"`, `\"percentiles\"`, `\"movmedian\"`, and `\"movmean\"`.",
-    "`[B,TF,L,U,C]` returns the filled array, detected outlier mask, lower threshold, upper threshold, and center value.",
-    "`OutlierLocations` accepts a logical or numeric array mask with the same number of elements as the input.",
-    "Spline-like interpolation methods, `SamplePoints`, and table/timetable-specific options are reported as unsupported instead of approximated."
+    "`[B,TF,L,U,C]` returns the filled array, actually filled-entry mask, lower threshold, upper threshold, and center value.",
+    "Documented `OutlierLocations` logical masks must have exactly the same shape as the input. Numeric masks are a separately mode-gated RunMat extension.",
+    "Typed-integer constant fill scalars and direct provider-resident inputs or arguments are independent mode-gated extensions and are classified before gather.",
+    "`OutlierLocations` cannot be combined with an explicitly specified outlier detection method.",
+    "Integer input produces double `B`, `L`, `U`, and `C` and logical `TF`. Authoritative storage is anchored before conversion, and the exact span guard ensures every admitted integer observation remains distinct at that boundary.",
+    "Spline-like interpolation methods, Grubbs/GESD detection, vector or duration windows, `SamplePoints`, `MaxNumOutliers`, and table/timetable-specific options are reported as unsupported instead of approximated."
   ],
   "examples": [
     {

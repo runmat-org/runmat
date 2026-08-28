@@ -1,0 +1,37 @@
+[package]
+name = "runmat-jit"
+version = "0.6.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../LICENSE.md"
+description = "Adaptive native execution and lifecycle policy for RunMat"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+futures = "0.3"
+runmat-mir = { workspace = true }
+runmat-hir = { workspace = true }
+runmat-execution = { workspace = true }
+runmat-native-codegen = { workspace = true, features = ["compiler"] }
+runmat-native-executor = { workspace = true }
+runmat-types = { workspace = true }
+runmat-time = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+runmat-runtime = { workspace = true }
+cranelift-codegen = { workspace = true }
+cranelift-jit = { workspace = true }
+cranelift-module = { workspace = true }
+cranelift-native = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+runmat-runtime = { workspace = true, features = ["plot-web"] }
+
+[dev-dependencies]
+runmat-builtins = { workspace = true }
+runmat-gc = { workspace = true }
+runmat-value = { workspace = true }

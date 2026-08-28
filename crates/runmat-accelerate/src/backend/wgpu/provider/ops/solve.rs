@@ -31,8 +31,9 @@ impl WgpuProvider {
         self.telemetry
             .record_solve_fallback("linsolve:host_reupload");
 
+        let solution_data = solution.materialize_f64();
         let handle = self.upload_exec(&HostTensorView {
-            data: &solution.data,
+            data: &solution_data,
             shape: &solution.shape,
         })?;
 
@@ -46,8 +47,9 @@ impl WgpuProvider {
         let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("inv: {e}"))?;
         let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
+        let result_data = result.materialize_f64();
         self.upload_exec(&HostTensorView {
-            data: &result.data,
+            data: &result_data,
             shape: &result.shape,
         })
     }
@@ -61,8 +63,9 @@ impl WgpuProvider {
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("pinv: {e}"))?;
         let result =
             pinv_host_real_for_provider(&tensor, options.tolerance).map_err(|e| anyhow!("{e}"))?;
+        let result_data = result.materialize_f64();
         self.upload_exec(&HostTensorView {
-            data: &result.data,
+            data: &result_data,
             shape: &result.shape,
         })
     }
@@ -161,8 +164,9 @@ impl WgpuProvider {
         self.telemetry
             .record_solve_fallback("mldivide:host_reupload");
 
+        let result_data = result.materialize_f64();
         let handle = self.upload_exec(&HostTensorView {
-            data: &result.data,
+            data: &result_data,
             shape: &result.shape,
         })?;
         Ok(handle)
@@ -198,8 +202,9 @@ impl WgpuProvider {
         self.telemetry
             .record_solve_fallback("mrdivide:host_reupload");
 
+        let result_data = result.materialize_f64();
         let handle = self.upload_exec(&HostTensorView {
-            data: &result.data,
+            data: &result_data,
             shape: &result.shape,
         })?;
         Ok(handle)
@@ -276,7 +281,11 @@ impl WgpuProvider {
         let mut min_diag = f64::INFINITY;
         let mut max_diag = 0.0_f64;
         for i in 0..rows {
-            let diag = tensor.data[i + i * rows].abs();
+            let diag = tensor
+                .numeric_value_at(i + i * rows)
+                .expect("validated triangular tensor storage")
+                .materialize_f64()
+                .abs();
             if diag == 0.0 {
                 return Err(anyhow!(
                     "linsolve: matrix is singular to working precision."
@@ -297,7 +306,9 @@ impl WgpuProvider {
         .await
         .map_err(|err| runtime_flow_to_anyhow(label, err))?;
         let singular_values = host_tensor_from_value(label, eval.singular_values())?;
-        Ok(Self::singular_value_rcond(&singular_values.data))
+        Ok(Self::singular_value_rcond(
+            &singular_values.materialize_f64(),
+        ))
     }
 
     fn needs_rcond(options: &ProviderLinsolveOptions) -> bool {
