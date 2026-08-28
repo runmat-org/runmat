@@ -28,9 +28,12 @@ impl RunMatSession {
             ),
         );
         let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
+        let parallel_services = crate::parallel_runtime::CoreParallelServices::new();
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_call(std::rc::Rc::new(runmat_runtime::context::RuntimeCallRouter))
-            .with_placement(placement.clone());
+            .with_placement(placement.clone())
+            .with_spmd(parallel_services.spmd)
+            .with_distributed(parallel_services.distributed);
         #[cfg(not(target_arch = "wasm32"))]
         let (
             runtime_services,

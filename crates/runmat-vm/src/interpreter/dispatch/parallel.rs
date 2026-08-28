@@ -1,6 +1,9 @@
 use crate::bytecode::{program::ExecutionContext, FunctionRegistry, Instr};
+use crate::{InterpreterOutcome, InterpreterResumeState};
+use runmat_runtime::execution::value_codec::{encode_inline_value, ValueCodecError};
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
+use std::collections::{HashMap, HashSet};
 
 use super::{build_user_function_expand_multi_args, calls, DispatchDecision, DispatchHandled};
 
@@ -137,11 +140,739 @@ pub(super) async fn dispatch(
                 DispatchDecision::ContinueLoop,
             )));
         }
+        Instr::ExecuteSpmd { region, header } => {
+            let executable = bytecode
+                .spmd_regions
+                .iter()
+                .find(|candidate| candidate.contract.id == *region)
+                .cloned()
+                .ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "SpmdExecutableMissing",
+                        "SPMD has no compiler-bound executable region",
+                    )
+                })?;
+            let operands = crate::call::builtins::collect_call_args(stack, header.operand_count())?;
+            execute_spmd(
+                bytecode,
+                &executable,
+                *header,
+                operands,
+                vars,
+                execution,
+                current_function_name,
+            )
+            .await?;
+            *pc = executable.exit.pc;
+            return Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::ContinueLoop,
+            )));
+        }
+        Instr::Collective { id, operation } => {
+            let arguments =
+                crate::call::builtins::collect_call_args(stack, operation.operand_count())?;
+            stack.push(execute_collective(bytecode, *id, *operation, arguments, execution).await?);
+        }
+        Instr::Distributed(operation) => {
+            let input = pop(stack, "distributed instruction expected one input value")?;
+            stack.push(execute_distributed(bytecode, operation, input, execution).await?);
+        }
         _ => return Ok(None),
     }
     Ok(Some(DispatchHandled::Generic(
         DispatchDecision::FallThrough,
     )))
+}
+
+async fn execute_distributed(
+    bytecode: &crate::Bytecode,
+    operation: &crate::BytecodeDistributedOp,
+    input: Value,
+    execution: &ExecutionContext,
+) -> Result<Value, RuntimeError> {
+    use crate::BytecodeDistributedOp as Op;
+
+    let service = execution
+        .runtime
+        .service_ports()
+        .require_distributed("distributed value operation")
+        .map_err(capability_error)?
+        .clone();
+    match operation {
+        Op::Create { id, owner, scheme } => {
+            let contract = bytecode
+                .distributed_values
+                .iter()
+                .find(|contract| contract.id == *id)
+                .filter(|contract| contract.owner == *owner && contract.scheme == *scheme)
+                .cloned()
+                .ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "DistributedContractMissing",
+                        "distributed instruction has no matching compiler-owned semantic contract",
+                    )
+                })?;
+            let pool = execution
+                .runtime
+                .execution()
+                .ensure_pool(runmat_execution::PoolRequest::automatic())
+                .map_err(execution_error)?;
+            service
+                .create(contract, input, pool)
+                .await
+                .map(|handle| Value::Distributed(Box::new(handle)))
+        }
+        Op::LocalPart => {
+            let Value::Distributed(handle) = input else {
+                return Err(crate::interpreter::errors::mex(
+                    "DistributedValueRequired",
+                    "getLocalPart requires a distributed value",
+                ));
+            };
+            let rank = if let Some(collective) = execution.runtime.service_ports().collective() {
+                collective.context().rank
+            } else if handle.partition_count.0 == 1 {
+                runmat_types::LabRank(1)
+            } else {
+                return Err(crate::interpreter::errors::mex(
+                    "DistributedRankContextRequired",
+                    "getLocalPart requires an SPMD rank context for a multi-partition value",
+                ));
+            };
+            service.local_part(*handle, rank).await
+        }
+        Op::Materialize => {
+            let Value::Distributed(handle) = input else {
+                return Err(crate::interpreter::errors::mex(
+                    "DistributedValueRequired",
+                    "gather requires a distributed value on this execution path",
+                ));
+            };
+            service.materialize(*handle).await
+        }
+        Op::Redistribute { scheme } => {
+            let Value::Distributed(handle) = input else {
+                return Err(crate::interpreter::errors::mex(
+                    "DistributedValueRequired",
+                    "redistribute requires a distributed value",
+                ));
+            };
+            service
+                .redistribute(*handle, scheme.clone())
+                .await
+                .map(|handle| Value::Distributed(Box::new(handle)))
+        }
+    }
+}
+
+async fn execute_collective(
+    bytecode: &crate::Bytecode,
+    id: runmat_types::CollectiveId,
+    operation: crate::BytecodeCollectiveOp,
+    arguments: Vec<Value>,
+    execution: &ExecutionContext,
+) -> Result<Value, RuntimeError> {
+    let contract = bytecode
+        .collective_contracts
+        .iter()
+        .find(|contract| contract.id == id)
+        .ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "CollectiveContractMissing",
+                "collective instruction has no compiler-owned semantic contract",
+            )
+        })?;
+    if !collective_operation_matches(&contract.operation, operation) {
+        return Err(crate::interpreter::errors::mex(
+            "CollectiveContractMismatch",
+            "collective instruction disagrees with its compiler-owned semantic contract",
+        ));
+    }
+    let collective = execution
+        .runtime
+        .service_ports()
+        .require_collective("SPMD collective")
+        .map_err(capability_error)?
+        .clone();
+    let sequence = collective.next_sequence(id)?;
+    let invocation = collective_invocation(operation, arguments, collective.context())?;
+    let response = collective
+        .execute(runmat_execution::CollectiveRequest {
+            context: collective.context().clone(),
+            id,
+            sequence,
+            invocation,
+        })
+        .await?;
+    collective_response(response, operation).await
+}
+
+fn collective_operation_matches(
+    contract: &runmat_types::CollectiveOperation,
+    instruction: crate::BytecodeCollectiveOp,
+) -> bool {
+    use crate::BytecodeCollectiveOp as Bytecode;
+    use runmat_types::CollectiveOperation as Contract;
+
+    match (contract, instruction) {
+        (Contract::Barrier, Bytecode::Barrier)
+        | (Contract::Broadcast, Bytecode::Broadcast { .. })
+        | (Contract::Gather, Bytecode::Gather)
+        | (Contract::Scatter, Bytecode::Scatter)
+        | (Contract::AllGather, Bytecode::AllGather)
+        | (Contract::Send, Bytecode::Send { .. })
+        | (Contract::SendReceive, Bytecode::SendReceive { .. })
+        | (Contract::Probe, Bytecode::Probe { .. }) => true,
+        (
+            Contract::Receive {
+                requested_outputs: expected,
+            },
+            Bytecode::Receive {
+                requested_outputs, ..
+            },
+        ) => *expected == requested_outputs,
+        (Contract::Reduce { operator: expected }, Bytecode::Reduce { operator })
+        | (Contract::AllReduce { operator: expected }, Bytecode::AllReduce { operator }) => {
+            *expected == operator
+        }
+        _ => false,
+    }
+}
+
+fn collective_invocation(
+    operation: crate::BytecodeCollectiveOp,
+    mut arguments: Vec<Value>,
+    context: &runmat_execution::SpmdTaskContext,
+) -> Result<runmat_execution::CollectiveInvocation, RuntimeError> {
+    use crate::BytecodeCollectiveOp as Op;
+    use runmat_execution::{CollectiveInvocation, CollectiveMessageTag, ReceiveSelection};
+
+    let encode = |value: &Value| encode_inline_value(value).map_err(value_codec_error);
+    Ok(match operation {
+        Op::Barrier => CollectiveInvocation::Barrier,
+        Op::Broadcast { has_input } => {
+            let input = has_input.then(|| arguments.remove(0));
+            let root = lab_rank(arguments.remove(0), context)?;
+            CollectiveInvocation::Broadcast {
+                root,
+                value: if context.rank == root {
+                    input.as_ref().map(encode).transpose()?
+                } else {
+                    None
+                },
+            }
+        }
+        Op::Gather => {
+            let value = encode(&arguments.remove(0))?;
+            let root = lab_rank(arguments.remove(0), context)?;
+            CollectiveInvocation::Gather { root, value }
+        }
+        Op::Scatter => {
+            let value = arguments.remove(0);
+            let root = lab_rank(arguments.remove(0), context)?;
+            let values = if context.rank == root {
+                let Value::Cell(values) = value else {
+                    return Err(crate::interpreter::errors::mex(
+                        "CollectiveScatterInput",
+                        "scatter root must provide one cell entry per lab",
+                    ));
+                };
+                Some(
+                    values
+                        .data
+                        .iter()
+                        .map(encode)
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            } else {
+                None
+            };
+            CollectiveInvocation::Scatter { root, values }
+        }
+        Op::AllGather => CollectiveInvocation::AllGather {
+            value: encode(&arguments.remove(0))?,
+        },
+        Op::Reduce { operator } => {
+            let value = encode(&arguments.remove(0))?;
+            let root = lab_rank(arguments.remove(0), context)?;
+            CollectiveInvocation::Reduce {
+                root: Some(root),
+                operator,
+                value,
+            }
+        }
+        Op::AllReduce { operator } => CollectiveInvocation::Reduce {
+            root: None,
+            operator,
+            value: encode(&arguments.remove(0))?,
+        },
+        Op::Send { has_tag } => {
+            let value = encode(&arguments.remove(0))?;
+            let destination = lab_rank(arguments.remove(0), context)?;
+            let tag = if has_tag {
+                message_tag(arguments.remove(0))?
+            } else {
+                CollectiveMessageTag(0)
+            };
+            CollectiveInvocation::Send {
+                destination,
+                tag,
+                value,
+            }
+        }
+        Op::Receive {
+            has_source,
+            has_tag,
+            ..
+        }
+        | Op::Probe {
+            has_source,
+            has_tag,
+        } => {
+            let source = if has_source {
+                receive_source(arguments.remove(0), context)?
+            } else {
+                None
+            };
+            let tag = has_tag
+                .then(|| message_tag(arguments.remove(0)))
+                .transpose()?;
+            let selection = ReceiveSelection { source, tag };
+            if matches!(operation, Op::Receive { .. }) {
+                CollectiveInvocation::Receive { selection }
+            } else {
+                CollectiveInvocation::Probe { selection }
+            }
+        }
+        Op::SendReceive { has_tag } => {
+            let destination = optional_lab_rank(arguments.remove(0), context)?;
+            let source = optional_lab_rank(arguments.remove(0), context)?;
+            let value = encode(&arguments.remove(0))?;
+            let tag = if has_tag {
+                message_tag(arguments.remove(0))?
+            } else {
+                CollectiveMessageTag(0)
+            };
+            CollectiveInvocation::SendReceive {
+                destination,
+                source,
+                tag,
+                value,
+            }
+        }
+    })
+}
+
+async fn collective_response(
+    response: runmat_execution::CollectiveResponse,
+    operation: crate::BytecodeCollectiveOp,
+) -> Result<Value, RuntimeError> {
+    use runmat_execution::CollectiveResponse;
+
+    match response {
+        CollectiveResponse::Complete => Ok(empty_value()),
+        CollectiveResponse::Value { value } => {
+            runmat_runtime::execution::value_codec::decode_inline_value(&value)
+                .map_err(value_codec_error)
+        }
+        CollectiveResponse::Received { value, source, tag } => {
+            let value = runmat_runtime::execution::value_codec::decode_inline_value(&value)
+                .map_err(value_codec_error)?;
+            let requested_outputs = match operation {
+                crate::BytecodeCollectiveOp::Receive {
+                    requested_outputs, ..
+                } => requested_outputs,
+                crate::BytecodeCollectiveOp::SendReceive { .. } => 1,
+                _ => 1,
+            };
+            if requested_outputs == 1 {
+                Ok(value)
+            } else {
+                let mut outputs = vec![value, Value::Num(f64::from(source.0))];
+                if requested_outputs == 3 {
+                    outputs.push(Value::Int(runmat_value::IntValue::U64(tag.0)));
+                }
+                Ok(Value::OutputList(outputs))
+            }
+        }
+        CollectiveResponse::Values { values } => {
+            let count = values.len();
+            let values = values
+                .iter()
+                .map(runmat_runtime::execution::value_codec::decode_inline_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(value_codec_error)?;
+            runmat_value::CellArray::new_with_shape(values, vec![count, 1])
+                .map(Value::Cell)
+                .map_err(|error| {
+                    runmat_runtime::runtime_error::semantic_error("RunMat:CollectiveResult", error)
+                })
+        }
+        CollectiveResponse::ReductionInputs { operator, values } => {
+            let mut values = values
+                .iter()
+                .map(runmat_runtime::execution::value_codec::decode_inline_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(value_codec_error)?
+                .into_iter();
+            let mut accumulator = values.next().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "CollectiveReductionEmpty",
+                    "collective reduction received no lab contributions",
+                )
+            })?;
+            for contribution in values {
+                accumulator = runmat_runtime::parallel::reduction::combine(
+                    operator,
+                    accumulator,
+                    contribution,
+                )
+                .await?;
+            }
+            Ok(accumulator)
+        }
+        CollectiveResponse::Probe { available } => Ok(Value::Bool(available)),
+    }
+}
+
+fn receive_source(
+    value: Value,
+    context: &runmat_execution::SpmdTaskContext,
+) -> Result<Option<runmat_types::LabRank>, RuntimeError> {
+    match value {
+        Value::String(value) if value.eq_ignore_ascii_case("any") => Ok(None),
+        Value::CharArray(value)
+            if value
+                .row_string()
+                .is_some_and(|value| value.eq_ignore_ascii_case("any")) =>
+        {
+            Ok(None)
+        }
+        value => lab_rank(value, context).map(Some),
+    }
+}
+
+fn optional_lab_rank(
+    value: Value,
+    context: &runmat_execution::SpmdTaskContext,
+) -> Result<Option<runmat_types::LabRank>, RuntimeError> {
+    if is_empty_value(&value) {
+        Ok(None)
+    } else {
+        lab_rank(value, context).map(Some)
+    }
+}
+
+fn is_empty_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Tensor(value) if value.is_empty()
+    ) || matches!(value, Value::Cell(value) if value.data.is_empty())
+        || matches!(value, Value::LogicalArray(value) if value.is_empty())
+}
+
+fn empty_value() -> Value {
+    Value::Tensor(runmat_value::Tensor::zeros(vec![0, 0]))
+}
+
+fn lab_rank(
+    value: Value,
+    context: &runmat_execution::SpmdTaskContext,
+) -> Result<runmat_types::LabRank, RuntimeError> {
+    let rank = positive_u32(value, "lab rank")?;
+    if rank > context.gang.labs.0 {
+        return Err(crate::interpreter::errors::mex(
+            "CollectiveRankOutsideGang",
+            "collective lab rank lies outside the admitted gang",
+        ));
+    }
+    Ok(runmat_types::LabRank(rank))
+}
+
+fn message_tag(value: Value) -> Result<runmat_execution::CollectiveMessageTag, RuntimeError> {
+    let tag = match value {
+        Value::Int(value) => value.try_to_u64(),
+        Value::Num(value)
+            if value.is_finite()
+                && value.fract() == 0.0
+                && value >= 0.0
+                && value <= u64::MAX as f64 =>
+        {
+            Some(value as u64)
+        }
+        _ => None,
+    }
+    .ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "CollectiveTagInvalid",
+            "collective message tag must be a nonnegative integer scalar",
+        )
+    })?;
+    Ok(runmat_execution::CollectiveMessageTag(tag))
+}
+
+fn positive_u32(value: Value, label: &str) -> Result<u32, RuntimeError> {
+    let value = match value {
+        Value::Int(value) => value.try_to_u64(),
+        Value::Num(value)
+            if value.is_finite()
+                && value.fract() == 0.0
+                && value >= 1.0
+                && value <= u32::MAX as f64 =>
+        {
+            Some(value as u64)
+        }
+        _ => None,
+    };
+    value
+        .filter(|value| *value > 0)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| {
+            runmat_runtime::runtime_error::semantic_error(
+                "RunMat:CollectiveIntegerInvalid",
+                format!("{label} must be a positive integer scalar"),
+            )
+        })
+}
+
+async fn execute_spmd(
+    bytecode: &crate::Bytecode,
+    executable: &crate::BytecodeSpmdRegion,
+    header: crate::BytecodeSpmdHeader,
+    operands: Vec<Value>,
+    vars: &mut [Value],
+    execution: &ExecutionContext,
+    current_function_name: &str,
+) -> Result<(), RuntimeError> {
+    let (pool, labs) = spmd_request(header, operands, execution)?;
+    let available_labs = runmat_types::LabCount(
+        execution
+            .runtime
+            .execution()
+            .current_pool()
+            .map_err(execution_error)?
+            .filter(|snapshot| snapshot.handle == pool)
+            .map(|snapshot| snapshot.workers)
+            .ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "SpmdPoolUnavailable",
+                    "SPMD requires a live pool in the current execution scope",
+                )
+            })?,
+    );
+    let captures = executable
+        .captures
+        .iter()
+        .map(|capture| {
+            vars.get(capture.slot).cloned().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "SpmdFrame",
+                    "SPMD capture is outside its compiler-bound VM frame",
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut region_bytecode = bytecode.clone();
+    let header_instruction = region_bytecode
+        .instructions
+        .get_mut(executable.header.pc)
+        .ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "SpmdExecutableInvalid",
+                "SPMD header lies outside its compiler-bound instruction stream",
+            )
+        })?;
+    *header_instruction = Instr::Return;
+    if let Some(coverage) = region_bytecode.coverage_sites.get_mut(executable.header.pc) {
+        coverage.clear();
+    }
+    let spmd = execution
+        .runtime
+        .service_ports()
+        .require_spmd("SPMD execution")
+        .map_err(capability_error)?
+        .clone();
+    let admission = spmd
+        .admit(
+            runmat_execution::GangRequest { pool, labs },
+            available_labs,
+            executable.contract.id,
+        )
+        .await?;
+    admission.validate()?;
+
+    let mut tasks = Vec::with_capacity(admission.labs.len());
+    for collective in admission.labs {
+        let mut frame = vec![None; bytecode.var_count];
+        for (capture, value) in executable.captures.iter().zip(&captures) {
+            frame[capture.slot] = Some(value.clone());
+        }
+        let services = execution
+            .runtime
+            .service_ports()
+            .clone()
+            .with_collective(collective);
+        let runtime = execution.runtime.fork_parallel_lab(services);
+        let bytecode = region_bytecode.clone();
+        let function_name = current_function_name.to_string();
+        let body_pc = executable.body.pc;
+        tasks.push(async move {
+            let resume = InterpreterResumeState {
+                pc: body_pc,
+                vars: frame,
+                supplied_inputs: 0,
+                requested_outputs: 0,
+                missing_input_slots: HashSet::new(),
+                global_aliases: HashMap::new(),
+                persistent_aliases: HashMap::new(),
+                side_effect_epoch: 0,
+            };
+            match crate::interpreter::runner::interpret_resume_in_context(
+                &bytecode,
+                resume,
+                Some(&function_name),
+                runtime,
+            )
+            .await?
+            {
+                InterpreterOutcome::Completed(values) => Ok::<Vec<Value>, RuntimeError>(values),
+            }
+        });
+    }
+
+    let gang = admission.gang.handle;
+    let execution_result = async {
+        let lab_frames = futures::future::try_join_all(tasks).await?;
+        let outputs = executable
+            .outputs
+            .iter()
+            .map(|output| {
+                let entries = lab_frames
+                    .iter()
+                    .map(|frame| {
+                        frame
+                            .get(output.slot)
+                            .map(encode_inline_value)
+                            .transpose()
+                            .map_err(value_codec_error)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(runmat_runtime::context::RuntimeSpmdOutput {
+                    value: output.contract.value,
+                    fact: output.contract.fact.clone(),
+                    entries,
+                })
+            })
+            .collect::<Result<Vec<_>, RuntimeError>>()?;
+        let handles = spmd
+            .retain_outputs(gang.clone(), executable.contract.id, outputs)
+            .await?;
+        if handles.len() != executable.outputs.len() {
+            return Err(crate::interpreter::errors::mex(
+                "SpmdOutputContract",
+                "SPMD runtime returned a different number of outputs than the compiler contract",
+            ));
+        }
+        for (output, handle) in executable.outputs.iter().zip(handles) {
+            let destination = vars.get_mut(output.slot).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "SpmdFrame",
+                    "SPMD output is outside its compiler-bound VM frame",
+                )
+            })?;
+            *destination = Value::Composite(Box::new(handle));
+            crate::runtime::workspace::mark_workspace_assigned(output.slot);
+        }
+        Ok(())
+    }
+    .await;
+    let retirement = spmd.retire(gang).await;
+    match execution_result {
+        Err(error) => Err(error),
+        Ok(()) => retirement,
+    }
+}
+
+fn spmd_request(
+    header: crate::BytecodeSpmdHeader,
+    mut operands: Vec<Value>,
+    execution: &ExecutionContext,
+) -> Result<
+    (
+        runmat_execution::PoolHandle,
+        runmat_types::SpmdLabRequirement,
+    ),
+    RuntimeError,
+> {
+    use runmat_types::{LabCount, SpmdLabRequirement};
+
+    let explicit_pool = matches!(header, crate::BytecodeSpmdHeader::PoolRange);
+    let pool = if explicit_pool {
+        pool_handle(operands.remove(0))?
+    } else {
+        execution
+            .runtime
+            .execution()
+            .ensure_pool(runmat_execution::PoolRequest::automatic())
+            .map_err(execution_error)?
+            .handle
+    };
+    let labs = match header {
+        crate::BytecodeSpmdHeader::Default => SpmdLabRequirement::Default,
+        crate::BytecodeSpmdHeader::Exact => SpmdLabRequirement::Exact {
+            labs: LabCount(spmd_lab_count(operands.remove(0))?),
+        },
+        crate::BytecodeSpmdHeader::Range | crate::BytecodeSpmdHeader::PoolRange => {
+            let minimum = spmd_lab_count(operands.remove(0))?;
+            let maximum = spmd_lab_count(operands.remove(0))?;
+            if minimum > maximum {
+                return Err(crate::interpreter::errors::mex(
+                    "InvalidSpmdRange",
+                    "SPMD minimum lab count cannot exceed its maximum",
+                ));
+            }
+            SpmdLabRequirement::Range {
+                minimum: LabCount(minimum),
+                maximum: LabCount(maximum),
+            }
+        }
+    };
+    Ok((pool, labs))
+}
+
+fn spmd_lab_count(value: Value) -> Result<u32, RuntimeError> {
+    let count = match value {
+        Value::Int(value) => value.try_to_u64(),
+        Value::Num(value)
+            if value.is_finite()
+                && value.fract() == 0.0
+                && value >= 1.0
+                && value <= u32::MAX as f64 =>
+        {
+            Some(value as u64)
+        }
+        _ => None,
+    };
+    count
+        .filter(|count| *count > 0)
+        .and_then(|count| u32::try_from(count).ok())
+        .ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "InvalidSpmdLabCount",
+                "SPMD lab counts must be positive integer scalars",
+            )
+        })
+}
+
+fn capability_error(error: runmat_runtime::context::RuntimeCapabilityError) -> RuntimeError {
+    runmat_runtime::runtime_error::semantic_error(
+        "RunMat:RuntimeCapabilityUnavailable",
+        error.to_string(),
+    )
+}
+
+fn value_codec_error(error: ValueCodecError) -> RuntimeError {
+    runmat_runtime::runtime_error::semantic_error("RunMat:ParallelValueEncoding", error.to_string())
 }
 
 async fn execute_parfor(

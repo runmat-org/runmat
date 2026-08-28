@@ -114,10 +114,10 @@ fn representative_facts() -> Vec<ValueFact> {
             function: ProgramFunctionId(0),
             ordinal: 1,
         },
-        owner: ParallelRegionId(RegionId {
+        owner: runmat_types::DistributedOwner::Region(ParallelRegionId(RegionId {
             function: ProgramFunctionId(0),
             ordinal: 2,
-        }),
+        })),
         scheme: Some(DistributionScheme::Block { dimension: 1 }),
         value: Box::new(numeric(NumericClass::Double)),
         materializable: true,

@@ -82,7 +82,7 @@ thread_local! {
         const { StaticValueThreadRegistration };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct RuntimeClassState {
     classes: HashMap<String, RuntimeClass>,
     sealed: HashSet<String>,

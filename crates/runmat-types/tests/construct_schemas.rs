@@ -136,7 +136,7 @@ fn parallel() -> ParallelManifest {
             id: distributed,
             value: ValueFact::scalar(ValueKindFact::Logical),
             scheme: DistributionScheme::Block { dimension: 1 },
-            owner_region: region,
+            owner: runmat_types::DistributedOwner::Region(region),
             materializable: true,
         }],
         collectives: vec![CollectiveContract {
@@ -153,7 +153,8 @@ fn parallel() -> ParallelManifest {
                     domain: runmat_types::NumericDomain::Real,
                 },
             ))),
-            peer: None,
+            source: None,
+            destination: None,
             tag: None,
         }],
     }

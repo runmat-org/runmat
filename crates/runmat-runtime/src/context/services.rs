@@ -214,11 +214,82 @@ pub trait RuntimeParallelService {
     }
 }
 
+#[derive(Clone)]
+pub struct RuntimeSpmdAdmission {
+    pub gang: runmat_execution::GangSnapshot,
+    pub labs: Vec<Rc<dyn RuntimeCollectiveService>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeSpmdOutput {
+    pub value: runmat_types::RegionValueId,
+    pub fact: runmat_types::ValueFact,
+    pub entries: Vec<Option<runmat_execution::value::ValuePayload>>,
+}
+
+impl RuntimeSpmdAdmission {
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        self.gang.validate().map_err(|error| {
+            crate::runtime_error::semantic_error(
+                "RunMat:parallel:InvalidGangAdmission",
+                error.to_string(),
+            )
+        })?;
+        if self.labs.len() != self.gang.handle.labs.0 as usize
+            || self
+                .labs
+                .iter()
+                .zip(&self.gang.ranks)
+                .any(|(service, rank)| {
+                    service.context().gang != self.gang.handle || service.context().rank != *rank
+                })
+        {
+            return Err(crate::runtime_error::semantic_error(
+                "RunMat:parallel:InvalidGangAdmission",
+                "SPMD admission must provide one ordered collective context per stable lab rank",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Host-owned admission and lifecycle authority for one SPMD gang. Collective
+/// services are scoped per lab while the coordinator remains shared.
+pub trait RuntimeSpmdService {
+    fn admit(
+        &self,
+        request: runmat_execution::GangRequest,
+        available_labs: runmat_types::LabCount,
+        region: runmat_types::ParallelRegionId,
+    ) -> RuntimeServiceFuture<Result<RuntimeSpmdAdmission, RuntimeError>>;
+
+    fn retire(
+        &self,
+        gang: runmat_execution::GangHandle,
+    ) -> RuntimeServiceFuture<Result<(), RuntimeError>>;
+
+    fn retain_outputs(
+        &self,
+        gang: runmat_execution::GangHandle,
+        region: runmat_types::ParallelRegionId,
+        outputs: Vec<RuntimeSpmdOutput>,
+    ) -> RuntimeServiceFuture<Result<Vec<runmat_execution::CompositeHandle>, RuntimeError>>;
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeDistributedCallRequest {
     pub builtin: BuiltinId,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
+}
+
+/// Live distributed metadata visible to language/runtime consumers. Payloads
+/// remain behind the execution-owned store; unlike a transport snapshot this
+/// record never invents object references for locally retained partitions.
+#[derive(Debug, Clone)]
+pub struct RuntimeDistributedSnapshot {
+    pub handle: runmat_execution::DistributedValueHandle,
+    pub partitions: Vec<runmat_execution::DistributedPartitionLayout>,
 }
 
 /// Runtime operations over execution-service-owned distributed values.
@@ -229,17 +300,18 @@ pub trait RuntimeDistributedService {
         &self,
         contract: DistributedValueContract,
         input: Value,
-        pool: runmat_execution::PoolHandle,
+        pool: runmat_execution::PoolSnapshot,
     ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueHandle, RuntimeError>>;
 
     fn inspect(
         &self,
         handle: runmat_execution::DistributedValueHandle,
-    ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueSnapshot, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<RuntimeDistributedSnapshot, RuntimeError>>;
 
     fn local_part(
         &self,
         handle: runmat_execution::DistributedValueHandle,
+        rank: LabRank,
     ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
 
     fn materialize(
@@ -270,6 +342,14 @@ pub trait RuntimeDistributedService {
 pub trait RuntimeCollectiveService {
     fn context(&self) -> &runmat_execution::SpmdTaskContext;
 
+    /// Allocate the next invocation sequence for one compiler-owned call site.
+    /// Sequence state is scoped to the lab service, so repeated calls in loops
+    /// cannot collide while every rank retains the same deterministic order.
+    fn next_sequence(
+        &self,
+        id: runmat_types::CollectiveId,
+    ) -> Result<runmat_execution::CollectiveSequence, RuntimeError>;
+
     fn execute(
         &self,
         request: runmat_execution::CollectiveRequest,
@@ -292,6 +372,7 @@ pub struct RuntimeServicePorts {
     native: Option<Rc<dyn RuntimeNativeService>>,
     foreign: Option<Rc<dyn RuntimeForeignService>>,
     parallel: Option<Rc<dyn RuntimeParallelService>>,
+    spmd: Option<Rc<dyn RuntimeSpmdService>>,
     distributed: Option<Rc<dyn RuntimeDistributedService>>,
     collective: Option<Rc<dyn RuntimeCollectiveService>>,
 }
@@ -311,6 +392,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("native", &self.native.is_some())
             .field("foreign", &self.foreign.is_some())
             .field("parallel", &self.parallel.is_some())
+            .field("spmd", &self.spmd.is_some())
             .field("distributed", &self.distributed.is_some())
             .field("collective", &self.collective.is_some())
             .finish()
@@ -444,6 +526,14 @@ impl RuntimeServicePorts {
         parallel,
         RuntimeParallelService,
         Parallel
+    );
+    port_accessors!(
+        with_spmd,
+        spmd,
+        require_spmd,
+        spmd,
+        RuntimeSpmdService,
+        Spmd
     );
     port_accessors!(
         with_distributed,

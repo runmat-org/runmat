@@ -756,14 +756,9 @@ fn diagnose_rvalue_reads(
             }
         }
         MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
-        MirRvalue::Distributed(operation) => match operation {
-            crate::parallel::MirDistributedOp::Create { input, .. } => {
-                diagnose_operand_read(input, state, span, diagnostics);
-            }
-            crate::parallel::MirDistributedOp::LocalPart { .. }
-            | crate::parallel::MirDistributedOp::Materialize { .. }
-            | crate::parallel::MirDistributedOp::Redistribute { .. } => {}
-        },
+        MirRvalue::Distributed(operation) => {
+            diagnose_operand_read(operation.input(), state, span, diagnostics);
+        }
         MirRvalue::Collective(operation) => {
             for operand in operation.operands() {
                 diagnose_operand_read(operand, state, span, diagnostics);

@@ -448,10 +448,19 @@ enum BraceOutcomeExpectation {
     ExpandedValues { invalid_message: &'static str },
 }
 
+struct BraceStackRequest<'a> {
+    num_indices: usize,
+    end_offsets: &'a [(usize, isize)],
+    end_exprs: &'a [(usize, EndExpr)],
+    operation: BraceIndexOperation,
+    expectation: BraceOutcomeExpectation,
+}
+
 async fn execute_brace_operation(
     base: Value,
     raw_indices: &[Value],
     operation: BraceIndexOperation,
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<BraceIndexOutcome, RuntimeError> {
     if matches!(
         base,
@@ -503,6 +512,9 @@ async fn execute_brace_operation(
                     let indices = resolve_cell_indices(raw_indices).await?;
                     runmat_runtime::object::cell::index_cell_value(&ca, &indices)?
                 }
+                Value::Composite(handle) => {
+                    read_composite_entry(runtime, *handle, raw_indices).await?
+                }
                 _ => {
                     return Err(crate::interpreter::errors::mex(
                         "CellIndexingOnNonCell",
@@ -513,10 +525,26 @@ async fn execute_brace_operation(
             Ok(BraceIndexOutcome::Value(value))
         }
         BraceIndexOperation::Expand { out_count } => {
+            if let Value::Composite(handle) = base {
+                if out_count != 1 {
+                    return Err(crate::interpreter::errors::mex(
+                        "CompositeOutputArity",
+                        "one Composite brace selection produces exactly one value",
+                    ));
+                }
+                return Ok(BraceIndexOutcome::Expanded(vec![
+                    read_composite_entry(runtime, *handle, raw_indices).await?,
+                ]));
+            }
             let values = expand_brace_values(base, raw_indices, Some(out_count)).await?;
             Ok(BraceIndexOutcome::Expanded(values))
         }
         BraceIndexOperation::List => {
+            if let Value::Composite(handle) = base {
+                return read_composite_entry(runtime, *handle, raw_indices)
+                    .await
+                    .map(BraceIndexOutcome::Value);
+            }
             if !matches!(
                 base,
                 Value::Cell(_) | Value::Object(_) | Value::HandleObject(_)
@@ -629,6 +657,12 @@ async fn execute_brace_operation(
                         }
                     }
                 }
+                Value::Composite(_) => {
+                    return Err(crate::interpreter::errors::mex(
+                        "CompositeAssignmentUnsupported",
+                        "Composite entries are owned by their SPMD execution and cannot be assigned from the driver",
+                    ))
+                }
                 _ => {
                     return Err(crate::interpreter::errors::mex(
                         "CellAssignmentOnNonCell",
@@ -641,22 +675,61 @@ async fn execute_brace_operation(
     }
 }
 
+async fn read_composite_entry(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    handle: runmat_execution::CompositeHandle,
+    raw_indices: &[Value],
+) -> Result<Value, RuntimeError> {
+    if raw_indices.len() != 1 {
+        return Err(crate::interpreter::errors::mex(
+            "CompositeIndexArity",
+            "Composite brace indexing requires one lab index",
+        ));
+    }
+    let rank = index_scalar_from_value(&raw_indices[0])
+        .await?
+        .and_then(|index| index.positive_usize())
+        .and_then(|index| u32::try_from(index).ok())
+        .filter(|rank| *rank <= handle.gang.labs.0)
+        .map(runmat_types::LabRank)
+        .ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "CompositeIndexOutOfBounds",
+                "Composite lab index must be a positive integer within the SPMD gang",
+            )
+        })?;
+    runtime
+        .service_ports()
+        .require_distributed("Composite brace indexing")
+        .map_err(|error| {
+            runmat_runtime::runtime_error::semantic_error(
+                "RunMat:RuntimeCapabilityUnavailable",
+                error.to_string(),
+            )
+        })?
+        .composite_entry(handle, rank)
+        .await?
+        .ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "CompositeEntryUnavailable",
+                "the selected lab did not assign this Composite value",
+            )
+        })
+}
+
 async fn execute_brace_operation_from_stack(
     stack: &mut Vec<Value>,
-    num_indices: usize,
-    end_offsets: &[(usize, isize)],
-    end_exprs: &[(usize, EndExpr)],
     vars: &mut [Value],
-    operation: BraceIndexOperation,
-    expectation: BraceOutcomeExpectation,
+    request: BraceStackRequest<'_>,
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<(), RuntimeError> {
-    let raw_indices = pop_index_values(stack, num_indices)?;
+    let raw_indices = pop_index_values(stack, request.num_indices)?;
     let base = pop_index_base(stack)?;
-    let allow_end_plus_one_growth = matches!(operation, BraceIndexOperation::Store { .. });
+    let allow_end_plus_one_growth = matches!(request.operation, BraceIndexOperation::Store { .. });
     let adjusted_end_exprs = apply_cell_end_exprs_for_base(
         &base,
         &raw_indices,
-        end_exprs,
+        request.end_exprs,
         vars,
         allow_end_plus_one_growth,
     )
@@ -664,11 +737,12 @@ async fn execute_brace_operation_from_stack(
     let adjusted_indices = apply_cell_end_offsets_for_base(
         &base,
         &adjusted_end_exprs,
-        end_offsets,
+        request.end_offsets,
         allow_end_plus_one_growth,
     )?;
-    let outcome = execute_brace_operation(base, &adjusted_indices, operation).await?;
-    match (outcome, expectation) {
+    let outcome =
+        execute_brace_operation(base, &adjusted_indices, request.operation, runtime).await?;
+    match (outcome, request.expectation) {
         (BraceIndexOutcome::Value(value), BraceOutcomeExpectation::SingleValue { .. }) => {
             stack.push(value)
         }
@@ -1038,6 +1112,7 @@ pub async fn dispatch_indexing(
     vars: &mut [Value],
     function_registry: &crate::bytecode::FunctionRegistry,
     pc: usize,
+    runtime: &runmat_runtime::context::RuntimeContext,
     _clear_value_residency: impl FnMut(&Value),
 ) -> Result<bool, RuntimeError> {
     match instr {
@@ -1064,14 +1139,17 @@ pub async fn dispatch_indexing(
         } => {
             execute_brace_operation_from_stack(
                 stack,
-                *num_indices,
-                end_offsets,
-                end_exprs,
                 vars,
-                BraceIndexOperation::ReadSingle,
-                BraceOutcomeExpectation::SingleValue {
-                    invalid_message: "IndexCell expected a single value outcome",
+                BraceStackRequest {
+                    num_indices: *num_indices,
+                    end_offsets,
+                    end_exprs,
+                    operation: BraceIndexOperation::ReadSingle,
+                    expectation: BraceOutcomeExpectation::SingleValue {
+                        invalid_message: "IndexCell expected a single value outcome",
+                    },
                 },
+                runtime,
             )
             .await?;
             Ok(true)
@@ -1084,16 +1162,19 @@ pub async fn dispatch_indexing(
         } => {
             execute_brace_operation_from_stack(
                 stack,
-                *num_indices,
-                end_offsets,
-                end_exprs,
                 vars,
-                BraceIndexOperation::Expand {
-                    out_count: *out_count,
+                BraceStackRequest {
+                    num_indices: *num_indices,
+                    end_offsets,
+                    end_exprs,
+                    operation: BraceIndexOperation::Expand {
+                        out_count: *out_count,
+                    },
+                    expectation: BraceOutcomeExpectation::ExpandedValues {
+                        invalid_message: "IndexCellExpand expected an expanded value list",
+                    },
                 },
-                BraceOutcomeExpectation::ExpandedValues {
-                    invalid_message: "IndexCellExpand expected an expanded value list",
-                },
+                runtime,
             )
             .await?;
             Ok(true)
@@ -1105,14 +1186,17 @@ pub async fn dispatch_indexing(
         } => {
             execute_brace_operation_from_stack(
                 stack,
-                *num_indices,
-                end_offsets,
-                end_exprs,
                 vars,
-                BraceIndexOperation::List,
-                BraceOutcomeExpectation::SingleValue {
-                    invalid_message: "IndexCellList expected a single list value",
+                BraceStackRequest {
+                    num_indices: *num_indices,
+                    end_offsets,
+                    end_exprs,
+                    operation: BraceIndexOperation::List,
+                    expectation: BraceOutcomeExpectation::SingleValue {
+                        invalid_message: "IndexCellList expected a single list value",
+                    },
                 },
+                runtime,
             )
             .await?;
             Ok(true)
@@ -1140,14 +1224,17 @@ pub async fn dispatch_indexing(
             ))?;
             execute_brace_operation_from_stack(
                 stack,
-                *num_indices,
-                end_offsets,
-                end_exprs,
                 vars,
-                BraceIndexOperation::Store { rhs },
-                BraceOutcomeExpectation::SingleValue {
-                    invalid_message: "StoreIndexCell expected a single base value",
+                BraceStackRequest {
+                    num_indices: *num_indices,
+                    end_offsets,
+                    end_exprs,
+                    operation: BraceIndexOperation::Store { rhs },
+                    expectation: BraceOutcomeExpectation::SingleValue {
+                        invalid_message: "StoreIndexCell expected a single base value",
+                    },
                 },
+                runtime,
             )
             .await?;
             Ok(true)

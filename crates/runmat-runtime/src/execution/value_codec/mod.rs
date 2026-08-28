@@ -274,7 +274,7 @@ mod tests {
                 function,
                 ordinal: 1,
             },
-            owner_region,
+            owner: runmat_types::DistributedOwner::Region(owner_region),
             scope_id,
             generation: 1,
             pool: pool.clone(),

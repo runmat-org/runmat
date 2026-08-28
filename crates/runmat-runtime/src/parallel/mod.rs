@@ -2,6 +2,7 @@
 
 pub mod assembly;
 pub mod current;
+pub mod distribution;
 pub mod future;
 pub mod introspection;
 pub mod pool;

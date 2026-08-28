@@ -319,10 +319,15 @@ const fn current_descriptor(
 }
 
 const CURRENT_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
-const POOL_READ_EFFECTS: [EffectKind; 2] = [EffectKind::EnvironmentRead, EffectKind::MayThrow];
-const POOL_WRITE_EFFECTS: [EffectKind; 3] = [
+const POOL_READ_EFFECTS: [EffectKind; 3] = [
+    EffectKind::EnvironmentRead,
+    EffectKind::MaySuspend,
+    EffectKind::MayThrow,
+];
+const POOL_WRITE_EFFECTS: [EffectKind; 4] = [
     EffectKind::EnvironmentRead,
     EffectKind::EnvironmentWrite,
+    EffectKind::MaySuspend,
     EffectKind::MayThrow,
 ];
 const SCHEDULE_EFFECTS: [EffectKind; 3] = [

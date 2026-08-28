@@ -114,6 +114,9 @@ pub fn compile(
         async_metadata,
         regions: Vec::new(),
         parfor_regions: Vec::new(),
+        spmd_regions: Vec::new(),
+        distributed_values: Vec::new(),
+        collective_contracts: Vec::new(),
         #[cfg(feature = "native-accel")]
         accel_graph,
         #[cfg(feature = "native-accel")]
@@ -862,6 +865,9 @@ fn compile_semantic_functions(
                 resume_points,
                 regions: Vec::new(),
                 parfor_regions: Vec::new(),
+                spmd_regions: Vec::new(),
+                distributed_values: Vec::new(),
+                collective_contracts: Vec::new(),
             },
         );
     }
@@ -4747,37 +4753,39 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
-    fn compile_rejects_parallel_region_until_scheduler_lowering_is_available() {
+    fn compile_emits_typed_parfor_instruction() {
         let source = "parfor (i = 1:10, 4); y = i; end";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
 
-        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
-        assert_eq!(
-            err.identifier.as_deref(),
-            Some("RunMat:MirParallelCapabilityUnsupported")
-        );
-        let span = err.span.expect("parallel source span");
-        assert_eq!(&source[span.start..span.end], source);
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile parfor");
+        assert!(bytecode.instructions.iter().any(|instruction| matches!(
+            instruction,
+            Instr::ExecuteParfor {
+                has_maximum_workers: true,
+                ..
+            }
+        )));
     }
 
     #[test]
-    fn compile_rejects_spmd_until_scheduler_lowering_is_available() {
+    fn compile_emits_typed_spmd_instruction() {
         let source = "spmd (2, 8); y = 1; end";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
 
-        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
-        assert_eq!(
-            err.identifier.as_deref(),
-            Some("RunMat:MirParallelCapabilityUnsupported")
-        );
-        let span = err.span.expect("SPMD source span");
-        assert_eq!(&source[span.start..span.end], source);
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile SPMD");
+        assert!(bytecode.instructions.iter().any(|instruction| matches!(
+            instruction,
+            Instr::ExecuteSpmd {
+                header: crate::BytecodeSpmdHeader::Range,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -4802,10 +4810,12 @@ y = x^[1 2; 3 4];\n",
                 function: runmat_types::ProgramFunctionId(0),
                 ordinal: 0,
             },
-            owner: runmat_types::ParallelRegionId(runmat_types::RegionId {
-                function: runmat_types::ProgramFunctionId(0),
-                ordinal: 0,
-            }),
+            owner: runmat_types::DistributedOwner::Region(runmat_types::ParallelRegionId(
+                runmat_types::RegionId {
+                    function: runmat_types::ProgramFunctionId(0),
+                    ordinal: 0,
+                },
+            )),
             input: MirOperand::Constant(MirConstant::Number("1".into())),
             scheme: runmat_types::DistributionScheme::Replicated,
         });

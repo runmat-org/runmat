@@ -2758,11 +2758,158 @@ fn parfor_analysis_requires_safe_private_and_sliced_classification() {
 }
 
 #[test]
+fn spmd_analysis_records_admission_captures_outputs_and_legality() {
+    let store = analyze_assembly(&lower_mir("x = 4; spmd (2); y = x + 1; end; after = x;"));
+    let contract = store.parallel.spmd_regions.first().expect("SPMD contract");
+    assert_eq!(
+        contract.labs,
+        runmat_types::SpmdLabRequirement::Exact {
+            labs: runmat_types::LabCount(2),
+        }
+    );
+    assert_eq!(contract.captures.len(), 1);
+    assert_eq!(contract.outputs.len(), 1);
+    assert!(matches!(
+        contract.captures[0].role,
+        runmat_types::ParallelVariableRole::Broadcast
+    ));
+    assert!(matches!(
+        contract.outputs[0].role,
+        runmat_types::ParallelVariableRole::Private
+    ));
+    store.parallel.validate().expect("valid SPMD manifest");
+
+    let nested = analyze_assembly(&lower_mir("spmd (2); spmd (2); x = 1; end; end;"));
+    assert!(nested
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-MIR0020"));
+    assert!(nested.parallel.spmd_regions.is_empty());
+}
+
+#[test]
+fn spmd_context_calls_are_classified_as_outputs() {
+    let store = analyze_assembly(&lower_mir(
+        "spmd; workerIndex = spmdIndex(); workerCount = spmdSize(); labBarrier(); end;",
+    ));
+    let contract = store.parallel.spmd_regions.first().expect("SPMD contract");
+    assert_eq!(contract.outputs.len(), 2, "{contract:?}");
+}
+
+#[test]
+fn parallel_primitives_lower_to_typed_mir_and_manifest_contracts() {
+    let mir = lower_mir(
+        "d = distributed([1, 2]); spmd (2); labBarrier(); x = labBroadcast(1, d); labSend(x, 2, 7); ready = labProbe(); total = gplus(1); end;",
+    );
+    let distributed_ops = mir
+        .bodies
+        .values()
+        .flat_map(|body| &body.blocks)
+        .flat_map(|block| &block.statements)
+        .filter(|statement| {
+            matches!(
+                statement.kind,
+                runmat_mir::MirStmtKind::Assign {
+                    value: runmat_mir::MirRvalue::Distributed(_),
+                    ..
+                }
+            )
+        })
+        .count();
+    let collective_ops = mir
+        .bodies
+        .values()
+        .flat_map(|body| &body.blocks)
+        .flat_map(|block| &block.statements)
+        .filter(|statement| {
+            matches!(
+                statement.kind,
+                runmat_mir::MirStmtKind::Assign {
+                    value: runmat_mir::MirRvalue::Collective(_),
+                    ..
+                } | runmat_mir::MirStmtKind::Expr(runmat_mir::MirRvalue::Collective(_))
+            )
+        })
+        .count();
+    assert_eq!(distributed_ops, 1);
+    assert_eq!(collective_ops, 5);
+
+    let store = analyze_assembly(&mir);
+    assert_eq!(store.parallel.distributed_values.len(), 1);
+    assert!(matches!(
+        store.parallel.distributed_values[0].owner,
+        runmat_types::DistributedOwner::Client(runmat_types::ProgramFunctionId(0))
+    ));
+    assert_eq!(store.parallel.collectives.len(), 5);
+    store
+        .parallel
+        .validate()
+        .expect("typed parallel primitive manifest");
+}
+
+#[test]
+fn modern_spmd_primitives_keep_dynamic_operands_and_result_arity_in_mir() {
+    let mir = lower_mir(
+        "spmd; spmdSend(uint64(9), 1, 7); [received, source, tag] = spmdReceive(\"any\", 7); exchanged = spmdSendReceive(1, 1, uint16(5)); total = spmdPlus(uint32(2)); spmdBarrier(); end;",
+    );
+    let operations = mir
+        .bodies
+        .values()
+        .flat_map(|body| &body.blocks)
+        .flat_map(|block| &block.statements)
+        .filter_map(|statement| match &statement.kind {
+            runmat_mir::MirStmtKind::Assign {
+                value: runmat_mir::MirRvalue::Collective(operation),
+                ..
+            }
+            | runmat_mir::MirStmtKind::MultiAssign {
+                value: runmat_mir::MirRvalue::Collective(operation),
+                ..
+            }
+            | runmat_mir::MirStmtKind::Expr(runmat_mir::MirRvalue::Collective(operation)) => {
+                Some(operation)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(operations.len(), 5);
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        runmat_mir::parallel::MirCollectiveOp::Receive {
+            requested_outputs: 3,
+            source: Some(_),
+            tag: Some(_),
+            ..
+        }
+    )));
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        runmat_mir::parallel::MirCollectiveOp::SendReceive {
+            destination: _,
+            source: _,
+            input: _,
+            tag: None,
+            ..
+        }
+    )));
+
+    let store = analyze_assembly(&mir);
+    assert_eq!(store.parallel.collectives.len(), 5);
+    assert!(store.parallel.collectives.iter().any(|contract| matches!(
+        contract.operation,
+        runmat_types::CollectiveOperation::Receive {
+            requested_outputs: 3
+        }
+    )));
+    store.parallel.validate().expect("modern SPMD manifest");
+}
+
+#[test]
 fn every_mir_construct_has_one_explicit_native_lowering_class() {
     use runmat_mir::{MirConstructKind, NativeLoweringClass};
     use std::collections::HashSet;
 
-    assert_eq!(MirConstructKind::ALL.len(), 47);
+    assert_eq!(MirConstructKind::ALL.len(), 49);
     assert_eq!(
         MirConstructKind::ALL
             .into_iter()

@@ -107,6 +107,25 @@ impl DistributedStore {
         Ok(&self.record(handle)?.partitions)
     }
 
+    pub fn layouts(
+        &self,
+        handle: &DistributedValueHandle,
+    ) -> RunnerResult<Vec<DistributedPartitionLayout>> {
+        Ok(self
+            .record(handle)?
+            .partitions
+            .iter()
+            .map(|partition| partition.layout.clone())
+            .collect())
+    }
+
+    pub fn cloned_parts(
+        &self,
+        handle: &DistributedValueHandle,
+    ) -> RunnerResult<Vec<OwnedPartition>> {
+        Ok(self.record(handle)?.partitions.clone())
+    }
+
     pub fn retire(&mut self, handle: &DistributedValueHandle) -> RunnerResult<()> {
         self.record(handle)?;
         self.distributed.remove(&handle.id);
@@ -216,7 +235,7 @@ mod tests {
                 function,
                 ordinal: 1,
             },
-            owner_region,
+            owner: runmat_types::DistributedOwner::Region(owner_region),
             scope_id,
             generation: 1,
             pool: PoolHandle {
@@ -285,7 +304,12 @@ mod tests {
         };
         let handle = CompositeHandle {
             id: CompositeId::derive(&[b"composite"]),
-            owner_region: distributed.owner_region,
+            owner_region: match distributed.owner {
+                runmat_types::DistributedOwner::Region(region) => region,
+                runmat_types::DistributedOwner::Client(_) => {
+                    panic!("test fixture uses a region-owned distributed value")
+                }
+            },
             scope_id: distributed.scope_id,
             generation: 1,
             gang,

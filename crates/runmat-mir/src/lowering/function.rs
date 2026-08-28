@@ -56,7 +56,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
             function.id,
             lower_function_with_context(
                 function,
-                MirLoweringContext::with_async_functions(async_functions.clone()),
+                MirLoweringContext::with_async_functions(async_functions.clone(), function.id),
             )?,
         );
     }

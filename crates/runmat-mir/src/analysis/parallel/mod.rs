@@ -3,6 +3,7 @@ mod facts;
 mod legality;
 mod patterns;
 mod region;
+mod spmd;
 
 use runmat_types::{ParallelManifest, PARALLEL_MANIFEST_SCHEMA_VERSION};
 
@@ -46,7 +47,16 @@ pub(super) fn analyze_parallel_contracts(
         let Ok(function) = u32::try_from(function.0).map(runmat_types::ProgramFunctionId) else {
             continue;
         };
+        spmd::classify_distributed_body(body, function, store, &mut manifest);
         classify::classify_body(
+            body,
+            function,
+            store,
+            &summaries,
+            &mut manifest,
+            &mut diagnostics,
+        );
+        spmd::classify_body(
             body,
             function,
             store,

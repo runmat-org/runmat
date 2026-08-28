@@ -460,21 +460,23 @@ impl ControlFlowBuilder {
                         await_replacements,
                     },
                 )?;
-                let body_block = self.lower_block_from(
-                    body_id,
-                    0,
-                    MirTerminator {
-                        kind: MirTerminatorKind::Goto(exit_id),
-                        span: stmt.span,
-                    },
-                    BlockLoweringEnv {
-                        ctx,
-                        body: spmd_body,
-                        return_terminator,
-                        loop_targets: None,
-                        await_replacements,
-                    },
-                )?;
+                let body_block = ctx.with_spmd_region(*region, || {
+                    self.lower_block_from(
+                        body_id,
+                        0,
+                        MirTerminator {
+                            kind: MirTerminatorKind::Goto(exit_id),
+                            span: stmt.span,
+                        },
+                        BlockLoweringEnv {
+                            ctx,
+                            body: spmd_body,
+                            return_terminator,
+                            loop_targets: None,
+                            await_replacements,
+                        },
+                    )
+                })?;
                 self.blocks.push(body_block);
                 let header_block = BasicBlock {
                     id: header_id,

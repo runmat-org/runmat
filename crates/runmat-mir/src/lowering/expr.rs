@@ -120,7 +120,9 @@ pub(crate) fn lower_expr_with_replacements(
                 .iter()
                 .map(|arg| lower_call_arg(ctx, arg, temps, await_replacements))
                 .collect::<Result<_, _>>()?;
-            if let HirCallableRef::DynamicExpr(callee) = &call.callee {
+            if let Some(value) = lower_parallel_intrinsic(ctx, call, &args)? {
+                value
+            } else if let HirCallableRef::DynamicExpr(callee) = &call.callee {
                 dynamic_call_rvalue(
                     call,
                     lower_operand_with_replacements(ctx, callee, temps, await_replacements)?,
@@ -196,6 +198,154 @@ pub(crate) fn lower_expr_with_replacements(
             ))
         }
     })
+}
+
+fn lower_parallel_intrinsic(
+    ctx: &MirLoweringContext,
+    call: &runmat_hir::HirCall,
+    args: &[MirCallArg],
+) -> Result<Option<MirRvalue>, HirError> {
+    use crate::parallel::{
+        MirCollectiveOp as Collective, MirDistributedOp as Distributed, ParallelIntrinsic,
+    };
+
+    let Some(intrinsic) = call
+        .callee
+        .identity()
+        .and_then(|identity| ParallelIntrinsic::resolve(&identity))
+    else {
+        return Ok(None);
+    };
+    let name = intrinsic.name();
+    let operands = || {
+        args.iter()
+            .map(|argument| match argument {
+                MirCallArg::Single(value) => Ok(value.clone()),
+                MirCallArg::Expansion { .. } => Err(HirError::new(format!(
+                    "{name}: comma-list expansion is not valid for a parallel primitive"
+                ))),
+            })
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let arity = |values: &[MirOperand], expected: &[usize]| {
+        if expected.contains(&values.len()) {
+            Ok(())
+        } else {
+            Err(HirError::new(format!(
+                "{name}: expected {} argument(s), received {}",
+                expected
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" or "),
+                values.len()
+            )))
+        }
+    };
+    let value = match intrinsic {
+        ParallelIntrinsic::Distributed => {
+            let values = operands()?;
+            arity(&values, &[1])?;
+            let (id, owner) = ctx.distributed_identity();
+            Some(MirRvalue::Distributed(Distributed::Create {
+                id,
+                owner,
+                input: values[0].clone(),
+                scheme: runmat_types::DistributionScheme::Block { dimension: 1 },
+            }))
+        }
+        ParallelIntrinsic::GetLocalPart => {
+            let values = operands()?;
+            arity(&values, &[1])?;
+            Some(MirRvalue::Distributed(Distributed::LocalPart {
+                value: values[0].clone(),
+            }))
+        }
+        _ if !ctx.in_spmd_region() => None,
+        ParallelIntrinsic::LabBarrier => {
+            let values = operands()?;
+            arity(&values, &[0])?;
+            Some(MirRvalue::Collective(Collective::Barrier {
+                id: ctx.collective_identity()?,
+            }))
+        }
+        ParallelIntrinsic::LabBroadcast => {
+            let values = operands()?;
+            arity(&values, &[1, 2])?;
+            Some(MirRvalue::Collective(Collective::Broadcast {
+                id: ctx.collective_identity()?,
+                root: values[0].clone(),
+                input: values.get(1).cloned(),
+            }))
+        }
+        ParallelIntrinsic::LabSend => {
+            let values = operands()?;
+            arity(&values, &[2, 3])?;
+            Some(MirRvalue::Collective(Collective::Send {
+                id: ctx.collective_identity()?,
+                input: values[0].clone(),
+                destination: values[1].clone(),
+                tag: values.get(2).cloned(),
+            }))
+        }
+        ParallelIntrinsic::LabReceive | ParallelIntrinsic::LabProbe => {
+            let values = operands()?;
+            arity(&values, &[0, 1, 2])?;
+            let id = ctx.collective_identity()?;
+            let source = values.first().cloned();
+            let tag = values.get(1).cloned();
+            Some(MirRvalue::Collective(
+                if intrinsic == ParallelIntrinsic::LabReceive {
+                    let requested_outputs = u8::try_from(call.requested_outputs.fixed_count())
+                        .map_err(|_| HirError::new(format!("{name}: output count exceeds u8")))?;
+                    if !(1..=3).contains(&requested_outputs) {
+                        return Err(HirError::new(format!(
+                            "{name}: expected between one and three outputs"
+                        )));
+                    }
+                    Collective::Receive {
+                        id,
+                        source,
+                        tag,
+                        requested_outputs,
+                    }
+                } else {
+                    Collective::Probe { id, source, tag }
+                },
+            ))
+        }
+        ParallelIntrinsic::LabSendReceive => {
+            let values = operands()?;
+            arity(&values, &[3, 4])?;
+            Some(MirRvalue::Collective(Collective::SendReceive {
+                id: ctx.collective_identity()?,
+                destination: values[0].clone(),
+                source: values[1].clone(),
+                input: values[2].clone(),
+                tag: values.get(3).cloned(),
+            }))
+        }
+        ParallelIntrinsic::Gplus => {
+            let values = operands()?;
+            arity(&values, &[1, 2])?;
+            let id = ctx.collective_identity()?;
+            Some(MirRvalue::Collective(if let Some(root) = values.get(1) {
+                Collective::Reduce {
+                    id,
+                    input: values[0].clone(),
+                    root: root.clone(),
+                    operator: runmat_types::OperatorKind::Add,
+                }
+            } else {
+                Collective::AllReduce {
+                    id,
+                    input: values[0].clone(),
+                    operator: runmat_types::OperatorKind::Add,
+                }
+            }))
+        }
+    };
+    Ok(value)
 }
 
 fn lower_call_arg(

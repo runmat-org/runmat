@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use runmat_types::{ProgramFunctionId, ProgramPointId};
 
-use crate::parallel::{MirDistributedOp, MirSpmdHeader};
+use crate::parallel::MirSpmdHeader;
 use crate::{
     BasicBlockId, MirBody, MirCallArg, MirCallee, MirIndexComponent, MirIndexing, MirLocalId,
     MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
@@ -289,8 +289,7 @@ fn rvalue_uses(value: &MirRvalue, uses: &mut Locals, defs: &mut Locals) {
                 }
             }
         }
-        MirRvalue::Distributed(MirDistributedOp::Create { input, .. }) => operand_uses(input, uses),
-        MirRvalue::Distributed(_) => {}
+        MirRvalue::Distributed(operation) => operand_uses(operation.input(), uses),
         MirRvalue::Collective(operation) => {
             for operand in operation.operands() {
                 operand_uses(operand, uses);

@@ -48,6 +48,19 @@ pub(super) fn rvalue_fact(
     }
 }
 
+pub(super) fn operand_fact(
+    store: &AnalysisStore,
+    function: ProgramFunctionId,
+    block: BasicBlockId,
+    position: usize,
+    value: &MirOperand,
+) -> ValueFact {
+    match value {
+        MirOperand::Local(local) => value_fact(store, function, block, position, *local),
+        _ => ValueFact::unknown(DynamicReason::RuntimeValue),
+    }
+}
+
 pub(super) fn transferable(fact: &ValueFact) -> bool {
     !matches!(
         fact.kind,
@@ -57,6 +70,7 @@ pub(super) fn transferable(fact: &ValueFact) -> bool {
             | ValueKindFact::ClassReference(_)
             | ValueKindFact::Execution(_)
             | ValueKindFact::Distributed(_)
+            | ValueKindFact::Composite(_)
             | ValueKindFact::Foreign(_)
     )
 }

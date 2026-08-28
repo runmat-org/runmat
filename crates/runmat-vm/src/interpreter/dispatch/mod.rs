@@ -306,6 +306,7 @@ pub async fn dispatch_instruction(
             vars,
             function_registry,
             *pc,
+            &context.runtime,
             &mut *clear_value_residency,
         )
         .await? =>

@@ -113,7 +113,8 @@ fn validation_rejects_duplicate_catalog_and_binding_identities() {
 
 #[test]
 fn migrated_registry_is_valid_and_case_insensitive() {
-    assert!(validate_builtin_catalog(builtin_catalog_entries()).is_empty());
+    let errors = validate_builtin_catalog(builtin_catalog_entries());
+    assert!(errors.is_empty(), "catalog errors: {errors:#?}");
     assert_eq!(
         builtin_catalog_entry_by_name("FULL")
             .expect("full catalog entry")
