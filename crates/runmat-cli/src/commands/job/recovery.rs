@@ -288,6 +288,13 @@ async fn recover(
                     bail!("recovered result requires an artifact-aware consumer")
                 }
                 ProgramExecutionResponse::Failure { message } => bail!("{message}"),
+                ProgramExecutionResponse::RuntimeFailure { failure } => {
+                    bail!(
+                        "{}",
+                        crate::diagnostics::format_program_runtime_failure(failure)
+                            .map_err(anyhow::Error::msg)?
+                    )
+                }
             }
         }
         return Ok(());

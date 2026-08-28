@@ -38,4 +38,8 @@ pub use placement::{
 };
 pub use runmat_types::ProgramFunctionId;
 pub use state::{CancellationReason, PoolState};
-pub use task::ProgramCallable;
+pub use task::{
+    ParallelChunk, ParallelRandomStream, ParallelRandomnessContext, ParallelTaskContext,
+    ParallelTaskGraph, ProgramCallFrame, ProgramCallable, ProgramExecutionAssignment,
+    ProgramInvocationContext, ProgramRuntimeFailure, ProgramSourceSpan, RetryPolicy,
+};

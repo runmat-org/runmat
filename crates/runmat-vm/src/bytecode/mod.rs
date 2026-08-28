@@ -1,5 +1,6 @@
 pub mod compile;
 pub mod instr;
+mod parallel;
 pub mod program;
 mod region;
 
@@ -10,6 +11,7 @@ pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 3;
 
 pub use compile::{compile, compile_semantic_function_registry};
 pub use instr::{EmitLabel, Instr, StackEffect};
+pub use parallel::{BytecodeParallelVariable, BytecodeParforRegion};
 pub use program::{
     AsyncMetadata, AwaitSite, Bytecode, FunctionBytecode, FunctionRegistry, SpawnSite,
 };

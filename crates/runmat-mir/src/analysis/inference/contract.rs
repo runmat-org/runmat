@@ -27,10 +27,17 @@ pub(crate) fn statement_contract(
         MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
         | MirStmtKind::Expr(value) => rvalue_contract(value, summaries),
-        MirStmtKind::PlaceMutation(_) => (
-            EffectSet([EffectKind::Unknown].into_iter().collect()),
-            CapabilitySet::default(),
-        ),
+        MirStmtKind::PlaceMutation(mutation)
+            if mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::Overloaded
+                || mutation.shape_policy == runmat_hir::AssignmentShapePolicy::Overloaded
+                || mutation.kind == runmat_hir::PlaceMutationKind::MemberAssign =>
+        {
+            (
+                EffectSet([EffectKind::Unknown].into_iter().collect()),
+                CapabilitySet::default(),
+            )
+        }
+        MirStmtKind::PlaceMutation(_) => (EffectSet::default(), CapabilitySet::default()),
         MirStmtKind::WorkspaceEffect { .. } => (
             EffectSet([EffectKind::WorkspaceWrite].into_iter().collect()),
             CapabilitySet::default(),

@@ -14,8 +14,40 @@ use super::ExecutionServiceError;
 static NEXT_SERVICE_NONCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum DeferredInvocation {
+    Callable(crate::call::descriptor::CallableDescriptor),
+    Program {
+        callable: runmat_execution::ProgramCallable,
+        context: runmat_execution::ProgramInvocationContext,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+    },
+}
+
+impl DeferredInvocation {
+    pub fn requested_outputs(&self) -> usize {
+        match self {
+            Self::Callable(descriptor) => descriptor.requested_outputs,
+            Self::Program {
+                requested_outputs, ..
+            } => *requested_outputs,
+        }
+    }
+
+    pub fn arguments(&self) -> &[Value] {
+        match self {
+            Self::Callable(descriptor) => &descriptor.args,
+            Self::Program { arguments, .. } => arguments,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct DeferredCall {
-    pub descriptor: crate::call::descriptor::CallableDescriptor,
+    pub invocation: DeferredInvocation,
+    /// Retry semantics proven at the call's semantic origin. Execution
+    /// adapters must carry this value unchanged into their task request.
+    pub retry: runmat_execution::RetryPolicy,
     pub program_revision: Option<runmat_execution::ProgramRevision>,
     /// Exact, runtime-opaque program description supplied by the VM.
     ///
@@ -254,7 +286,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
     }
 
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError> {
-        let requested_outputs = u16::try_from(call.descriptor.requested_outputs)
+        let requested_outputs = u16::try_from(call.invocation.requested_outputs())
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let mut state = self.state.lock().expect("execution service state poisoned");
         let sequence = state.next_future;
@@ -585,13 +617,18 @@ mod tests {
 
     fn deferred_call(function: usize, arguments: Vec<Value>) -> DeferredCall {
         DeferredCall {
-            descriptor: crate::call::descriptor::CallableDescriptor::resolved(
-                runmat_types::CallableIdentity::BoundFunction(runmat_types::FunctionId(function)),
-                arguments,
-                1,
-                runmat_types::CallableFallbackPolicy::None,
-                crate::call::descriptor::CallableCallKind::Direct,
+            invocation: DeferredInvocation::Callable(
+                crate::call::descriptor::CallableDescriptor::resolved(
+                    runmat_types::CallableIdentity::BoundFunction(runmat_types::FunctionId(
+                        function,
+                    )),
+                    arguments,
+                    1,
+                    runmat_types::CallableFallbackPolicy::None,
+                    crate::call::descriptor::CallableCallKind::Direct,
+                ),
             ),
+            retry: runmat_execution::RetryPolicy::Never,
             program_revision: None,
             program: None,
         }
@@ -621,13 +658,16 @@ mod tests {
         };
         assert_eq!(handle, future);
         assert!(matches!(
-            call.descriptor.target,
-            crate::call::descriptor::CallableTarget::Resolved {
-                identity: runmat_types::CallableIdentity::BoundFunction(runmat_types::FunctionId(
-                    7
-                )),
+            call.invocation,
+            DeferredInvocation::Callable(crate::call::descriptor::CallableDescriptor {
+                target: crate::call::descriptor::CallableTarget::Resolved {
+                    identity: runmat_types::CallableIdentity::BoundFunction(
+                        runmat_types::FunctionId(7)
+                    ),
+                    ..
+                },
                 ..
-            }
+            })
         ));
         service
             .complete_future(&future, Ok(Value::Num(9.0)))

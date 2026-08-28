@@ -18,6 +18,16 @@ pub struct BytecodeRegion {
     pub exits: Vec<BytecodeRegionBoundary>,
 }
 
+impl BytecodeRegion {
+    pub(crate) fn rebind_owner(&mut self, owner: runmat_types::ProgramFunctionId) {
+        self.id.function = owner;
+        self.entry.point.function = owner;
+        for exit in &mut self.exits {
+            exit.point.function = owner;
+        }
+    }
+}
+
 impl Bytecode {
     /// Transactionally install every analyzed region that resolves to exact
     /// empty-stack VM boundaries in this bytecode product. Regions are

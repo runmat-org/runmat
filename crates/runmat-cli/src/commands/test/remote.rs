@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundleBuilder, LogicalObject, ProgramExecutionDescriptor,
-    ProgramExecutionInputs, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    ProgramExecutionInputs, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
 };
 use runmat_package::FrozenProjectHandoff;
 use runmat_test::protocol::{ProtocolHandshake, WorkerCapability};
@@ -169,7 +169,7 @@ impl WorkerBackend for RemoteTestBackend {
                 .cloned()
                 .ok_or_else(|| protocol("remote test bundle has no program artifact"))?;
             let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
                 recipe: bundled_recipe.clone(),
                 artifact: bundled_artifact,
                 callable: runmat_execution::ProgramCallable::semantic(
@@ -180,7 +180,8 @@ impl WorkerBackend for RemoteTestBackend {
             })
             .map_err(protocol)?;
             let inputs = serde_json::to_vec(&ProgramExecutionInputs {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+                context: runmat_execution::ProgramInvocationContext::Direct,
                 arguments: Vec::new(),
             })
             .map_err(protocol)?;
@@ -243,6 +244,10 @@ impl WorkerBackend for RemoteTestBackend {
                 ProgramExecutionResponse::Failure { message } => {
                     Err(BackendError::new(BackendErrorKind::Crashed, message))
                 }
+                ProgramExecutionResponse::RuntimeFailure { failure } => Err(BackendError::new(
+                    BackendErrorKind::Crashed,
+                    failure.message,
+                )),
             }
         })
     }

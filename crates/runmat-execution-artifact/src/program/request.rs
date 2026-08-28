@@ -1,13 +1,16 @@
 use std::collections::BTreeSet;
 
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
-use runmat_execution::ProgramCallable;
+use runmat_execution::{
+    JobId, ProgramCallable, ProgramExecutionAssignment, ProgramInvocationContext,
+    ProgramRuntimeFailure,
+};
 use serde::{Deserialize, Serialize};
 
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use crate::{ArtifactError, ArtifactResult};
 
-pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V2: u16 = 2;
+pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V4: u16 = 4;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
 pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_538;
 
@@ -24,7 +27,7 @@ pub struct ProgramExecutionDescriptor {
 impl ProgramExecutionDescriptor {
     pub fn validate(&self) -> ArtifactResult<()> {
         self.artifact.validate_against(&self.recipe)?;
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V4
             || self.callable.validate().is_err()
             || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
@@ -46,12 +49,13 @@ impl ProgramExecutionDescriptor {
 #[serde(deny_unknown_fields)]
 pub struct ProgramExecutionInputs {
     pub schema_version: u16,
+    pub context: ProgramInvocationContext,
     pub arguments: Vec<ValuePayload>,
 }
 
 impl ProgramExecutionInputs {
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V4
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
         {
             return Err(ArtifactError::Invalid(
@@ -74,6 +78,13 @@ pub struct ProgramExecutionRequest {
     pub recipe: ProgramBuildRecipe,
     pub artifact: ProgramArtifact,
     pub callable: ProgramCallable,
+    pub context: ProgramInvocationContext,
+    /// Scheduler-owned placement identity for this invocation. Direct calls
+    /// have no assignment; execution hosts attach one after placement.
+    pub assignment: Option<ProgramExecutionAssignment>,
+    /// Durable job identity, independent of whether this invocation is also a
+    /// scheduler task. A batch driver has a job without a task assignment.
+    pub job_id: Option<JobId>,
     pub arguments: Vec<ValuePayload>,
     pub requested_outputs: u16,
 }
@@ -86,10 +97,13 @@ impl ProgramExecutionRequest {
         descriptor.validate()?;
         inputs.validate()?;
         let request = Self {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
             recipe: descriptor.recipe,
             artifact: descriptor.artifact,
             callable: descriptor.callable,
+            context: inputs.context,
+            assignment: None,
+            job_id: None,
             arguments: inputs.arguments,
             requested_outputs: descriptor.requested_outputs,
         };
@@ -98,13 +112,14 @@ impl ProgramExecutionRequest {
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2 {
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V4 {
             return Err(ArtifactError::Invalid(
                 "unsupported program execution request schema".into(),
             ));
         }
         self.artifact.validate_against(&self.recipe)?;
         if self.callable.validate().is_err()
+            || self.context.validate_for(&self.callable).is_err()
             || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
@@ -187,6 +202,9 @@ pub enum ProgramExecutionResponse {
     Failure {
         message: String,
     },
+    RuntimeFailure {
+        failure: ProgramRuntimeFailure,
+    },
 }
 
 impl ProgramExecutionResponse {
@@ -215,6 +233,9 @@ impl ProgramExecutionResponse {
                 }
                 Ok(())
             }
+            Self::RuntimeFailure { failure } => failure
+                .validate()
+                .map_err(|error| ArtifactError::Limit(error.to_string())),
         }
     }
 }
@@ -268,10 +289,11 @@ fn validate_externalized_success(
 
 #[cfg(test)]
 mod tests {
-    use runmat_execution::identity::ValueId;
+    use runmat_execution::identity::{AttemptId, ValueId, WorkerId};
     use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
     use runmat_execution::{
-        Digest, OutputContract, ProgramEnvironment, ProgramFunctionId, ProgramRevision,
+        Digest, ExecutionScopeId, JobId, OutputContract, PoolBackend, PoolId, ProgramEnvironment,
+        ProgramExecutionAssignment, ProgramFunctionId, ProgramRevision, TaskId,
     };
 
     use super::*;
@@ -312,10 +334,13 @@ mod tests {
         )
         .unwrap();
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
             recipe,
             artifact,
             callable: ProgramCallable::semantic(ProgramFunctionId(7), Some("test_function".into())),
+            context: ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
             arguments: Vec::new(),
             requested_outputs: 1,
         }
@@ -356,6 +381,32 @@ mod tests {
         let mut outputs = request();
         outputs.requested_outputs = 2;
         assert!(outputs.validate().is_err());
+    }
+
+    #[test]
+    fn execution_identity_round_trips_without_becoming_artifact_identity() {
+        let mut request = request();
+        request.assignment = Some(ProgramExecutionAssignment {
+            scope_id: ExecutionScopeId::derive(&[b"scope"]),
+            pool_id: PoolId::derive(&[b"pool"]),
+            task_id: TaskId::derive(&[b"task"]),
+            attempt_id: AttemptId::derive(&[b"attempt"]),
+            worker_id: WorkerId::derive(&[b"worker"]),
+            backend: PoolBackend::Remote,
+        });
+        request.job_id = Some(JobId::derive(&[b"job"]));
+
+        let encoded = serde_json::to_vec(&request).unwrap();
+        let decoded: ProgramExecutionRequest = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, request);
+        decoded.validate().unwrap();
+
+        let mut with_unknown = serde_json::to_value(&request).unwrap();
+        with_unknown
+            .as_object_mut()
+            .unwrap()
+            .insert("worker_hint".into(), serde_json::json!("untyped"));
+        assert!(serde_json::from_value::<ProgramExecutionRequest>(with_unknown).is_err());
     }
 
     #[test]

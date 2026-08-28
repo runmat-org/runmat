@@ -369,7 +369,11 @@ async fn parent() {
     })
     .await
     .unwrap();
-    assert!(matches!(cancelled, Err(message) if message.contains("cancelled")));
+    assert!(matches!(
+        cancelled,
+        Err(runmat_execution_runner_native::NativeProgramFailure::Execution(message))
+            if message.contains("cancelled")
+    ));
     drop(cancel_task);
     drop(cancel_session);
     assert!(!cancel_store_root.exists());

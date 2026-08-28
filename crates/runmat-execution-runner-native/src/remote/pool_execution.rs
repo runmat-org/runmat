@@ -4,7 +4,7 @@ use std::time::Duration;
 use runmat_execution::identity::{ArtifactId, PoolId};
 use runmat_execution::state::TaskState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, OutputContract, TaskId};
+use runmat_execution::{CancellationReason, ExecutionScopeId, OutputContract, TaskId};
 use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
 use runmat_execution_runner::{PoolSpec, TaskSubmission};
@@ -130,11 +130,8 @@ pub(super) async fn execute(
                 scope_id,
                 pool_id,
                 program_artifact_id: artifact_id,
-                callable: Callable {
-                    owner_identity: "remote-run".into(),
-                    qualified_name: request.recipe.entrypoint.clone(),
-                    entrypoint_digest: Digest::sha256(request.recipe.entrypoint.as_bytes()),
-                },
+                callable: Callable::for_program("remote-run", &request.callable),
+                invocation_context: request.context.clone(),
                 inputs: request.arguments.clone(),
                 outputs: OutputContract {
                     requested_outputs: request.requested_outputs,
@@ -177,14 +174,20 @@ pub(super) async fn execute(
                             result_objects: success.result_objects,
                         },
                     )),
-                    Err(message) => {
+                    Err(failure) => {
                         let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
                         if state == Some(TaskState::Indeterminate) {
-                            Ok(RemotePoolExecutionOutcome::Indeterminate(message))
+                            Ok(RemotePoolExecutionOutcome::Indeterminate(failure.to_string()))
                         } else {
-                            Ok(RemotePoolExecutionOutcome::Completed(
-                                ProgramExecutionResponse::Failure { message },
-                            ))
+                            let response = match failure {
+                                crate::NativeProgramFailure::Execution(message) => {
+                                    ProgramExecutionResponse::Failure { message }
+                                }
+                                crate::NativeProgramFailure::Runtime(failure) => {
+                                    ProgramExecutionResponse::RuntimeFailure { failure }
+                                }
+                            };
+                            Ok(RemotePoolExecutionOutcome::Completed(response))
                         }
                     }
                 };

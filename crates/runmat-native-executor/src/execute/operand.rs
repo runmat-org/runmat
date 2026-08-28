@@ -190,13 +190,16 @@ pub(super) fn evaluate_rvalue(
                 .runtime
                 .execution()
                 .create_future(runmat_runtime::execution::DeferredCall {
-                    descriptor: runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                        runmat_hir::CallableIdentity::BoundFunction(*function),
-                        arguments,
-                        requested_outputs.fixed_count(),
-                        runmat_hir::CallableFallbackPolicy::None,
-                        runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                    invocation: runmat_runtime::execution::DeferredInvocation::Callable(
+                        runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                            runmat_hir::CallableIdentity::BoundFunction(*function),
+                            arguments,
+                            requested_outputs.fixed_count(),
+                            runmat_hir::CallableFallbackPolicy::None,
+                            runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                        ),
                     ),
+                    retry: runmat_execution::RetryPolicy::Never,
                     program_revision: state.runtime.program_revision().cloned(),
                     program,
                 })

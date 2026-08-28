@@ -59,10 +59,13 @@ async fn execute_portable_envelope(
     )
     .unwrap();
     runmat_vm::execute_program_request(runmat_execution_artifact::ProgramExecutionRequest {
-        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
         recipe,
         artifact,
         callable: runmat_execution::ProgramCallable::semantic(function, None),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: Vec::new(),
         requested_outputs: 1,
     })

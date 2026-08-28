@@ -113,6 +113,7 @@ pub fn compile(
         layout: c.layout,
         async_metadata,
         regions: Vec::new(),
+        parfor_regions: Vec::new(),
         #[cfg(feature = "native-accel")]
         accel_graph,
         #[cfg(feature = "native-accel")]
@@ -860,6 +861,7 @@ fn compile_semantic_functions(
                     .collect(),
                 resume_points,
                 regions: Vec::new(),
+                parfor_regions: Vec::new(),
             },
         );
     }

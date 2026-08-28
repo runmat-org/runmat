@@ -128,7 +128,7 @@ impl LocalSupervisorClient {
             })
             .await?
         {
-            SupervisorResponse::Attachment { attachment } => Ok(attachment),
+            SupervisorResponse::Attachment { attachment } => Ok(*attachment),
             response => unexpected(response),
         }
     }

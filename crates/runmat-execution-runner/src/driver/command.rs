@@ -43,6 +43,7 @@ pub enum DriverCommand {
         request: ResizeRequest,
     },
     RegisterWorker(WorkerSpec),
+    ActivateWorker(WorkerId),
     DrainWorker(WorkerId),
     WorkerLost(WorkerId),
     Submit(Box<TaskSubmission>),

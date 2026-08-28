@@ -1,8 +1,17 @@
 use serde::{Deserialize, Serialize};
 
+mod assignment;
 mod callable;
+mod failure;
+mod parallel;
 
+pub use assignment::ProgramExecutionAssignment;
 pub use callable::ProgramCallable;
+pub use failure::{ProgramCallFrame, ProgramRuntimeFailure, ProgramSourceSpan};
+pub use parallel::{
+    ParallelChunk, ParallelRandomStream, ParallelRandomnessContext, ParallelTaskContext,
+    ParallelTaskGraph, ProgramInvocationContext,
+};
 
 use crate::handle::OutputContract;
 use crate::identity::{ArtifactId, ExecutionScopeId, PoolId, TaskId};
@@ -12,8 +21,7 @@ use crate::value::ValuePayload;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Callable {
     pub owner_identity: String,
-    pub qualified_name: String,
-    pub entrypoint_digest: crate::Digest,
+    pub program: ProgramCallable,
 }
 
 impl Callable {
@@ -23,14 +31,20 @@ impl Callable {
     pub fn for_program(owner_identity: impl Into<String>, callable: &ProgramCallable) -> Self {
         Self {
             owner_identity: owner_identity.into(),
-            qualified_name: callable.display_name(),
-            entrypoint_digest: callable.identity_digest(),
+            program: callable.clone(),
         }
     }
 
     pub fn identifies_program(&self, callable: &ProgramCallable) -> bool {
-        self.qualified_name == callable.display_name()
-            && self.entrypoint_digest == callable.identity_digest()
+        self.program == *callable
+    }
+
+    pub fn qualified_name(&self) -> String {
+        self.program.display_name()
+    }
+
+    pub fn entrypoint_digest(&self) -> crate::Digest {
+        self.program.identity_digest()
     }
 }
 
@@ -50,6 +64,11 @@ pub struct TaskRequest {
     pub pool_id: PoolId,
     pub program_artifact_id: ArtifactId,
     pub callable: Callable,
+    /// Typed per-task invocation metadata. This is separate from the immutable
+    /// program artifact so retries and parallel chunks can share one compiled
+    /// product without aliasing their execution context.
+    #[serde(default)]
+    pub invocation_context: ProgramInvocationContext,
     pub inputs: Vec<ValuePayload>,
     pub outputs: OutputContract,
     pub resources: ResourceRequest,

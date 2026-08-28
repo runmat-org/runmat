@@ -22,22 +22,24 @@ struct State {
 pub(super) struct RemoteProgressBuffer(Mutex<State>);
 
 pub struct RemoteTaskCompletion {
-    receiver: oneshot::Receiver<Result<AttemptSuccess, String>>,
+    receiver: oneshot::Receiver<Result<AttemptSuccess, crate::NativeProgramFailure>>,
     progress: std::sync::Arc<RemoteProgressBuffer>,
 }
 
 impl RemoteTaskCompletion {
     pub(super) fn new(
-        receiver: oneshot::Receiver<Result<AttemptSuccess, String>>,
+        receiver: oneshot::Receiver<Result<AttemptSuccess, crate::NativeProgramFailure>>,
         progress: std::sync::Arc<RemoteProgressBuffer>,
     ) -> Self {
         Self { receiver, progress }
     }
 
-    pub async fn wait(self) -> Result<AttemptSuccess, String> {
-        self.receiver
-            .await
-            .unwrap_or_else(|_| Err("remote task completion channel closed".into()))
+    pub async fn wait(self) -> Result<AttemptSuccess, crate::NativeProgramFailure> {
+        self.receiver.await.unwrap_or_else(|_| {
+            Err(crate::NativeProgramFailure::Execution(
+                "remote task completion channel closed".into(),
+            ))
+        })
     }
 
     pub fn drain_progress(&self) -> Vec<ProgramProgress> {

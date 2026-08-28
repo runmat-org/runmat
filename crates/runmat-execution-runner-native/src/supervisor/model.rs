@@ -4,7 +4,7 @@ use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::{Digest, JobHandle};
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
 };
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +85,7 @@ pub struct ProgramBatchSubmission {
     pub recipe: ProgramBuildRecipe,
     pub artifact: ProgramArtifact,
     pub callable: runmat_execution::ProgramCallable,
+    pub invocation_context: runmat_execution::ProgramInvocationContext,
     pub arguments: Vec<ValuePayload>,
     pub requested_outputs: u16,
     pub idempotency_key: Option<String>,
@@ -101,6 +102,7 @@ impl ProgramBatchSubmission {
             recipe: request.recipe,
             artifact: request.artifact,
             callable: request.callable,
+            invocation_context: request.context,
             arguments: request.arguments,
             requested_outputs: request.requested_outputs,
             idempotency_key,
@@ -110,10 +112,13 @@ impl ProgramBatchSubmission {
 
     pub fn program_request(&self) -> ProgramExecutionRequest {
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
             recipe: self.recipe.clone(),
             artifact: self.artifact.clone(),
             callable: self.callable.clone(),
+            context: self.invocation_context.clone(),
+            assignment: None,
+            job_id: None,
             arguments: self.arguments.clone(),
             requested_outputs: self.requested_outputs,
         }
@@ -280,6 +285,7 @@ pub enum BatchDriverInvocation {
     },
     Program {
         job_directory: PathBuf,
+        job_id: runmat_execution::JobId,
         submission: Box<ProgramBatchSubmission>,
     },
 }

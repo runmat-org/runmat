@@ -36,7 +36,10 @@ impl RemotePoolDriver {
         };
         if let Some(results) = committed_results {
             if let Err(error) = self.execution_objects.commit_results(&results) {
-                self.resolve_task(task_id, Err(error.to_string()));
+                self.resolve_task(
+                    task_id,
+                    Err(crate::NativeProgramFailure::Execution(error.to_string())),
+                );
                 return;
             }
         }
@@ -45,12 +48,17 @@ impl RemotePoolDriver {
             let outcome = match report.report {
                 AttemptReport::Succeeded { result } => Ok(result),
                 AttemptReport::Failed { message, .. } | AttemptReport::Lost { message } => {
-                    Err(message)
+                    Err(crate::NativeProgramFailure::Execution(message))
                 }
-                AttemptReport::Cancelled => Err("remote task was cancelled".into()),
-                AttemptReport::Started => Err(format!(
-                    "remote task reached terminal state {state:?} without a terminal report"
+                AttemptReport::RuntimeFailed { failure } => {
+                    Err(crate::NativeProgramFailure::Runtime(failure))
+                }
+                AttemptReport::Cancelled => Err(crate::NativeProgramFailure::Execution(
+                    "remote task was cancelled".into(),
                 )),
+                AttemptReport::Started => Err(crate::NativeProgramFailure::Execution(format!(
+                    "remote task reached terminal state {state:?} without a terminal report"
+                ))),
             };
             self.resolve_task(task_id, outcome);
         }
@@ -75,7 +83,10 @@ impl RemotePoolDriver {
             })
             .collect::<Vec<_>>();
         for (task_id, message) in terminal {
-            self.resolve_task(task_id, Err(message));
+            self.resolve_task(
+                task_id,
+                Err(crate::NativeProgramFailure::Execution(message)),
+            );
         }
     }
 

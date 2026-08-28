@@ -125,6 +125,117 @@ fn migrated_registry_is_valid_and_case_insensitive() {
 }
 
 #[test]
+fn current_parallel_context_contracts_are_typed_and_parallel_capable() {
+    for name in ["getCurrentTask", "getCurrentWorker", "getCurrentJob"] {
+        let entry = builtin_catalog_entry_by_name(name).expect("parallel context catalog entry");
+        let effects = entry.contract.effect_set();
+        let capabilities = entry.contract.capability_set();
+
+        assert_eq!(
+            effects.0,
+            [EffectKind::MayThrow].into_iter().collect(),
+            "{name} must not acquire an unknown effect"
+        );
+        assert_eq!(
+            capabilities.0,
+            [CapabilityRequirement::ParallelRuntime]
+                .into_iter()
+                .collect(),
+            "{name} must retain its execution capability through analysis"
+        );
+        assert_eq!(
+            entry.contract.maturity,
+            BuiltinContractMaturity::DynamicByDesign
+        );
+    }
+}
+
+#[test]
+fn parallel_surface_retains_pool_future_and_fetch_facts() {
+    use runmat_types::{
+        CallRequest, CallableFact, ExecutionFact, FutureStateFact, LiteralContext, LiteralValue,
+        NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ValueFact,
+        ValueKindFact,
+    };
+
+    let request = CallRequest {
+        arguments: Vec::new(),
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let pool = infer_catalog_call(
+        builtin_catalog_entry_by_name("parpool").expect("parpool entry"),
+        &request,
+    );
+    assert!(matches!(
+        pool.outputs[0].kind,
+        ValueKindFact::Execution(ExecutionFact::Pool)
+    ));
+    assert_eq!(
+        pool.capabilities.0,
+        [CapabilityRequirement::ParallelRuntime]
+            .into_iter()
+            .collect()
+    );
+
+    let callable_output = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::UInt16,
+        domain: NumericDomain::Real,
+    }));
+    let callable = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        parameters: vec![ValueFact::unknown(
+            runmat_types::DynamicReason::RuntimeValue,
+        )],
+        parameters_complete: true,
+        outputs: vec![callable_output.clone()],
+        outputs_complete: true,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: Vec::new(),
+        captures_complete: true,
+    }));
+    let future = infer_catalog_call(
+        builtin_catalog_entry_by_name("parfeval").expect("parfeval entry"),
+        &CallRequest {
+            arguments: vec![
+                callable,
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+                ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(1.0),
+                LiteralValue::Unknown,
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(matches!(
+        &future.outputs[0].kind,
+        ValueKindFact::Execution(ExecutionFact::Future {
+            output,
+            state: FutureStateFact::Unknown,
+        }) if **output == callable_output
+    ));
+
+    let fetched = infer_catalog_call(
+        builtin_catalog_entry_by_name("fetchOutputs").expect("fetchOutputs entry"),
+        &CallRequest {
+            arguments: future.outputs,
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(fetched.outputs, vec![callable_output]);
+    assert!(fetched.effects.0.contains(&EffectKind::MaySuspend));
+    assert!(fetched.effects.0.contains(&EffectKind::MayThrow));
+}
+
+#[test]
 fn zeros_contract_uses_literal_dimensions_class_and_like_residency() {
     use runmat_types::{
         CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,

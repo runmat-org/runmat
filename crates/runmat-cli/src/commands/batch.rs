@@ -121,8 +121,10 @@ pub async fn run_driver() -> std::process::ExitCode {
             working_directory,
             ..
         } => run_script_driver(source_path, arguments, working_directory).await,
-        BatchDriverInvocation::Program { submission, .. } => {
-            let response = execute_program_batch(*submission).await;
+        BatchDriverInvocation::Program {
+            job_id, submission, ..
+        } => {
+            let response = execute_program_batch(*submission, job_id).await;
             let success = matches!(
                 response,
                 WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. }

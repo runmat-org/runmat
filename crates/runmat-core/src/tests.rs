@@ -14350,10 +14350,48 @@ fn portable_product_preserves_analyzed_parfor_contracts() {
         envelope.manifest.parallel.parfor_regions[0].maximum_workers,
         Some(runmat_types::LabCount(2))
     );
+    let executable = unit
+        .bytecode()
+        .parfor_regions
+        .first()
+        .expect("compiled parfor executable");
+    assert_eq!(
+        executable.contract,
+        envelope.manifest.parallel.parfor_regions[0]
+    );
+    assert_ne!(executable.header.pc, executable.body.pc);
+    assert_ne!(executable.header.pc, executable.exit.pc);
+    assert_eq!(
+        executable
+            .variables
+            .iter()
+            .find(|variable| variable.contract.value == executable.contract.loop_variable)
+            .map(|variable| variable.slot),
+        Some(executable.loop_slot)
+    );
     envelope
         .manifest
         .validate()
         .expect("parallel contract remains valid in the executable manifest");
+}
+
+#[test]
+fn parfor_without_a_semantic_contract_is_rejected_before_execution() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let error = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-parfor-legality-test@1",
+            "parallel_legality.m",
+            "parfor index = 1:2; break; end;\n",
+        ),
+        None,
+    ))
+    .expect_err("an unclassified parfor must not produce executable bytecode");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("did not pass semantic classification"),
+        "unexpected parfor compilation error: {rendered}"
+    );
 }
 
 #[test]
@@ -14368,6 +14406,48 @@ fn parfor_has_a_deterministic_serial_execution_fallback() {
         session.get_variables().get("total"),
         Some(&runmat_value::Value::Num(10.0))
     );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn generic_native_deoptimizes_at_the_exact_parfor_boundary() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-native-parfor-test@1",
+            "nativeParfor.m",
+            "function [values, total] = nativeParfor(n)\nvalues = zeros(1, n);\ntotal = 0;\nparfor index = 1:n\nvalues(index) = index * 2;\ntotal = total + index;\nend\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile native parfor unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeParfor".into()),
+        arguments: vec![runmat_value::Value::Num(4.0)],
+        requested_outputs: 2,
+    };
+    let established = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("established parfor execution");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("generic-native parfor execution");
+    assert_eq!(native, established);
+    let runmat_value::Value::OutputList(outputs) = native else {
+        panic!("expected two parfor outputs");
+    };
+    assert!(matches!(
+        &outputs[0],
+        runmat_value::Value::Tensor(value)
+            if value.materialize_f64() == vec![2.0, 4.0, 6.0, 8.0]
+    ));
+    assert_eq!(outputs[1], runmat_value::Value::Num(10.0));
 }
 
 #[test]

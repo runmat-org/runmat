@@ -43,6 +43,9 @@ pub enum AttemptReport {
         kind: AttemptFailureKind,
         message: String,
     },
+    RuntimeFailed {
+        failure: runmat_execution::ProgramRuntimeFailure,
+    },
     Lost {
         message: String,
     },

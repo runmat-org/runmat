@@ -120,6 +120,21 @@ pub(super) fn execute(
         )? {
             return Ok(NativeSiteOutcome::exit());
         }
+        if request.phase == NativeSitePhase::TERMINATOR_RVALUE && instruction.site.ordinal == 0 {
+            if let NativeTerminatorKind::ParFor { region, .. } = &block.terminator.kind {
+                super::deoptimization::install_exit_for_target(
+                    state,
+                    call,
+                    &instruction.site,
+                    frame_state,
+                    super::deoptimization::NativeTransfer::interpreter_slow_path(
+                        parallel_region_token(*region),
+                    ),
+                    exit,
+                )?;
+                return Ok(NativeSiteOutcome::exit());
+            }
+        }
         if request.phase == NativeSitePhase::RVALUE {
             if let Some(outcome) = super::region::checkpoint(state, request, exit)? {
                 return Ok(outcome);
@@ -450,12 +465,27 @@ fn execute_terminator(
                 }
             }
         }
-        NativeTerminatorKind::ParFor { .. } | NativeTerminatorKind::Spmd { .. } => {
-            Err(NativeExecutorError::UnsupportedSite(
-                "parallel terminator requires the R27 native parallel executor".into(),
-            ))
+        NativeTerminatorKind::ParFor { region, .. } => {
+            super::deoptimization::install_exit_for_target(
+                state,
+                call,
+                &terminator.site,
+                &terminator.frame_state,
+                super::deoptimization::NativeTransfer::interpreter_slow_path(
+                    parallel_region_token(*region),
+                ),
+                exit,
+            )?;
+            Ok(NativeSiteOutcome::exit())
         }
+        NativeTerminatorKind::Spmd { .. } => Err(NativeExecutorError::UnsupportedSite(
+            "SPMD terminator requires the distributed native executor".into(),
+        )),
     }
+}
+
+fn parallel_region_token(region: runmat_types::ParallelRegionId) -> u64 {
+    (u64::from(region.0.function.0) << 32) | u64::from(region.0.ordinal)
 }
 
 fn return_local_value(

@@ -207,6 +207,7 @@ fn exact_program_submission_round_trips_through_durable_storage() {
         recipe,
         artifact,
         callable: ProgramCallable::semantic(ProgramFunctionId(7), None),
+        invocation_context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: Vec::new(),
         requested_outputs: 1,
         idempotency_key: Some("program-key".into()),

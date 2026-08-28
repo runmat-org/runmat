@@ -783,7 +783,10 @@ fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
     error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Requested)
 }
 
-fn value_contains_explicit_gpu(value: &Value) -> bool {
+/// Returns whether a value, including any recursively captured value, carries
+/// explicit device-residency intent. Execution boundaries may gather automatic
+/// residency, but must not silently erase an explicit `gpuArray` request.
+pub fn value_contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
         Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),

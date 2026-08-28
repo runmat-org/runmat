@@ -114,14 +114,21 @@ impl RuntimeExecutionServices for NativeExecutionService {
 
     fn current_pool(&self) -> Result<Option<PoolSnapshot>, ExecutionServiceError> {
         let state = self.state.lock().expect("native service poisoned");
-        Ok(state.pool_open.then(|| PoolSnapshot {
+        if !state.pool_open {
+            return Ok(None);
+        }
+        let workers = self
+            .driver
+            .active_workers()
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        Ok(Some(PoolSnapshot {
             handle: PoolHandle {
                 id: self.driver.pool_id(),
                 scope_id: self.scope_id,
                 generation: state.pool_generation,
             },
             backend: PoolBackend::LocalProcesses,
-            workers: self.driver.max_workers(),
+            workers,
             state: PoolState::Ready,
         }))
     }
@@ -130,15 +137,36 @@ impl RuntimeExecutionServices for NativeExecutionService {
         if request
             .backend
             .is_some_and(|backend| backend != PoolBackend::LocalProcesses)
-            || request
-                .workers
-                .is_some_and(|workers| workers != self.driver.max_workers())
         {
-            return Err(ExecutionServiceError::Failed(format!(
-                "this session owns a fixed local process pool with {} workers",
-                self.driver.max_workers()
-            )));
+            return Err(ExecutionServiceError::Failed(
+                "this session supports the local process pool backend".into(),
+            ));
         }
+        if request.workers.is_none() {
+            let state = self.state.lock().expect("native service poisoned");
+            if state.pool_open {
+                let generation = state.pool_generation;
+                drop(state);
+                let workers = self
+                    .driver
+                    .active_workers()
+                    .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+                return Ok(PoolSnapshot {
+                    handle: PoolHandle {
+                        id: self.driver.pool_id(),
+                        scope_id: self.scope_id,
+                        generation,
+                    },
+                    backend: PoolBackend::LocalProcesses,
+                    workers,
+                    state: PoolState::Ready,
+                });
+            }
+        }
+        let workers = request.workers.unwrap_or_else(|| self.driver.max_workers());
+        self.driver
+            .resize_pool(workers)
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         let mut state = self.state.lock().expect("native service poisoned");
         state.pool_open = true;
         Ok(PoolSnapshot {
@@ -148,7 +176,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 generation: state.pool_generation,
             },
             backend: PoolBackend::LocalProcesses,
-            workers: self.driver.max_workers(),
+            workers,
             state: PoolState::Ready,
         })
     }
@@ -174,7 +202,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
     }
 
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError> {
-        let requested_outputs = u16::try_from(call.descriptor.requested_outputs)
+        let requested_outputs = u16::try_from(call.invocation.requested_outputs())
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let mut state = self.state.lock().expect("native service poisoned");
         let sequence = state.next_future;
@@ -202,20 +230,23 @@ impl RuntimeExecutionServices for NativeExecutionService {
             }
             None => return Err(ExecutionServiceError::UnknownHandle),
         };
-        let (callable, recipe, artifact, inputs) = materialize_call(&call, future.outputs.clone())?;
+        let (callable, invocation_context, recipe, artifact, inputs) =
+            materialize_call(&call, future.outputs.clone())?;
         let sequence = state.next_task;
         state.next_task = sequence.wrapping_add(1);
         let id = TaskId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
         let completion = self
             .driver
-            .submit(
-                id,
+            .submit(crate::driver::LocalProgramSubmission {
+                task_id: id,
                 callable,
+                invocation_context,
                 recipe,
                 artifact,
                 inputs,
-                future.outputs.clone(),
-            )
+                outputs: future.outputs.clone(),
+                retry: call.retry,
+            })
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         state
             .futures
@@ -357,14 +388,16 @@ impl RuntimeExecutionServices for NativeExecutionService {
         call: DeferredCall,
         options: DurableJobOptions,
     ) -> Result<JobHandle, ExecutionServiceError> {
-        let requested_outputs = u16::try_from(call.descriptor.requested_outputs)
+        let requested_outputs = u16::try_from(call.invocation.requested_outputs())
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let outputs = OutputContract { requested_outputs };
-        let (callable, recipe, artifact, arguments) = materialize_call(&call, outputs)?;
+        let (callable, invocation_context, recipe, artifact, arguments) =
+            materialize_call(&call, outputs)?;
         self.durable.submit(ProgramBatchSubmission {
             recipe,
             artifact,
             callable,
+            invocation_context,
             arguments,
             requested_outputs,
             idempotency_key: options.idempotency_key,
@@ -431,9 +464,16 @@ impl RuntimeExecutionServices for NativeExecutionService {
                     );
                 }
                 runmat_runtime::execution::value_codec::decode_inline_value(payload)
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| crate::driver::TransferFailure::Message(error.to_string()))
             })
-            .map_err(ExecutionServiceError::Failed);
+            .map_err(|failure| match failure {
+                crate::driver::TransferFailure::Message(message) => {
+                    ExecutionServiceError::Failed(message)
+                }
+                crate::driver::TransferFailure::Runtime(failure) => {
+                    ExecutionServiceError::RuntimeFailure(failure)
+                }
+            });
         let mut state = self.state.lock().expect("native service poisoned");
         state
             .futures
@@ -551,6 +591,7 @@ fn materialize_call(
 ) -> Result<
     (
         runmat_execution::ProgramCallable,
+        runmat_execution::ProgramInvocationContext,
         runmat_execution_artifact::ProgramBuildRecipe,
         runmat_execution_artifact::ProgramArtifact,
         Vec<runmat_execution::value::ValuePayload>,

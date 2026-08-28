@@ -8,7 +8,7 @@ use runmat_execution::resource::{ResourceInventory, ResourceRequest};
 use runmat_execution::state::PoolState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::{InlineValue, ValuePayload};
-use runmat_execution::{Digest, ExecutionScopeId, PoolId, TaskId};
+use runmat_execution::{ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_runner::driver::{DriverAction, DriverCommand, DriverConfig};
 use runmat_execution_runner::{Driver, PoolSpec, TaskSubmission, WorkerSpec};
 
@@ -99,11 +99,14 @@ pub fn task(
             scope_id: scope,
             pool_id: pool,
             program_artifact_id: ArtifactId::derive(&[b"artifact"]),
-            callable: Callable {
-                owner_identity: "fixture".into(),
-                qualified_name: name.into(),
-                entrypoint_digest: Digest::sha256(name),
-            },
+            callable: Callable::for_program(
+                "fixture",
+                &runmat_execution::ProgramCallable::semantic(
+                    runmat_execution::ProgramFunctionId(0),
+                    None,
+                ),
+            ),
+            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: Vec::new(),
             outputs: OutputContract {
                 requested_outputs: 1,

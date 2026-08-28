@@ -53,7 +53,7 @@ pub enum SupervisorResponse {
         record: LocalJobRecord,
     },
     Attachment {
-        attachment: JobAttachment,
+        attachment: Box<JobAttachment>,
     },
     Cancelled {
         record: LocalJobRecord,

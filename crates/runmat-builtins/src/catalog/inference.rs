@@ -1,8 +1,8 @@
 use super::{BuiltinCatalogEntry, BuiltinContractMaturity};
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact,
-    StructFact, ValueFact, ValueKindFact,
+    infer_call, CallContract, CallInference, CallRequest, DynamicReason, ExecutionFact,
+    FutureStateFact, InferenceDiagnostic, LiteralValue, NumericClass, NumericDomain, NumericFact,
+    OutputListFact, ResidencyFact, ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -14,8 +14,128 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
         "acceleration.gather" => infer_gather(request, entry),
         "aggregate.struct" => infer_struct_builtin(request, entry),
         "introspection.feval" => infer_feval(request, entry),
+        "parallel.parpool" => infer_parallel_pool(request, entry, false),
+        "parallel.gcp" => infer_parallel_pool(request, entry, true),
+        "parallel.parfeval" | "parallel.parfeval-on-all" => infer_parallel_future(request, entry),
+        "parallel.fetch-outputs" => infer_parallel_fetch(request, entry, false),
+        "parallel.fetch-next" => infer_parallel_fetch(request, entry, true),
         _ => unavailable_rule(entry, request),
     }
+}
+
+fn infer_parallel_pool(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    current_pool: bool,
+) -> CallInference {
+    let nocreate = current_pool
+        && request
+            .literals
+            .literal_args
+            .first()
+            .and_then(literal_text)
+            .is_some_and(|value| value.eq_ignore_ascii_case("nocreate"));
+    let output = if nocreate {
+        ValueFact::unknown(DynamicReason::RuntimeValue)
+    } else {
+        ValueFact::scalar(ValueKindFact::Execution(ExecutionFact::Pool))
+    };
+    finish_fixed(entry, request, output, Vec::new())
+}
+
+fn infer_parallel_future(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let explicit_pool = matches!(
+        request.arguments.first().map(|fact| &fact.kind),
+        Some(ValueKindFact::Execution(ExecutionFact::Pool))
+    );
+    let callable_index = usize::from(explicit_pool);
+    let output_count_index = callable_index + 1;
+    let output = scheduled_callable_output(request, callable_index, output_count_index);
+    let future = ValueFact::scalar(ValueKindFact::Execution(ExecutionFact::Future {
+        output: Box::new(output),
+        state: FutureStateFact::Unknown,
+    }));
+    finish_fixed(entry, request, future, Vec::new())
+}
+
+fn scheduled_callable_output(
+    request: &CallRequest,
+    callable_index: usize,
+    output_count_index: usize,
+) -> ValueFact {
+    let Some(ValueKindFact::Callable(callable)) =
+        request.arguments.get(callable_index).map(|fact| &fact.kind)
+    else {
+        return ValueFact::unknown(DynamicReason::UnresolvedCallable);
+    };
+    let Some(output_count) = request
+        .literals
+        .literal_args
+        .get(output_count_index)
+        .and_then(literal_output_count)
+    else {
+        return ValueFact::unknown(DynamicReason::RuntimeValue);
+    };
+    if output_count == 0 {
+        return ValueFact::scalar(ValueKindFact::Void);
+    }
+    let outputs = (0..output_count)
+        .map(|index| {
+            callable
+                .outputs
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue))
+        })
+        .collect::<Vec<_>>();
+    if output_count == 1 {
+        outputs
+            .into_iter()
+            .next()
+            .expect("one requested output was materialized")
+    } else {
+        ValueFact::scalar(ValueKindFact::OutputList(OutputListFact {
+            outputs,
+            variadic: !callable.outputs_complete || callable.variadic_outputs,
+        }))
+    }
+}
+
+fn literal_output_count(literal: &LiteralValue) -> Option<usize> {
+    let LiteralValue::Number(value) = literal else {
+        return None;
+    };
+    (value.is_finite() && *value >= 0.0 && value.fract() == 0.0 && *value <= usize::MAX as f64)
+        .then_some(*value as usize)
+}
+
+fn infer_parallel_fetch(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    include_index: bool,
+) -> CallInference {
+    let payload = match request.arguments.first().map(|fact| &fact.kind) {
+        Some(ValueKindFact::Execution(ExecutionFact::Future { output, .. })) => {
+            output.as_ref().clone()
+        }
+        _ => ValueFact::unknown(DynamicReason::RuntimeValue),
+    };
+    let mut outputs = Vec::new();
+    if include_index {
+        outputs.push(default_double_scalar());
+    }
+    match payload.kind {
+        ValueKindFact::OutputList(OutputListFact {
+            outputs: payload_outputs,
+            ..
+        }) => outputs.extend(payload_outputs),
+        ValueKindFact::Void => {}
+        _ => outputs.push(payload),
+    }
+    let mut contract = CallContract::fixed(outputs);
+    contract.effects = entry.contract.effect_set();
+    contract.capabilities = entry.contract.capability_set();
+    infer_call(&contract, request)
 }
 
 fn infer_feval(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {

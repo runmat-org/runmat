@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_types::{
     CapabilityRequirement, CapabilitySet, LabCount, ParallelAccess, ParallelManifest,
@@ -7,12 +7,13 @@ use runmat_types::{
 };
 
 use crate::{
-    MirBody, MirDiagnostic, MirDiagnosticSeverity, MirIndexComponent, MirLocalId, MirLocalKind,
-    MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+    MirBody, MirDiagnostic, MirDiagnosticSeverity, MirLocalId, MirLocalKind, MirRvalue,
+    MirTerminatorKind,
 };
+use runmat_hir::FunctionId;
 
 use super::super::AnalysisStore;
-use super::{facts, region};
+use super::{facts, legality, region};
 
 struct ClassificationContext<'a> {
     body: &'a MirBody,
@@ -30,6 +31,7 @@ pub(super) fn classify_body(
     body: &MirBody,
     function: ProgramFunctionId,
     store: &AnalysisStore,
+    summaries: &BTreeMap<FunctionId, super::super::inference::FunctionSummary>,
     manifest: &mut ParallelManifest,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
@@ -46,6 +48,8 @@ pub(super) fn classify_body(
             continue;
         };
         let blocks = region::body_blocks(body, header.id, *body_block, *exit_block);
+        let mut legal =
+            legality::validate_control_flow(body, &blocks, header.id, *exit_block, diagnostics);
         if region::contains_parallel_region(body, &blocks) {
             diagnostics.push(
                 MirDiagnostic::new(
@@ -58,6 +62,7 @@ pub(super) fn classify_body(
                 .with_help("move the nested parallel work outside this parfor")
                 .with_category("parfor-legality"),
             );
+            legal = false;
         }
         let access = region::accesses(body, &blocks);
         let header_position = header.statements.len();
@@ -82,10 +87,66 @@ pub(super) fn classify_body(
             .filter_map(|local| variable_contract(&context, local))
             .collect::<Vec<_>>();
         variables.sort_by_key(|variable| variable.value);
+        for variable in &variables {
+            let Ok(local_index) = usize::try_from(variable.value.local) else {
+                continue;
+            };
+            if matches!(
+                variable.role,
+                ParallelVariableRole::Private | ParallelVariableRole::Temporary
+            ) && legality::read_before_iteration_assignment(
+                body,
+                &blocks,
+                *body_block,
+                *binding,
+                MirLocalId(local_index),
+            ) {
+                let span = body
+                    .locals
+                    .get(local_index)
+                    .map(|local| local.span)
+                    .unwrap_or(header.terminator.span);
+                diagnostics.push(
+                    MirDiagnostic::new(
+                        "RM-MIR0019",
+                        MirDiagnosticSeverity::Error,
+                        "parfor variable cannot be classified safely",
+                        span,
+                    )
+                    .with_primary_label(
+                        "this value is read before an iteration-local assignment and is not a valid broadcast, slice, or reduction",
+                    )
+                    .with_help(
+                        "use one consistent sliced dimension, a supported reduction, or assign the temporary on every path before reading it",
+                    )
+                    .with_category("parfor-legality"),
+                );
+                legal = false;
+            }
+        }
+        if !legal {
+            continue;
+        }
         let maximum_workers = maximum_workers
             .as_deref()
             .and_then(constant_positive_worker_count);
         let mut capabilities = CapabilitySet::default();
+        let mut effects = runmat_types::EffectSet::default();
+        for block in body
+            .blocks
+            .iter()
+            .filter(|block| blocks.contains(&block.id))
+        {
+            for statement in &block.statements {
+                let (statement_effects, statement_capabilities) =
+                    super::super::inference::statement_contract(statement, summaries);
+                effects.0.extend(statement_effects.0);
+                capabilities.0.extend(statement_capabilities.0);
+            }
+            if matches!(block.terminator.kind, MirTerminatorKind::Await { .. }) {
+                effects.0.insert(runmat_types::EffectKind::MaySuspend);
+            }
+        }
         capabilities
             .0
             .insert(CapabilityRequirement::ParallelRuntime);
@@ -98,6 +159,7 @@ pub(super) fn classify_body(
             iterable: facts::rvalue_fact(store, function, header.id, header_position, iterable),
             variables,
             maximum_workers,
+            effects,
             capabilities,
             randomness: ParallelRandomnessPolicy::DeterministicSubstreams,
         });
@@ -122,11 +184,17 @@ fn variable_contract(
         ParallelVariableRole::Loop
     } else if read && !write {
         ParallelVariableRole::Broadcast
-    } else if let Some(dimensions) =
-        sliced_dimensions(context.body, context.blocks, context.binding, local)
+    } else if let Some(access) = super::patterns::sliced_access(
+        context.body,
+        context.blocks,
+        context.function,
+        context.binding,
+        local,
+    ) {
+        ParallelVariableRole::Sliced { access }
+    } else if let Some(operator) =
+        super::patterns::reduction_operator(context.body, context.blocks, local)
     {
-        ParallelVariableRole::Sliced { dimensions }
-    } else if let Some(operator) = reduction_operator(context.body, context.blocks, local) {
         ParallelVariableRole::Reduction { operator }
     } else {
         match context.body.locals.get(local.0).map(|local| &local.kind) {
@@ -147,138 +215,6 @@ fn variable_contract(
         transferable: facts::transferable(&fact),
         fact,
     })
-}
-
-fn sliced_dimensions(
-    body: &MirBody,
-    blocks: &BTreeSet<crate::BasicBlockId>,
-    binding: MirLocalId,
-    local: MirLocalId,
-) -> Option<Vec<u32>> {
-    let mut dimensions = BTreeSet::new();
-    let mut found = false;
-    for statement in body
-        .blocks
-        .iter()
-        .filter(|block| blocks.contains(&block.id))
-        .flat_map(|block| &block.statements)
-    {
-        let places = match &statement.kind {
-            MirStmtKind::Assign { place, .. } => vec![place],
-            MirStmtKind::MultiAssign { targets, .. } => targets
-                .targets
-                .iter()
-                .filter_map(|target| match target {
-                    crate::MirOutputTarget::Place(place) => Some(place),
-                    crate::MirOutputTarget::Discard => None,
-                })
-                .collect(),
-            MirStmtKind::PlaceMutation(mutation) => vec![&mutation.place],
-            _ => Vec::new(),
-        };
-        for place in places {
-            if place_root_local(place) != Some(local) {
-                continue;
-            }
-            found = true;
-            let MirPlace::Index(_, indexing) = place else {
-                return None;
-            };
-            let indexed = indexing
-                .components
-                .iter()
-                .enumerate()
-                .filter_map(|(dimension, component)| {
-                    matches!(component, MirIndexComponent::Expr(MirOperand::Local(value)) if *value == binding)
-                        .then_some(u32::try_from(dimension + 1).ok())
-                        .flatten()
-                })
-                .collect::<Vec<_>>();
-            if indexed.len() != 1 {
-                return None;
-            }
-            dimensions.insert(indexed[0]);
-        }
-    }
-    (found && dimensions.len() == 1).then(|| dimensions.into_iter().collect())
-}
-
-fn reduction_operator(
-    body: &MirBody,
-    blocks: &BTreeSet<crate::BasicBlockId>,
-    local: MirLocalId,
-) -> Option<runmat_types::OperatorKind> {
-    let mut operator = None;
-    let mut found = false;
-    for statement in body
-        .blocks
-        .iter()
-        .filter(|block| blocks.contains(&block.id))
-        .flat_map(|block| &block.statements)
-    {
-        let MirStmtKind::Assign {
-            place: MirPlace::Local(target),
-            value: MirRvalue::Binary(left, candidate, right),
-        } = &statement.kind
-        else {
-            if statement_writes_local(statement, local) {
-                return None;
-            }
-            continue;
-        };
-        if *target != local {
-            continue;
-        }
-        let reads_accumulator = matches!(left, MirOperand::Local(value) if *value == local)
-            || (commutative_reduction(*candidate)
-                && matches!(right, MirOperand::Local(value) if *value == local));
-        if !reads_accumulator || !supported_reduction(*candidate) {
-            return None;
-        }
-        found = true;
-        if operator
-            .replace(*candidate)
-            .is_some_and(|prior| prior != *candidate)
-        {
-            return None;
-        }
-    }
-    if found {
-        operator
-    } else {
-        None
-    }
-}
-
-fn supported_reduction(operator: runmat_types::OperatorKind) -> bool {
-    matches!(
-        operator,
-        runmat_types::OperatorKind::Add
-            | runmat_types::OperatorKind::Subtract
-            | runmat_types::OperatorKind::MatrixMultiply
-            | runmat_types::OperatorKind::ElementwiseMultiply
-            | runmat_types::OperatorKind::ElementwiseAnd
-            | runmat_types::OperatorKind::ElementwiseOr
-    )
-}
-
-fn commutative_reduction(operator: runmat_types::OperatorKind) -> bool {
-    !matches!(operator, runmat_types::OperatorKind::Subtract)
-}
-
-fn statement_writes_local(statement: &crate::MirStmt, local: MirLocalId) -> bool {
-    let (_, writes) = super::super::regions::statement_uses_defs(statement);
-    writes.contains(&local)
-}
-
-fn place_root_local(place: &MirPlace) -> Option<MirLocalId> {
-    match place {
-        MirPlace::Local(local) => Some(*local),
-        MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) | MirPlace::Index(base, _) => {
-            place_root_local(base)
-        }
-        MirPlace::Binding(_) => None,
-    }
 }
 
 fn region_value(function: ProgramFunctionId, local: MirLocalId) -> Option<RegionValueId> {

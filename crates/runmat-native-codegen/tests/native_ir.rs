@@ -1144,6 +1144,7 @@ fn parfor_and_spmd_fixtures_lower_as_structured_suspend_resume_ir() {
                     transferable: true,
                 }],
                 maximum_workers: Some(LabCount(4)),
+                effects: Default::default(),
                 capabilities: CapabilitySet::default(),
                 randomness: ParallelRandomnessPolicy::DeterministicSubstreams,
             });

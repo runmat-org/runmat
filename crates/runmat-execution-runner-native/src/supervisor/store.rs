@@ -473,6 +473,7 @@ pub(super) fn load_driver_invocation(
             }
             Ok(BatchDriverInvocation::Program {
                 job_directory: job_dir.to_path_buf(),
+                job_id: request.handle.id,
                 submission,
             })
         }

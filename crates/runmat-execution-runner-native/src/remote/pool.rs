@@ -17,7 +17,7 @@ use super::pool_progress::RemoteTaskCompletion;
 use super::{RemoteAttempt, RemoteWorkerChannel};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-type CompletionResult = Result<AttemptSuccess, String>;
+type CompletionResult = Result<AttemptSuccess, crate::NativeProgramFailure>;
 
 mod completion;
 
@@ -318,6 +318,14 @@ impl RemotePoolDriver {
             let report = match (channel, program) {
                 (Some(channel), Some(mut program)) => {
                     program.arguments = request.task.inputs.clone();
+                    program.assignment = Some(runmat_execution::ProgramExecutionAssignment {
+                        scope_id: request.scope_id,
+                        pool_id: request.task.pool_id,
+                        task_id: request.task_id,
+                        attempt_id: request.id,
+                        worker_id: request.worker_id,
+                        backend: runmat_execution::PoolBackend::Remote,
+                    });
                     let transfer = this
                         .execution_objects
                         .transfer_all(channel.as_ref(), request.worker_id)

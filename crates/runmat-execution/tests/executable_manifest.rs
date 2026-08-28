@@ -148,6 +148,7 @@ fn manifest() -> ExecutableUnitManifest {
                     transferable: true,
                 }],
                 maximum_workers: Some(LabCount(4)),
+                effects: Default::default(),
                 capabilities: Default::default(),
                 randomness: ParallelRandomnessPolicy::DeterministicSubstreams,
             }],
@@ -197,7 +198,7 @@ fn executable_manifest_round_trips_all_contract_families() {
     round_trip_vector();
     assert_eq!(
         manifest().cache_key().unwrap().to_string(),
-        "sha256:b47785269dfca2097437e19559c0e32db6825ee3a8500432d015b6eb9038a2e9"
+        "sha256:50cef67f83179e997bef49a190af7acc136619f34f0e99b938a87639cad6fc16"
     );
 }
 

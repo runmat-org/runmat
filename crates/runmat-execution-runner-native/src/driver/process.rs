@@ -7,10 +7,12 @@ use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
 use runmat_process_host::HostCommand;
 use tokio::io::BufReader;
 
-use super::{LocalDriver, TaskCompletion, TransferResult, NATIVE_OBJECT_STORE_ROOT_ENV};
+use super::{
+    LocalDriver, TaskCompletion, TransferFailure, TransferResult, NATIVE_OBJECT_STORE_ROOT_ENV,
+};
 use crate::protocol::{
     StoredProgram, WorkerProcessMessage, WorkerRequest, WorkerResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
 };
 
 pub(super) fn execute_attempt(
@@ -25,10 +27,20 @@ pub(super) fn execute_attempt(
     let stored: StoredProgram =
         serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
     let worker_request = WorkerRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
         recipe: stored.recipe,
         artifact: stored.artifact,
-        callable: stored.callable,
+        callable: request.task.callable.program.clone(),
+        context: request.task.invocation_context.clone(),
+        assignment: Some(runmat_execution::ProgramExecutionAssignment {
+            scope_id: request.scope_id,
+            pool_id: request.task.pool_id,
+            task_id: request.task_id,
+            attempt_id: request.id,
+            worker_id: request.worker_id,
+            backend: runmat_execution::PoolBackend::LocalProcesses,
+        }),
+        job_id: None,
         arguments: request.task.inputs.clone(),
         requested_outputs: request.task.outputs.requested_outputs,
     };
@@ -114,6 +126,9 @@ async fn run_process(
             outputs,
             result_objects,
         }),
-        WorkerResponse::Failure { message } => Err(message),
+        WorkerResponse::Failure { message } => Err(TransferFailure::Message(message)),
+        WorkerResponse::RuntimeFailure { failure } => {
+            Err(TransferFailure::Runtime(Box::new(failure)))
+        }
     }
 }

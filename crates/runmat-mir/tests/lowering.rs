@@ -2591,7 +2591,12 @@ fn parfor_analysis_classifies_loop_broadcast_sliced_reduction_and_private_values
         .any(|variable| matches!(variable.role, ParallelVariableRole::Broadcast)));
     assert!(contract.variables.iter().any(|variable| matches!(
         variable.role,
-        ParallelVariableRole::Sliced { ref dimensions } if dimensions == &[1]
+        ParallelVariableRole::Sliced {
+            access: runmat_types::ParallelSliceAccess {
+                axis: runmat_types::ParallelSliceAxis::Linear,
+                offset: runmat_types::ParallelSliceOffset::None,
+            },
+        }
     )));
     assert!(contract.variables.iter().any(|variable| matches!(
         variable.role,
@@ -2607,6 +2612,71 @@ fn parfor_analysis_classifies_loop_broadcast_sliced_reduction_and_private_values
 }
 
 #[test]
+fn parfor_analysis_distinguishes_linear_and_dimensional_slices() {
+    use runmat_types::{ParallelSliceAccess, ParallelVariableRole};
+
+    let mir = lower_mir(
+        "linear = zeros(1, 4); columns = zeros(2, 4); parfor i = 1:4; linear(i) = i; columns(:, i) = i; end;",
+    );
+    let store = analyze_assembly(&mir);
+    let contract = store
+        .parallel
+        .parfor_regions
+        .first()
+        .expect("parfor contract");
+    let accesses = contract
+        .variables
+        .iter()
+        .filter_map(|variable| match variable.role {
+            ParallelVariableRole::Sliced { access } => Some(access),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        accesses,
+        std::collections::BTreeSet::from([
+            ParallelSliceAccess::linear(),
+            ParallelSliceAccess::dimension(2),
+        ])
+    );
+    store.parallel.validate().expect("valid parallel manifest");
+}
+
+#[test]
+fn parfor_analysis_preserves_affine_slice_offsets() {
+    use runmat_types::{
+        ParallelIndexConstant, ParallelSliceOffset, ParallelSliceOffsetOperand,
+        ParallelVariableRole,
+    };
+
+    let mir = lower_mir(
+        "offset = 1; constants = zeros(1, 5); broadcasts = zeros(1, 5); parfor i = 1:4; constants(i + 1) = i; broadcasts(i + offset) = i; end;",
+    );
+    let store = analyze_assembly(&mir);
+    let contract = store
+        .parallel
+        .parfor_regions
+        .first()
+        .expect("parfor contract");
+    let offsets = contract
+        .variables
+        .iter()
+        .filter_map(|variable| match variable.role {
+            ParallelVariableRole::Sliced { access } => Some(access.offset),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(offsets.contains(&ParallelSliceOffset::Add(
+        ParallelSliceOffsetOperand::Constant(ParallelIndexConstant::Unsigned(1))
+    )));
+    assert!(offsets.iter().any(|offset| matches!(
+        offset,
+        ParallelSliceOffset::Add(ParallelSliceOffsetOperand::Broadcast(_))
+    )));
+    store.parallel.validate().expect("valid parallel manifest");
+}
+
+#[test]
 fn parfor_analysis_rejects_nested_parallel_regions() {
     let mir = lower_mir("parfor i = 1:2; parfor j = 1:2; y(i,j) = i + j; end; end;");
     let store = analyze_assembly(&mir);
@@ -2614,6 +2684,77 @@ fn parfor_analysis_rejects_nested_parallel_regions() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-MIR0014"));
+}
+
+#[test]
+fn parfor_analysis_rejects_iteration_escape_and_suspension() {
+    for (source, code) in [
+        ("parfor i = 1:2; break; end;", "RM-MIR0017"),
+        ("parfor i = 1:2; return; end;", "RM-MIR0015"),
+        (
+            "async function y = f(g); parfor i = 1:2; await(g); end; y = 1; end",
+            "RM-MIR0016",
+        ),
+    ] {
+        let store = analyze_assembly(&lower_mir(source));
+        assert!(
+            store
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == code),
+            "missing {code}: {:?}",
+            store.diagnostics
+        );
+        assert!(store.parallel.parfor_regions.is_empty());
+    }
+}
+
+#[test]
+fn parfor_analysis_requires_safe_private_and_sliced_classification() {
+    for source in [
+        "a = ones(1, 2); parfor i = 1:2; a(1) = i; end;",
+        "y = zeros(2, 2); parfor i = 1:2; y(i, 1) = i; y(1, i) = i; end;",
+        "y = zeros(1, 2); parfor i = 1:2; y(i) = y(1) + i; end;",
+        "total = 0; y = zeros(1, 2); parfor i = 1:2; y(i) = total; total = total + i; end;",
+        "y = zeros(1, 2); parfor i = 1:2; if i > 1; t = i; end; y(i) = t; end;",
+    ] {
+        let store = analyze_assembly(&lower_mir(source));
+        assert!(
+            store
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-MIR0019"),
+            "missing unsafe-classification diagnostic: {:?}",
+            store.diagnostics
+        );
+        assert!(store.parallel.parfor_regions.is_empty());
+    }
+
+    let valid = analyze_assembly(&lower_mir(
+        "y = zeros(1, 2); parfor i = 1:2; if i > 1; t = i; else; t = 0; end; y(i) = t; end;",
+    ));
+    assert!(
+        valid
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "RM-MIR0019"),
+        "valid iteration-local assignment was rejected: {:?}",
+        valid.diagnostics
+    );
+    assert_eq!(valid.parallel.parfor_regions.len(), 1);
+
+    let valid_read_modify_write = analyze_assembly(&lower_mir(
+        "y = zeros(1, 2); parfor i = 1:2; y(i) = y(i) + 1; end;",
+    ));
+    assert!(
+        valid_read_modify_write
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "RM-MIR0019"),
+        "consistent sliced read/write was rejected: {:?}",
+        valid_read_modify_write.diagnostics
+    );
+    assert_eq!(valid_read_modify_write.parallel.parfor_regions.len(), 1);
 }
 
 #[test]

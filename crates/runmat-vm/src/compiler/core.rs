@@ -776,24 +776,19 @@ impl Compiler {
                     )?;
                 }
                 MirTerminatorKind::ParFor {
-                    binding,
+                    region,
                     iterable,
-                    body_block,
-                    exit_block,
+                    maximum_workers,
                     ..
                 } => {
-                    // The serial scheduler is the correctness fallback for a
-                    // structured parallel loop. Parallel-capable hosts may
-                    // replace this region using the executable manifest; the
-                    // VM still preserves exact loop semantics when no worker
-                    // budget is available.
-                    self.compile_mir_for_terminator(
-                        *binding,
-                        iterable,
-                        *body_block,
-                        *exit_block,
-                        &mut pending_jumps,
-                    )?;
+                    self.compile_mir_rvalue(iterable)?;
+                    if let Some(maximum_workers) = maximum_workers {
+                        self.compile_mir_rvalue(maximum_workers)?;
+                    }
+                    self.emit(Instr::ExecuteParfor {
+                        region: *region,
+                        has_maximum_workers: maximum_workers.is_some(),
+                    });
                 }
                 MirTerminatorKind::Spmd { .. } => {
                     return Err(CompileError::new(

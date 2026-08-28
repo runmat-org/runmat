@@ -3,6 +3,7 @@ pub mod debug;
 pub mod dispatch;
 pub mod engine;
 pub mod errors;
+pub(crate) mod parallel_placement;
 pub mod runner;
 pub mod stack;
 pub mod state;

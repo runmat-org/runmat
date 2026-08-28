@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::{Digest, OutputContract};
+use runmat_execution::OutputContract;
 use runmat_execution_runner::TaskSubmission;
 use runmat_test_runner::worker::ExecutionRequest;
 
@@ -17,18 +17,20 @@ pub(crate) fn task<S>(
         .revision
         .canonical_bytes()
         .expect("validated test revision must have a canonical encoding");
-    let qualified_name = format!("test:{}", request.test_id.as_str());
     TaskSubmission {
         request: TaskRequest {
             id: session.task_id(request.test_id.as_str(), request.attempt),
             scope_id: session.scope_id,
             pool_id: session.pool_id,
             program_artifact_id: ArtifactId::derive(&[b"runmat-test-plan-v1", &revision]),
-            callable: Callable {
-                owner_identity: "runmat.test".into(),
-                qualified_name: qualified_name.clone(),
-                entrypoint_digest: Digest::sha256(qualified_name),
-            },
+            callable: Callable::for_program(
+                "runmat.test",
+                &runmat_execution::ProgramCallable::semantic(
+                    runmat_execution::ProgramFunctionId(0),
+                    None,
+                ),
+            ),
+            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: Vec::new(),
             outputs: OutputContract {
                 requested_outputs: 1,

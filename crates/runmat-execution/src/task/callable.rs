@@ -1,4 +1,4 @@
-use runmat_types::ProgramFunctionId;
+use runmat_types::{ParallelRegionId, ProgramFunctionId};
 use serde::{Deserialize, Serialize};
 
 use crate::{ContractError, Digest};
@@ -18,6 +18,9 @@ pub enum ProgramCallable {
     Builtin {
         name: String,
     },
+    ParallelRegion {
+        region: ParallelRegionId,
+    },
 }
 
 impl ProgramCallable {
@@ -32,6 +35,10 @@ impl ProgramCallable {
         let callable = Self::Builtin { name: name.into() };
         callable.validate()?;
         Ok(callable)
+    }
+
+    pub fn parallel_region(region: ParallelRegionId) -> Self {
+        Self::ParallelRegion { region }
     }
 
     pub fn validate(&self) -> Result<(), ContractError> {
@@ -54,6 +61,7 @@ impl ProgramCallable {
                 ));
             }
             Self::Builtin { .. } => {}
+            Self::ParallelRegion { .. } => {}
         }
         Ok(())
     }
@@ -61,6 +69,7 @@ impl ProgramCallable {
     pub fn semantic_function(&self) -> Option<ProgramFunctionId> {
         match self {
             Self::Semantic { function, .. } => Some(*function),
+            Self::ParallelRegion { region } => Some(region.0.function),
             Self::Builtin { .. } => None,
         }
     }
@@ -69,6 +78,10 @@ impl ProgramCallable {
         match self {
             Self::Semantic { function, .. } => function.0.to_string(),
             Self::Builtin { name } => format!("builtin:{name}"),
+            Self::ParallelRegion { region } => format!(
+                "parallel-region:{}:{}",
+                region.0.function.0, region.0.ordinal
+            ),
         }
     }
 
@@ -81,6 +94,9 @@ impl ProgramCallable {
                 .clone()
                 .unwrap_or_else(|| format!("function#{}", function.0)),
             Self::Builtin { name } => name.clone(),
+            Self::ParallelRegion { region } => {
+                format!("parfor region {}:{}", region.0.function.0, region.0.ordinal)
+            }
         }
     }
 

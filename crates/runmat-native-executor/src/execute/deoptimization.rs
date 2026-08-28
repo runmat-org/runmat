@@ -15,6 +15,16 @@ pub(super) struct NativeTransfer {
     pub identity: u64,
 }
 
+impl NativeTransfer {
+    pub(super) fn interpreter_slow_path(identity: u64) -> Self {
+        Self {
+            reason: NativeDeoptReason::EXPLICIT_SLOW_PATH,
+            target: runmat_runtime::native::NativeResumeKind::INTERPRETER,
+            identity,
+        }
+    }
+}
+
 pub(super) fn checkpoint(
     state: &mut HostState,
     call: &mut NativeCall,
