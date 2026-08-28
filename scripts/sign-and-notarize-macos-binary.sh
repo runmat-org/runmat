@@ -96,7 +96,6 @@ xcrun notarytool submit "$notary_archive" \
   --issuer "$APPLE_NOTARIZE_ISSUER_ID" \
   --wait
 
-# Notarization tickets cannot be stapled to a bare executable. Gatekeeper uses
-# Apple's online ticket for the signed CLI, so assess the exact binary that the
-# workflow will package.
-spctl --assess --type execute --verbose=4 "$binary"
+# A bare executable cannot carry a stapled notarization ticket and is not an
+# app/package type that spctl can assess. The strict codesign verification above
+# and notarytool's blocking Accepted result are the applicable release checks.
