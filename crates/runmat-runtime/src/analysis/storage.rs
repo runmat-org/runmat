@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use runmat_filesystem::{DirEntry, FsFileType};
 use serde::{Deserialize, Serialize};
 
@@ -110,9 +110,10 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
                 .map_err(|err| format!("failed to create artifact directory: {err}"))?;
         }
         let op_version = run_operation_version(run);
+        let created_at = Utc::now().to_rfc3339();
         let persisted = PersistedRunArtifact {
             schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-            created_at: Utc::now().to_rfc3339(),
+            created_at: created_at.clone(),
             op_version: op_version.clone(),
             run: run.clone(),
         };
@@ -123,7 +124,7 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
 
         Ok(AnalysisArtifactRecord {
             run_id: run.run_id.clone(),
-            created_at: Utc::now().to_rfc3339(),
+            created_at,
             op_version,
             field_ids: super::analysis_run_field_ids(run),
         })
@@ -168,6 +169,37 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         }
         Ok(runs)
     }
+}
+
+#[derive(Debug)]
+struct FilesystemRunArtifact {
+    path: PathBuf,
+    op_version: String,
+    run_id: String,
+    created_at: Option<DateTime<Utc>>,
+    modified_at: Option<DateTime<Utc>>,
+}
+
+impl FilesystemRunArtifact {
+    fn recorded_at(&self) -> Option<DateTime<Utc>> {
+        self.created_at.or(self.modified_at)
+    }
+}
+
+fn generated_run_id_order(run_id: &str) -> Option<(i64, u64)> {
+    let suffix = run_id.strip_prefix("run_")?;
+    let (timestamp_millis, sequence) = suffix.rsplit_once('_')?;
+    Some((timestamp_millis.parse().ok()?, sequence.parse().ok()?))
+}
+
+fn sort_filesystem_artifacts_newest_first(artifacts: &mut [FilesystemRunArtifact]) {
+    artifacts.sort_by(|a, b| {
+        b.recorded_at()
+            .cmp(&a.recorded_at())
+            .then_with(|| generated_run_id_order(&b.run_id).cmp(&generated_run_id_order(&a.run_id)))
+            .then_with(|| b.run_id.cmp(&a.run_id))
+            .then_with(|| b.path.cmp(&a.path))
+    });
 }
 
 fn run_operation_version(run: &AnalysisRunResult) -> String {
@@ -249,33 +281,48 @@ fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
             continue;
         }
         let bytes = fs_read(&path).map_err(|err| format!("failed to read artifact file: {err}"))?;
-        let (op_version, run_id) = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
-            Ok(persisted) => (persisted.op_version, persisted.run.run_id),
-            Err(_) => match serde_json::from_slice::<AnalysisRunResult>(&bytes) {
-                Ok(run) => (run_operation_version(&run), run.run_id),
-                Err(_) => continue,
-            },
-        };
-        let modified = fs_modified(&path).ok().flatten();
-        artifacts.push((path, op_version, run_id, modified));
+        let (op_version, run_id, created_at) =
+            match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
+                Ok(persisted) => (
+                    persisted.op_version,
+                    persisted.run.run_id,
+                    DateTime::parse_from_rfc3339(&persisted.created_at)
+                        .ok()
+                        .map(|value| value.with_timezone(&Utc)),
+                ),
+                Err(_) => match serde_json::from_slice::<AnalysisRunResult>(&bytes) {
+                    Ok(run) => (run_operation_version(&run), run.run_id, None),
+                    Err(_) => continue,
+                },
+            };
+        let modified_at = fs_modified(&path).ok().flatten().map(DateTime::<Utc>::from);
+        artifacts.push(FilesystemRunArtifact {
+            path,
+            op_version,
+            run_id,
+            created_at,
+            modified_at,
+        });
     }
-    artifacts.sort_by(|a, b| b.3.cmp(&a.3));
+    sort_filesystem_artifacts_newest_first(&mut artifacts);
 
     let mut to_remove = Vec::new();
     if max_runs_per_kind > 0 {
         let mut per_kind_counts: HashMap<String, usize> = HashMap::new();
-        for (path, op_version, _run_id, _modified) in &artifacts {
-            let count = per_kind_counts.entry(op_version.clone()).or_default();
+        for artifact in &artifacts {
+            let count = per_kind_counts
+                .entry(artifact.op_version.clone())
+                .or_default();
             *count += 1;
             if *count > max_runs_per_kind {
-                to_remove.push(path.clone());
+                to_remove.push(artifact.path.clone());
             }
         }
     }
     if max_runs > 0 {
-        for (index, (path, _op_version, _run_id, _modified)) in artifacts.iter().enumerate() {
+        for (index, artifact) in artifacts.iter().enumerate() {
             if index >= max_runs {
-                to_remove.push(path.clone());
+                to_remove.push(artifact.path.clone());
             }
         }
     }
@@ -458,4 +505,32 @@ pub fn reset_artifact_store_for_tests() {
         .write()
         .expect("analysis artifact retention config lock poisoned") =
         AnalysisArtifactRetentionConfig::default();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{sort_filesystem_artifacts_newest_first, FilesystemRunArtifact};
+    use chrono::{TimeZone, Utc};
+    use std::path::PathBuf;
+
+    fn artifact(run_id: &str) -> FilesystemRunArtifact {
+        let recorded_at = Utc.timestamp_opt(1_000, 0).single().unwrap();
+        FilesystemRunArtifact {
+            path: PathBuf::from(format!("{run_id}.json")),
+            op_version: "fea.run_nonlinear/v1".to_string(),
+            run_id: run_id.to_string(),
+            created_at: Some(recorded_at),
+            modified_at: Some(recorded_at),
+        }
+    }
+
+    #[test]
+    fn artifact_retention_breaks_timestamp_ties_by_generated_run_sequence() {
+        let mut artifacts = vec![artifact("run_1000_9"), artifact("run_1000_10")];
+
+        sort_filesystem_artifacts_newest_first(&mut artifacts);
+
+        assert_eq!(artifacts[0].run_id, "run_1000_10");
+        assert_eq!(artifacts[1].run_id, "run_1000_9");
+    }
 }
