@@ -102,7 +102,9 @@ pub async fn submit(
             Some(revision.clone()),
         )
         .await?;
-    let foreign_artifacts = crate::commands::package::prepare_foreign_artifacts(frozen)?;
+    let python_required = unit.requires_python_runtime();
+    let foreign_artifacts =
+        crate::commands::package::prepare_foreign_artifacts(frozen, config, python_required)?;
     let executable = unit
         .portable_envelope_for_with_interop(function.as_deref(), foreign_artifacts.interop)
         .map_err(anyhow::Error::msg)?;

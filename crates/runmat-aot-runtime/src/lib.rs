@@ -10,6 +10,7 @@ mod mex_artifacts;
 mod native_interfaces;
 mod output;
 mod program;
+mod python_artifacts;
 
 pub use input::AotProcessInput;
 
@@ -50,6 +51,8 @@ pub unsafe extern "C" fn runmat_aot_main(
     mex_artifacts_len: u64,
     java_artifacts: *const u8,
     java_artifacts_len: u64,
+    python_artifacts: *const u8,
+    python_artifacts_len: u64,
 ) -> i32 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SAFETY: the generated launcher forwards the process argument vector
@@ -97,6 +100,8 @@ pub unsafe extern "C" fn runmat_aot_main(
             mex_artifacts_len,
             java_artifacts,
             java_artifacts_len,
+            python_artifacts,
+            python_artifacts_len,
         };
         // SAFETY: the raw pointers were checked and converted to bounded borrows
         // above; both resolver contracts are documented on this entry.

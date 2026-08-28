@@ -162,6 +162,9 @@ impl TryFrom<&runmat_config::project::ProjectManifest> for PackageManifest {
         if !manifest.java_artifacts.is_empty() {
             required_capabilities.insert(HostCapability::Jvm);
         }
+        if !manifest.python_artifacts.is_empty() {
+            required_capabilities.insert(HostCapability::Python);
+        }
         let optional_capabilities = parse_capabilities(&manifest.capabilities.optional)?;
         let registries = manifest
             .registries

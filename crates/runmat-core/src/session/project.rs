@@ -60,6 +60,9 @@ impl RunMatSession {
         handoff: &runmat_package::FrozenProjectHandoff,
     ) -> std::result::Result<(), runmat_package::FrozenProjectHandoffError> {
         self.mex_runtime.clear_installed_artifacts();
+        self.python_adapter
+            .clear_artifact_bundle()
+            .map_err(project_artifact_error)?;
         let mut manifests = Vec::new();
         for interface in &handoff.project.native_interfaces {
             self.native_ffi_adapter
@@ -112,6 +115,53 @@ impl RunMatSession {
                 }],
             });
         }
+        if !handoff.project.python_artifacts.is_empty() {
+            let mut artifacts = Vec::with_capacity(handoff.project.python_artifacts.len());
+            for artifact in &handoff.project.python_artifacts {
+                let bytes = std::fs::read(&artifact.path).map_err(project_artifact_error)?;
+                let digest = runmat_package::ContentDigest::sha256(&bytes);
+                if digest != artifact.digest {
+                    return Err(project_artifact_error(format!(
+                        "Python artifact `{}` changed after project resolution: expected {}, found {}",
+                        artifact.name, artifact.digest, digest
+                    )));
+                }
+                let filename = artifact
+                    .path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .ok_or_else(|| {
+                        project_artifact_error(format!(
+                            "Python artifact `{}` has a non-Unicode filename",
+                            artifact.name
+                        ))
+                    })?
+                    .to_owned();
+                artifacts.push(runmat_python::PythonArtifactBundleEntry::wheel(
+                    artifact.name.clone(),
+                    artifact.module.clone(),
+                    filename,
+                    bytes,
+                ));
+            }
+            let bundle = runmat_python::PythonArtifactBundle::artifacts_only(artifacts)
+                .map_err(project_artifact_error)?;
+            self.python_adapter
+                .install_artifact_bundle(&bundle)
+                .map_err(project_artifact_error)?;
+            manifests.push(runmat_types::InteropManifest {
+                schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+                foreign_types: Vec::new(),
+                adapters: vec![runmat_types::ForeignAdapterRequirement {
+                    adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
+                    minimum_version: runmat_python::PYTHON_ADAPTER_VERSION,
+                    capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
+                        runmat_types::CapabilityRequirement::ForeignRuntime,
+                    ])),
+                    artifact_identities: bundle.artifact_identities().into_iter().collect(),
+                }],
+            });
+        }
         let interop =
             runmat_types::InteropManifest::merge(manifests).map_err(project_artifact_error)?;
         self.foreign_runtime
@@ -142,6 +192,10 @@ impl RunMatSession {
         }
         #[cfg(not(target_arch = "wasm32"))]
         self.mex_runtime.clear_installed_artifacts();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Err(error) = self.python_adapter.clear_artifact_bundle() {
+            tracing::warn!(%error, "could not clear Python artifacts while clearing project");
+        }
     }
 
     /// Return the revision currently installed at the session boundary.

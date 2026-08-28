@@ -66,6 +66,9 @@ impl IsolatedPythonClient {
                 version: host_configuration.version,
                 minimum_version: host_configuration.minimum_version,
                 maximum_version: host_configuration.maximum_version,
+                exact_version: host_configuration.exact_version,
+                required_abi_tag: host_configuration.required_abi_tag.clone(),
+                required_platform_tag: host_configuration.required_platform_tag.clone(),
             })
             .map_err(|error| wire_error("RunMat:Python:PythonDiscoveryError", error.to_string()))?;
             host_configuration.executable = Some(installation.executable);

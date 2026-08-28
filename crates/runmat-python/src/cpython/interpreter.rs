@@ -20,6 +20,8 @@ pub(super) struct BuiltinTypes {
     pub(super) complex: *mut PyObject,
     pub(super) str_: *mut PyObject,
     pub(super) bytes: *mut PyObject,
+    pub(super) datetime: *mut PyObject,
+    pub(super) timedelta: *mut PyObject,
     pub(super) type_: *mut PyObject,
     pub(super) runtime_error: *mut PyObject,
     pub(super) keyboard_interrupt: *mut PyObject,
@@ -58,12 +60,22 @@ impl Interpreter {
                 complex: attr(&api, builtins_module, "complex")?,
                 str_: attr(&api, builtins_module, "str")?,
                 bytes: attr(&api, builtins_module, "bytes")?,
+                datetime: std::ptr::null_mut(),
+                timedelta: std::ptr::null_mut(),
                 type_: attr(&api, builtins_module, "type")?,
                 runtime_error: attr(&api, builtins_module, "RuntimeError")?,
                 keyboard_interrupt: attr(&api, builtins_module, "KeyboardInterrupt")?,
                 module: builtins_module,
                 buffer_view: std::ptr::null_mut(),
             };
+            let datetime_module = checked(
+                &api,
+                (api.py_import_import_module)(c"datetime".as_ptr()),
+                "import datetime",
+            )?;
+            let datetime = attr(&api, datetime_module, "datetime")?;
+            let timedelta = attr(&api, datetime_module, "timedelta")?;
+            (api.py_dec_ref)(datetime_module);
             let workspace = checked(&api, (api.py_dict_new)(), "create Python workspace")?;
             set_dict_string(&api, workspace, "__builtins__", builtins.module)?;
             let support = checked(&api, (api.py_dict_new)(), "create Python support workspace")?;
@@ -94,6 +106,8 @@ impl Interpreter {
             (api.py_dec_ref)(buffer_view_key);
             (api.py_dec_ref)(support);
             let mut builtins = builtins;
+            builtins.datetime = datetime;
+            builtins.timedelta = timedelta;
             builtins.buffer_view = buffer_view;
             (api.py_gil_state_release)(state);
             if initialized_here {
@@ -120,6 +134,40 @@ impl Interpreter {
         self.with_gil(|this| this.metadata_with_gil(handle))
     }
 
+    pub(crate) fn prepend_module_paths(
+        &self,
+        paths: &[std::path::PathBuf],
+    ) -> Result<(), PythonError> {
+        self.with_gil(|this| {
+            let sys = unsafe {
+                checked(
+                    &this.api,
+                    (this.api.py_import_import_module)(c"sys".as_ptr()),
+                    "import sys",
+                )?
+            };
+            let path_list = unsafe { attr(&this.api, sys, "path") };
+            this.decref(sys);
+            let path_list = path_list?;
+            let insert = unsafe { attr(&this.api, path_list, "insert") };
+            this.decref(path_list);
+            let insert = insert?;
+            for path in paths.iter().rev() {
+                let arguments = this.values_to_tuple(vec![
+                    PythonValue::Signed(0),
+                    PythonValue::String(path.to_string_lossy().into_owned()),
+                ])?;
+                let result =
+                    unsafe { (this.api.py_object_call)(insert, arguments, std::ptr::null_mut()) };
+                this.decref(arguments);
+                let result = unsafe { checked(&this.api, result, "prepend Python module path")? };
+                this.decref(result);
+            }
+            this.decref(insert);
+            Ok(())
+        })
+    }
+
     pub(crate) fn clear(&self) {
         let state = unsafe { (self.api.py_gil_state_ensure)() };
         for (_, object) in std::mem::take(&mut *self.objects.borrow_mut()) {
@@ -136,6 +184,8 @@ impl Interpreter {
             (self.api.py_dec_ref)(self.builtins.complex);
             (self.api.py_dec_ref)(self.builtins.str_);
             (self.api.py_dec_ref)(self.builtins.bytes);
+            (self.api.py_dec_ref)(self.builtins.datetime);
+            (self.api.py_dec_ref)(self.builtins.timedelta);
             (self.api.py_dec_ref)(self.builtins.type_);
             (self.api.py_dec_ref)(self.builtins.runtime_error);
             (self.api.py_dec_ref)(self.builtins.keyboard_interrupt);

@@ -11,13 +11,16 @@ mod publication_manifest;
 mod publication_retry;
 #[cfg(test)]
 mod publication_tests;
+mod python_artifacts;
 mod registry_transport;
 mod resolve;
 mod server_transport;
 mod tree;
 mod vendor;
 
-pub(crate) use foreign_artifacts::{prepare_foreign_artifacts, PreparedForeignArtifacts};
+pub(crate) use foreign_artifacts::{
+    prepare_foreign_artifacts, prepare_python_runtime, PreparedForeignArtifacts,
+};
 pub(crate) use resolve::{
     install_project_for_source, resolve_for_source, resolve_for_test_manifest,
     NativeResolvedProject,

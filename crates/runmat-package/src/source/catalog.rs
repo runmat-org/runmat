@@ -119,6 +119,7 @@ pub struct FrozenProject {
     pub native_interfaces: Vec<FrozenNativeInterface>,
     pub mex_artifacts: Vec<FrozenMexArtifact>,
     pub java_artifacts: Vec<FrozenJavaArtifact>,
+    pub python_artifacts: Vec<FrozenPythonArtifact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +153,16 @@ pub struct FrozenJavaArtifact {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrozenPythonArtifact {
+    pub package_instance: ContentDigest,
+    pub name: String,
+    pub module: String,
+    pub digest: ContentDigest,
+    pub path: PathBuf,
+}
+
 pub(crate) struct FrozenPackageInput {
     pub instance: ContentDigest,
     pub local_name: String,
@@ -161,6 +172,7 @@ pub(crate) struct FrozenPackageInput {
     pub native_interfaces: Vec<FrozenNativeInterfaceInput>,
     pub mex_artifacts: Vec<FrozenMexArtifactInput>,
     pub java_artifacts: Vec<FrozenJavaArtifactInput>,
+    pub python_artifacts: Vec<FrozenPythonArtifactInput>,
 }
 
 pub(crate) struct FrozenSourceInput {
@@ -190,6 +202,13 @@ pub(crate) struct FrozenJavaArtifactInput {
     pub bytes: Vec<u8>,
 }
 
+pub(crate) struct FrozenPythonArtifactInput {
+    pub name: String,
+    pub module: String,
+    pub path: PathBuf,
+    pub bytes: Vec<u8>,
+}
+
 pub(crate) fn assemble_frozen_project(
     manifest_path: PathBuf,
     workspace_root: PathBuf,
@@ -201,6 +220,7 @@ pub(crate) fn assemble_frozen_project(
     let mut native_interfaces = Vec::new();
     let mut mex_artifacts = Vec::new();
     let mut java_artifacts = Vec::new();
+    let mut python_artifacts = Vec::new();
     for package in package_inputs {
         if !graph.packages.contains_key(&package.instance) {
             return Err(CatalogAssemblyError::MissingInstance(package.instance));
@@ -257,6 +277,15 @@ pub(crate) fn assemble_frozen_project(
                 path: artifact.path,
             });
         }
+        for artifact in package.python_artifacts {
+            python_artifacts.push(FrozenPythonArtifact {
+                package_instance: package.instance.clone(),
+                name: artifact.name,
+                module: artifact.module,
+                digest: ContentDigest::sha256(&artifact.bytes),
+                path: artifact.path,
+            });
+        }
         sources.sort_by(|left, right| left.id.cmp(&right.id));
         let logical_root = logical_mount_root(&package.instance)?;
         packages.insert(
@@ -284,6 +313,9 @@ pub(crate) fn assemble_frozen_project(
     java_artifacts.sort_by(|left, right| {
         (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
     });
+    python_artifacts.sort_by(|left, right| {
+        (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
+    });
     Ok(FrozenProject {
         manifest_path,
         workspace_root,
@@ -293,6 +325,7 @@ pub(crate) fn assemble_frozen_project(
         native_interfaces,
         mex_artifacts,
         java_artifacts,
+        python_artifacts,
     })
 }
 

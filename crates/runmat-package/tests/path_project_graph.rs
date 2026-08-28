@@ -227,6 +227,51 @@ fn java_artifacts_are_frozen_and_require_a_jvm() {
 }
 
 #[test]
+fn python_artifacts_are_frozen_and_require_python() {
+    let (temp, manifest) = fixture();
+    fs::create_dir_all(temp.path().join("python")).unwrap();
+    fs::write(
+        temp.path().join("python/fixture-1.0-py3-none-any.whl"),
+        b"exact-wheel",
+    )
+    .unwrap();
+    let root_manifest = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!(
+            "{root_manifest}\n[python-artifacts.fixture]\npath = \"python/fixture-1.0-py3-none-any.whl\"\nmodule = \"fixture\"\n"
+        ),
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&manifest, BTreeSet::new())
+        .expect_err("portable host must reject a Python package");
+    assert!(error.to_string().contains("python"));
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::Python]),
+    )
+    .unwrap();
+    let [artifact] = frozen.python_artifacts.as_slice() else {
+        panic!("expected one Python artifact");
+    };
+    assert_eq!(artifact.name, "fixture");
+    assert_eq!(artifact.module, "fixture");
+    assert_eq!(
+        artifact.digest,
+        runmat_package::ContentDigest::sha256(b"exact-wheel")
+    );
+    assert_eq!(
+        artifact.path,
+        temp.path()
+            .join("python/fixture-1.0-py3-none-any.whl")
+            .canonicalize()
+            .unwrap()
+    );
+}
+
+#[test]
 fn mex_artifacts_are_frozen_and_require_mex_capability() {
     let (temp, manifest) = fixture();
     fs::create_dir_all(temp.path().join("mex")).unwrap();

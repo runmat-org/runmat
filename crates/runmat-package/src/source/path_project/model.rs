@@ -16,6 +16,7 @@ pub(super) struct LoadedPathPackage {
     pub native_interfaces: Vec<LoadedNativeInterface>,
     pub mex_artifacts: Vec<LoadedMexArtifact>,
     pub java_artifacts: Vec<LoadedJavaArtifact>,
+    pub python_artifacts: Vec<LoadedPythonArtifact>,
     pub dependencies: BTreeMap<String, PathBuf>,
 }
 
@@ -42,6 +43,13 @@ pub(super) struct LoadedMexArtifact {
 
 pub(super) struct LoadedJavaArtifact {
     pub name: String,
+    pub path: PathBuf,
+    pub bytes: Vec<u8>,
+}
+
+pub(super) struct LoadedPythonArtifact {
+    pub name: String,
+    pub module: String,
     pub path: PathBuf,
     pub bytes: Vec<u8>,
 }

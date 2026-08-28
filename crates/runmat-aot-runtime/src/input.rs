@@ -4,6 +4,7 @@ const MAX_RESUME_POINT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_NATIVE_INTERFACE_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_MEX_ARTIFACT_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_JAVA_ARTIFACT_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_PYTHON_ARTIFACT_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_ARGUMENTS: i32 = 16_384;
 pub type AotFunctionResolver = unsafe extern "C" fn(function: u32) -> *const std::ffi::c_void;
 pub type AotBuiltinResolver = unsafe extern "C" fn(binding: u32) -> *const std::ffi::c_void;
@@ -26,6 +27,8 @@ pub struct LinkedProcessImage {
     pub mex_artifacts_len: u64,
     pub java_artifacts: *const u8,
     pub java_artifacts_len: u64,
+    pub python_artifacts: *const u8,
+    pub python_artifacts_len: u64,
 }
 
 pub struct AotProcessInput {
@@ -37,6 +40,7 @@ pub struct AotProcessInput {
     pub native_interfaces: Vec<u8>,
     pub mex_artifacts: Vec<u8>,
     pub java_artifacts: Vec<u8>,
+    pub python_artifacts: Vec<u8>,
 }
 
 impl AotProcessInput {
@@ -119,6 +123,14 @@ impl AotProcessInput {
                 "Java artifact",
             )
         }?;
+        let python_artifacts = unsafe {
+            copy_bounded(
+                input.python_artifacts,
+                input.python_artifacts_len,
+                MAX_PYTHON_ARTIFACT_BYTES,
+                "Python artifact",
+            )
+        }?;
         Ok(Self {
             function_resolver,
             builtin_resolver,
@@ -128,6 +140,7 @@ impl AotProcessInput {
             native_interfaces,
             mex_artifacts,
             java_artifacts,
+            python_artifacts,
         })
     }
 }
@@ -202,6 +215,8 @@ mod tests {
                 mex_artifacts_len: 1,
                 java_artifacts: one.as_ptr(),
                 java_artifacts_len: 1,
+                python_artifacts: one.as_ptr(),
+                python_artifacts_len: 1,
             })
         };
         assert!(invalid.is_err());
@@ -224,6 +239,8 @@ mod tests {
                 mex_artifacts_len: 1,
                 java_artifacts: one.as_ptr(),
                 java_artifacts_len: 1,
+                python_artifacts: one.as_ptr(),
+                python_artifacts_len: 1,
             })
         };
         assert!(oversized.is_err());

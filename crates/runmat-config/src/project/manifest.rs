@@ -31,6 +31,7 @@ pub struct ProjectManifest {
     pub native_interfaces: BTreeMap<String, ProjectNativeInterface>,
     pub mex_artifacts: BTreeMap<String, ProjectMexArtifact>,
     pub java_artifacts: BTreeMap<String, ProjectJavaArtifact>,
+    pub python_artifacts: BTreeMap<String, ProjectPythonArtifact>,
     pub test: ProjectTestConfig,
 }
 
@@ -86,6 +87,13 @@ pub struct ProjectJavaArtifact {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectPythonArtifact {
+    pub path: PathBuf,
+    pub module: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawProjectManifest {
@@ -117,6 +125,8 @@ struct RawProjectManifest {
     mex_artifacts: BTreeMap<String, ProjectMexArtifact>,
     #[serde(default, rename = "java-artifacts")]
     java_artifacts: BTreeMap<String, ProjectJavaArtifact>,
+    #[serde(default, rename = "python-artifacts")]
+    python_artifacts: BTreeMap<String, ProjectPythonArtifact>,
     #[serde(default, rename = "runtime")]
     _runtime: Option<IgnoredAny>,
     #[serde(default)]
@@ -164,6 +174,7 @@ impl From<RawProjectManifest> for ProjectManifest {
             native_interfaces: value.native_interfaces,
             mex_artifacts: value.mex_artifacts,
             java_artifacts: value.java_artifacts,
+            python_artifacts: value.python_artifacts,
             test: value.test,
         }
     }
@@ -208,6 +219,8 @@ impl Serialize for ProjectManifest {
             mex_artifacts: &'a BTreeMap<String, ProjectMexArtifact>,
             #[serde(rename = "java-artifacts")]
             java_artifacts: &'a BTreeMap<String, ProjectJavaArtifact>,
+            #[serde(rename = "python-artifacts")]
+            python_artifacts: &'a BTreeMap<String, ProjectPythonArtifact>,
             #[serde(skip_serializing_if = "ProjectTestConfig::is_default")]
             test: &'a ProjectTestConfig,
         }
@@ -252,6 +265,7 @@ impl Serialize for ProjectManifest {
             native_interfaces: &self.native_interfaces,
             mex_artifacts: &self.mex_artifacts,
             java_artifacts: &self.java_artifacts,
+            python_artifacts: &self.python_artifacts,
             test: &self.test,
         }
         .serialize(serializer)
@@ -587,6 +601,45 @@ impl ProjectManifest {
                     path: project_root.join(&artifact.path),
                     missing_message: format!(
                         "Java artifact `{name}` path `{}` does not exist as a file under project root",
+                        artifact.path.display()
+                    ),
+                });
+            }
+        }
+        for (name, artifact) in &self.python_artifacts {
+            if name.is_empty()
+                || matches!(name.as_str(), "." | "..")
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+            {
+                messages.push(format!("Python artifact name `{name}` is invalid"));
+                continue;
+            }
+            if artifact.module.split('.').any(|part| {
+                let mut characters = part.chars();
+                !characters
+                    .next()
+                    .is_some_and(|character| character == '_' || character.is_alphabetic())
+                    || !characters.all(|character| character == '_' || character.is_alphanumeric())
+            }) {
+                messages.push(format!(
+                    "Python artifact `{name}` module `{}` is invalid",
+                    artifact.module
+                ));
+            }
+            if !is_relative_without_parent(&artifact.path)
+                || artifact.path.extension().and_then(|value| value.to_str()) != Some("whl")
+            {
+                messages.push(format!(
+                    "Python artifact `{name}` path `{}` must be a project-relative .whl file without `..` segments",
+                    artifact.path.display()
+                ));
+            } else {
+                path_requirements.push(PathRequirement::File {
+                    path: project_root.join(&artifact.path),
+                    missing_message: format!(
+                        "Python artifact `{name}` path `{}` does not exist as a file under project root",
                         artifact.path.display()
                     ),
                 });

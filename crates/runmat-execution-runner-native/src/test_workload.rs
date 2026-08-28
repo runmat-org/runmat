@@ -115,6 +115,35 @@ async fn execute_portable_request(
     if let Some(requirement) = interop
         .adapters
         .iter()
+        .find(|requirement| requirement.adapter == runmat_python::PYTHON_ADAPTER_ID)
+    {
+        let Some(bundle) = materialized.and_then(|materialized| materialized.python_bundle())
+        else {
+            return ProgramExecutionResponse::Failure {
+                message: "worker has no materialized Python artifact bundle".into(),
+            };
+        };
+        let available = bundle.artifact_identities();
+        if let Some(missing) = requirement
+            .artifact_identities
+            .iter()
+            .find(|identity| !available.contains(*identity))
+        {
+            return ProgramExecutionResponse::Failure {
+                message: format!(
+                    "worker has no materialized Python environment or wheel for required identity {missing}"
+                ),
+            };
+        }
+        if let Err(error) = session.install_portable_python_artifact_bundle(bundle) {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker could not install Python artifacts: {error}"),
+            };
+        }
+    }
+    if let Some(requirement) = interop
+        .adapters
+        .iter()
         .find(|requirement| requirement.adapter == runmat_java::JAVA_ADAPTER_ID)
     {
         let Some(materialized) = materialized else {
@@ -189,6 +218,11 @@ async fn execute_test_attempt(
         session
             .install_project_handoff(project.clone())
             .map_err(|error| format!("failed to install exact test project: {error}"))?;
+    }
+    if let Some(bundle) = materialized.and_then(|materialized| materialized.python_bundle()) {
+        session
+            .install_portable_python_artifact_bundle(bundle)
+            .map_err(|error| format!("failed to install exact Python test artifacts: {error}"))?;
     }
     let execution = session
         .execute_planned_test(

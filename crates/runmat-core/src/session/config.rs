@@ -35,6 +35,22 @@ impl RunMatSession {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_python_artifact_bundle(
+        &self,
+        bundle: &runmat_python::PythonArtifactBundle,
+    ) -> Result<(), RuntimeError> {
+        self.python_adapter.install_artifact_bundle(bundle)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_portable_python_artifact_bundle(
+        &self,
+        bundle: &runmat_python::PythonArtifactBundle,
+    ) -> Result<(), RuntimeError> {
+        self.python_adapter.install_portable_artifact_bundle(bundle)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn install_mex_artifact(
         &self,
         module_path: &std::path::Path,
@@ -302,6 +318,9 @@ impl RunMatSession {
             version: required_version,
             minimum_version,
             maximum_version,
+            exact_version: None,
+            required_abi_tag: None,
+            required_platform_tag: None,
             execution_mode: match config.execution_mode {
                 runmat_config::runtime::PythonExecutionModeConfig::InProcess => {
                     runmat_python::PythonExecutionMode::InProcess
@@ -310,6 +329,8 @@ impl RunMatSession {
                     runmat_python::PythonExecutionMode::OutOfProcess
                 }
             },
+            module_paths: Vec::new(),
+            artifact_identities: std::collections::BTreeSet::new(),
         })
     }
 

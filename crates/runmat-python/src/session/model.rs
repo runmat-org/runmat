@@ -24,6 +24,7 @@ thread_local! {
 #[derive(Debug, Clone)]
 pub struct PythonSessionConfig {
     pub installation: PythonInstallation,
+    pub module_paths: Vec<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +117,11 @@ impl PythonSession {
             .spawn(move || {
                 let interpreter = match Interpreter::start(&config.installation) {
                     Ok(interpreter) => {
+                        if let Err(error) = interpreter.prepend_module_paths(&config.module_paths) {
+                            let _ = started.send(Err(error));
+                            interpreter.clear();
+                            return;
+                        }
                         let _ = started.send(Ok(interpreter.interrupt_handle()));
                         interpreter
                     }
@@ -281,8 +287,8 @@ fn lane_ended(error: impl std::fmt::Display) -> PythonError {
 mod tests {
     use super::*;
     use crate::{
-        discover_python, PythonArray, PythonBufferOwner, PythonDType, PythonDiscoveryRequest,
-        PythonObjectHandle,
+        discover_python, PythonArray, PythonBufferOwner, PythonDType, PythonDateTime,
+        PythonDiscoveryRequest, PythonObjectHandle, PythonTimeDelta,
     };
 
     #[derive(Debug)]
@@ -308,8 +314,11 @@ mod tests {
     fn session() -> Option<PythonSession> {
         let installation = discover_python(&PythonDiscoveryRequest::default()).ok()?;
         Some(
-            PythonSession::start(PythonSessionConfig { installation })
-                .expect("start selected CPython"),
+            PythonSession::start(PythonSessionConfig {
+                installation,
+                module_paths: Vec::new(),
+            })
+            .expect("start selected CPython"),
         )
     }
 
@@ -419,6 +428,98 @@ mod tests {
             array.owner.copy_bytes(),
             TestBuffer(vec![1.0, 2.0, 3.0, 4.0]).copy_bytes()
         );
+    }
+
+    #[test]
+    fn temporal_scalars_and_arrays_use_explicit_python_types() {
+        let Some(session) = session() else {
+            return;
+        };
+        let result = session
+            .invoke(PythonCall::ExecutePersistent {
+                code: "import datetime\nimport numpy as np\nscalar_date_type = type(date).__name__\nscalar_delta_type = type(delta).__name__\ndates = np.array(['1969-12-31T23:59:59.123456', '2026-08-27T12:34:56.654321'], dtype='datetime64[us]')\ndeltas = np.array([-1001, 2002], dtype='timedelta64[us]')".into(),
+                inputs: vec![
+                    (
+                        "date".into(),
+                        PythonValue::DateTime(PythonDateTime {
+                            year: 2026,
+                            month: 8,
+                            day: 27,
+                            hour: 12,
+                            minute: 34,
+                            second: 56,
+                            microsecond: 654_321,
+                        }),
+                    ),
+                    (
+                        "delta".into(),
+                        PythonValue::TimeDelta(PythonTimeDelta {
+                            days: -1,
+                            seconds: 86_399,
+                            microseconds: 998_999,
+                        }),
+                    ),
+                ],
+                outputs: vec![
+                    "scalar_date_type".into(),
+                    "scalar_delta_type".into(),
+                    "dates".into(),
+                    "deltas".into(),
+                ],
+            })
+            .expect("round-trip Python temporal values");
+        assert!(matches!(result.first(), Some(PythonValue::String(value)) if value == "datetime"));
+        assert!(matches!(result.get(1), Some(PythonValue::String(value)) if value == "timedelta"));
+        let Some(PythonValue::Array(dates)) = result.get(2) else {
+            panic!("expected datetime64 array");
+        };
+        assert_eq!(dates.dtype, PythonDType::DateTime64Micros);
+        assert_eq!(dates.shape, vec![2]);
+        assert_eq!(
+            dates.owner.copy_bytes(),
+            [-876_544_i64, 1_787_834_096_654_321_i64]
+                .into_iter()
+                .flat_map(i64::to_ne_bytes)
+                .collect::<Vec<_>>()
+        );
+        let Some(PythonValue::Array(deltas)) = result.get(3) else {
+            panic!("expected timedelta64 array");
+        };
+        assert_eq!(deltas.dtype, PythonDType::TimeDelta64Micros);
+        assert_eq!(
+            deltas.owner.copy_bytes(),
+            [-1_001_i64, 2_002_i64]
+                .into_iter()
+                .flat_map(i64::to_ne_bytes)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn naive_datetime_converts_and_aware_datetime_keeps_python_identity() {
+        let Some(session) = session() else {
+            return;
+        };
+        let result = session
+            .invoke(PythonCall::ExecutePersistent {
+                code: "import datetime\nnaive = datetime.datetime(2026, 8, 27, 1, 2, 3, 456789)\naware = datetime.datetime(2026, 8, 27, tzinfo=datetime.timezone.utc)".into(),
+                inputs: Vec::new(),
+                outputs: vec!["naive".into(), "aware".into()],
+            })
+            .expect("read Python datetime values");
+        assert!(matches!(
+            result.first(),
+            Some(PythonValue::DateTime(PythonDateTime {
+                year: 2026,
+                month: 8,
+                day: 27,
+                hour: 1,
+                minute: 2,
+                second: 3,
+                microsecond: 456_789,
+            }))
+        ));
+        assert!(matches!(result.get(1), Some(PythonValue::Object(_))));
     }
 
     #[test]

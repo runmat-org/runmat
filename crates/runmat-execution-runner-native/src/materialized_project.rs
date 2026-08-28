@@ -8,9 +8,11 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 mod java_artifacts;
 mod mex_artifacts;
 mod native_interfaces;
+mod python_artifacts;
 pub(crate) use java_artifacts::MaterializedJavaArtifact;
 pub(crate) use mex_artifacts::MaterializedMexArtifact;
 pub(crate) use native_interfaces::MaterializedNativeInterface;
+use python_artifacts::MaterializedPythonArtifact;
 
 /// One private, exact, credential-free materialization of a portable bundle.
 ///
@@ -22,6 +24,7 @@ pub(crate) struct MaterializedProject {
     native_interfaces: Vec<MaterializedNativeInterface>,
     mex_artifacts: Vec<MaterializedMexArtifact>,
     java_artifacts: Vec<MaterializedJavaArtifact>,
+    python_bundle: Option<runmat_python::PythonArtifactBundle>,
 }
 
 impl MaterializedProject {
@@ -64,8 +67,15 @@ impl MaterializedProject {
         let native_interfaces = native_interfaces::discover(&foreign_objects, root.path())?;
         let mex_artifacts = mex_artifacts::discover(&foreign_objects, root.path())?;
         let java_artifacts = java_artifacts::discover(&foreign_objects, root.path())?;
+        let python = python_artifacts::discover(&foreign_objects, root.path())?;
         if let Some(handoff) = handoff.as_mut() {
-            rebase_foreign_artifacts(handoff, &native_interfaces, &mex_artifacts, &java_artifacts)?;
+            rebase_foreign_artifacts(
+                handoff,
+                &native_interfaces,
+                &mex_artifacts,
+                &java_artifacts,
+                &python.artifacts,
+            )?;
         }
         Ok(Self {
             _root: root,
@@ -73,6 +83,7 @@ impl MaterializedProject {
             native_interfaces,
             mex_artifacts,
             java_artifacts,
+            python_bundle: python.bundle,
         })
     }
 
@@ -107,6 +118,10 @@ impl MaterializedProject {
     pub(crate) fn java_artifacts(&self) -> &[MaterializedJavaArtifact] {
         &self.java_artifacts
     }
+
+    pub(crate) fn python_bundle(&self) -> Option<&runmat_python::PythonArtifactBundle> {
+        self.python_bundle.as_ref()
+    }
 }
 
 fn rebase_foreign_artifacts(
@@ -114,6 +129,7 @@ fn rebase_foreign_artifacts(
     native_interfaces: &[MaterializedNativeInterface],
     mex_artifacts: &[MaterializedMexArtifact],
     java_artifacts: &[MaterializedJavaArtifact],
+    python_artifacts: &[MaterializedPythonArtifact],
 ) -> NativeExecutionResult<()> {
     for interface in &mut handoff.project.native_interfaces {
         let materialized = native_interfaces
@@ -167,6 +183,22 @@ fn rebase_foreign_artifacts(
             .ok_or_else(|| {
                 protocol(format!(
                     "frozen Java artifact {} has no exact materialized archive",
+                    artifact.name
+                ))
+            })?;
+        artifact.path = materialized.path.clone();
+    }
+    for artifact in &mut handoff.project.python_artifacts {
+        let materialized = python_artifacts
+            .iter()
+            .find(|materialized| {
+                materialized.logical_name == artifact.name
+                    && materialized.module == artifact.module
+                    && digest_path(&materialized.path).ok().as_ref() == Some(&artifact.digest)
+            })
+            .ok_or_else(|| {
+                protocol(format!(
+                    "frozen Python artifact {} has no exact materialized wheel",
                     artifact.name
                 ))
             })?;
@@ -386,6 +418,14 @@ mod tests {
             java_bytes.clone(),
         )
         .unwrap();
+        let python_bundle = runmat_python::PythonArtifactBundle::empty();
+        let python = LogicalObject::new(
+            ObjectNamespace::ForeignArtifact,
+            "python/artifacts.json",
+            runmat_python::PYTHON_ARTIFACT_BUNDLE_MEDIA_TYPE,
+            python_bundle.canonical_bytes().unwrap(),
+        )
+        .unwrap();
         let mex_source = temp.path().join("materialized_mex.c");
         std::fs::write(
             &mex_source,
@@ -458,6 +498,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .unwrap()
             .with_foreign_artifact(java)
             .unwrap()
+            .with_foreign_artifact(python)
+            .unwrap()
             .with_foreign_artifact(mex_sidecar)
             .unwrap()
             .with_foreign_artifact(mex_module)
@@ -500,6 +542,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .readonly());
         let java = materialized.java_artifact(java_identity.as_str()).unwrap();
         assert_eq!(std::fs::read(&java.path).unwrap(), java_bytes);
+        assert_eq!(materialized.python_bundle(), Some(&python_bundle));
         assert!(std::fs::metadata(&java.path)
             .unwrap()
             .permissions()

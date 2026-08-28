@@ -1,5 +1,6 @@
 use super::loader::{
-    LoadedJavaArtifact, LoadedMexArtifact, LoadedNativeInterface, LoadedSource, PackageOrigin,
+    LoadedJavaArtifact, LoadedMexArtifact, LoadedNativeInterface, LoadedPythonArtifact,
+    LoadedSource, PackageOrigin,
 };
 use super::ProjectResolveError;
 use crate::{ContentDigest, NormalizedRelativePath, PathSourceId, SourceId};
@@ -81,6 +82,24 @@ pub(super) async fn load_java_artifacts(
     Ok(artifacts)
 }
 
+pub(super) async fn load_python_artifacts(
+    root: &Path,
+    manifest: &ProjectManifest,
+) -> Result<Vec<LoadedPythonArtifact>, ProjectResolveError> {
+    let mut artifacts = Vec::with_capacity(manifest.python_artifacts.len());
+    for (name, declaration) in &manifest.python_artifacts {
+        let path = root.join(&declaration.path);
+        let bytes = read_project_artifact(&path).await?;
+        artifacts.push(LoadedPythonArtifact {
+            name: name.clone(),
+            module: declaration.module.clone(),
+            path,
+            bytes,
+        });
+    }
+    Ok(artifacts)
+}
+
 pub(super) async fn load_mex_artifacts(
     root: &Path,
     manifest: &ProjectManifest,
@@ -107,6 +126,7 @@ pub(super) struct PackageContent<'a> {
     pub(super) native_interfaces: &'a [LoadedNativeInterface],
     pub(super) mex_artifacts: &'a [LoadedMexArtifact],
     pub(super) java_artifacts: &'a [LoadedJavaArtifact],
+    pub(super) python_artifacts: &'a [LoadedPythonArtifact],
 }
 
 async fn read_native_artifact(path: &Path) -> Result<Vec<u8>, ProjectResolveError> {
@@ -239,6 +259,9 @@ fn path_tree_digest(
         )?;
     }
     for artifact in content.java_artifacts {
+        append_project_artifact(&mut input, root, &artifact.path, &artifact.bytes)?;
+    }
+    for artifact in content.python_artifacts {
         append_project_artifact(&mut input, root, &artifact.path, &artifact.bytes)?;
     }
     Ok(ContentDigest::sha256(input))

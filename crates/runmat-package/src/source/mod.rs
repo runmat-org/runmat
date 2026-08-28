@@ -15,8 +15,9 @@ mod vendor;
 
 pub use acquisition::{SourceAcquisitionIntent, SourceAcquisitionPolicy, SourceLockAction};
 pub use catalog::{
-    FrozenJavaArtifact, FrozenNativeInterface, FrozenProject, FrozenSourceDescriptor, PackageMount,
-    PackageSourceCatalog, ProjectRevision, SourceCatalog, StableSourceId, VisibleProjectSource,
+    FrozenJavaArtifact, FrozenNativeInterface, FrozenProject, FrozenPythonArtifact,
+    FrozenSourceDescriptor, PackageMount, PackageSourceCatalog, ProjectRevision, SourceCatalog,
+    StableSourceId, VisibleProjectSource,
 };
 pub use encrypted_artifact::{
     ArtifactContentCipher, EncryptedArtifactMetadata, KeyEnvelopeAlgorithm, PackageKeyEnvelope,

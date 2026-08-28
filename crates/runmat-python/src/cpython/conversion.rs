@@ -5,7 +5,10 @@ use super::interpreter::Interpreter;
 use super::support::{
     array_strides, attr, capture_error, checked, parse_numpy_dtype, set_dict_string, unicode,
 };
-use crate::{value::OwnedPythonBytes, PythonArray, PythonError, PythonObjectHandle, PythonValue};
+use crate::{
+    value::OwnedPythonBytes, PythonArray, PythonDateTime, PythonError, PythonObjectHandle,
+    PythonTimeDelta, PythonValue,
+};
 
 impl Interpreter {
     pub(super) fn values_to_tuple(
@@ -101,6 +104,12 @@ impl Interpreter {
                     PythonError::host("PythonOverflowError", "byte array is too large for Python")
                 })?;
                 unsafe { (self.api.py_bytes_from_string_and_size)(value.as_ptr().cast(), length) }
+            }
+            PythonValue::DateTime(value) => {
+                return self.construct_datetime(value);
+            }
+            PythonValue::TimeDelta(value) => {
+                return self.construct_timedelta(value);
             }
             PythonValue::List(values) => self.values_to_list(values)?,
             PythonValue::Tuple(values) => self.values_to_tuple(values)?,
@@ -255,6 +264,17 @@ impl Interpreter {
             let bytes = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), length) };
             return Ok(PythonValue::Bytes(bytes.to_vec()));
         }
+        if self.is_instance(object, self.builtins.datetime)? {
+            let timezone = unsafe { attr(&self.api, object, "tzinfo")? };
+            let aware = timezone != self.builtins.none;
+            self.decref(timezone);
+            if !aware {
+                return self.read_datetime(object).map(PythonValue::DateTime);
+            }
+        }
+        if self.is_instance(object, self.builtins.timedelta)? {
+            return self.read_timedelta(object).map(PythonValue::TimeDelta);
+        }
         if let Some(array) = self.array_from_python(object)? {
             return Ok(PythonValue::Array(array));
         }
@@ -265,6 +285,84 @@ impl Interpreter {
             })?);
         self.objects.borrow_mut().insert(handle, object);
         Ok(PythonValue::Object(handle))
+    }
+
+    fn construct_datetime(&self, value: PythonDateTime) -> Result<*mut PyObject, PythonError> {
+        let arguments = self.values_to_tuple(vec![
+            PythonValue::Signed(i64::from(value.year)),
+            PythonValue::Unsigned(u64::from(value.month)),
+            PythonValue::Unsigned(u64::from(value.day)),
+            PythonValue::Unsigned(u64::from(value.hour)),
+            PythonValue::Unsigned(u64::from(value.minute)),
+            PythonValue::Unsigned(u64::from(value.second)),
+            PythonValue::Unsigned(u64::from(value.microsecond)),
+        ])?;
+        let result = unsafe {
+            (self.api.py_object_call)(self.builtins.datetime, arguments, std::ptr::null_mut())
+        };
+        self.decref(arguments);
+        unsafe { checked(&self.api, result, "construct Python datetime") }
+    }
+
+    fn construct_timedelta(&self, value: PythonTimeDelta) -> Result<*mut PyObject, PythonError> {
+        let arguments = self.values_to_tuple(vec![
+            PythonValue::Signed(value.days),
+            PythonValue::Unsigned(u64::from(value.seconds)),
+            PythonValue::Unsigned(u64::from(value.microseconds)),
+        ])?;
+        let result = unsafe {
+            (self.api.py_object_call)(self.builtins.timedelta, arguments, std::ptr::null_mut())
+        };
+        self.decref(arguments);
+        unsafe { checked(&self.api, result, "construct Python timedelta") }
+    }
+
+    fn read_datetime(&self, object: *mut PyObject) -> Result<PythonDateTime, PythonError> {
+        Ok(PythonDateTime {
+            year: i32::try_from(self.integer_attr(object, "year")?).map_err(|_| {
+                PythonError::host("PythonDateTimeError", "datetime year is outside i32")
+            })?,
+            month: self.unsigned_attr(object, "month")?,
+            day: self.unsigned_attr(object, "day")?,
+            hour: self.unsigned_attr(object, "hour")?,
+            minute: self.unsigned_attr(object, "minute")?,
+            second: self.unsigned_attr(object, "second")?,
+            microsecond: u32::try_from(self.integer_attr(object, "microsecond")?).map_err(
+                |_| PythonError::host("PythonDateTimeError", "invalid datetime microsecond"),
+            )?,
+        })
+    }
+
+    fn read_timedelta(&self, object: *mut PyObject) -> Result<PythonTimeDelta, PythonError> {
+        Ok(PythonTimeDelta {
+            days: self.integer_attr(object, "days")?,
+            seconds: u32::try_from(self.integer_attr(object, "seconds")?).map_err(|_| {
+                PythonError::host("PythonDateTimeError", "invalid timedelta seconds")
+            })?,
+            microseconds: u32::try_from(self.integer_attr(object, "microseconds")?).map_err(
+                |_| PythonError::host("PythonDateTimeError", "invalid timedelta microseconds"),
+            )?,
+        })
+    }
+
+    fn unsigned_attr(&self, object: *mut PyObject, name: &str) -> Result<u8, PythonError> {
+        u8::try_from(self.integer_attr(object, name)?).map_err(|_| {
+            PythonError::host(
+                "PythonDateTimeError",
+                format!("datetime {name} is outside u8"),
+            )
+        })
+    }
+
+    fn integer_attr(&self, object: *mut PyObject, name: &str) -> Result<i64, PythonError> {
+        let value = unsafe { attr(&self.api, object, name)? };
+        let mut overflow = 0;
+        let result = unsafe { (self.api.py_long_as_long_long_and_overflow)(value, &mut overflow) };
+        self.decref(value);
+        if overflow != 0 || !unsafe { (self.api.py_err_occurred)() }.is_null() {
+            return Err(unsafe { capture_error(&self.api, "read Python datetime field") });
+        }
+        Ok(result)
     }
 
     pub(super) fn tuple_values(
@@ -437,8 +535,28 @@ impl Interpreter {
         let typestr_text = unsafe { unicode(&self.api, typestr) };
         self.decref(typestr);
         let dtype = parse_numpy_dtype(&typestr_text?)?;
+        let canonical = if matches!(
+            dtype,
+            crate::PythonDType::DateTime64Micros | crate::PythonDType::TimeDelta64Micros
+        ) {
+            let astype = unsafe { attr(&self.api, object, "astype")? };
+            let target = match dtype {
+                crate::PythonDType::DateTime64Micros => "datetime64[us]",
+                crate::PythonDType::TimeDelta64Micros => "timedelta64[us]",
+                _ => unreachable!(),
+            };
+            let arguments = self.values_to_tuple(vec![PythonValue::String(target.into())])?;
+            let converted =
+                unsafe { (self.api.py_object_call)(astype, arguments, std::ptr::null_mut()) };
+            self.decref(arguments);
+            self.decref(astype);
+            Some(unsafe { checked(&self.api, converted, "normalize NumPy temporal array")? })
+        } else {
+            None
+        };
+        let source = canonical.unwrap_or(object);
 
-        let shape_object = unsafe { attr(&self.api, object, "shape")? };
+        let shape_object = unsafe { attr(&self.api, source, "shape")? };
         let shape = self.tuple_values(shape_object, "read Python array shape");
         self.decref(shape_object);
         let shape = shape?;
@@ -457,7 +575,7 @@ impl Interpreter {
                 )
             })?;
 
-        let flags = unsafe { attr(&self.api, object, "flags")? };
+        let flags = unsafe { attr(&self.api, source, "flags")? };
         let fortran = unsafe { attr(&self.api, flags, "f_contiguous")? };
         self.decref(flags);
         let column_major = unsafe { (self.api.py_object_is_true)(fortran) };
@@ -466,7 +584,7 @@ impl Interpreter {
             return Err(unsafe { capture_error(&self.api, "read Python array layout") });
         }
 
-        let tobytes = unsafe { attr(&self.api, object, "tobytes")? };
+        let tobytes = unsafe { attr(&self.api, source, "tobytes")? };
         // RunMat stores dense arrays in column-major order. NumPy performs an
         // explicit reorder here when the source is C-contiguous.
         let arguments = self.values_to_tuple(vec![PythonValue::String("F".into())])?;
@@ -481,6 +599,9 @@ impl Interpreter {
                 "Python array tobytes returned a non-bytes value",
             ));
         };
+        if source != object {
+            self.decref(source);
+        }
         Ok(Some(PythonArray {
             dtype,
             shape,

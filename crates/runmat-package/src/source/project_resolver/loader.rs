@@ -3,8 +3,8 @@ use super::selection::{
     validate_version,
 };
 use super::source::{
-    canonical_path, find_manifest, is_file, load_java_artifacts, load_sources, source_identity,
-    PackageContent,
+    canonical_path, find_manifest, is_file, load_java_artifacts, load_python_artifacts,
+    load_sources, source_identity, PackageContent,
 };
 use super::{PackageSourceProvider, ProjectResolveError, ProjectResolveOptions};
 use crate::{
@@ -51,6 +51,7 @@ pub(super) struct LoadedPackage {
     pub(super) native_interfaces: Vec<LoadedNativeInterface>,
     pub(super) mex_artifacts: Vec<LoadedMexArtifact>,
     pub(super) java_artifacts: Vec<LoadedJavaArtifact>,
+    pub(super) python_artifacts: Vec<LoadedPythonArtifact>,
     pub(super) enabled_features: BTreeSet<String>,
     pub(super) dependencies: Vec<LoadedDependency>,
     pub(super) inventory: crate::SourceInventory,
@@ -79,6 +80,13 @@ pub(super) struct LoadedMexArtifact {
 
 pub(super) struct LoadedJavaArtifact {
     pub(super) name: String,
+    pub(super) path: PathBuf,
+    pub(super) bytes: Vec<u8>,
+}
+
+pub(super) struct LoadedPythonArtifact {
+    pub(super) name: String,
+    pub(super) module: String,
     pub(super) path: PathBuf,
     pub(super) bytes: Vec<u8>,
 }
@@ -158,6 +166,7 @@ impl Loader<'_> {
             let native_interfaces = super::source::load_native_interfaces(&root, &config).await?;
             let mex_artifacts = super::source::load_mex_artifacts(&root, &config).await?;
             let java_artifacts = load_java_artifacts(&root, &config).await?;
+            let python_artifacts = load_python_artifacts(&root, &config).await?;
             let source = source_identity(
                 &self.workspace_root,
                 &manifest_path,
@@ -168,6 +177,7 @@ impl Loader<'_> {
                     native_interfaces: &native_interfaces,
                     mex_artifacts: &mex_artifacts,
                     java_artifacts: &java_artifacts,
+                    python_artifacts: &python_artifacts,
                 },
                 &origin,
             )?;
@@ -201,6 +211,7 @@ impl Loader<'_> {
                     native_interfaces,
                     mex_artifacts,
                     java_artifacts,
+                    python_artifacts,
                     enabled_features: active_features.clone(),
                     dependencies: Vec::new(),
                     inventory,

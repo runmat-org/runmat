@@ -15,6 +15,7 @@ pub struct NativeObjectOptions {
     pub native_interfaces: runmat_native_ffi::NativeInterfaceArtifactBundle,
     pub mex_artifacts: runmat_mex::MexArtifactBundle,
     pub java_artifacts: runmat_java::JavaArtifactBundle,
+    pub python_artifacts: runmat_python::PythonArtifactBundle,
 }
 
 impl Default for NativeObjectOptions {
@@ -28,6 +29,7 @@ impl Default for NativeObjectOptions {
             native_interfaces: runmat_native_ffi::NativeInterfaceArtifactBundle::empty(),
             mex_artifacts: runmat_mex::MexArtifactBundle::empty(),
             java_artifacts: runmat_java::JavaArtifactBundle::empty(),
+            python_artifacts: runmat_python::PythonArtifactBundle::empty(),
         }
     }
 }
@@ -58,20 +60,25 @@ pub fn emit_native_object(
     let data = input
         .aot_object_data(
             &assembly,
-            options.runtime_binding_mode,
-            options.retained_builtin_bindings.clone(),
-            options
-                .native_interfaces
-                .canonical_bytes()
-                .map_err(|error| {
-                    AotError::contract("aot.compile.native_interfaces", error.to_string())
+            runmat_core::AotObjectDataOptions {
+                runtime_binding_mode: options.runtime_binding_mode,
+                builtin_bindings: options.retained_builtin_bindings.clone(),
+                native_interfaces: options.native_interfaces.canonical_bytes().map_err(
+                    |error| AotError::contract("aot.compile.native_interfaces", error.to_string()),
+                )?,
+                mex_artifacts: options.mex_artifacts.canonical_bytes().map_err(|error| {
+                    AotError::contract("aot.compile.mex_artifacts", error.to_string())
                 })?,
-            options.mex_artifacts.canonical_bytes().map_err(|error| {
-                AotError::contract("aot.compile.mex_artifacts", error.to_string())
-            })?,
-            options.java_artifacts.canonical_bytes().map_err(|error| {
-                AotError::contract("aot.compile.java_artifacts", error.to_string())
-            })?,
+                java_artifacts: options.java_artifacts.canonical_bytes().map_err(|error| {
+                    AotError::contract("aot.compile.java_artifacts", error.to_string())
+                })?,
+                python_artifacts: options
+                    .python_artifacts
+                    .canonical_bytes()
+                    .map_err(|error| {
+                        AotError::contract("aot.compile.python_artifacts", error.to_string())
+                    })?,
+            },
         )
         .map_err(|error| AotError::contract("aot.compile.data", error.to_string()))?;
     runmat_native_codegen::aot::emit_relocatable_object_for_runtime(

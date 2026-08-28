@@ -954,7 +954,7 @@ fn format_for_object(obj: &ObjectInstance) -> String {
     }
 }
 
-fn serial_tensor_for_object(obj: &ObjectInstance) -> BuiltinResult<Tensor> {
+pub(crate) fn serial_tensor_for_object(obj: &ObjectInstance) -> BuiltinResult<Tensor> {
     match obj.properties.get(SERIAL_FIELD) {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         Some(Value::Num(value)) => Tensor::new(vec![*value], vec![1, 1])
@@ -1021,7 +1021,7 @@ pub(crate) fn datenum_from_naive(datetime: NaiveDateTime) -> f64 {
     total_seconds / SECONDS_PER_DAY + UNIX_DATENUM
 }
 
-fn naive_from_datenum(serial: f64) -> BuiltinResult<NaiveDateTime> {
+pub(crate) fn naive_from_datenum(serial: f64) -> BuiltinResult<NaiveDateTime> {
     if !serial.is_finite() {
         return Err(datetime_error(
             "datetime: serial date numbers must be finite",

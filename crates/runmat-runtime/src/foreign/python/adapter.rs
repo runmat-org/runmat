@@ -4,9 +4,10 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use runmat_python::{
-    discover_python, PythonCall, PythonCallbackInvocation, PythonDiscoveryRequest, PythonError,
-    PythonExecutionMode, PythonObjectHandle, PythonSession, PythonSessionConfig, PythonValue,
-    PYTHON_ADAPTER_ID, PYTHON_ADAPTER_VERSION,
+    discover_python, InstalledPythonArtifacts, PythonArtifactBundle, PythonCall,
+    PythonCallbackInvocation, PythonDiscoveryRequest, PythonError, PythonExecutionMode,
+    PythonObjectHandle, PythonSession, PythonSessionConfig, PythonValue, PYTHON_ADAPTER_ID,
+    PYTHON_ADAPTER_VERSION,
 };
 use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
@@ -48,7 +49,17 @@ pub struct PythonRuntimeConfiguration {
     pub version: Option<(u16, u16)>,
     pub minimum_version: (u16, u16),
     pub maximum_version: Option<(u16, u16)>,
+    #[serde(default)]
+    pub exact_version: Option<runmat_python::PythonVersion>,
+    #[serde(default)]
+    pub required_abi_tag: Option<String>,
+    #[serde(default)]
+    pub required_platform_tag: Option<String>,
     pub execution_mode: PythonExecutionMode,
+    #[serde(default)]
+    pub module_paths: Vec<std::path::PathBuf>,
+    #[serde(default)]
+    pub artifact_identities: BTreeSet<String>,
 }
 
 impl Default for PythonRuntimeConfiguration {
@@ -58,7 +69,12 @@ impl Default for PythonRuntimeConfiguration {
             version: None,
             minimum_version: (3, 9),
             maximum_version: None,
+            exact_version: None,
+            required_abi_tag: None,
+            required_platform_tag: None,
             execution_mode: PythonExecutionMode::InProcess,
+            module_paths: Vec::new(),
+            artifact_identities: BTreeSet::new(),
         }
     }
 }
@@ -77,6 +93,7 @@ pub struct PythonAdapter {
     callbacks: RefCell<BTreeMap<u64, PythonCallbackRegistration>>,
     next_callback: Cell<u64>,
     terminated: Rc<Cell<bool>>,
+    installed_artifacts: RefCell<Option<InstalledPythonArtifacts>>,
 }
 
 #[derive(Clone)]
@@ -142,6 +159,7 @@ impl PythonAdapter {
             callbacks: RefCell::new(BTreeMap::new()),
             next_callback: Cell::new(1),
             terminated: Rc::new(Cell::new(false)),
+            installed_artifacts: RefCell::new(None),
         }))
     }
 
@@ -162,6 +180,85 @@ impl PythonAdapter {
         self.session.borrow().is_some() || self.isolated_client.borrow().is_some()
     }
 
+    pub fn install_artifact_bundle(
+        &self,
+        bundle: &PythonArtifactBundle,
+    ) -> Result<(), RuntimeError> {
+        if self.is_running() || self.isolated_call_active.get() {
+            return Err(invalid_call(
+                "Python artifacts cannot change after the interpreter starts",
+            ));
+        }
+        bundle.validate().map_err(python_artifact_error)?;
+        let configuration = self.configuration.borrow().clone();
+        let installation =
+            discover_python(&discovery_request(&configuration)).map_err(python_runtime_error)?;
+        if let Some(required) = &bundle.environment {
+            if required.implementation != "cpython"
+                || required.version != installation.version
+                || required.abi_tag != installation.abi_tag
+                || required.platform_tag != installation.platform_tag
+                || required.execution_mode != configuration.execution_mode
+            {
+                return Err(invalid_call(format!(
+                    "Python artifact environment requires {} {} ({}, {}) in {:?} mode, but this session resolved {} {} ({}, {}) in {:?} mode",
+                    required.implementation,
+                    required.version,
+                    required.abi_tag,
+                    required.platform_tag,
+                    required.execution_mode,
+                    installation.implementation,
+                    installation.version,
+                    installation.abi_tag,
+                    installation.platform_tag,
+                    configuration.execution_mode
+                )));
+            }
+        }
+        let installed = bundle.install().map_err(python_artifact_error)?;
+        let mut updated = configuration;
+        updated.module_paths = installed.module_paths().to_vec();
+        updated.artifact_identities = bundle.artifact_identities();
+        *self.configuration.borrow_mut() = updated;
+        *self.installed_artifacts.borrow_mut() = Some(installed);
+        Ok(())
+    }
+
+    pub fn install_portable_artifact_bundle(
+        &self,
+        bundle: &PythonArtifactBundle,
+    ) -> Result<(), RuntimeError> {
+        if let Some(environment) = bundle.environment.as_ref() {
+            let mut configuration = self.configuration.borrow().clone();
+            configuration.version = Some((environment.version.major, environment.version.minor));
+            configuration.minimum_version = (environment.version.major, environment.version.minor);
+            configuration.maximum_version =
+                Some((environment.version.major, environment.version.minor));
+            configuration.execution_mode = environment.execution_mode;
+            configuration.exact_version = Some(environment.version);
+            configuration.required_abi_tag = Some(environment.abi_tag.clone());
+            configuration.required_platform_tag = Some(environment.platform_tag.clone());
+            configuration.module_paths.clear();
+            configuration.artifact_identities.clear();
+            self.configure(configuration)?;
+        }
+        self.install_artifact_bundle(bundle)
+    }
+
+    pub fn clear_artifact_bundle(&self) -> Result<(), RuntimeError> {
+        if self.is_running() || self.isolated_call_active.get() {
+            return Err(invalid_call(
+                "Python artifacts cannot be cleared after the interpreter starts",
+            ));
+        }
+        let mut configuration = self.configuration.borrow_mut();
+        configuration.module_paths.clear();
+        configuration.artifact_identities.clear();
+        drop(configuration);
+        self.installed_artifacts.borrow_mut().take();
+        Ok(())
+    }
+
     fn ensure_session(&self) -> Result<PythonSession, RuntimeError> {
         if let Some(session) = self.session.borrow().clone() {
             return Ok(session);
@@ -170,8 +267,11 @@ impl PythonAdapter {
         debug_assert_eq!(configuration.execution_mode, PythonExecutionMode::InProcess);
         let installation =
             discover_python(&discovery_request(&configuration)).map_err(python_runtime_error)?;
-        let session = PythonSession::start(PythonSessionConfig { installation })
-            .map_err(python_runtime_error)?;
+        let session = PythonSession::start(PythonSessionConfig {
+            installation,
+            module_paths: configuration.module_paths,
+        })
+        .map_err(python_runtime_error)?;
         *self.session.borrow_mut() = Some(session.clone());
         self.terminated.set(false);
         Ok(session)
@@ -765,7 +865,7 @@ impl ForeignAdapter for PythonAdapter {
                 ForeignCapability::Transfer,
                 ForeignCapability::ZeroCopy,
             ]),
-            artifact_identities: BTreeSet::new(),
+            artifact_identities: self.configuration.borrow().artifact_identities.clone(),
             supports_wasm: false,
             supports_host_bridge: false,
             execution_stack: runmat_types::ExecutionStackRequirement::Process,
@@ -797,6 +897,9 @@ fn discovery_request(configuration: &PythonRuntimeConfiguration) -> PythonDiscov
         version: configuration.version,
         minimum_version: configuration.minimum_version,
         maximum_version: configuration.maximum_version,
+        exact_version: configuration.exact_version,
+        required_abi_tag: configuration.required_abi_tag.clone(),
+        required_platform_tag: configuration.required_platform_tag.clone(),
     }
 }
 
@@ -942,6 +1045,10 @@ fn python_runtime_error(error: PythonError) -> RuntimeError {
         .with_identifier(format!("RunMat:Python:{type_name}"))
         .with_source(error)
         .build()
+}
+
+fn python_artifact_error(error: runmat_python::PythonArtifactError) -> RuntimeError {
+    foreign_error(ForeignErrorKind::InvalidManifest, error.to_string())
 }
 
 fn invalid_call(message: impl Into<String>) -> RuntimeError {

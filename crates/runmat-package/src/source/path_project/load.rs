@@ -1,6 +1,6 @@
 use super::model::{
     LoadedJavaArtifact, LoadedMexArtifact, LoadedNativeInterface, LoadedPathPackage,
-    LoadedPathProject, LoadedSource,
+    LoadedPathProject, LoadedPythonArtifact, LoadedSource,
 };
 use super::FrozenProjectError;
 use runmat_config::project::{
@@ -131,6 +131,17 @@ impl PathProjectLoader {
                     bytes,
                 });
             }
+            let mut python_artifacts = Vec::with_capacity(manifest.python_artifacts.len());
+            for (name, artifact) in &manifest.python_artifacts {
+                let path = project_root.join(&artifact.path);
+                let bytes = read_project_artifact(&path, "Python").await?;
+                python_artifacts.push(LoadedPythonArtifact {
+                    name: name.clone(),
+                    module: artifact.module.clone(),
+                    path,
+                    bytes,
+                });
+            }
 
             active.push((manifest_path.clone(), package_name.clone()));
             let mut dependencies = BTreeMap::new();
@@ -174,6 +185,7 @@ impl PathProjectLoader {
                     native_interfaces,
                     mex_artifacts,
                     java_artifacts,
+                    python_artifacts,
                     dependencies,
                 },
             );
