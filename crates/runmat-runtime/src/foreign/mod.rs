@@ -41,6 +41,7 @@ pub async fn run_extension_host() -> Result<(), String> {
         .as_deref()
     {
         Some(native_ffi::NATIVE_FFI_HOST_KIND) => native_ffi::run_native_ffi_extension_host(),
+        Some(python::PYTHON_HOST_KIND) => python::run_python_extension_host(),
         Some(kind) => Err(format!("unknown extension host kind `{kind}`")),
         None => mex::run_mex_extension_host().await,
     }

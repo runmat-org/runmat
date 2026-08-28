@@ -20,6 +20,7 @@ use super::super::{
     ForeignHandleRegistry, ForeignHostRegistration, ForeignHostRelease, ForeignResourceMetadata,
 };
 use super::conversion::{value_from_python, value_to_python};
+use super::{IsolatedPythonClient, NestedPythonCall, NestedPythonQueue};
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::{build_runtime_error, RuntimeError};
 
@@ -41,7 +42,7 @@ impl ForeignHostRelease for ReleaseQueue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PythonRuntimeConfiguration {
     pub executable: Option<std::path::PathBuf>,
     pub version: Option<(u16, u16)>,
@@ -66,13 +67,28 @@ pub struct PythonAdapter {
     handles: ForeignHandleRegistry,
     host_identity: String,
     session: RefCell<Option<PythonSession>>,
-    configuration: RefCell<PythonRuntimeConfiguration>,
+    isolated_client: Rc<RefCell<Option<IsolatedPythonClient>>>,
+    isolated_call_active: Rc<Cell<bool>>,
+    nested_isolated_calls: NestedPythonQueue,
+    configuration: Rc<RefCell<PythonRuntimeConfiguration>>,
     released: Arc<ReleaseQueue>,
     resources: RefCell<BTreeMap<u64, PythonObjectHandle>>,
     python_to_foreign: RefCell<BTreeMap<PythonObjectHandle, WeakForeignRef>>,
     callbacks: RefCell<BTreeMap<u64, PythonCallbackRegistration>>,
     next_callback: Cell<u64>,
-    terminated: Cell<bool>,
+    terminated: Rc<Cell<bool>>,
+}
+
+#[derive(Clone)]
+struct IsolatedPythonState {
+    handles: ForeignHandleRegistry,
+    host_identity: String,
+    client: Rc<RefCell<Option<IsolatedPythonClient>>>,
+    call_active: Rc<Cell<bool>>,
+    nested_calls: NestedPythonQueue,
+    configuration: Rc<RefCell<PythonRuntimeConfiguration>>,
+    released: Arc<ReleaseQueue>,
+    terminated: Rc<Cell<bool>>,
 }
 
 impl std::fmt::Debug for PythonAdapter {
@@ -116,18 +132,21 @@ impl PythonAdapter {
             handles,
             host_identity,
             session: RefCell::new(None),
-            configuration: RefCell::new(configuration),
+            isolated_client: Rc::new(RefCell::new(None)),
+            isolated_call_active: Rc::new(Cell::new(false)),
+            nested_isolated_calls: Rc::new(RefCell::new(std::collections::VecDeque::new())),
+            configuration: Rc::new(RefCell::new(configuration)),
             released,
             resources: RefCell::new(BTreeMap::new()),
             python_to_foreign: RefCell::new(BTreeMap::new()),
             callbacks: RefCell::new(BTreeMap::new()),
             next_callback: Cell::new(1),
-            terminated: Cell::new(false),
+            terminated: Rc::new(Cell::new(false)),
         }))
     }
 
     pub fn configure(&self, configuration: PythonRuntimeConfiguration) -> Result<(), RuntimeError> {
-        if self.session.borrow().is_some() {
+        if self.is_running() || self.isolated_call_active.get() {
             return Err(invalid_call(
                 "Python configuration is immutable after the interpreter starts",
             ));
@@ -140,7 +159,7 @@ impl PythonAdapter {
     }
 
     pub fn is_running(&self) -> bool {
-        self.session.borrow().is_some()
+        self.session.borrow().is_some() || self.isolated_client.borrow().is_some()
     }
 
     fn ensure_session(&self) -> Result<PythonSession, RuntimeError> {
@@ -148,14 +167,7 @@ impl PythonAdapter {
             return Ok(session);
         }
         let configuration = self.configuration.borrow().clone();
-        if configuration.execution_mode == PythonExecutionMode::OutOfProcess {
-            return Err(build_runtime_error(
-                "the isolated Python host has not been installed for this RunMat executable",
-            )
-            .with_builtin("python")
-            .with_identifier("RunMat:Python:IsolatedHostUnavailable")
-            .build());
-        }
+        debug_assert_eq!(configuration.execution_mode, PythonExecutionMode::InProcess);
         let installation =
             discover_python(&discovery_request(&configuration)).map_err(python_runtime_error)?;
         let session = PythonSession::start(PythonSessionConfig { installation })
@@ -166,15 +178,7 @@ impl PythonAdapter {
     }
 
     fn drain_releases(&self) -> Result<(), RuntimeError> {
-        let handles = {
-            let mut released = self.released.0.lock().map_err(|_| {
-                foreign_error(
-                    ForeignErrorKind::HostUnavailable,
-                    "Python release queue lock was poisoned",
-                )
-            })?;
-            std::mem::take(&mut *released)
-        };
+        let handles = self.take_releases()?;
         let Some(session) = self.session.borrow().clone() else {
             return Ok(());
         };
@@ -189,6 +193,16 @@ impl PythonAdapter {
             }
         }
         Ok(())
+    }
+
+    fn take_releases(&self) -> Result<Vec<u64>, RuntimeError> {
+        let mut released = self.released.0.lock().map_err(|_| {
+            foreign_error(
+                ForeignErrorKind::HostUnavailable,
+                "Python release queue lock was poisoned",
+            )
+        })?;
+        Ok(std::mem::take(&mut *released))
     }
 
     fn invoke_now(
@@ -463,79 +477,23 @@ impl PythonAdapter {
 
     fn status_value(&self) -> Result<Value, RuntimeError> {
         let configuration = self.configuration.borrow().clone();
-        let installation = discover_python(&discovery_request(&configuration)).ok();
-        let running = self.session.borrow().is_some();
-        let mut environment = ObjectInstance::new("py.PythonEnvironment".into());
-        environment.properties.insert(
-            "Version".into(),
-            Value::String(
-                installation
-                    .as_ref()
-                    .map(|value| value.version.to_string())
-                    .unwrap_or_default(),
-            ),
-        );
-        environment.properties.insert(
-            "Executable".into(),
-            Value::String(
-                installation
-                    .as_ref()
-                    .map(|value| value.executable.display().to_string())
-                    .unwrap_or_default(),
-            ),
-        );
-        environment.properties.insert(
-            "Library".into(),
-            Value::String(
-                installation
-                    .as_ref()
-                    .map(|value| value.library.display().to_string())
-                    .unwrap_or_default(),
-            ),
-        );
-        environment.properties.insert(
-            "Home".into(),
-            Value::String(
-                installation
-                    .as_ref()
-                    .map(|value| value.home.display().to_string())
-                    .unwrap_or_default(),
-            ),
-        );
-        environment.properties.insert(
-            "Status".into(),
-            Value::String(
-                if running {
-                    "Loaded"
-                } else if self.terminated.get() {
-                    "Terminated"
-                } else {
-                    "NotLoaded"
-                }
-                .into(),
-            ),
-        );
-        environment.properties.insert(
-            "ExecutionMode".into(),
-            Value::String(configuration.execution_mode.as_compatibility_name().into()),
-        );
-        environment.properties.insert(
-            "ProcessID".into(),
-            if running {
-                Value::Int(runmat_value::IntValue::U32(std::process::id()))
-            } else {
-                Value::Num(f64::NAN)
-            },
-        );
-        environment.properties.insert(
-            "ProcessName".into(),
-            Value::String(if running { "RunMat" } else { "" }.into()),
-        );
-        Ok(Value::Object(environment))
+        let running = self.is_running();
+        let process_id = self
+            .isolated_client
+            .borrow()
+            .as_ref()
+            .and_then(IsolatedPythonClient::process_id)
+            .or_else(|| running.then(std::process::id));
+        Ok(python_status_value(
+            &configuration,
+            running,
+            self.terminated.get(),
+            process_id,
+        ))
     }
 
     fn configure_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
-        if self.session.borrow().is_some() {
+        if self.is_running() || self.isolated_call_active.get() {
             return Err(invalid_call(
                 "pyenv cannot change Python configuration after startup",
             ));
@@ -598,6 +556,199 @@ impl PythonAdapter {
         self.terminated.set(true);
         self.status_value()
     }
+
+    fn isolated_state(&self) -> IsolatedPythonState {
+        IsolatedPythonState {
+            handles: self.handles.clone(),
+            host_identity: self.host_identity.clone(),
+            client: Rc::clone(&self.isolated_client),
+            call_active: Rc::clone(&self.isolated_call_active),
+            nested_calls: Rc::clone(&self.nested_isolated_calls),
+            configuration: Rc::clone(&self.configuration),
+            released: Arc::clone(&self.released),
+            terminated: Rc::clone(&self.terminated),
+        }
+    }
+}
+
+fn python_status_value(
+    configuration: &PythonRuntimeConfiguration,
+    running: bool,
+    terminated: bool,
+    process_id: Option<u32>,
+) -> Value {
+    let installation = discover_python(&discovery_request(configuration)).ok();
+    let mut environment = ObjectInstance::new("py.PythonEnvironment".into());
+    environment.properties.insert(
+        "Version".into(),
+        Value::String(
+            installation
+                .as_ref()
+                .map(|value| value.version.to_string())
+                .unwrap_or_default(),
+        ),
+    );
+    environment.properties.insert(
+        "Executable".into(),
+        Value::String(
+            installation
+                .as_ref()
+                .map(|value| value.executable.display().to_string())
+                .unwrap_or_default(),
+        ),
+    );
+    environment.properties.insert(
+        "Library".into(),
+        Value::String(
+            installation
+                .as_ref()
+                .map(|value| value.library.display().to_string())
+                .unwrap_or_default(),
+        ),
+    );
+    environment.properties.insert(
+        "Home".into(),
+        Value::String(
+            installation
+                .as_ref()
+                .map(|value| value.home.display().to_string())
+                .unwrap_or_default(),
+        ),
+    );
+    environment.properties.insert(
+        "Status".into(),
+        Value::String(
+            if running {
+                "Loaded"
+            } else if terminated {
+                "Terminated"
+            } else {
+                "NotLoaded"
+            }
+            .into(),
+        ),
+    );
+    environment.properties.insert(
+        "ExecutionMode".into(),
+        Value::String(configuration.execution_mode.as_compatibility_name().into()),
+    );
+    environment.properties.insert(
+        "ProcessID".into(),
+        if let Some(process_id) = process_id {
+            Value::Int(runmat_value::IntValue::U32(process_id))
+        } else {
+            Value::Num(f64::NAN)
+        },
+    );
+    environment.properties.insert(
+        "ProcessName".into(),
+        Value::String(if running { "RunMat" } else { "" }.into()),
+    );
+    Value::Object(environment)
+}
+
+async fn invoke_isolated(
+    state: IsolatedPythonState,
+    context: RuntimeContext,
+    call: ForeignCall,
+) -> Result<Value, RuntimeError> {
+    if state.call_active.replace(true) {
+        let (reply, response) = tokio::sync::oneshot::channel();
+        state
+            .nested_calls
+            .borrow_mut()
+            .push_back(NestedPythonCall { call, reply });
+        return response.await.map_err(|_| {
+            foreign_error(
+                ForeignErrorKind::HostUnavailable,
+                "isolated Python callback ended before its nested call completed",
+            )
+        })?;
+    }
+    let result = async {
+        let mut client = state.client.borrow_mut().take();
+        if client.is_none() {
+            let configuration = state.configuration.borrow().clone();
+            client = Some(
+                IsolatedPythonClient::spawn(&configuration)
+                    .await
+                    .map_err(super::isolation::runtime_error)?,
+            );
+            state.terminated.set(false);
+        }
+        let mut client = client.expect("isolated Python client initialized");
+        let released = take_releases(&state.released)?;
+        let outcome = client
+            .invoke(
+                context,
+                call,
+                &state.handles,
+                &state.host_identity,
+                released,
+                &state.nested_calls,
+            )
+            .await;
+        let terminal = outcome.as_ref().err().is_some_and(|error| {
+            matches!(
+                error.identifier(),
+                Some(
+                    "RunMat:Python:Cancelled"
+                        | "RunMat:Python:HostCrashed"
+                        | "RunMat:Python:HostTransport"
+                        | "RunMat:Python:HostAuthentication"
+                )
+            )
+        });
+        if terminal {
+            state.handles.restart_host(&state.host_identity)?;
+            state.terminated.set(true);
+        } else {
+            *state.client.borrow_mut() = Some(client);
+        }
+        outcome
+    }
+    .await;
+    state.call_active.set(false);
+    result
+}
+
+async fn terminate_isolated(state: IsolatedPythonState) -> Result<Value, RuntimeError> {
+    if state.call_active.replace(true) {
+        return Err(invalid_call(
+            "terminate cannot run during an active isolated Python call",
+        ));
+    }
+    let result = async {
+        let client = state.client.borrow_mut().take();
+        let shutdown = if let Some(mut client) = client {
+            let released = take_releases(&state.released)?;
+            client
+                .shutdown(released)
+                .await
+                .map_err(super::isolation::runtime_error)
+        } else {
+            Ok(())
+        };
+        state.handles.restart_host(&state.host_identity)?;
+        state.nested_calls.borrow_mut().clear();
+        state.terminated.set(true);
+        shutdown?;
+        let configuration = state.configuration.borrow().clone();
+        Ok(python_status_value(&configuration, false, true, None))
+    }
+    .await;
+    state.call_active.set(false);
+    result
+}
+
+fn take_releases(released: &ReleaseQueue) -> Result<Vec<u64>, RuntimeError> {
+    let mut released = released.0.lock().map_err(|_| {
+        foreign_error(
+            ForeignErrorKind::HostUnavailable,
+            "Python release queue lock was poisoned",
+        )
+    })?;
+    Ok(std::mem::take(&mut *released))
 }
 
 impl ForeignAdapter for PythonAdapter {
@@ -622,8 +773,17 @@ impl ForeignAdapter for PythonAdapter {
     }
 
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
-        let result = self.invoke_now(&context, call);
-        Box::pin(async move { result })
+        let mode = self.configuration.borrow().execution_mode;
+        if mode == PythonExecutionMode::InProcess
+            || matches!(call.symbol.as_str(), "status" | "configure")
+        {
+            let result = self.invoke_now(&context, call);
+            return Box::pin(async move { result });
+        }
+        if call.symbol == "terminate" {
+            return Box::pin(terminate_isolated(self.isolated_state()));
+        }
+        Box::pin(invoke_isolated(self.isolated_state(), context, call))
     }
 
     fn is_isolated(&self) -> bool {
