@@ -314,25 +314,7 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
 }
 
 impl RunMatSession {
-    async fn run(
-        &mut self,
-        input: &str,
-    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
-        self.configure_runtime_context();
-        let runtime = self.runtime_context.clone();
-        runtime.scope(self.run_in_context(input)).await
-    }
-
-    async fn run_in_context(
-        &mut self,
-        input: &str,
-    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
-        let _test_services = runmat_runtime::testing::install_test_services(
-            crate::testing::runtime_adapter::services(
-                self.compat_mode,
-                self.project_handoff.clone(),
-            ),
-        );
+    pub(super) fn configure_dynamic_function_services(&self) {
         let dynamic_environment = DynamicFunctionEnvironment {
             compat: self.compat_mode,
             top_level_await_enabled: self.top_level_await_enabled,
@@ -355,6 +337,7 @@ impl RunMatSession {
             });
         self.runtime_context
             .set_dynamic_function_loader(Some(loader));
+
         let dynamic_function_cache = Arc::clone(&self.dynamic_function_cache);
         #[cfg(not(target_arch = "wasm32"))]
         let mex_runtime = std::rc::Rc::clone(&self.mex_runtime);
@@ -377,7 +360,9 @@ impl RunMatSession {
                             runmat_runtime::user_functions::DynamicFunctionClearRequest::All => {
                                 cache.clear();
                             }
-                            runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(name) => {
+                            runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(
+                                name,
+                            ) => {
                                 cache.retain(|path, _| {
                                     !super::dynamic::path_matches_clear_name(path, name)
                                 });
@@ -392,6 +377,28 @@ impl RunMatSession {
             });
         self.runtime_context
             .set_dynamic_function_clearer(Some(clearer));
+    }
+
+    async fn run(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        self.configure_runtime_context();
+        let runtime = self.runtime_context.clone();
+        runtime.scope(self.run_in_context(input)).await
+    }
+
+    async fn run_in_context(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        let _test_services = runmat_runtime::testing::install_test_services(
+            crate::testing::runtime_adapter::services(
+                self.compat_mode,
+                self.project_handoff.clone(),
+            ),
+        );
+        self.configure_dynamic_function_services();
         let source_lookup_name = self
             .current_source_fullpath_name()
             .unwrap_or_else(|| self.current_source_name());

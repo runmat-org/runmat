@@ -152,6 +152,7 @@ pub(super) fn define(
     let program = required_data(data, super::AOT_PROGRAM_SYMBOL)?;
     let resume_points = required_data(data, super::AOT_RESUME_POINTS_SYMBOL)?;
     let native_interfaces = required_data(data, super::AOT_NATIVE_INTERFACES_SYMBOL)?;
+    let mex_artifacts = required_data(data, super::AOT_MEX_ARTIFACTS_SYMBOL)?;
     let java_artifacts = required_data(data, super::AOT_JAVA_ARTIFACTS_SYMBOL)?;
     let pointer = module.isa().pointer_type();
 
@@ -161,6 +162,8 @@ pub(super) fn define(
         AbiParam::new(pointer),
         AbiParam::new(pointer),
         AbiParam::new(pointer),
+        AbiParam::new(pointer),
+        AbiParam::new(types::I64),
         AbiParam::new(pointer),
         AbiParam::new(types::I64),
         AbiParam::new(pointer),
@@ -200,6 +203,7 @@ pub(super) fn define(
     let resume_data = module.declare_data_in_func(resume_points.0, &mut context.func);
     let native_interfaces_data =
         module.declare_data_in_func(native_interfaces.0, &mut context.func);
+    let mex_artifacts_data = module.declare_data_in_func(mex_artifacts.0, &mut context.func);
     let java_artifacts_data = module.declare_data_in_func(java_artifacts.0, &mut context.func);
 
     let mut builder_context = FunctionBuilderContext::new();
@@ -215,11 +219,13 @@ pub(super) fn define(
     let program_ptr = builder.ins().symbol_value(pointer, program_data);
     let resume_ptr = builder.ins().symbol_value(pointer, resume_data);
     let native_interfaces_ptr = builder.ins().symbol_value(pointer, native_interfaces_data);
+    let mex_artifacts_ptr = builder.ins().symbol_value(pointer, mex_artifacts_data);
     let java_artifacts_ptr = builder.ins().symbol_value(pointer, java_artifacts_data);
     let native_ir_len = length_constant(&mut builder, native_ir.1)?;
     let program_len = length_constant(&mut builder, program.1)?;
     let resume_len = length_constant(&mut builder, resume_points.1)?;
     let native_interfaces_len = length_constant(&mut builder, native_interfaces.1)?;
+    let mex_artifacts_len = length_constant(&mut builder, mex_artifacts.1)?;
     let java_artifacts_len = length_constant(&mut builder, java_artifacts.1)?;
     let call = builder.ins().call(
         runtime,
@@ -236,6 +242,8 @@ pub(super) fn define(
             resume_len,
             native_interfaces_ptr,
             native_interfaces_len,
+            mex_artifacts_ptr,
+            mex_artifacts_len,
             java_artifacts_ptr,
             java_artifacts_len,
         ],

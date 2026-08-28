@@ -2,6 +2,8 @@ mod abi;
 mod async_abi;
 mod async_request;
 mod boundary;
+#[cfg(not(target_family = "wasm"))]
+mod gpu_abi;
 mod service_slot;
 mod services;
 

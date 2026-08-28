@@ -4,7 +4,9 @@ mod builtin;
 mod execute;
 mod input;
 mod java_artifacts;
+mod materialize;
 mod mex;
+mod mex_artifacts;
 mod native_interfaces;
 mod output;
 mod program;
@@ -44,6 +46,8 @@ pub unsafe extern "C" fn runmat_aot_main(
     resume_points_len: u64,
     native_interfaces: *const u8,
     native_interfaces_len: u64,
+    mex_artifacts: *const u8,
+    mex_artifacts_len: u64,
     java_artifacts: *const u8,
     java_artifacts_len: u64,
 ) -> i32 {
@@ -89,6 +93,8 @@ pub unsafe extern "C" fn runmat_aot_main(
             resume_points_len,
             native_interfaces,
             native_interfaces_len,
+            mex_artifacts,
+            mex_artifacts_len,
             java_artifacts,
             java_artifacts_len,
         };

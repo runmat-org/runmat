@@ -86,6 +86,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             .await
         }
         Commands::Mex(args) => mex::execute(args),
+        Commands::Mexcuda(args) => mex::execute_cuda(args),
         Commands::Check {
             file,
             json,

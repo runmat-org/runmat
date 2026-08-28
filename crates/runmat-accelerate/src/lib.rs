@@ -39,7 +39,7 @@ pub use native_auto::{
 };
 pub use placement::{report as placement_report, PlacementReport};
 pub use reduction_meta::{value_is_all_keyword, ReductionAxes};
-#[cfg(feature = "wgpu")]
+#[cfg(any(feature = "wgpu", all(feature = "cuda", not(target_arch = "wasm32"))))]
 use runmat_accelerate_api::AccelProvider;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "wgpu")]
@@ -177,6 +177,24 @@ impl Default for AccelerateInitOptions {
 /// Initialize the global acceleration provider using the supplied options.
 pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
     configure_auto_offload(options.auto_offload.clone());
+
+    #[cfg(all(feature = "cuda", not(target_arch = "wasm32")))]
+    if options.enabled {
+        match backend::cuda::register_cuda_provider() {
+            Ok(Some(provider)) => {
+                log::info!(
+                    "RunMat Accelerate: CUDA extension provider {}",
+                    provider.device_info()
+                );
+            }
+            Ok(None) => {
+                log::debug!("RunMat Accelerate: CUDA driver is unavailable");
+            }
+            Err(error) => {
+                log::warn!("RunMat Accelerate: CUDA extension provider unavailable: {error}");
+            }
+        }
+    }
 
     if runmat_accelerate_api::provider().is_some() {
         return;

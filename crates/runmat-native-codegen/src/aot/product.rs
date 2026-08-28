@@ -3,7 +3,7 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 3;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 4;
 pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 2;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
@@ -12,6 +12,7 @@ pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
 pub const AOT_PROGRAM_SYMBOL: &str = "runmat_aot_program";
 pub const AOT_RESUME_POINTS_SYMBOL: &str = "runmat_aot_resume_points";
 pub const AOT_NATIVE_INTERFACES_SYMBOL: &str = "runmat_aot_native_interfaces";
+pub const AOT_MEX_ARTIFACTS_SYMBOL: &str = "runmat_aot_mex_artifacts";
 pub const AOT_JAVA_ARTIFACTS_SYMBOL: &str = "runmat_aot_java_artifacts";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

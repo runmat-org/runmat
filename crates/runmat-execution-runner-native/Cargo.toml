@@ -10,6 +10,8 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-value = { workspace = true }
+runmat-accelerate = { workspace = true, features = ["cuda"] }
+runmat-accelerate-api = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-core = { workspace = true }
 runmat-execution = { workspace = true }
@@ -19,6 +21,7 @@ runmat-execution-transport-native = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-execution = { workspace = true }
 runmat-native-ffi = { workspace = true }
+runmat-mex = { workspace = true }
 runmat-java = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-package = { workspace = true }

@@ -1,5 +1,3 @@
-use std::io::Write as _;
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use runmat_java::JavaArtifactBundle;
@@ -25,32 +23,13 @@ pub(crate) fn install(
             .validate_bytes(&artifact.bytes)
             .map_err(|error| format!("validate standalone Java artifact: {error}"))?;
         let path = root.path().join(format!("{index}.jar"));
-        write_private_read_only(&path, &artifact.bytes)?;
+        crate::materialize::write_private_read_only(&path, &artifact.bytes)?;
         installed.push((artifact.identity.clone(), path));
     }
     adapter
         .install_project_artifacts(&installed)
         .map_err(|error| format!("install standalone Java artifacts: {error}"))?;
     Ok(InstalledJavaArtifacts { _root: root })
-}
-
-fn write_private_read_only(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| format!("create Java artifact {}: {error}", path.display()))?;
-    file.write_all(bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|error| format!("write Java artifact {}: {error}", path.display()))?;
-    let mut permissions = file
-        .metadata()
-        .map_err(|error| format!("inspect Java artifact {}: {error}", path.display()))?
-        .permissions();
-    permissions.set_readonly(true);
-    std::fs::set_permissions(path, permissions)
-        .map_err(|error| format!("seal Java artifact {}: {error}", path.display()))?;
-    Ok(())
 }
 
 #[cfg(test)]

@@ -81,7 +81,7 @@ impl ExecutionBundle {
                 "compiled execution bundle has no source project to materialize".into(),
             ));
         };
-        let mut handoff = handoff.clone();
+        let mut handoff = handoff.as_ref().clone();
         handoff.project.workspace_root = root.to_path_buf();
         handoff.project.manifest_path = root.join("runmat.toml");
         for path in handoff.project.access_paths.values_mut() {

@@ -15,7 +15,7 @@ use crate::{
     MxArray, MxBoundaryInterface, MxClassId,
 };
 
-pub const MEX_HOST_ABI_VERSION: u32 = 8;
+pub const MEX_HOST_ABI_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexDiagnostic {
@@ -279,6 +279,28 @@ impl MexCallState {
             async_copy_result: async_abi::copy_result,
             async_copy_text: async_abi::copy_text,
             async_release: async_abi::release,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_context_enter: super::gpu_abi::context_enter,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_context_leave: super::gpu_abi::context_leave,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_create_from_array: super::gpu_abi::create_from_array,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_create: super::gpu_abi::create,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_to_host: super::gpu_abi::to_host,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_data: super::gpu_abi::data,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_class_id: super::gpu_abi::class_id,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_is_array: super::gpu_abi::is_array,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_is_same: super::gpu_abi::is_same,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_copy_component: super::gpu_abi::copy_component,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_create_complex: super::gpu_abi::create_complex,
         }
     }
 
@@ -306,7 +328,7 @@ impl MexCallState {
 }
 
 impl MexCallStateInner {
-    fn fail(&mut self, message: impl Into<String>) {
+    pub(super) fn fail(&mut self, message: impl Into<String>) {
         if self.error.is_none() {
             self.error = Some(MexDiagnostic {
                 identifier: Some("RunMat:MEX:MatrixApi".into()),
@@ -448,6 +470,32 @@ pub struct MexHostApiV1 {
     pub async_copy_result: unsafe extern "C" fn(*mut c_void, u64, usize, *mut *mut MxArray) -> i32,
     pub async_copy_text: unsafe extern "C" fn(*mut c_void, u64, u32, *mut c_char, usize) -> usize,
     pub async_release: unsafe extern "C" fn(*mut c_void, u64),
+    // ABI v9 fields append provider-owned native GPU access to the v8 prefix.
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_context_enter: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_context_leave: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_create_from_array:
+        unsafe extern "C" fn(*mut c_void, *const MxArray, i32) -> *mut MxArray,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_create:
+        unsafe extern "C" fn(*mut c_void, usize, *const usize, i32, i32, i32) -> *mut MxArray,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_to_host: unsafe extern "C" fn(*mut c_void, *const MxArray) -> *mut MxArray,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_data: unsafe extern "C" fn(*mut c_void, *mut MxArray, i32) -> *mut c_void,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_class_id: unsafe extern "C" fn(*mut c_void, *const MxArray) -> i32,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_is_array: unsafe extern "C" fn(*mut c_void, *const MxArray) -> i32,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_is_same: unsafe extern "C" fn(*mut c_void, *const MxArray, *const MxArray) -> i32,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_copy_component: unsafe extern "C" fn(*mut c_void, *const MxArray, i32) -> *mut MxArray,
+    #[cfg(not(target_family = "wasm"))]
+    pub gpu_create_complex:
+        unsafe extern "C" fn(*mut c_void, *const MxArray, *const MxArray) -> *mut MxArray,
 }
 
 unsafe fn state<'a>(host: *mut c_void) -> Option<MutexGuard<'a, MexCallStateInner>> {
@@ -1775,40 +1823,49 @@ mod tests {
     #[test]
     fn allocator_and_data_api_callbacks_extend_complete_previous_prefixes() {
         let pointer_size = std::mem::size_of::<usize>();
+        let gpu_field_count = 11;
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, allocate_memory),
-            std::mem::size_of::<MexHostApiV1>() - 27 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - (27 + gpu_field_count) * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, make_memory_persistent),
-            std::mem::size_of::<MexHostApiV1>() - 24 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - (24 + gpu_field_count) * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, share_array),
-            std::mem::size_of::<MexHostApiV1>() - 23 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - (23 + gpu_field_count) * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, record_host_copy),
-            std::mem::size_of::<MexHostApiV1>() - 22 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - (22 + gpu_field_count) * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, data_array_type),
-            std::mem::size_of::<MexHostApiV1>() - 21 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - (21 + gpu_field_count) * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, set_string),
-            std::mem::size_of::<MexHostApiV1>() - 17 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - (17 + gpu_field_count) * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, engine_context_create),
-            std::mem::size_of::<MexHostApiV1>() - 14 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - (14 + gpu_field_count) * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, async_submit_eval),
-            std::mem::size_of::<MexHostApiV1>() - 12 * pointer_size
+            std::mem::size_of::<MexHostApiV1>() - (12 + gpu_field_count) * pointer_size
         );
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, async_release),
+            std::mem::size_of::<MexHostApiV1>() - (1 + gpu_field_count) * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, gpu_context_enter),
+            std::mem::size_of::<MexHostApiV1>() - gpu_field_count * pointer_size
+        );
+        assert_eq!(
+            std::mem::offset_of!(MexHostApiV1, gpu_create_complex),
             std::mem::size_of::<MexHostApiV1>() - pointer_size
         );
     }

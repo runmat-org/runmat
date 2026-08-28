@@ -13,8 +13,10 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+mod native_device;
 mod placement;
 
+pub use native_device::*;
 pub use placement::*;
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
@@ -1638,6 +1640,102 @@ pub trait AccelProvider: Send + Sync {
 
     fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
     fn device_info(&self) -> String;
+
+    /// Native device ABI this provider can expose to extension code.
+    ///
+    /// Returning `None` is the conservative default. In particular, a WGPU
+    /// buffer is not a CUDA allocation and must not be exported through this
+    /// contract even when both ultimately use the same physical GPU.
+    fn native_device_api(&self) -> Option<NativeDeviceApi> {
+        None
+    }
+
+    /// Describe the provider-owned native device, context, and stream.
+    fn native_device_context(&self) -> anyhow::Result<NativeDeviceContext> {
+        Err(anyhow!(
+            "provider '{}' does not expose a native device context",
+            self.device_info()
+        ))
+    }
+
+    /// Make the provider's native context current on this execution lane.
+    fn enter_native_device_context(&self) -> anyhow::Result<NativeDeviceContextGuard> {
+        Err(anyhow!(
+            "provider '{}' does not support native device context entry",
+            self.device_info()
+        ))
+    }
+
+    /// Export one provider-owned buffer to compatible native extension code.
+    fn export_native_device_buffer(
+        &self,
+        _handle: &GpuTensorHandle,
+        _access: NativeDeviceAccess,
+    ) -> anyhow::Result<NativeDeviceBuffer> {
+        Err(anyhow!(
+            "provider '{}' does not expose native device buffers",
+            self.device_info()
+        ))
+    }
+
+    /// Allocate a provider-owned native numeric buffer.
+    fn allocate_native_device_buffer(
+        &self,
+        _shape: &[usize],
+        _element_type: NumericElementType,
+        _storage: GpuTensorStorage,
+        _initialization: NativeDeviceInitialization,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow!(
+            "provider '{}' does not allocate native extension buffers",
+            self.device_info()
+        ))
+    }
+
+    /// Make an independent provider-owned copy of a native device buffer.
+    fn copy_native_device_buffer(
+        &self,
+        _source: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow!(
+            "provider '{}' does not copy native extension buffers",
+            self.device_info()
+        ))
+    }
+
+    /// Copy one component from an interleaved complex native buffer into a
+    /// new real buffer owned by this provider.
+    fn copy_native_device_component(
+        &self,
+        _source: &GpuTensorHandle,
+        _component: NativeDeviceComponent,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow!(
+            "provider '{}' does not extract native complex components",
+            self.device_info()
+        ))
+    }
+
+    /// Combine matching real native buffers into a new interleaved complex
+    /// buffer owned by this provider.
+    fn combine_native_device_components(
+        &self,
+        _real: &GpuTensorHandle,
+        _imaginary: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow!(
+            "provider '{}' does not combine native complex components",
+            self.device_info()
+        ))
+    }
+
+    /// Wait for work submitted through the provider's native extension stream.
+    fn synchronize_native_device(&self) -> anyhow::Result<()> {
+        Err(anyhow!(
+            "provider '{}' does not expose native device synchronization",
+            self.device_info()
+        ))
+    }
     /// Returns the stable identifier used to route this provider's handles.
     /// Distinct concurrently registered provider instances must return distinct
     /// identifiers; reusing an identifier would make handle ownership ambiguous.
@@ -3652,6 +3750,23 @@ unsafe fn register_provider_for_device(device_id: u32, provider: &'static dyn Ac
     }
 }
 
+/// Register a provider as an addressable device owner without selecting it as
+/// the ambient placement provider.
+///
+/// This supports specialized native-device providers that coexist with WGPU
+/// or another general compute provider. Handles produced by the provider route
+/// through its distinct device id.
+///
+/// # Safety
+///
+/// The provider must remain valid for the process lifetime, and its device id
+/// must not be reused by a different live provider.
+pub unsafe fn register_device_provider(provider: &'static dyn AccelProvider) {
+    // SAFETY: the caller supplies the same lifetime and identity guarantees as
+    // `register_provider`; this variant changes only ambient selection.
+    unsafe { register_provider_for_device(provider.device_id(), provider) };
+}
+
 pub fn provider() -> Option<&'static dyn AccelProvider> {
     if let Some(p) = current_thread_provider() {
         return Some(p);
@@ -3698,6 +3813,26 @@ pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider>
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
     provider_for_device(handle.device_id)
+}
+
+/// Select a registered provider that explicitly exposes `api`.
+///
+/// The thread-selected provider wins when compatible. Otherwise selection is
+/// deterministic by provider device id, allowing a native extension backend
+/// to coexist with a different ambient placement provider.
+pub fn provider_for_native_device(api: NativeDeviceApi) -> Option<&'static dyn AccelProvider> {
+    if let Some(selected) =
+        current_thread_provider().filter(|provider| provider.native_device_api() == Some(api))
+    {
+        return Some(selected);
+    }
+    PROVIDER_REGISTRY.read().ok().and_then(|providers| {
+        providers
+            .iter()
+            .filter(|(_, provider)| provider.native_device_api() == Some(api))
+            .min_by_key(|(device_id, _)| **device_id)
+            .map(|(_, provider)| *provider)
+    })
 }
 
 pub fn spawn_handle_concurrency_for(handle: &GpuTensorHandle) -> Option<SpawnHandleConcurrency> {

@@ -1,8 +1,8 @@
-//! Source-compatibility catalog for the C and Fortran Matrix and MEX APIs.
+//! Source-compatibility catalog for the C, Fortran, and GPU Matrix and MEX APIs.
 //!
 //! This catalog is the adapter's public support contract. It intentionally
 //! excludes the C++ Data API, engine API, MAT-file API, and undocumented
-//! entrypoints; those belong to separate adapters or compatibility tiers.
+//! entrypoints; those belong to separate compatibility tiers.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MexApiAvailability {
@@ -130,6 +130,22 @@ pub const FORTRAN_MEX_API: &[MexApiSymbol] = api_symbols! {
     ],
 };
 
+pub const GPU_MATRIX_API: &[MexApiSymbol] = api_symbols! {
+    R2017b => [
+        "mxInitGPU", "mxIsGPUArray", "mxGPUIsValidGPUData",
+        "mxGPUCreateFromMxArray", "mxGPUCopyFromMxArray", "mxGPUCopyGPUArray",
+        "mxGPUCreateGPUArray", "mxGPUCreateMxArrayOnGPU",
+        "mxGPUCreateMxArrayOnCPU", "mxGPUDestroyGPUArray", "mxGPUGetClassID",
+        "mxGPUGetComplexity", "mxGPUGetDimensions", "mxGPUGetNumberOfDimensions",
+        "mxGPUGetNumberOfElements", "mxGPUGetData", "mxGPUGetDataReadOnly",
+        "mxGPUIsSparse", "mxGPUIsSame", "mxGPUCopyReal", "mxGPUCopyImag",
+        "mxGPUCreateComplexGPUArray"
+    ],
+    R2018a => [
+        "mxGPUSetDimensions"
+    ],
+};
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -141,11 +157,11 @@ mod tests {
         let matrix = include_str!("../include/matrix.h");
         let mex = include_str!("../include/mex.h");
         let support_source = concat!(
-            include_str!("../native/runmat_mex_support.c"),
-            include_str!("../native/sparse_index_compat.inc"),
-            include_str!("../native/matrix_api.inc"),
-            include_str!("../native/data_engine.inc"),
-            include_str!("../native/mex_api.inc")
+            include_str!("../src-c/runmat_mex_support.c"),
+            include_str!("../src-c/sparse_index_compat.inc"),
+            include_str!("../src-c/matrix_api.inc"),
+            include_str!("../src-c/data_engine.inc"),
+            include_str!("../src-c/mex_api.inc")
         );
         let mut names = BTreeSet::new();
         for symbol in C_MATRIX_API.iter().chain(C_MEX_API) {
@@ -188,7 +204,7 @@ mod tests {
     #[test]
     fn fortran_catalog_is_backed_by_the_bundled_header_and_abi_unit() {
         let header = include_str!("../include/fintrf.h");
-        let implementation = include_str!("../native/fortran_api.inc").to_ascii_lowercase();
+        let implementation = include_str!("../src-c/fortran_api.inc").to_ascii_lowercase();
         let mut names = BTreeSet::new();
         for symbol in FORTRAN_MATRIX_API.iter().chain(FORTRAN_MEX_API) {
             assert!(
@@ -225,6 +241,30 @@ mod tests {
                     symbol.name
                 );
             }
+        }
+    }
+
+    #[test]
+    fn gpu_catalog_is_backed_by_the_public_header_and_native_support_unit() {
+        let header = include_str!("../include/gpu/mxGPUArray.h");
+        let implementation = include_str!("../src-c/gpu_api.inc");
+        let mut names = BTreeSet::new();
+        for symbol in GPU_MATRIX_API {
+            assert!(
+                names.insert(symbol.name),
+                "duplicate GPU symbol {}",
+                symbol.name
+            );
+            assert!(
+                header.contains(symbol.name),
+                "bundled GPU interface does not declare {}",
+                symbol.name
+            );
+            assert!(
+                implementation.contains(symbol.name),
+                "native GPU support does not implement {}",
+                symbol.name
+            );
         }
     }
 }

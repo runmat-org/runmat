@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Args, Clone)]
 pub struct MexArgs {
-    /// C, C++, or Fortran source files to compile and link into one MEX module
+    /// C, C++, Fortran, or CUDA source files to compile and link into one MEX module
     #[arg(required = true)]
     pub sources: Vec<PathBuf>,
     /// Output module name without the platform MEX extension
@@ -12,10 +12,10 @@ pub struct MexArgs {
     /// Directory in which to write the compiled MEX module
     #[arg(long, default_value = ".")]
     pub out_dir: PathBuf,
-    /// Primary language compiler driver (defaults through CC, CXX, FC/F77, or the platform driver)
+    /// Primary compiler driver (defaults through CC, CXX, FC/F77, NVCC, or MW_NVCC_PATH)
     #[arg(long)]
     pub compiler: Option<PathBuf>,
-    /// Use the R2017b separate-complex, large-array API (the default)
+    /// Use R2017b separate-complex (mex default; mexcuda defaults to R2018a)
     #[arg(
         long = "R2017b",
         conflicts_with_all = ["r2018a", "large_array_dims", "compatible_array_dims"]
@@ -86,6 +86,32 @@ mod tests {
         assert_eq!(
             args.sources,
             [PathBuf::from("gateway.c"), PathBuf::from("support.c")]
+        );
+    }
+
+    #[test]
+    fn mexcuda_is_a_distinct_command_with_the_shared_build_options() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "mexcuda",
+            "--R2018a",
+            "--compiler",
+            "nvcc",
+            "-o",
+            "gpu_add",
+            "gateway.cu",
+            "support.cpp",
+        ])
+        .unwrap();
+        let Some(Commands::Mexcuda(args)) = cli.command else {
+            panic!("expected mexcuda command");
+        };
+        assert!(args.r2018a);
+        assert_eq!(args.compiler.as_deref(), Some(std::path::Path::new("nvcc")));
+        assert_eq!(args.output.as_deref(), Some("gpu_add"));
+        assert_eq!(
+            args.sources,
+            [PathBuf::from("gateway.cu"), PathBuf::from("support.cpp")]
         );
     }
 }

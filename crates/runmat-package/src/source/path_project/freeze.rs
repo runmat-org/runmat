@@ -14,8 +14,8 @@ use thiserror::Error;
 
 use crate::source::{
     catalog::{
-        assemble_frozen_project, FrozenJavaArtifactInput, FrozenNativeInterfaceInput,
-        FrozenPackageInput, FrozenSourceInput,
+        assemble_frozen_project, FrozenJavaArtifactInput, FrozenMexArtifactInput,
+        FrozenNativeInterfaceInput, FrozenPackageInput, FrozenSourceInput,
     },
     FrozenProject,
 };
@@ -160,6 +160,17 @@ fn build_catalog(
                         library_bytes: interface.library_bytes.clone(),
                     })
                     .collect(),
+                mex_artifacts: package
+                    .mex_artifacts
+                    .iter()
+                    .map(|artifact| FrozenMexArtifactInput {
+                        name: artifact.name.clone(),
+                        manifest_path: artifact.manifest_path.clone(),
+                        manifest_bytes: artifact.manifest_bytes.clone(),
+                        module_path: artifact.module_path.clone(),
+                        module_bytes: artifact.module_bytes.clone(),
+                    })
+                    .collect(),
                 java_artifacts: package
                     .java_artifacts
                     .iter()
@@ -243,6 +254,20 @@ fn package_tree_digest(package: &LoadedPathPackage) -> Result<ContentDigest, Gra
             &package.project_root,
             &interface.library_path,
             &interface.library_bytes,
+        )?;
+    }
+    for artifact in &package.mex_artifacts {
+        append_artifact_tree_entry(
+            &mut input,
+            &package.project_root,
+            &artifact.manifest_path,
+            &artifact.manifest_bytes,
+        )?;
+        append_artifact_tree_entry(
+            &mut input,
+            &package.project_root,
+            &artifact.module_path,
+            &artifact.module_bytes,
         )?;
     }
     for artifact in &package.java_artifacts {

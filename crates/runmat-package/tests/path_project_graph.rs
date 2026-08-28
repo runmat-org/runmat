@@ -227,6 +227,48 @@ fn java_artifacts_are_frozen_and_require_a_jvm() {
 }
 
 #[test]
+fn mex_artifacts_are_frozen_and_require_mex_capability() {
+    let (temp, manifest) = fixture();
+    fs::create_dir_all(temp.path().join("mex")).unwrap();
+    fs::write(temp.path().join("mex/fixture.mex.runmat.json"), b"manifest").unwrap();
+    fs::write(temp.path().join("mex/fixture.mex"), b"module").unwrap();
+    let root_manifest = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!(
+            "{root_manifest}\n[mex-artifacts.fixture]\nmanifest = \"mex/fixture.mex.runmat.json\"\nmodule = \"mex/fixture.mex\"\n"
+        ),
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&manifest, BTreeSet::new())
+        .expect_err("portable host must reject a MEX package");
+    assert!(error.to_string().contains("mex"));
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::Mex]),
+    )
+    .unwrap();
+    let [artifact] = frozen.mex_artifacts.as_slice() else {
+        panic!("expected one MEX artifact");
+    };
+    assert_eq!(artifact.name, "fixture");
+    assert_eq!(
+        artifact.manifest_digest,
+        runmat_package::ContentDigest::sha256(b"manifest")
+    );
+    assert_eq!(
+        artifact.module_digest,
+        runmat_package::ContentDigest::sha256(b"module")
+    );
+    assert_eq!(
+        artifact.module_path,
+        temp.path().join("mex/fixture.mex").canonicalize().unwrap()
+    );
+}
+
+#[test]
 fn missing_dependency_manifest_is_a_package_loader_error() {
     let temp = TempDir::new().unwrap();
     fs::create_dir_all(temp.path().join("src")).unwrap();

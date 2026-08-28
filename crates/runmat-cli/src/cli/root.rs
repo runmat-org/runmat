@@ -268,8 +268,10 @@ pub enum Commands {
         #[arg(short, long)]
         force: bool,
     },
-    /// Build C, C++, or Fortran sources into a platform-native MEX module
+    /// Build C, C++, Fortran, or CUDA sources into a platform-native MEX module
     Mex(MexArgs),
+    /// Build CUDA sources into a GPU MEX module with nvcc
+    Mexcuda(MexArgs),
     /// Check a MATLAB script or FEA document without running it
     Check {
         /// .m or .fea file to check

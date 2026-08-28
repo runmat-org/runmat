@@ -15,6 +15,12 @@ pub enum MexBuildError {
     },
     #[error("Fortran MEX compiler `{compiler}` does not use a supported GNU-compatible ABI")]
     UnsupportedFortranCompiler { compiler: PathBuf },
+    #[error("GPU MEX compiler `{compiler}` is not a supported nvcc driver")]
+    UnsupportedCudaCompiler { compiler: PathBuf },
+    #[error("GPU MEX compilation is supported on native Linux and Windows CUDA targets")]
+    UnsupportedCudaTarget,
+    #[error("Fortran and CUDA gateway sources cannot be combined in one MEX module")]
+    MixedFortranCudaSources,
     #[error("MEX cross-compilation for target `{triple}` is not available; run this build on the target host")]
     CrossCompilationUnavailable { triple: String },
     #[error("a MEX build requires at least one source file")]

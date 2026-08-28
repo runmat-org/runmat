@@ -67,15 +67,20 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     foreign
         .register_adapter(java.clone())
         .map_err(|error| error.to_string())?;
+    let mex = Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
+    foreign
+        .register_adapter(mex.clone())
+        .map_err(|error| error.to_string())?;
     let _native_interfaces =
         crate::native_interfaces::install(&input.native_interfaces, &native_ffi)?;
+    let _mex_artifacts = crate::mex_artifacts::install(&input.mex_artifacts, &mex)?;
     let _java_artifacts = crate::java_artifacts::install(&input.java_artifacts, &java)?;
     foreign
         .admit(&assembly.requirements.interop)
         .map_err(|error| format!("standalone interop admission failed: {error}"))?;
     let ports = runtime.service_ports().clone().with_foreign(foreign);
     runtime = runtime.with_service_ports(ports);
-    let mut mex_guard = crate::mex::install(&runtime);
+    let mut mex_guard = crate::mex::install(&runtime, mex);
     let mut entrypoints = BTreeMap::new();
     for function in &assembly.functions {
         // SAFETY: the generated resolver has the exact declared C ABI. It

@@ -6,7 +6,7 @@ use super::{MexApi, MexBuild, MexBuildOutput};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum MexArgumentError {
-    #[error("mex: expected at least one C, C++, or Fortran source file")]
+    #[error("mex: expected at least one C, C++, Fortran, or CUDA source file")]
     MissingSource,
     #[error("mex: option {0} requires a value")]
     MissingOptionValue(String),
@@ -16,6 +16,8 @@ pub enum MexArgumentError {
         "mex: -setup is not interactive; set CC/CXX/FC or pass --compiler to select a toolchain"
     )]
     SetupUnsupported,
+    #[error("mexcuda: expected at least one CUDA (.cu) source file")]
+    CudaSourceRequired,
     #[error("mex: API options {first} and {second} cannot be combined")]
     ConflictingApiOptions { first: String, second: String },
 }
@@ -34,6 +36,7 @@ impl MexBuildInvocation {
         let mut c_compiler = None;
         let mut cxx_compiler = None;
         let mut fortran_compiler = None;
+        let mut cuda_compiler = None;
         let mut api = None;
         let mut include_directories = Vec::new();
         let mut definitions = Vec::new();
@@ -41,6 +44,7 @@ impl MexBuildInvocation {
         let mut c_compiler_arguments = Vec::new();
         let mut cxx_compiler_arguments = Vec::new();
         let mut fortran_compiler_arguments = Vec::new();
+        let mut cuda_compiler_arguments = Vec::new();
         let mut linker_arguments = Vec::new();
         let mut verbose = false;
         let mut index = 0;
@@ -94,6 +98,9 @@ impl MexBuildInvocation {
                 _ if argument.starts_with("F77=") => {
                     fortran_compiler = Some(PathBuf::from(&argument[4..]));
                 }
+                _ if argument.starts_with("NVCC=") => {
+                    cuda_compiler = Some(PathBuf::from(&argument[5..]));
+                }
                 _ if argument.starts_with("CFLAGS=") => {
                     c_compiler_arguments.extend(split_driver_arguments(&argument[7..]));
                 }
@@ -102,6 +109,9 @@ impl MexBuildInvocation {
                 }
                 _ if argument.starts_with("FFLAGS=") => {
                     fortran_compiler_arguments.extend(split_driver_arguments(&argument[7..]));
+                }
+                _ if argument.starts_with("NVCCFLAGS=") => {
+                    cuda_compiler_arguments.extend(split_driver_arguments(&argument[10..]));
                 }
                 _ if argument.starts_with("LDFLAGS=") => {
                     linker_arguments.extend(split_driver_arguments(&argument[8..]));
@@ -134,6 +144,9 @@ impl MexBuildInvocation {
         if let Some(compiler) = fortran_compiler {
             build = build.fortran_compiler(compiler);
         }
+        if let Some(compiler) = cuda_compiler {
+            build = build.cuda_compiler(compiler);
+        }
         for directory in include_directories {
             build = build.include_directory(directory);
         }
@@ -152,6 +165,9 @@ impl MexBuildInvocation {
         for argument in fortran_compiler_arguments {
             build = build.fortran_compiler_argument(argument);
         }
+        for argument in cuda_compiler_arguments {
+            build = build.cuda_compiler_argument(argument);
+        }
         for argument in linker_arguments {
             build = build.linker_argument(argument);
         }
@@ -160,6 +176,17 @@ impl MexBuildInvocation {
 
     pub fn compile(&self) -> Result<MexBuildOutput, super::MexBuildError> {
         self.build.compile()
+    }
+
+    pub fn parse_cuda(
+        arguments: &[String],
+        working_directory: &Path,
+    ) -> Result<Self, MexArgumentError> {
+        let invocation = Self::parse(arguments, working_directory)?;
+        if invocation.build.language() != super::MexSourceLanguage::Cuda {
+            return Err(MexArgumentError::CudaSourceRequired);
+        }
+        Ok(invocation)
     }
 }
 
@@ -206,6 +233,7 @@ fn split_driver_arguments(value: &str) -> impl Iterator<Item = String> + '_ {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MexSourceLanguage;
 
     #[test]
     fn parses_matlab_style_build_arguments_into_one_plan() {
@@ -327,5 +355,32 @@ mod tests {
                 ["-DFORTRAN_ONLY"]
             );
         }
+    }
+
+    #[test]
+    fn mexcuda_parser_selects_nvcc_flags_and_interleaved_api_by_default() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("gateway.cu");
+        std::fs::write(&source, "__global__ void kernel(void) {} ").unwrap();
+        let arguments = vec![
+            "NVCC=nvcc".into(),
+            "NVCCFLAGS=-lineinfo --use_fast_math".into(),
+            "gateway.cu".into(),
+        ];
+        let invocation = MexBuildInvocation::parse_cuda(&arguments, temporary.path()).unwrap();
+        assert_eq!(invocation.build.language, MexSourceLanguage::Cuda);
+        assert_eq!(invocation.build.api, MexApi::R2018a);
+        assert_eq!(invocation.build.cuda_compiler, PathBuf::from("nvcc"));
+        assert_eq!(
+            invocation.build.cuda_compiler_arguments,
+            ["-lineinfo", "--use_fast_math"]
+        );
+    }
+
+    #[test]
+    fn mexcuda_parser_rejects_a_source_set_without_cuda() {
+        let arguments = vec!["gateway.cpp".into()];
+        let error = MexBuildInvocation::parse_cuda(&arguments, Path::new(".")).unwrap_err();
+        assert_eq!(error, MexArgumentError::CudaSourceRequired);
     }
 }

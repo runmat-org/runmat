@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define RUNMAT_MEX_HOST_ABI_VERSION 8u
+#define RUNMAT_MEX_HOST_ABI_VERSION 9u
 #define RUNMAT_HOST_COPY_MEMORY_LAYOUT 8u
 #define RUNMAT_HOST_COPY_SPARSE_LAYOUT 4u
 
@@ -149,6 +149,24 @@ typedef struct RunMatMexHostApiV1 {
                               unsigned int field, char *output,
                               size_t output_capacity);
     void (*async_release)(void *host, uint64_t request);
+    /* ABI v9 append-only provider-owned native GPU authority. */
+    void *(*gpu_context_enter)(void *host);
+    int (*gpu_context_leave)(void *host, void *guard);
+    mxArray *(*gpu_create_from_array)(void *host, const mxArray *array,
+                                      int independent_copy);
+    mxArray *(*gpu_create)(void *host, size_t ndim, const size_t *dims,
+                           mxClassID classid, mxComplexity complexity,
+                           int initialize);
+    mxArray *(*gpu_to_host)(void *host, const mxArray *array);
+    void *(*gpu_data)(void *host, mxArray *array, int writable);
+    mxClassID (*gpu_class_id)(void *host, const mxArray *array);
+    int (*gpu_is_array)(void *host, const mxArray *array);
+    int (*gpu_is_same)(void *host, const mxArray *left,
+                       const mxArray *right);
+    mxArray *(*gpu_copy_component)(void *host, const mxArray *array,
+                                   int component);
+    mxArray *(*gpu_create_complex)(void *host, const mxArray *real,
+                                   const mxArray *imaginary);
 } RunMatMexHostApiV1;
 
 RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api);

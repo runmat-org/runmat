@@ -1,5 +1,7 @@
 mod api;
 mod complex;
+#[cfg(not(target_family = "wasm"))]
+mod gpu;
 mod memory;
 mod object;
 

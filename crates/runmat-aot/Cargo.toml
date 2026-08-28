@@ -17,6 +17,7 @@ runmat-builtins = { workspace = true }
 runmat-mir = { workspace = true }
 runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-native-ffi = { workspace = true }
+runmat-mex = { workspace = true }
 runmat-java = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

@@ -7,6 +7,7 @@ use crate::MxArray;
 pub enum MxArenaError {
     NullArray,
     UnknownArray,
+    Operation(String),
 }
 
 impl fmt::Display for MxArenaError {
@@ -14,6 +15,7 @@ impl fmt::Display for MxArenaError {
         match self {
             Self::NullArray => write!(formatter, "mxArray pointer is null"),
             Self::UnknownArray => write!(formatter, "mxArray is not owned by this call arena"),
+            Self::Operation(message) => formatter.write_str(message),
         }
     }
 }

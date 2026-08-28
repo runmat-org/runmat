@@ -1,5 +1,6 @@
 use super::model::{
-    LoadedJavaArtifact, LoadedNativeInterface, LoadedPathPackage, LoadedPathProject, LoadedSource,
+    LoadedJavaArtifact, LoadedMexArtifact, LoadedNativeInterface, LoadedPathPackage,
+    LoadedPathProject, LoadedSource,
 };
 use super::FrozenProjectError;
 use runmat_config::project::{
@@ -106,6 +107,20 @@ impl PathProjectLoader {
                     library_bytes,
                 });
             }
+            let mut mex_artifacts = Vec::with_capacity(manifest.mex_artifacts.len());
+            for (name, artifact) in &manifest.mex_artifacts {
+                let manifest_path = project_root.join(&artifact.manifest);
+                let manifest_bytes = read_project_artifact(&manifest_path, "MEX").await?;
+                let module_path = project_root.join(&artifact.module);
+                let module_bytes = read_project_artifact(&module_path, "MEX").await?;
+                mex_artifacts.push(LoadedMexArtifact {
+                    name: name.clone(),
+                    manifest_path,
+                    manifest_bytes,
+                    module_path,
+                    module_bytes,
+                });
+            }
             let mut java_artifacts = Vec::with_capacity(manifest.java_artifacts.len());
             for (name, artifact) in &manifest.java_artifacts {
                 let path = project_root.join(&artifact.path);
@@ -157,6 +172,7 @@ impl PathProjectLoader {
                     manifest,
                     sources,
                     native_interfaces,
+                    mex_artifacts,
                     java_artifacts,
                     dependencies,
                 },

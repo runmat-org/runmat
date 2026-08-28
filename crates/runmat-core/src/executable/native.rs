@@ -136,6 +136,7 @@ impl NativeCompilationInput {
         runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
         builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
         native_interfaces: Vec<u8>,
+        mex_artifacts: Vec<u8>,
         java_artifacts: Vec<u8>,
     ) -> Result<
         Vec<runmat_native_codegen::aot::NativeObjectData>,
@@ -171,7 +172,7 @@ impl NativeCompilationInput {
                 format!("failed to encode embedded resume points: {error}"),
             )
         })?;
-        let mut data = Vec::with_capacity(5);
+        let mut data = Vec::with_capacity(6);
         for blob in [
             runmat_native_codegen::aot::embedded_blob(
                 runmat_native_codegen::aot::AOT_NATIVE_IR_SYMBOL,
@@ -191,6 +192,11 @@ impl NativeCompilationInput {
             runmat_native_codegen::aot::embedded_blob(
                 runmat_native_codegen::aot::AOT_NATIVE_INTERFACES_SYMBOL,
                 native_interfaces,
+                8,
+            )?,
+            runmat_native_codegen::aot::embedded_blob(
+                runmat_native_codegen::aot::AOT_MEX_ARTIFACTS_SYMBOL,
+                mex_artifacts,
                 8,
             )?,
             runmat_native_codegen::aot::embedded_blob(
@@ -402,6 +408,7 @@ end
                 runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
                 Vec::new(),
                 br#"{"schema_version":1,"interfaces":[]}"#.to_vec(),
+                br#"{"schema_version":1,"artifacts":[]}"#.to_vec(),
                 br#"{"schema_version":1,"artifacts":[]}"#.to_vec(),
             )
             .expect("build retained AOT object data");

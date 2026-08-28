@@ -13,6 +13,7 @@ pub struct NativeObjectOptions {
     pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
     pub interop: runmat_types::InteropManifest,
     pub native_interfaces: runmat_native_ffi::NativeInterfaceArtifactBundle,
+    pub mex_artifacts: runmat_mex::MexArtifactBundle,
     pub java_artifacts: runmat_java::JavaArtifactBundle,
 }
 
@@ -25,6 +26,7 @@ impl Default for NativeObjectOptions {
             retained_builtin_bindings: Vec::new(),
             interop: runmat_types::InteropManifest::empty(),
             native_interfaces: runmat_native_ffi::NativeInterfaceArtifactBundle::empty(),
+            mex_artifacts: runmat_mex::MexArtifactBundle::empty(),
             java_artifacts: runmat_java::JavaArtifactBundle::empty(),
         }
     }
@@ -64,6 +66,9 @@ pub fn emit_native_object(
                 .map_err(|error| {
                     AotError::contract("aot.compile.native_interfaces", error.to_string())
                 })?,
+            options.mex_artifacts.canonical_bytes().map_err(|error| {
+                AotError::contract("aot.compile.mex_artifacts", error.to_string())
+            })?,
             options.java_artifacts.canonical_bytes().map_err(|error| {
                 AotError::contract("aot.compile.java_artifacts", error.to_string())
             })?,

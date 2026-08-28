@@ -17,13 +17,16 @@ pub mod mxarray;
 
 pub use arena::{MxArena, MxArenaError};
 pub use build::{
-    mex_suffix, MexApi, MexArgumentError, MexArtifactIdentity, MexArtifactManifest, MexBuild,
-    MexBuildError, MexBuildInvocation, MexBuildOutput, MexBuildPlan, MexBuildStep,
-    MexSourceLanguage, MexTarget, MEX_ADAPTER_ID, MEX_ADAPTER_VERSION, MEX_ARTIFACT_SCHEMA_VERSION,
-    MEX_EXTENSIONS,
+    mex_suffix, MexApi, MexArgumentError, MexArtifactBundle, MexArtifactBundleEntry,
+    MexArtifactBundleError, MexArtifactIdentity, MexArtifactManifest, MexBuild, MexBuildError,
+    MexBuildInvocation, MexBuildOutput, MexBuildPlan, MexBuildStep, MexSourceLanguage, MexTarget,
+    MEX_ADAPTER_ID, MEX_ADAPTER_VERSION, MEX_ARTIFACT_BUNDLE_SCHEMA_VERSION,
+    MEX_ARTIFACT_MANIFEST_MEDIA_TYPE, MEX_ARTIFACT_SCHEMA_VERSION, MEX_EXTENSIONS,
+    MEX_MODULE_MEDIA_TYPE,
 };
 pub use compatibility::{
     MexApiAvailability, MexApiSymbol, C_MATRIX_API, C_MEX_API, FORTRAN_MATRIX_API, FORTRAN_MEX_API,
+    GPU_MATRIX_API,
 };
 pub use conversion::{value_from_mx, value_to_mx, MxConversionError, MxValueContext};
 pub(crate) use conversion::{value_from_mx_in_context, value_to_mx_for_interface_in_context};

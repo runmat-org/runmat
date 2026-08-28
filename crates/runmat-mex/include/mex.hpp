@@ -587,7 +587,7 @@ public:
     virtual void operator()(ArgumentList outputs, ArgumentList inputs) = 0;
 
 protected:
-    std::shared_ptr<engine::MATLABEngine> getEngine() {
+    std::shared_ptr<engine::RunMatEngine> getEngine() {
         if (!engine_) engine_ = std::make_shared<engine::RunMatEngine>();
         return engine_;
     }
