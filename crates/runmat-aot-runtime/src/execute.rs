@@ -75,7 +75,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     let python = runmat_runtime::foreign::PythonAdapter::new(foreign.handles().clone())
         .map_err(|error| error.to_string())?;
     foreign
-        .register_adapter(python)
+        .register_adapter(python.clone())
         .map_err(|error| error.to_string())?;
     let mex = Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
     foreign
@@ -85,6 +85,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         crate::native_interfaces::install(&input.native_interfaces, &native_ffi)?;
     let _mex_artifacts = crate::mex_artifacts::install(&input.mex_artifacts, &mex)?;
     let _java_artifacts = crate::java_artifacts::install(&input.java_artifacts, &java)?;
+    crate::python_artifacts::install(&input.python_artifacts, &python)?;
     foreign
         .admit(&assembly.requirements.interop)
         .map_err(|error| format!("standalone interop admission failed: {error}"))?;

@@ -14330,6 +14330,46 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         .contains("interop.schema_version"));
 }
 
+#[test]
+fn portable_product_derives_python_runtime_and_browser_rejection_contracts() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-python-interop-test@1",
+            "python_interop.m",
+            "answer = py.math.sqrt(9);\n",
+        ),
+        None,
+    ))
+    .expect("compile Python-bearing unit");
+    assert!(unit.requires_python_runtime());
+    let envelope = unit.portable_envelope().expect("portable Python product");
+    let python_type = envelope
+        .manifest
+        .interop
+        .foreign_types
+        .iter()
+        .find(|requirement| requirement.type_identity.family == "python")
+        .expect("Python foreign-type requirement");
+    assert_eq!(python_type.wasm, runmat_types::WasmInteropPolicy::Reject);
+    assert!(envelope
+        .manifest
+        .interop
+        .adapters
+        .iter()
+        .any(|requirement| requirement.adapter == "python"));
+
+    let error = runmat_runtime::foreign::admit_interop_manifest(
+        &envelope.manifest.interop,
+        &std::collections::BTreeMap::new(),
+        runmat_runtime::foreign::ForeignPlatform::Wasm {
+            host_bridge_available: false,
+        },
+    )
+    .expect_err("native CPython must reject before browser execution");
+    assert_eq!(error.identifier(), Some("RunMat:Foreign:UnsupportedOnWasm"));
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn deterministic_native_tiering_has_bounded_warmup_and_stable_steady_state() {

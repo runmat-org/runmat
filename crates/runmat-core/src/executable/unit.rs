@@ -101,6 +101,13 @@ impl ExecutableUnit {
         runmat_mir::analysis::analyze_reachability(&self.mir, &names)
     }
 
+    /// Whether the executable's closed, statically visible surface requires
+    /// the Python foreign runtime. Dynamic calls remain represented by the
+    /// reachability report's unknown edges and are not guessed here.
+    pub fn requires_python_runtime(&self) -> bool {
+        reachability_requires_python(&self.reachability_report())
+    }
+
     /// Exact VM layout shared by interpreter state materialization and native frames.
     pub fn vm_layout(&self) -> &runmat_vm::VmAssemblyLayout {
         &self.layout
@@ -182,4 +189,16 @@ impl ExecutableUnit {
     pub(crate) fn functions(&self) -> &runmat_vm::FunctionRegistry {
         &self.functions
     }
+}
+
+pub fn reachability_requires_python(report: &runmat_mir::analysis::ReachabilityReport) -> bool {
+    report.nodes.iter().any(|node| {
+        node.symbol.starts_with("py.")
+            || matches!(
+                node.symbol.to_ascii_lowercase().as_str(),
+                "pyenv" | "pyrun" | "pyrunfile" | "pyargs"
+            )
+            || (node.kind == runmat_mir::analysis::ReachabilityNodeKind::ArtifactDependency
+                && node.symbol == "python")
+    })
 }

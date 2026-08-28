@@ -23,6 +23,7 @@ runmat-meshing-execution = { workspace = true }
 runmat-native-ffi = { workspace = true }
 runmat-mex = { workspace = true }
 runmat-java = { workspace = true }
+runmat-python = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-package = { workspace = true }
 runmat-runtime = { workspace = true }

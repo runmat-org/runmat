@@ -56,6 +56,8 @@ pub(super) fn parse_numpy_dtype(typestr: &str) -> Result<PythonDType, PythonErro
         "b1" => Ok(PythonDType::Bool),
         "c8" => Ok(PythonDType::Complex64),
         "c16" => Ok(PythonDType::Complex128),
+        code if code.starts_with("M8[") => Ok(PythonDType::DateTime64Micros),
+        code if code.starts_with("m8[") => Ok(PythonDType::TimeDelta64Micros),
         _ => Err(PythonError::host(
             "PythonArrayConversionError",
             format!("NumPy dtype {typestr} is not supported"),

@@ -186,6 +186,31 @@ fn validate_sources(project: &FrozenProject) -> Result<(), FrozenProjectHandoffE
         }
         previous = Some(key);
     }
+    let mut previous = None;
+    for artifact in &project.python_artifacts {
+        if !project
+            .graph
+            .packages
+            .contains_key(&artifact.package_instance)
+        {
+            return Err(FrozenProjectHandoffError::SourceCatalog(format!(
+                "Python artifact `{}` belongs to an absent package instance",
+                artifact.name
+            )));
+        }
+        if artifact.name.trim().is_empty() || artifact.module.trim().is_empty() {
+            return Err(FrozenProjectHandoffError::SourceCatalog(
+                "Python artifact name and module must be non-empty".to_string(),
+            ));
+        }
+        let key = (&artifact.package_instance, artifact.name.as_str());
+        if previous.is_some_and(|previous| previous >= key) {
+            return Err(FrozenProjectHandoffError::SourceCatalog(
+                "Python artifacts must be sorted and unique by package and name".to_string(),
+            ));
+        }
+        previous = Some(key);
+    }
     let expected = compute_source_revision(&project.graph.graph_digest, &project.sources.packages)
         .map_err(|error| FrozenProjectHandoffError::Revision(error.to_string()))?;
     if expected != project.sources.revision {

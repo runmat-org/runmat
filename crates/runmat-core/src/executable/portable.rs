@@ -47,6 +47,9 @@ impl ExecutableUnit {
         preferred_function: Option<&str>,
         interop: runmat_types::InteropManifest,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        let interop =
+            runmat_types::InteropManifest::merge([self.inferred_interop_manifest(), interop])
+                .map_err(|error| format!("{}: {}", error.path, error.message))?;
         let payloads = self.component_payloads()?;
         let revisions = self.component_revisions()?;
         let components = payloads
@@ -142,6 +145,35 @@ impl ExecutableUnit {
         };
         runmat_execution::ExecutableUnitEnvelope::new(manifest, payloads)
             .map_err(|error| error.to_string())
+    }
+
+    fn inferred_interop_manifest(&self) -> runmat_types::InteropManifest {
+        if !self.requires_python_runtime() {
+            return runmat_types::InteropManifest::empty();
+        }
+        runmat_types::InteropManifest {
+            schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+            foreign_types: vec![runmat_types::ForeignRequirement {
+                type_identity: runmat_types::ForeignTypeIdentity {
+                    family: "python".into(),
+                    name: "environment".into(),
+                    version: 1,
+                },
+                ownership: runmat_types::ForeignOwnership::Shared,
+                affinity: runmat_types::ForeignAffinity::OriginProcess,
+                lifetime: runmat_types::ForeignLifetime::Session,
+                capabilities: vec![runmat_types::ForeignCapability::Invoke],
+                wasm: runmat_types::WasmInteropPolicy::Reject,
+            }],
+            adapters: vec![runmat_types::ForeignAdapterRequirement {
+                adapter: "python".into(),
+                minimum_version: 1,
+                capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
+                    runmat_types::CapabilityRequirement::ForeignRuntime,
+                ])),
+                artifact_identities: Vec::new(),
+            }],
+        }
     }
 
     fn component_revisions(

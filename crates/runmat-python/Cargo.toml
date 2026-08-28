@@ -13,6 +13,8 @@ libloading = "0.8.9"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+sha2 = { workspace = true }
+zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
+tempfile = "3.12"
 
 [dev-dependencies]
-tempfile = "3"

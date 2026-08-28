@@ -18,6 +18,15 @@ pub struct NativeCompilationInput {
     coverage_sites: BTreeMap<runmat_types::ProgramPointId, Vec<u64>>,
 }
 
+pub struct AotObjectDataOptions {
+    pub runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
+    pub builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
+    pub native_interfaces: Vec<u8>,
+    pub mex_artifacts: Vec<u8>,
+    pub java_artifacts: Vec<u8>,
+    pub python_artifacts: Vec<u8>,
+}
+
 impl NativeCompilationInput {
     pub fn entrypoint(&self) -> runmat_types::ProgramFunctionId {
         self.entrypoint
@@ -133,11 +142,7 @@ impl NativeCompilationInput {
     pub fn aot_object_data(
         &self,
         assembly: &runmat_native_codegen::NativeAssembly,
-        runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
-        builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
-        native_interfaces: Vec<u8>,
-        mex_artifacts: Vec<u8>,
-        java_artifacts: Vec<u8>,
+        options: AotObjectDataOptions,
     ) -> Result<
         Vec<runmat_native_codegen::aot::NativeObjectData>,
         runmat_native_codegen::NativeCodegenError,
@@ -157,8 +162,8 @@ impl NativeCompilationInput {
         let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
             assembly,
             runmat_execution::Digest::sha256(&native_ir),
-            runtime_binding_mode,
-            builtin_bindings,
+            options.runtime_binding_mode,
+            options.builtin_bindings,
         )?
         .canonical_bytes()?;
         let ordered_resume_points = self
@@ -172,7 +177,7 @@ impl NativeCompilationInput {
                 format!("failed to encode embedded resume points: {error}"),
             )
         })?;
-        let mut data = Vec::with_capacity(6);
+        let mut data = Vec::with_capacity(7);
         for blob in [
             runmat_native_codegen::aot::embedded_blob(
                 runmat_native_codegen::aot::AOT_NATIVE_IR_SYMBOL,
@@ -191,17 +196,22 @@ impl NativeCompilationInput {
             )?,
             runmat_native_codegen::aot::embedded_blob(
                 runmat_native_codegen::aot::AOT_NATIVE_INTERFACES_SYMBOL,
-                native_interfaces,
+                options.native_interfaces,
                 8,
             )?,
             runmat_native_codegen::aot::embedded_blob(
                 runmat_native_codegen::aot::AOT_MEX_ARTIFACTS_SYMBOL,
-                mex_artifacts,
+                options.mex_artifacts,
                 8,
             )?,
             runmat_native_codegen::aot::embedded_blob(
                 runmat_native_codegen::aot::AOT_JAVA_ARTIFACTS_SYMBOL,
-                java_artifacts,
+                options.java_artifacts,
+                8,
+            )?,
+            runmat_native_codegen::aot::embedded_blob(
+                runmat_native_codegen::aot::AOT_PYTHON_ARTIFACTS_SYMBOL,
+                options.python_artifacts,
                 8,
             )?,
         ] {
@@ -325,6 +335,7 @@ mod tests {
 
     use futures::executor::block_on;
 
+    use super::AotObjectDataOptions;
     use crate::{ExecutableSource, RunMatSession};
 
     #[test]
@@ -405,11 +416,16 @@ end
         let object_data = input
             .aot_object_data(
                 &assembly,
-                runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
-                Vec::new(),
-                br#"{"schema_version":1,"interfaces":[]}"#.to_vec(),
-                br#"{"schema_version":1,"artifacts":[]}"#.to_vec(),
-                br#"{"schema_version":1,"artifacts":[]}"#.to_vec(),
+                AotObjectDataOptions {
+                    runtime_binding_mode:
+                        runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
+                    builtin_bindings: Vec::new(),
+                    native_interfaces: br#"{"schema_version":1,"interfaces":[]}"#.to_vec(),
+                    mex_artifacts: br#"{"schema_version":1,"artifacts":[]}"#.to_vec(),
+                    java_artifacts: br#"{"schema_version":1,"environment":null,"artifacts":[]}"#
+                        .to_vec(),
+                    python_artifacts: br#"{"schema_version":1,"artifacts":[]}"#.to_vec(),
+                },
             )
             .expect("build retained AOT object data");
         let program_bytes = &object_data

@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use runmat_python::{PythonArray, PythonBufferOwner, PythonDType, PythonValue};
+use chrono::{Datelike, NaiveDate, Timelike, Utc};
+use runmat_python::{
+    PythonArray, PythonBufferOwner, PythonDType, PythonDateTime, PythonTimeDelta, PythonValue,
+};
 use runmat_value::{
     CellArray, ComplexStorage, ComplexTensor, HostComplexBuffer, HostLogicalBuffer,
     HostNumericBuffer, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage,
@@ -178,6 +181,10 @@ pub(super) fn value_to_python(value: Value) -> Result<PythonValue, RuntimeError>
                 .map(|(name, value)| Ok((PythonValue::String(name), value_to_python(value)?)))
                 .collect::<Result<_, RuntimeError>>()?,
         )),
+        Value::Object(value) if value.is_class("datetime") => datetime_to_python(&value),
+        Value::Object(value) if value.is_class("duration") => {
+            duration_to_python(Value::Object(value))
+        }
         Value::Object(value) if value.class_name == "RunMat.PythonArguments" => {
             keyword_bundle(value)
         }
@@ -241,6 +248,8 @@ pub(super) fn value_from_python(value: PythonValue) -> Result<Value, RuntimeErro
                 .map(Value::Tensor)
                 .map_err(invalid_conversion)
         }
+        PythonValue::DateTime(value) => datetime_from_python(value),
+        PythonValue::TimeDelta(value) => timedelta_from_python(value),
         PythonValue::List(values) | PythonValue::Tuple(values) => {
             let length = values.len();
             CellArray::new(
@@ -315,6 +324,8 @@ fn array_from_python(array: PythonArray) -> Result<Value, RuntimeError> {
         PythonDType::Complex128 => ComplexTensor::new(decode_complex_f64(&bytes)?, array.shape)
             .map(Value::ComplexTensor)
             .map_err(invalid_conversion),
+        PythonDType::DateTime64Micros => datetime_array_from_python(&bytes, array.shape),
+        PythonDType::TimeDelta64Micros => duration_array_from_python(&bytes, array.shape),
         dtype => Tensor::from_numeric_storage(decode_numeric(dtype, &bytes)?, array.shape)
             .map(Value::Tensor)
             .map_err(invalid_conversion),
@@ -343,10 +354,177 @@ fn decode_numeric(dtype: PythonDType, bytes: &[u8]) -> Result<NumericStorage, Ru
         PythonDType::Uint16 => decode!(u16, U16),
         PythonDType::Uint32 => decode!(u32, U32),
         PythonDType::Uint64 => decode!(u64, U64),
-        PythonDType::Bool | PythonDType::Complex64 | PythonDType::Complex128 => {
+        PythonDType::Bool
+        | PythonDType::Complex64
+        | PythonDType::Complex128
+        | PythonDType::DateTime64Micros
+        | PythonDType::TimeDelta64Micros => {
             return Err(invalid_conversion("invalid real numeric Python dtype"));
         }
     })
+}
+
+const MICROS_PER_SECOND: i64 = 1_000_000;
+const SECONDS_PER_DAY: i64 = 86_400;
+const MICROS_PER_DAY: i64 = SECONDS_PER_DAY * MICROS_PER_SECOND;
+
+fn datetime_to_python(value: &runmat_value::ObjectInstance) -> Result<PythonValue, RuntimeError> {
+    let tensor = crate::builtins::datetime::serial_tensor_for_object(value)?;
+    let mut micros = Vec::with_capacity(tensor.len());
+    let mut scalar = None;
+    for serial in tensor.materialize_f64() {
+        let date = crate::builtins::datetime::naive_from_datenum(serial)?;
+        let value = PythonDateTime {
+            year: date.year(),
+            month: date.month() as u8,
+            day: date.day() as u8,
+            hour: date.hour() as u8,
+            minute: date.minute() as u8,
+            second: date.second() as u8,
+            microsecond: date.and_utc().timestamp_subsec_micros(),
+        };
+        if tensor.len() == 1 {
+            scalar = Some(value);
+        } else {
+            micros.push(date.and_utc().timestamp_micros());
+        }
+    }
+    if let Some(value) = scalar {
+        return Ok(PythonValue::DateTime(value));
+    }
+    Ok(temporal_array(
+        PythonDType::DateTime64Micros,
+        tensor.shape,
+        micros,
+    ))
+}
+
+fn duration_to_python(value: Value) -> Result<PythonValue, RuntimeError> {
+    let tensor = crate::builtins::duration::duration_tensor_from_duration_value(&value)?;
+    let micros = tensor
+        .materialize_f64()
+        .into_iter()
+        .map(|days| days_to_micros(days, "duration"))
+        .collect::<Result<Vec<_>, _>>()?;
+    if let [total] = micros.as_slice() {
+        let days = total.div_euclid(MICROS_PER_DAY);
+        let remainder = total.rem_euclid(MICROS_PER_DAY);
+        return Ok(PythonValue::TimeDelta(PythonTimeDelta {
+            days,
+            seconds: (remainder / MICROS_PER_SECOND) as u32,
+            microseconds: (remainder % MICROS_PER_SECOND) as u32,
+        }));
+    }
+    Ok(temporal_array(
+        PythonDType::TimeDelta64Micros,
+        tensor.shape,
+        micros,
+    ))
+}
+
+fn temporal_array(dtype: PythonDType, shape: Vec<usize>, values: Vec<i64>) -> PythonValue {
+    let bytes = values
+        .into_iter()
+        .flat_map(i64::to_ne_bytes)
+        .collect::<Vec<_>>();
+    PythonValue::Array(PythonArray::from_owned_bytes(
+        dtype, shape, true, true, bytes,
+    ))
+}
+
+fn datetime_from_python(value: PythonDateTime) -> Result<Value, RuntimeError> {
+    let date = NaiveDate::from_ymd_opt(value.year, u32::from(value.month), u32::from(value.day))
+        .and_then(|date| {
+            date.and_hms_micro_opt(
+                u32::from(value.hour),
+                u32::from(value.minute),
+                u32::from(value.second),
+                value.microsecond,
+            )
+        })
+        .ok_or_else(|| invalid_conversion("Python datetime contains invalid components"))?;
+    let serial = crate::builtins::datetime::datenum_from_naive(date);
+    let tensor = Tensor::new(vec![serial], vec![1, 1]).map_err(invalid_conversion)?;
+    crate::builtins::datetime::datetime_object_from_serial_tensor(tensor, "dd-MMM-yyyy HH:mm:ss")
+}
+
+fn timedelta_from_python(value: PythonTimeDelta) -> Result<Value, RuntimeError> {
+    let days = value.days;
+    let seconds = value.seconds;
+    let microseconds = value.microseconds;
+    let total = i128::from(days)
+        .checked_mul(i128::from(MICROS_PER_DAY))
+        .and_then(|total| total.checked_add(i128::from(seconds) * i128::from(MICROS_PER_SECOND)))
+        .and_then(|total| total.checked_add(i128::from(microseconds)))
+        .ok_or_else(|| invalid_conversion("Python timedelta is outside RunMat's duration range"))?;
+    let total = matlab_duration_micros(total)?;
+    duration_from_micros(vec![total], vec![1, 1])
+}
+
+fn datetime_array_from_python(bytes: &[u8], shape: Vec<usize>) -> Result<Value, RuntimeError> {
+    let serials = decode_i64(bytes)
+        .into_iter()
+        .map(|micros| {
+            if micros == i64::MIN {
+                return Err(invalid_conversion(
+                    "NumPy NaT cannot be converted to datetime",
+                ));
+            }
+            let date = chrono::DateTime::<Utc>::from_timestamp_micros(micros)
+                .ok_or_else(|| invalid_conversion("NumPy datetime64 is outside RunMat's range"))?
+                .naive_utc();
+            Ok(crate::builtins::datetime::datenum_from_naive(date))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let tensor = Tensor::new(serials, shape).map_err(invalid_conversion)?;
+    crate::builtins::datetime::datetime_object_from_serial_tensor(tensor, "dd-MMM-yyyy HH:mm:ss")
+}
+
+fn duration_array_from_python(bytes: &[u8], shape: Vec<usize>) -> Result<Value, RuntimeError> {
+    let values = decode_i64(bytes)
+        .into_iter()
+        .map(|micros| {
+            if micros == i64::MIN {
+                return Err(invalid_conversion(
+                    "NumPy NaT cannot be converted to duration",
+                ));
+            }
+            matlab_duration_micros(i128::from(micros))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    duration_from_micros(values, shape)
+}
+
+fn duration_from_micros(values: Vec<i64>, shape: Vec<usize>) -> Result<Value, RuntimeError> {
+    let days = values
+        .into_iter()
+        .map(|value| value as f64 / MICROS_PER_DAY as f64)
+        .collect();
+    let tensor = Tensor::new(days, shape).map_err(invalid_conversion)?;
+    crate::builtins::duration::duration_object_from_days_tensor(tensor, "hh:mm:ss")
+}
+
+fn matlab_duration_micros(value: i128) -> Result<i64, RuntimeError> {
+    let milliseconds = value / 1_000;
+    i64::try_from(milliseconds * 1_000)
+        .map_err(|_| invalid_conversion("Python duration is outside RunMat's duration range"))
+}
+
+fn days_to_micros(days: f64, kind: &str) -> Result<i64, RuntimeError> {
+    let micros = (days * MICROS_PER_DAY as f64).trunc();
+    if !micros.is_finite() || micros < i64::MIN as f64 || micros > i64::MAX as f64 {
+        return Err(invalid_conversion(format!(
+            "{kind} is outside Python's temporal range"
+        )));
+    }
+    Ok(micros as i64)
+}
+
+fn decode_i64(bytes: &[u8]) -> Vec<i64> {
+    bytes
+        .chunks_exact(8)
+        .map(|chunk| i64::from_ne_bytes(chunk.try_into().expect("exact chunk")))
+        .collect()
 }
 
 fn decode_complex_f32(bytes: &[u8]) -> Result<Vec<(f32, f32)>, RuntimeError> {
@@ -409,5 +587,110 @@ fn value_kind(value: &Value) -> &'static str {
         Value::MException(_) => "exception",
         Value::Future(_) | Value::Task(_) | Value::Pool(_) | Value::Job(_) => "execution-handle",
         _ => "value",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn datetime_scalar_uses_python_datetime_components() {
+        let date = NaiveDate::from_ymd_opt(2026, 8, 27)
+            .unwrap()
+            .and_hms_micro_opt(12, 34, 56, 654_321)
+            .unwrap();
+        let tensor = Tensor::new(
+            vec![crate::builtins::datetime::datenum_from_naive(date)],
+            vec![1, 1],
+        )
+        .unwrap();
+        let value = crate::builtins::datetime::datetime_object_from_serial_tensor(
+            tensor,
+            "dd-MMM-yyyy HH:mm:ss",
+        )
+        .unwrap();
+        let PythonValue::DateTime(converted) = value_to_python(value).unwrap() else {
+            panic!("expected Python datetime");
+        };
+        assert_eq!(
+            (converted.year, converted.month, converted.day),
+            (2026, 8, 27)
+        );
+        assert_eq!(
+            (converted.hour, converted.minute, converted.second),
+            (12, 34, 56)
+        );
+        assert!(converted.microsecond.abs_diff(654_321) <= 10);
+    }
+
+    #[test]
+    fn python_temporal_values_convert_to_runmat_objects_with_documented_precision() {
+        let value = value_from_python(PythonValue::DateTime(PythonDateTime {
+            year: 1969,
+            month: 12,
+            day: 31,
+            hour: 23,
+            minute: 59,
+            second: 59,
+            microsecond: 123_456,
+        }))
+        .unwrap();
+        let Value::Object(object) = value else {
+            panic!("expected datetime object");
+        };
+        let serial = crate::builtins::datetime::serial_tensor_for_object(&object).unwrap();
+        let round_trip =
+            crate::builtins::datetime::naive_from_datenum(serial.materialize_f64()[0]).unwrap();
+        assert!(round_trip.and_utc().timestamp_micros().abs_diff(-876_544) <= 10);
+
+        let duration = value_from_python(PythonValue::TimeDelta(PythonTimeDelta {
+            days: -1,
+            seconds: 86_399,
+            microseconds: 998_999,
+        }))
+        .unwrap();
+        let tensor =
+            crate::builtins::duration::duration_tensor_from_duration_value(&duration).unwrap();
+        let micros = (tensor.materialize_f64()[0] * MICROS_PER_DAY as f64).round() as i64;
+        assert_eq!(micros, -1_000, "Python duration truncates to milliseconds");
+    }
+
+    #[test]
+    fn numpy_temporal_arrays_keep_shape_and_reject_nat() {
+        let dates = PythonArray::from_owned_bytes(
+            PythonDType::DateTime64Micros,
+            vec![2, 1],
+            true,
+            false,
+            [-876_544_i64, 1_787_834_096_654_321_i64]
+                .into_iter()
+                .flat_map(i64::to_ne_bytes)
+                .collect(),
+        );
+        let value = value_from_python(PythonValue::Array(dates)).unwrap();
+        let Value::Object(object) = value else {
+            panic!("expected datetime object");
+        };
+        let tensor = crate::builtins::datetime::serial_tensor_for_object(&object).unwrap();
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert!(
+            crate::builtins::datetime::naive_from_datenum(tensor.materialize_f64()[0])
+                .unwrap()
+                .and_utc()
+                .timestamp_micros()
+                .abs_diff(-876_544)
+                <= 10
+        );
+
+        let nat = PythonArray::from_owned_bytes(
+            PythonDType::TimeDelta64Micros,
+            vec![1, 1],
+            true,
+            false,
+            i64::MIN.to_ne_bytes().to_vec(),
+        );
+        let error = value_from_python(PythonValue::Array(nat)).unwrap_err();
+        assert!(error.message().contains("NaT"));
     }
 }

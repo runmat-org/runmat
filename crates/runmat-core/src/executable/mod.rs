@@ -13,9 +13,9 @@ pub use coverage::CoveragePlan;
 pub(crate) use invocation::ExecutableBackendPolicy;
 pub use invocation::{InvocationControl, ProcedureInvocation, ProcedureTarget};
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::NativeCompilationInput;
+pub use native::{AotObjectDataOptions, NativeCompilationInput};
 pub use revision::ExecutableRevision;
 pub use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};
 pub use source::ExecutableSource;
 pub use source_map::{ExecutableSourceMap, SourceMapEntry};
-pub use unit::ExecutableUnit;
+pub use unit::{reachability_requires_python, ExecutableUnit};

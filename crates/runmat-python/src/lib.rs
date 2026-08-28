@@ -7,6 +7,7 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod artifact;
 mod cpython;
 mod environment;
 mod error;
@@ -14,6 +15,11 @@ mod object;
 mod session;
 mod value;
 
+pub use artifact::{
+    InstalledPythonArtifacts, PythonArtifactBundle, PythonArtifactBundleEntry, PythonArtifactError,
+    PythonArtifactIdentity, PythonEnvironmentIdentity, PYTHON_ARTIFACT_BUNDLE_MEDIA_TYPE,
+    PYTHON_WHEEL_MEDIA_TYPE,
+};
 pub use environment::{
     discover_python, PythonDiscoveryRequest, PythonExecutionMode, PythonInstallation, PythonStatus,
     PythonVersion,
@@ -21,7 +27,9 @@ pub use environment::{
 pub use error::{PythonError, PythonFrame};
 pub use object::{PythonCallbackInvocation, PythonObjectHandle, PythonObjectMetadata};
 pub use session::{PythonCall, PythonSession, PythonSessionConfig};
-pub use value::{PythonArray, PythonBufferOwner, PythonDType, PythonValue};
+pub use value::{
+    PythonArray, PythonBufferOwner, PythonDType, PythonDateTime, PythonTimeDelta, PythonValue,
+};
 
 pub const PYTHON_ADAPTER_ID: &str = "python";
 pub const PYTHON_ADAPTER_VERSION: u32 = 1;

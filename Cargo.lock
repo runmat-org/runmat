@@ -6368,6 +6368,7 @@ dependencies = [
  "runmat-mir",
  "runmat-native-codegen",
  "runmat-native-ffi",
+ "runmat-python",
  "runmat-runtime",
  "runmat-types",
  "serde",
@@ -6391,6 +6392,7 @@ dependencies = [
  "runmat-native-executor",
  "runmat-native-ffi",
  "runmat-process-host",
+ "runmat-python",
  "runmat-runtime",
  "runmat-types",
  "runmat-value",
@@ -6570,6 +6572,7 @@ dependencies = [
  "runmat-native-ffi",
  "runmat-package",
  "runmat-process-host",
+ "runmat-python",
  "runmat-runtime",
  "runmat-test",
  "runmat-test-runner",
@@ -7224,8 +7227,10 @@ dependencies = [
  "libloading 0.8.9",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",
+ "zip",
 ]
 
 [[package]]

@@ -55,6 +55,9 @@ pub struct PythonDiscoveryRequest {
     pub version: Option<(u16, u16)>,
     pub minimum_version: (u16, u16),
     pub maximum_version: Option<(u16, u16)>,
+    pub exact_version: Option<PythonVersion>,
+    pub required_abi_tag: Option<String>,
+    pub required_platform_tag: Option<String>,
 }
 
 impl Default for PythonDiscoveryRequest {
@@ -64,13 +67,19 @@ impl Default for PythonDiscoveryRequest {
             version: None,
             minimum_version: (3, 9),
             maximum_version: None,
+            exact_version: None,
+            required_abi_tag: None,
+            required_platform_tag: None,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PythonInstallation {
+    pub implementation: String,
     pub version: PythonVersion,
+    pub abi_tag: String,
+    pub platform_tag: String,
     pub executable: PathBuf,
     pub library: PathBuf,
     pub home: PathBuf,

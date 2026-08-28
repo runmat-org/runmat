@@ -245,6 +245,11 @@ fn relocatable_object_embeds_canonical_bounded_runtime_data() {
             bytes: b"java-artifacts".to_vec(),
             alignment: 8,
         },
+        NativeObjectData {
+            symbol: "runmat_aot_python_artifacts".into(),
+            bytes: b"python-artifacts".to_vec(),
+            alignment: 8,
+        },
     ];
     let object =
         emit_relocatable_object_with_data(&assembly, NativeOptimization::Speed, data).unwrap();
@@ -262,6 +267,7 @@ fn relocatable_object_embeds_canonical_bounded_runtime_data() {
             "runmat_aot_native_interfaces",
             "runmat_aot_native_ir",
             "runmat_aot_program",
+            "runmat_aot_python_artifacts",
             "runmat_aot_resume_points"
         ]
     );

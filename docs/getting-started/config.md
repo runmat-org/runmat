@@ -227,6 +227,26 @@ Use `[java-artifacts.<name>]` for JARs that are part of the project rather than 
 path = "lib/analysis.jar"
 ```
 
+### `[runtime.foreign.python]`
+
+| Key | Type | Default | Allowed values | Notes |
+| --- | --- | --- | --- | --- |
+| `executable` | path | unset | — | Selects a specific CPython executable. |
+| `version` | string | unset | `major.minor` | Requests one CPython feature version. |
+| `minimum_version` | string | `"3.9"` | `major.minor` | Rejects an older interpreter before startup. |
+| `maximum_version` | string | unset | `major.minor` | Rejects a newer interpreter before startup. |
+| `execution_mode` | string | `"in_process"` | `in_process`, `out_of_process` | Chooses direct in-process execution or an isolated child mode of the same `runmat` executable. |
+
+Use `[python-artifacts.<name>]` for a wheel that belongs to the project. `path` is a project-relative `.whl` file and `module` is its top-level import name:
+
+```toml
+[python-artifacts.analysis]
+path = "python/analysis-1.0-py3-none-any.whl"
+module = "analysis"
+```
+
+RunMat freezes and revalidates declared wheels, carries them through packages, native compilation, and remote execution, and materializes them into a session-owned import root. Native wheels remain target-specific. Browser/WASM products reject native CPython requirements before execution. See [Python Interoperability](/docs/runtime/execution/python) for value conversion, isolation, callbacks, datetime behavior, and packaging details.
+
 The isolated extension host contains crashes and can be terminated on cancellation or timeout, but it is not an operating-system security sandbox. An admitted native module has the extension-host process's permissions. Use `unmanifested = "deny"` when only exact, manifest-bound RunMat artifacts should be allowed.
 
 ### `[runtime.jit]`

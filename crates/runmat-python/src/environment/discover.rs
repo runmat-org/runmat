@@ -48,7 +48,10 @@ for candidate in candidates:
         break
 
 print(json.dumps({
+    "implementation": sys.implementation.name,
     "version": {"major": major, "minor": minor, "patch": patch},
+    "abi_tag": sysconfig.get_config_var("SOABI") or sys.implementation.cache_tag or "",
+    "platform_tag": sysconfig.get_platform(),
     "executable": executable,
     "library": resolved,
     "home": base_prefix,
@@ -58,7 +61,10 @@ print(json.dumps({
 
 #[derive(Debug, Deserialize)]
 struct DiscoveryOutput {
+    implementation: String,
     version: PythonVersion,
+    abi_tag: String,
+    platform_tag: String,
     executable: PathBuf,
     library: PathBuf,
     home: PathBuf,
@@ -73,7 +79,7 @@ pub fn discover_python(
     let mut failures = Vec::new();
     for candidate in candidates {
         match inspect_candidate(&candidate) {
-            Ok(installation) if version_matches(request, installation.version) => {
+            Ok(installation) if installation_matches(request, &installation) => {
                 return Ok(installation);
             }
             Ok(installation) => failures.push(format!(
@@ -130,6 +136,35 @@ fn validate_request(request: &PythonDiscoveryRequest) -> Result<(), PythonError>
                 ),
             ));
         }
+    }
+    if let Some(exact) = request.exact_version {
+        let pair = (exact.major, exact.minor);
+        if exact.major != 3
+            || request.version.is_some_and(|required| required != pair)
+            || pair < request.minimum_version
+            || request
+                .maximum_version
+                .is_some_and(|maximum| pair > maximum)
+        {
+            return Err(PythonError::host(
+                "PythonConfigurationError",
+                "exact Python environment version conflicts with the configured version range",
+            ));
+        }
+    }
+    if request
+        .required_abi_tag
+        .as_ref()
+        .is_some_and(String::is_empty)
+        || request
+            .required_platform_tag
+            .as_ref()
+            .is_some_and(String::is_empty)
+    {
+        return Err(PythonError::host(
+            "PythonConfigurationError",
+            "exact Python environment tags must be non-empty",
+        ));
     }
     Ok(())
 }
@@ -193,7 +228,7 @@ fn inspect_candidate(executable: &Path) -> Result<PythonInstallation, PythonErro
             format!("interpreter returned invalid discovery metadata: {error}"),
         )
     })?;
-    if discovered.version.major != 3 {
+    if discovered.implementation != "cpython" || discovered.version.major != 3 {
         return Err(PythonError::host(
             "PythonDiscoveryError",
             format!("{} is not a CPython 3 interpreter", executable.display()),
@@ -209,7 +244,10 @@ fn inspect_candidate(executable: &Path) -> Result<PythonInstallation, PythonErro
         ));
     }
     Ok(PythonInstallation {
+        implementation: discovered.implementation,
         version: discovered.version,
+        abi_tag: discovered.abi_tag,
+        platform_tag: discovered.platform_tag,
         executable: discovered.executable,
         library: discovered.library,
         home: discovered.home,
@@ -217,9 +255,24 @@ fn inspect_candidate(executable: &Path) -> Result<PythonInstallation, PythonErro
     })
 }
 
-fn version_matches(request: &PythonDiscoveryRequest, version: PythonVersion) -> bool {
+fn installation_matches(
+    request: &PythonDiscoveryRequest,
+    installation: &PythonInstallation,
+) -> bool {
+    let version = installation.version;
     let pair = (version.major, version.minor);
     request.version.is_none_or(|requested| requested == pair)
+        && request
+            .exact_version
+            .is_none_or(|required| required == version)
+        && request
+            .required_abi_tag
+            .as_ref()
+            .is_none_or(|required| required == &installation.abi_tag)
+        && request
+            .required_platform_tag
+            .as_ref()
+            .is_none_or(|required| required == &installation.platform_tag)
         && pair >= request.minimum_version
         && request
             .maximum_version
@@ -255,5 +308,23 @@ mod tests {
         assert!(installation.executable.is_file());
         assert!(installation.library.is_file());
         assert!(installation.home.is_dir());
+    }
+
+    #[test]
+    fn exact_environment_constraints_select_the_same_patch_abi_and_platform() {
+        let Ok(expected) = discover_python(&PythonDiscoveryRequest::default()) else {
+            return;
+        };
+        let actual = discover_python(&PythonDiscoveryRequest {
+            version: Some((expected.version.major, expected.version.minor)),
+            exact_version: Some(expected.version),
+            required_abi_tag: Some(expected.abi_tag.clone()),
+            required_platform_tag: Some(expected.platform_tag.clone()),
+            ..PythonDiscoveryRequest::default()
+        })
+        .expect("exact discovered environment remains selectable");
+        assert_eq!(actual.version, expected.version);
+        assert_eq!(actual.abi_tag, expected.abi_tag);
+        assert_eq!(actual.platform_tag, expected.platform_tag);
     }
 }

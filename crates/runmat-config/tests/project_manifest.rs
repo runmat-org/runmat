@@ -211,6 +211,59 @@ path = "../fixture.jar"
 }
 
 #[test]
+fn loads_project_relative_python_wheel_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("python")).unwrap();
+    std::fs::write(temp.path().join("python/fixture.whl"), b"wheel").unwrap();
+    let manifest_path = temp.path().join("runmat.toml");
+    std::fs::write(
+        &manifest_path,
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[python-artifacts.fixture]
+path = "python/fixture.whl"
+module = "fixture.tools"
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir(temp.path().join("src")).unwrap();
+    let loaded = load_project_manifest(&manifest_path).expect("Python artifact should validate");
+    assert_eq!(loaded.python_artifacts["fixture"].module, "fixture.tools");
+}
+
+#[test]
+fn rejects_unsafe_python_artifact_declarations() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[python-artifacts.fixture]
+path = "../fixture.zip"
+module = "fixture-tools"
+"#,
+    )
+    .unwrap();
+    let error = parsed.validate(std::path::Path::new(".")).unwrap_err();
+    assert!(error
+        .messages
+        .iter()
+        .any(|message| message.contains("module `fixture-tools` is invalid")));
+    assert!(error
+        .messages
+        .iter()
+        .any(|message| message.contains("project-relative .whl")));
+}
+
+#[test]
 fn parses_manifest_with_runtime_section() {
     let parsed = parse_project_manifest_toml(
         r#"

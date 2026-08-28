@@ -3,7 +3,7 @@ use super::source::{canonical_path, is_file};
 use super::{PackageSourceProvider, ProjectResolveError, ProjectResolveOptions, ResolvedProject};
 use crate::source::catalog::{
     assemble_frozen_project, FrozenJavaArtifactInput, FrozenMexArtifactInput,
-    FrozenNativeInterfaceInput, FrozenPackageInput, FrozenSourceInput,
+    FrozenNativeInterfaceInput, FrozenPackageInput, FrozenPythonArtifactInput, FrozenSourceInput,
 };
 use crate::{
     build_resolved_graph, reconcile_path_lock, PackageLock, PathLockMode, ResolvedDependencyInput,
@@ -144,6 +144,16 @@ pub async fn resolve_project_async(
                 .into_iter()
                 .map(|artifact| FrozenJavaArtifactInput {
                     name: artifact.name,
+                    path: artifact.path,
+                    bytes: artifact.bytes,
+                })
+                .collect(),
+            python_artifacts: package
+                .python_artifacts
+                .into_iter()
+                .map(|artifact| FrozenPythonArtifactInput {
+                    name: artifact.name,
+                    module: artifact.module,
                     path: artifact.path,
                     bytes: artifact.bytes,
                 })
