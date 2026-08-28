@@ -281,7 +281,9 @@ impl MeshingHostWorkload {
             .iter()
             .map(|value| match value {
                 ValuePayload::Object(root) => Ok((**root).clone()),
-                ValuePayload::Inline(_) => Err(MeshingExecutionError::Invalid(
+                ValuePayload::Inline(_)
+                | ValuePayload::Distributed(_)
+                | ValuePayload::Composite(_) => Err(MeshingExecutionError::Invalid(
                     "meshing host inputs must be externalized root manifests".into(),
                 )),
             })

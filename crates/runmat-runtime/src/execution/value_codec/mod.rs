@@ -243,6 +243,71 @@ mod tests {
     }
 
     #[test]
+    fn distributed_and_composite_handles_round_trip_without_materializing_payloads() {
+        use runmat_execution::{
+            CompositeHandle, CompositeId, DistributedObjectId, DistributedValueHandle,
+            ExecutionScopeId, GangHandle, GangId, PoolHandle, PoolId,
+        };
+        use runmat_types::{
+            DistributedValueId, DistributionScheme, LabCount, NumericClass, NumericDomain,
+            NumericFact, ParallelRegionId, ProgramFunctionId, RegionId, ValueFact, ValueKindFact,
+        };
+
+        let scope_id = ExecutionScopeId::derive(&[b"codec-distributed"]);
+        let function = ProgramFunctionId(3);
+        let owner_region = ParallelRegionId(RegionId {
+            function,
+            ordinal: 2,
+        });
+        let pool = PoolHandle {
+            id: PoolId::derive(&[b"pool"]),
+            scope_id,
+            generation: 1,
+        };
+        let fact = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }));
+        let distributed = DistributedValueHandle {
+            id: DistributedObjectId::derive(&[b"value"]),
+            contract: DistributedValueId {
+                function,
+                ordinal: 1,
+            },
+            owner_region,
+            scope_id,
+            generation: 1,
+            pool: pool.clone(),
+            partition_count: LabCount(2),
+            value: fact.clone(),
+            global_shape: vec![8, 2],
+            scheme: DistributionScheme::Block { dimension: 1 },
+            materializable: true,
+        };
+        let composite = CompositeHandle {
+            id: CompositeId::derive(&[b"composite"]),
+            owner_region,
+            scope_id,
+            generation: 1,
+            gang: GangHandle {
+                id: GangId::derive(&[b"gang"]),
+                scope_id,
+                generation: 1,
+                pool,
+                labs: LabCount(2),
+            },
+            value: fact,
+        };
+        for value in [
+            Value::Distributed(Box::new(distributed)),
+            Value::Composite(Box::new(composite)),
+        ] {
+            let payload = encode_inline_value(&value).unwrap();
+            assert_eq!(decode_inline_value(&payload).unwrap(), value);
+        }
+    }
+
+    #[test]
     fn live_foreign_references_require_a_manifest_adapter() {
         let reference = ForeignRef::detached(
             ForeignResourceKey {

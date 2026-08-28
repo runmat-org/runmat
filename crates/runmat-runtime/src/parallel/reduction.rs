@@ -144,7 +144,7 @@ mod tests {
         assert!(matches!(
             identity,
             Value::LogicalArray(value)
-                if value.shape == vec![2, 2] && value.data.as_slice() == &[1, 1, 1, 1]
+                if value.shape == vec![2, 2] && value.data.as_slice() == [1, 1, 1, 1]
         ));
     }
 }

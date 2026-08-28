@@ -3,7 +3,10 @@ use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
 use crate::warning_store::RuntimeWarning;
 use crate::RuntimeError;
-use runmat_types::{CallableFallbackPolicy, CallableIdentity, SourceId};
+use runmat_types::{
+    BuiltinId, CallableFallbackPolicy, CallableIdentity, DistributedValueContract,
+    DistributionScheme, LabRank, SourceId,
+};
 use runmat_value::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -211,6 +214,68 @@ pub trait RuntimeParallelService {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct RuntimeDistributedCallRequest {
+    pub builtin: BuiltinId,
+    pub arguments: Vec<Value>,
+    pub requested_outputs: usize,
+}
+
+/// Runtime operations over execution-service-owned distributed values.
+/// Implementations preserve partition ownership and decide locality; callers
+/// never obtain raw partition storage through this port.
+pub trait RuntimeDistributedService {
+    fn create(
+        &self,
+        contract: DistributedValueContract,
+        input: Value,
+        pool: runmat_execution::PoolHandle,
+    ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueHandle, RuntimeError>>;
+
+    fn inspect(
+        &self,
+        handle: runmat_execution::DistributedValueHandle,
+    ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueSnapshot, RuntimeError>>;
+
+    fn local_part(
+        &self,
+        handle: runmat_execution::DistributedValueHandle,
+    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
+
+    fn materialize(
+        &self,
+        handle: runmat_execution::DistributedValueHandle,
+    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
+
+    fn redistribute(
+        &self,
+        handle: runmat_execution::DistributedValueHandle,
+        scheme: DistributionScheme,
+    ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueHandle, RuntimeError>>;
+
+    fn invoke(
+        &self,
+        request: RuntimeDistributedCallRequest,
+    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
+
+    fn composite_entry(
+        &self,
+        handle: runmat_execution::CompositeHandle,
+        rank: LabRank,
+    ) -> RuntimeServiceFuture<Result<Option<Value>, RuntimeError>>;
+}
+
+/// SPMD worker communication. The installed service owns the current rank and
+/// transports typed collective payloads through the admitted gang.
+pub trait RuntimeCollectiveService {
+    fn context(&self) -> &runmat_execution::SpmdTaskContext;
+
+    fn execute(
+        &self,
+        request: runmat_execution::CollectiveRequest,
+    ) -> RuntimeServiceFuture<Result<runmat_execution::CollectiveResponse, RuntimeError>>;
+}
+
 /// Narrow, typed ports composed by the host. An absent port is meaningful and
 /// produces a stable capability error through the corresponding `require_*`
 /// accessor; there is no string-keyed service locator.
@@ -227,6 +292,8 @@ pub struct RuntimeServicePorts {
     native: Option<Rc<dyn RuntimeNativeService>>,
     foreign: Option<Rc<dyn RuntimeForeignService>>,
     parallel: Option<Rc<dyn RuntimeParallelService>>,
+    distributed: Option<Rc<dyn RuntimeDistributedService>>,
+    collective: Option<Rc<dyn RuntimeCollectiveService>>,
 }
 
 impl std::fmt::Debug for RuntimeServicePorts {
@@ -244,6 +311,8 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("native", &self.native.is_some())
             .field("foreign", &self.foreign.is_some())
             .field("parallel", &self.parallel.is_some())
+            .field("distributed", &self.distributed.is_some())
+            .field("collective", &self.collective.is_some())
             .finish()
     }
 }
@@ -376,6 +445,22 @@ impl RuntimeServicePorts {
         RuntimeParallelService,
         Parallel
     );
+    port_accessors!(
+        with_distributed,
+        distributed,
+        require_distributed,
+        distributed,
+        RuntimeDistributedService,
+        Distributed
+    );
+    port_accessors!(
+        with_collective,
+        collective,
+        require_collective,
+        collective,
+        RuntimeCollectiveService,
+        Collective
+    );
 }
 
 #[cfg(test)]
@@ -403,6 +488,8 @@ mod tests {
             missing(ports.require_native("load library")),
             missing(ports.require_foreign("foreign call")),
             missing(ports.require_parallel("parfor")),
+            missing(ports.require_distributed("distributed array")),
+            missing(ports.require_collective("SPMD barrier")),
         ];
         assert_eq!(
             failures
@@ -421,6 +508,8 @@ mod tests {
                 RuntimeCapability::Native,
                 RuntimeCapability::Foreign,
                 RuntimeCapability::Parallel,
+                RuntimeCapability::Distributed,
+                RuntimeCapability::Collective,
             ]
         );
         assert!(failures.iter().all(|failure| {

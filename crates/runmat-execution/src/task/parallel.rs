@@ -63,6 +63,7 @@ impl ParallelTaskContext {
 pub enum ProgramInvocationContext {
     Direct,
     ParallelTask { task: ParallelTaskContext },
+    SpmdTask { task: crate::SpmdTaskContext },
 }
 
 impl Default for ProgramInvocationContext {
@@ -80,6 +81,12 @@ impl ProgramInvocationContext {
                     "parallel-region callables require a parallel task context",
                 ))
             }
+            (Self::Direct, crate::ProgramCallable::SpmdRegion { .. }) => {
+                Err(ContractError::invalid(
+                    "program invocation context",
+                    "SPMD-region callables require an SPMD task context",
+                ))
+            }
             (Self::ParallelTask { task }, crate::ProgramCallable::ParallelRegion { region }) => {
                 task.validate()?;
                 if task.region != *region {
@@ -93,6 +100,20 @@ impl ProgramInvocationContext {
             (Self::ParallelTask { .. }, _) => Err(ContractError::invalid(
                 "program invocation context",
                 "only parallel-region callables accept a parallel task context",
+            )),
+            (Self::SpmdTask { task }, crate::ProgramCallable::SpmdRegion { region }) => {
+                task.validate()?;
+                if task.region != *region {
+                    return Err(ContractError::invalid(
+                        "program invocation context",
+                        "SPMD task context identifies a different region",
+                    ));
+                }
+                Ok(())
+            }
+            (Self::SpmdTask { .. }, _) => Err(ContractError::invalid(
+                "program invocation context",
+                "only SPMD-region callables accept an SPMD task context",
             )),
             (Self::Direct, _) => Ok(()),
         }

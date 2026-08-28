@@ -92,6 +92,8 @@ impl Trace for Value {
             | Value::Task(_)
             | Value::Pool(_)
             | Value::Job(_)
+            | Value::Distributed(_)
+            | Value::Composite(_)
             | Value::Foreign(_) => {}
         }
     }

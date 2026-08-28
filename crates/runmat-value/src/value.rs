@@ -61,6 +61,12 @@ pub enum Value {
     Pool(runmat_execution::PoolHandle),
     /// Durable batch execution capability.
     Job(runmat_execution::JobHandle),
+    /// A distributed array whose partitions remain owned by an execution
+    /// service. The handle carries identity and fencing, never array payloads.
+    Distributed(Box<runmat_execution::DistributedValueHandle>),
+    /// Per-rank values retained by an SPMD gang. Entries are resolved through
+    /// the owning execution service rather than embedded in the language value.
+    Composite(Box<runmat_execution::CompositeHandle>),
     /// Opaque resource owned by a foreign runtime host and fenced by generation.
     Foreign(ForeignRef),
 }

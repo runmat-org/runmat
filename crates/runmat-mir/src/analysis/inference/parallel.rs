@@ -73,6 +73,7 @@ pub(crate) fn collective_fact(
         | MirCollectiveOp::Reduce { input, .. }
         | MirCollectiveOp::AllReduce { input, .. } => operand_fact(input, state),
         MirCollectiveOp::Receive { .. } => ValueFact::unknown(DynamicReason::RuntimeValue),
+        MirCollectiveOp::Probe { .. } => ValueFact::scalar(ValueKindFact::Logical),
     }
 }
 

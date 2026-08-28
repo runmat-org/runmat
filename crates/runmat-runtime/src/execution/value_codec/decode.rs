@@ -17,11 +17,20 @@ pub fn decode_inline_value(payload: &ValuePayload) -> Result<Value, ValueCodecEr
 }
 
 fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> {
-    let ValuePayload::Inline(value) = payload else {
-        return Err(ValueCodecError::unsupported(
-            path,
-            "object references require an execution object-store decoder",
-        ));
+    let value = match payload {
+        ValuePayload::Inline(value) => value,
+        ValuePayload::Distributed(handle) => {
+            return Ok(Value::Distributed(handle.clone()));
+        }
+        ValuePayload::Composite(handle) => {
+            return Ok(Value::Composite(handle.clone()));
+        }
+        ValuePayload::Object(_) => {
+            return Err(ValueCodecError::unsupported(
+                path,
+                "object references require an execution object-store decoder",
+            ));
+        }
     };
     match value.as_ref() {
         InlineValue::Null => Err(ValueCodecError::unsupported(

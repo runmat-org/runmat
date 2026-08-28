@@ -1,6 +1,6 @@
 use crate::{
-    AliasFact, CallableFact, CellFact, ClassReferenceFact, ContiguityFact, DimensionFact,
-    DistributedFact, ExceptionFact, ExecutionFact, ForeignAffinityFact, ForeignFact,
+    AliasFact, CallableFact, CellFact, ClassReferenceFact, CompositeFact, ContiguityFact,
+    DimensionFact, DistributedFact, ExceptionFact, ExecutionFact, ForeignAffinityFact, ForeignFact,
     ForeignLifetimeFact, ForeignOwnershipFact, FutureStateFact, LayoutFact, MutationFact,
     ObjectFact, OutputListFact, ResidencyFact, ShapeFact, StorageFact, StructFact, ValueFact,
     ValueKindFact, ViewFact,
@@ -48,6 +48,7 @@ impl FactSatisfaction for ValueKindFact {
             (Self::Exception(actual), Self::Exception(expected)) => actual.satisfies(expected),
             (Self::Execution(actual), Self::Execution(expected)) => actual.satisfies(expected),
             (Self::Distributed(actual), Self::Distributed(expected)) => actual.satisfies(expected),
+            (Self::Composite(actual), Self::Composite(expected)) => actual.satisfies(expected),
             (Self::Foreign(actual), Self::Foreign(expected)) => actual.satisfies(expected),
             _ => self == expected,
         }
@@ -215,6 +216,14 @@ impl FactSatisfaction for DistributedFact {
             && option_satisfies(&self.scheme, &expected.scheme)
             && self.value.satisfies(&expected.value)
             && self.materializable == expected.materializable
+    }
+}
+
+impl FactSatisfaction for CompositeFact {
+    fn satisfies(&self, expected: &Self) -> bool {
+        self.owner == expected.owner
+            && self.labs == expected.labs
+            && self.value.satisfies(&expected.value)
     }
 }
 

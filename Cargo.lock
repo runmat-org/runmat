@@ -6540,6 +6540,7 @@ version = "0.6.2"
 dependencies = [
  "futures",
  "runmat-execution",
+ "runmat-types",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

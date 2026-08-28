@@ -34,6 +34,8 @@ impl Default for ValueLimits {
 pub enum ValuePayload {
     Inline(Box<InlineValue>),
     Object(Box<ValueRef>),
+    Distributed(Box<crate::DistributedValueHandle>),
+    Composite(Box<crate::CompositeHandle>),
 }
 
 impl ValuePayload {

@@ -184,19 +184,11 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
                 scan_operand(body, input, reads_captures);
             }
         }
-        MirRvalue::Collective(operation) => match operation {
-            crate::parallel::MirCollectiveOp::Broadcast { input, .. }
-            | crate::parallel::MirCollectiveOp::Gather { input, .. }
-            | crate::parallel::MirCollectiveOp::Scatter { input, .. }
-            | crate::parallel::MirCollectiveOp::AllGather { input, .. }
-            | crate::parallel::MirCollectiveOp::Reduce { input, .. }
-            | crate::parallel::MirCollectiveOp::AllReduce { input, .. }
-            | crate::parallel::MirCollectiveOp::Send { input, .. } => {
-                scan_operand(body, input, reads_captures);
+        MirRvalue::Collective(operation) => {
+            for operand in operation.operands() {
+                scan_operand(body, operand, reads_captures);
             }
-            crate::parallel::MirCollectiveOp::Barrier { .. }
-            | crate::parallel::MirCollectiveOp::Receive { .. } => {}
-        },
+        }
     }
 }
 

@@ -336,6 +336,8 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)

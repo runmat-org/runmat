@@ -204,6 +204,15 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
         Value::MException(_) => false,
         Value::OutputList(_) => false,
         Value::Future(_) | Value::Task(_) | Value::Pool(_) | Value::Job(_) => false,
+        Value::Distributed(handle) => matches!(
+            handle.value.kind,
+            runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+                domain: runmat_types::NumericDomain::Real,
+                ..
+            }) | runmat_types::ValueKindFact::Logical
+                | runmat_types::ValueKindFact::Character
+        ),
+        Value::Composite(_) => false,
         Value::Foreign(_) => false,
         Value::GpuTensor(_) => {
             return Err(internal_error(

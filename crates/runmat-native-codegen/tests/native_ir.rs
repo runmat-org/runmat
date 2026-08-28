@@ -1129,6 +1129,8 @@ fn parfor_and_spmd_fixtures_lower_as_structured_suspend_resume_ir() {
                 id: region,
                 labs: SpmdLabRequirement::Exact { labs: LabCount(2) },
                 captures: Vec::new(),
+                outputs: Vec::new(),
+                effects: Default::default(),
                 capabilities: CapabilitySet::default(),
             });
         } else {

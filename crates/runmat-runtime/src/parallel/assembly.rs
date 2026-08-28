@@ -451,7 +451,7 @@ mod tests {
         .expect("assemble logical column");
         assert!(matches!(
             logical,
-            Value::LogicalArray(value) if value.data.as_slice() == &[0, 0, 1, 1]
+            Value::LogicalArray(value) if value.data.as_slice() == [0, 0, 1, 1]
         ));
 
         let cells = (0..8).map(|_| Value::Num(0.0)).collect::<Vec<_>>();

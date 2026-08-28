@@ -159,6 +159,8 @@ fn manifest() -> ExecutableUnitManifest {
                     maximum: LabCount(4),
                 },
                 captures: Vec::new(),
+                outputs: Vec::new(),
+                effects: Default::default(),
                 capabilities: Default::default(),
             }],
             distributed_values: Vec::new(),

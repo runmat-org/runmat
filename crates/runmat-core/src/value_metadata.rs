@@ -49,6 +49,8 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::Task(_) => "parallel.Task".to_string(),
         Value::Pool(_) => "parallel.Pool".to_string(),
         Value::Job(_) => "parallel.Job".to_string(),
+        Value::Distributed(_) => "distributed".to_string(),
+        Value::Composite(_) => "Composite".to_string(),
         Value::Foreign(reference) => reference.type_identity.name.clone(),
     }
 }
@@ -72,6 +74,14 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::ComplexTensor(t) => Some(t.shape.clone()),
         Value::Cell(ca) => Some(ca.shape.clone()),
         Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        Value::Distributed(handle) => handle
+            .global_shape
+            .iter()
+            .copied()
+            .map(usize::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .ok(),
+        Value::Composite(_) => Some(vec![1, 1]),
         Value::ObjectArray(array) => Some(array.shape().to_vec()),
         Value::Object(obj) if obj.is_class("datetime") => match obj.properties.get("__serial") {
             Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
@@ -90,6 +100,22 @@ pub fn numeric_dtype_label(value: &Value) -> Option<&'static str> {
         Value::SparseTensor(s) => Some(s.class_name()),
         Value::LogicalArray(_) => Some("logical"),
         Value::Int(iv) => Some(iv.class_name()),
+        Value::Distributed(handle) => match &handle.value.kind {
+            runmat_types::ValueKindFact::Numeric(numeric) => Some(match numeric.class {
+                runmat_types::NumericClass::Double => "double",
+                runmat_types::NumericClass::Single => "single",
+                runmat_types::NumericClass::Int8 => "int8",
+                runmat_types::NumericClass::UInt8 => "uint8",
+                runmat_types::NumericClass::Int16 => "int16",
+                runmat_types::NumericClass::UInt16 => "uint16",
+                runmat_types::NumericClass::Int32 => "int32",
+                runmat_types::NumericClass::UInt32 => "uint32",
+                runmat_types::NumericClass::Int64 => "int64",
+                runmat_types::NumericClass::UInt64 => "uint64",
+            }),
+            runmat_types::ValueKindFact::Logical => Some("logical"),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -180,6 +206,8 @@ pub fn preview_numeric_values(
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::GpuTensor(_) => None,
     }

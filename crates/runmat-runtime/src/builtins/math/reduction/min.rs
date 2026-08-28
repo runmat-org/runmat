@@ -1076,6 +1076,8 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(min_invalid_input(format!("{name}: unsupported input type"))),
     }

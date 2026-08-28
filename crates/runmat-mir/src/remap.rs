@@ -295,20 +295,8 @@ fn remap_collective(
     operation: &mut MirCollectiveOp,
     remap: &HashMap<FunctionId, FunctionId>,
 ) -> Result<(), String> {
-    let (id, input) = match operation {
-        MirCollectiveOp::Barrier { id } | MirCollectiveOp::Receive { id, .. } => (id, None),
-        MirCollectiveOp::Broadcast { id, input, .. }
-        | MirCollectiveOp::Gather { id, input, .. }
-        | MirCollectiveOp::Scatter { id, input, .. }
-        | MirCollectiveOp::AllGather { id, input }
-        | MirCollectiveOp::Reduce { id, input, .. }
-        | MirCollectiveOp::AllReduce { id, input, .. }
-        | MirCollectiveOp::Send { id, input, .. } => (id, Some(input)),
-    };
-    remap_parallel_region(&mut id.region, remap)?;
-    if let Some(input) = input {
-        remap_operand(input, remap);
-    }
+    remap_parallel_region(&mut operation.id_mut().region, remap)?;
+    operation.for_each_operand_mut(|operand| remap_operand(operand, remap));
     Ok(())
 }
 

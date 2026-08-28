@@ -29,6 +29,8 @@ impl ValidationBudget {
         match payload {
             ValuePayload::Inline(value) => self.inline(value, depth),
             ValuePayload::Object(reference) => self.reference(reference),
+            ValuePayload::Distributed(handle) => handle.validate(),
+            ValuePayload::Composite(handle) => handle.validate(),
         }
     }
 

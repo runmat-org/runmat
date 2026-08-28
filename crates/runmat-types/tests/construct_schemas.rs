@@ -92,6 +92,7 @@ fn interop() -> InteropManifest {
 
 fn parallel() -> ParallelManifest {
     let region = ParallelRegionId(region_id(2));
+    let spmd_region = ParallelRegionId(region_id(3));
     let distributed = DistributedValueId {
         function: region.0.function,
         ordinal: 0,
@@ -121,28 +122,39 @@ fn parallel() -> ParallelManifest {
             randomness: ParallelRandomnessPolicy::DeterministicSubstreams,
         }],
         spmd_regions: vec![SpmdContract {
-            id: ParallelRegionId(region_id(3)),
+            id: spmd_region,
             labs: SpmdLabRequirement::Range {
                 minimum: LabCount(1),
                 maximum: LabCount(4),
             },
             captures: Vec::new(),
+            outputs: Vec::new(),
+            effects: Default::default(),
             capabilities: CapabilitySet::default(),
         }],
         distributed_values: vec![DistributedValueContract {
             id: distributed,
             value: ValueFact::scalar(ValueKindFact::Logical),
-            scheme: DistributionScheme::Block { dimension: 0 },
+            scheme: DistributionScheme::Block { dimension: 1 },
             owner_region: region,
             materializable: true,
         }],
         collectives: vec![CollectiveContract {
-            id: CollectiveId { region, ordinal: 0 },
-            operation: CollectiveOperation::Broadcast {
-                input: distributed,
-                output: distributed,
-                root: runmat_types::LabRank(0),
+            id: CollectiveId {
+                region: spmd_region,
+                ordinal: 0,
             },
+            operation: CollectiveOperation::Broadcast,
+            input: Some(ValueFact::scalar(ValueKindFact::Logical)),
+            output: Some(ValueFact::scalar(ValueKindFact::Logical)),
+            root: Some(ValueFact::scalar(ValueKindFact::Numeric(
+                runmat_types::NumericFact {
+                    class: runmat_types::NumericClass::Double,
+                    domain: runmat_types::NumericDomain::Real,
+                },
+            ))),
+            peer: None,
+            tag: None,
         }],
     }
 }
@@ -190,16 +202,10 @@ fn construct_schemas_reject_version_order_and_kind_drift() {
     );
 
     let mut invalid_collective = parallel();
-    invalid_collective.collectives[0].operation = CollectiveOperation::Send {
-        input: DistributedValueId {
-            function: ProgramFunctionId(99),
-            ordinal: 0,
-        },
-        peer: runmat_types::LabRank(1),
-    };
+    invalid_collective.collectives[0].operation = CollectiveOperation::Send;
     assert_eq!(
         invalid_collective.validate().unwrap_err().path,
-        "parallel.collectives.values"
+        "parallel.collectives"
     );
 
     let mut invalid_range = parallel();

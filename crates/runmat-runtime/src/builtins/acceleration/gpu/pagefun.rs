@@ -1256,6 +1256,8 @@ impl TypeName for Value {
             Value::Task(_) => "task",
             Value::Pool(_) => "pool",
             Value::Job(_) => "job",
+            Value::Distributed(_) => "distributed",
+            Value::Composite(_) => "Composite",
             Value::Foreign(_) => "foreign",
         }
     }

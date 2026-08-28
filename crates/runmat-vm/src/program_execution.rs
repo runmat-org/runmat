@@ -456,9 +456,12 @@ async fn execute_function_request(
                 .scope(runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor))
                 .await
         }
-        runmat_execution::ProgramCallable::ParallelRegion { .. } => {
+        runmat_execution::ProgramCallable::ParallelRegion { .. }
+        | runmat_execution::ProgramCallable::SpmdRegion { .. } => {
             return ProgramExecutionResponse::Failure {
-                message: "parallel callable reached the semantic function execution path".into(),
+                message:
+                    "structured parallel callable reached the semantic function execution path"
+                        .into(),
             }
         }
     };

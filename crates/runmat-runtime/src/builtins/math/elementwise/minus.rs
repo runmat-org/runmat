@@ -450,6 +450,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(minus_error_with_detail(
             &MINUS_ERROR_INVALID_ARGUMENT,
