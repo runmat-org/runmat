@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches:
       - '**'
@@ -980,6 +981,9 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         env:
+          # Exercise the packager with styled ambient Cargo output. The
+          # metadata-producing subprocess must remain deterministic.
+          CARGO_TERM_COLOR: always
           CARGO_PROFILE_RELEASE_STRIP: symbols
           OPENSSL_NO_PKG_CONFIG: ${{ runner.os == 'macOS' && '1' || '0' }}
           OPENSSL_STATIC: ${{ runner.os == 'macOS' && '1' || '0' }}
@@ -999,6 +1003,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
+          # Exercise the PowerShell packager across the same color boundary.
+          CARGO_TERM_COLOR: always
           CARGO_PROFILE_RELEASE_STRIP: symbols
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'

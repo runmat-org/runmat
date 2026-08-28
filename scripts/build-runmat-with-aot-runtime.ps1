@@ -41,9 +41,19 @@ if ($target) {
 }
 
 try {
-  $rustcOutput = & cargo rustc @lockedArgs -p runmat-aot-runtime --profile $profile @targetArgs --lib --crate-type staticlib -- --print native-static-libs 2>&1
+  # This output becomes machine-readable input to the packer. Prevent an
+  # ambient CARGO_TERM_COLOR setting from adding ANSI sequences to the
+  # native-static-libs line, then restore the caller's preference.
+  $previousCargoTermColor = $env:CARGO_TERM_COLOR
+  try {
+    $env:CARGO_TERM_COLOR = 'never'
+    $rustcOutput = & cargo rustc @lockedArgs -p runmat-aot-runtime --profile $profile @targetArgs --lib --crate-type staticlib -- --print native-static-libs 2>&1
+    $rustcExitCode = $LASTEXITCODE
+  } finally {
+    $env:CARGO_TERM_COLOR = $previousCargoTermColor
+  }
   $rustcOutput | ForEach-Object { Write-Host $_ }
-  if ($LASTEXITCODE -ne 0) {
+  if ($rustcExitCode -ne 0) {
     throw "failed to build the RunMat AOT runtime archive"
   }
 
