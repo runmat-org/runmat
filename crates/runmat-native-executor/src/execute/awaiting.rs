@@ -110,15 +110,25 @@ pub(super) async fn complete(
                 }
             }
             AwaitWork::Execute { handle, call } => {
-                let requested_outputs = call.descriptor.requested_outputs;
-                let result = runtime
-                    .scope(
-                        runmat_runtime::call::descriptor::execute_callable_descriptor(
-                            call.descriptor,
-                        ),
-                    )
-                    .await
-                    .map(|value| normalize_outputs(value, requested_outputs));
+                let requested_outputs = call.invocation.requested_outputs();
+                let result = match call.invocation {
+                    runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
+                        runtime
+                            .scope(
+                                runmat_runtime::call::descriptor::execute_callable_descriptor(
+                                    descriptor,
+                                ),
+                            )
+                            .await
+                    }
+                    runmat_runtime::execution::DeferredInvocation::Program { .. } => {
+                        Err(runmat_runtime::runtime_error::semantic_error(
+                            "ParallelProgramUnavailable",
+                            "native continuation cannot execute a deferred program in-process",
+                        ))
+                    }
+                }
+                .map(|value| normalize_outputs(value, requested_outputs));
                 let stored = result
                     .as_ref()
                     .map(Clone::clone)

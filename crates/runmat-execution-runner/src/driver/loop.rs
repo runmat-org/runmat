@@ -86,7 +86,15 @@ impl Driver {
             }
             DriverCommand::ResizePool { pool_id, request } => {
                 let pool = self.pool_mut(pool_id)?;
-                let decision = request.decide(&pool.spec, pool.workers.len() as u32)?;
+                let available_workers = pool
+                    .workers
+                    .values()
+                    .filter(|worker| worker.accepts_work())
+                    .count();
+                let available_workers = u32::try_from(available_workers).map_err(|_| {
+                    RunnerError::Invalid("pool worker count exceeds the supported range".into())
+                })?;
+                let decision = request.decide(&pool.spec, available_workers)?;
                 if decision != ResizeDecision::Unchanged {
                     pool.state = PoolState::Resizing;
                     actions.push(DriverAction::ResizePool {
@@ -100,6 +108,7 @@ impl Driver {
                 }
             }
             DriverCommand::RegisterWorker(spec) => self.register_worker(spec)?,
+            DriverCommand::ActivateWorker(worker_id) => self.activate_worker(worker_id)?,
             DriverCommand::DrainWorker(worker_id) => self.drain_worker(worker_id)?,
             DriverCommand::WorkerLost(worker_id) => {
                 self.worker_lost(worker_id, &mut actions)?;

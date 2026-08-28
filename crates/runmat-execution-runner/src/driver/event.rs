@@ -33,6 +33,9 @@ pub enum DriverEventKind {
         worker_id: WorkerId,
         pool_id: PoolId,
     },
+    WorkerActivated {
+        worker_id: WorkerId,
+    },
     WorkerDraining {
         worker_id: WorkerId,
     },

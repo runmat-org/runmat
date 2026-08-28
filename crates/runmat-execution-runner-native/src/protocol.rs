@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub use runmat_execution_artifact::{
     ProgramExecutionRequest as WorkerRequest, ProgramExecutionResponse as WorkerResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
 };
 
 pub const NATIVE_WORKER_MESSAGE_SCHEMA_V1: u16 = 1;
@@ -49,7 +49,6 @@ pub enum WorkerProcessMessage {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StoredProgram {
-    pub callable: runmat_execution::ProgramCallable,
     pub recipe: runmat_execution_artifact::ProgramBuildRecipe,
     pub artifact: runmat_execution_artifact::ProgramArtifact,
 }

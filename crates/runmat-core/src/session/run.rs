@@ -798,11 +798,19 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         let mut bytecode = interactive_unit.bytecode().clone();
         #[cfg(target_arch = "wasm32")]
-        let _ = mir;
-        #[cfg(target_arch = "wasm32")]
-        let _ = analysis;
-        #[cfg(target_arch = "wasm32")]
-        let mut bytecode = bytecode;
+        let mut bytecode = {
+            let mut bytecode = bytecode;
+            bytecode
+                .install_parallel_regions(&mir, &analysis.parallel)
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableProduct")
+                            .build(),
+                    )
+                })?;
+            bytecode
+        };
         let source_catalog_entries = self
             .source_pool
             .entries()

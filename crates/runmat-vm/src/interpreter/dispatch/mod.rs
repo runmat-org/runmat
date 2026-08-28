@@ -51,6 +51,7 @@ pub enum DispatchHandled {
 
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
+    pub bytecode: &'a crate::bytecode::Bytecode,
     pub var_names: &'a HashMap<usize, String>,
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
@@ -253,6 +254,7 @@ pub async fn dispatch_instruction(
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     let DispatchMeta {
         instr,
+        bytecode,
         var_names,
         function_registry,
         source_id,
@@ -281,7 +283,20 @@ pub async fn dispatch_instruction(
         store_local_after_store,
         store_local_after_fallback_store,
     } = hooks;
-    if let Some(handled) = parallel::dispatch(instr, stack, context, function_registry).await? {
+    if let Some(handled) = parallel::dispatch(
+        instr,
+        stack,
+        vars,
+        pc,
+        parallel::ParallelDispatchContext {
+            bytecode,
+            execution: context,
+            function_registry,
+            current_function_name,
+        },
+    )
+    .await?
+    {
         return Ok(Some(handled));
     }
     match instr {

@@ -4,9 +4,10 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-    ProgramExecutionResponse,
+    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
 };
-use runmat_runtime::execution::{DeferredCall, ExecutionServiceError};
+use runmat_runtime::execution::{DeferredCall, DeferredInvocation, ExecutionServiceError};
+use runmat_value::Value;
 
 pub fn materialize_deferred_call(
     call: &DeferredCall,
@@ -15,37 +16,53 @@ pub fn materialize_deferred_call(
 ) -> Result<
     (
         ProgramCallable,
+        runmat_execution::ProgramInvocationContext,
         ProgramBuildRecipe,
         ProgramArtifact,
         Vec<ValuePayload>,
     ),
     ExecutionServiceError,
 > {
-    let callable = match &call.descriptor.target {
-        runmat_runtime::call::descriptor::CallableTarget::Resolved {
-            identity:
-                runmat_hir::CallableIdentity::BoundFunction(function)
-                | runmat_hir::CallableIdentity::AnonymousFunction(function)
-                | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
-            ..
-        } => ProgramCallable::semantic(
-            ProgramFunctionId(u32::try_from(function.0).map_err(|_| {
-                ExecutionServiceError::Failed(
-                    "semantic function identity exceeds its portable representation".into(),
-                )
-            })?),
-            call.descriptor.metadata.display_name.clone(),
-        ),
-        runmat_runtime::call::descriptor::CallableTarget::Resolved {
-            identity: runmat_hir::CallableIdentity::Builtin(name),
-            ..
-        } => ProgramCallable::builtin(name.0.clone())
-            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?,
-        _ => {
-            return Err(ExecutionServiceError::Failed(
-                "isolated execution requires a resolved semantic callable".into(),
-            ))
+    let (callable, invocation_context, arguments) = match &call.invocation {
+        DeferredInvocation::Callable(descriptor) => {
+            let callable = match &descriptor.target {
+                runmat_runtime::call::descriptor::CallableTarget::Resolved {
+                    identity:
+                        runmat_hir::CallableIdentity::BoundFunction(function)
+                        | runmat_hir::CallableIdentity::AnonymousFunction(function)
+                        | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
+                    ..
+                } => ProgramCallable::semantic(
+                    ProgramFunctionId(u32::try_from(function.0).map_err(|_| {
+                        ExecutionServiceError::Failed(
+                            "semantic function identity exceeds its portable representation".into(),
+                        )
+                    })?),
+                    descriptor.metadata.display_name.clone(),
+                ),
+                runmat_runtime::call::descriptor::CallableTarget::Resolved {
+                    identity: runmat_hir::CallableIdentity::Builtin(name),
+                    ..
+                } => ProgramCallable::builtin(name.0.clone())
+                    .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?,
+                _ => {
+                    return Err(ExecutionServiceError::Failed(
+                        "isolated execution requires a resolved semantic callable".into(),
+                    ))
+                }
+            };
+            (
+                callable,
+                runmat_execution::ProgramInvocationContext::Direct,
+                descriptor.args.as_slice(),
+            )
         }
+        DeferredInvocation::Program {
+            callable,
+            context,
+            arguments,
+            ..
+        } => (callable.clone(), context.clone(), arguments.as_slice()),
     };
     let program = call.program.as_deref().ok_or_else(|| {
         ExecutionServiceError::Failed("execution is missing its exact program".into())
@@ -72,14 +89,55 @@ pub fn materialize_deferred_call(
         program.to_vec(),
     )
     .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-    let arguments = call
-        .descriptor
-        .args
+    let arguments = arguments
         .iter()
         .map(runmat_runtime::execution::value_codec::encode_inline_value)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-    Ok((callable, recipe, artifact, arguments))
+    Ok((callable, invocation_context, recipe, artifact, arguments))
+}
+
+pub async fn execute_deferred_program_in_context(
+    call: DeferredCall,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> Result<Value, ExecutionServiceError> {
+    let requested_outputs = u16::try_from(call.invocation.requested_outputs())
+        .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
+    let output_contract = OutputContract { requested_outputs };
+    let (callable, invocation_context, recipe, artifact, arguments) = materialize_deferred_call(
+        &call,
+        output_contract,
+        runmat_execution_artifact::ProgramTarget::portable("vm-parallel-region-v1"),
+    )?;
+    let request = ProgramExecutionRequest {
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        recipe,
+        artifact,
+        callable,
+        context: invocation_context,
+        assignment: None,
+        job_id: None,
+        arguments,
+        requested_outputs,
+    };
+    request
+        .validate_for_portable_host()
+        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+    match execute_program_request_with_context(request, runtime).await {
+        ProgramExecutionResponse::Success { value } => {
+            runmat_runtime::execution::value_codec::decode_inline_value(&value)
+                .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
+        }
+        ProgramExecutionResponse::Failure { message } => {
+            Err(ExecutionServiceError::Failed(message))
+        }
+        ProgramExecutionResponse::RuntimeFailure { failure } => {
+            Err(ExecutionServiceError::RuntimeFailure(Box::new(failure)))
+        }
+        ProgramExecutionResponse::ExternalizedSuccess { .. } => Err(ExecutionServiceError::Failed(
+            "parallel region returned an externalized result to an inline executor".into(),
+        )),
+    }
 }
 
 fn captured_program_revision(program: &[u8]) -> ProgramRevision {
@@ -122,9 +180,6 @@ async fn execute_program_request_in_context(
             message: "worker rejected a protocol or program identity mismatch".into(),
         };
     }
-    if request.artifact.form == ExecutableForm::InterpreterScriptV1 {
-        return execute_script_request(request, runtime).await;
-    }
     if request.artifact.form == ExecutableForm::TestAttemptV1 {
         return ProgramExecutionResponse::Failure {
             message: "test-attempt programs require a test-capable execution host".into(),
@@ -135,13 +190,26 @@ async fn execute_program_request_in_context(
             message: "meshing workloads require a meshing-capable execution host".into(),
         };
     }
-    if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
-        return execute_unit_request(request, runtime).await;
-    }
     if request.artifact.form == ExecutableForm::NativeObjectV1 {
         return ProgramExecutionResponse::Failure {
             message: "native object programs require a native AOT execution host".into(),
         };
+    }
+    let runtime = runtime.unwrap_or_else(|| {
+        runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+    });
+    let _assignment = runtime.enter_execution_assignment(request.assignment.clone());
+    let _job = runtime.enter_execution_job(request.job_id);
+    if request.artifact.form == ExecutableForm::InterpreterScriptV1 {
+        return execute_script_request(request, runtime).await;
+    }
+    if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
+        return execute_unit_request(request, runtime).await;
+    }
+    if matches!(request.callable, ProgramCallable::ParallelRegion { .. }) {
+        return execute_parallel_region_request(request, runtime).await;
     }
     let registry: crate::FunctionRegistry =
         match serde_json::from_slice(&request.artifact.executable_bytes) {
@@ -152,12 +220,118 @@ async fn execute_program_request_in_context(
                 }
             }
         };
-    execute_function_request(&request, &registry, runtime.as_ref()).await
+    execute_function_request(&request, &registry, &runtime).await
+}
+
+async fn execute_parallel_region_request(
+    request: ProgramExecutionRequest,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> ProgramExecutionResponse {
+    let ProgramCallable::ParallelRegion { region } = &request.callable else {
+        return ProgramExecutionResponse::Failure {
+            message: "worker received a non-parallel callable on the parallel execution path"
+                .into(),
+        };
+    };
+    let runmat_execution::ProgramInvocationContext::ParallelTask { task } = &request.context else {
+        return ProgramExecutionResponse::Failure {
+            message: "parallel region task is missing its typed execution context".into(),
+        };
+    };
+    if request.requested_outputs != 1 {
+        return ProgramExecutionResponse::Failure {
+            message: "parallel region tasks return one typed result envelope".into(),
+        };
+    }
+    let bytecode: crate::Bytecode = match serde_json::from_slice(&request.artifact.executable_bytes)
+    {
+        Ok(bytecode) => bytecode,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected invalid parallel bytecode: {error}"),
+            }
+        }
+    };
+    let Some(executable) = bytecode
+        .parfor_regions
+        .iter()
+        .find(|candidate| candidate.contract.id == *region)
+    else {
+        return ProgramExecutionResponse::Failure {
+            message: "worker could not find the requested parallel region in its exact program"
+                .into(),
+        };
+    };
+    let mut arguments = match request
+        .arguments
+        .iter()
+        .map(runmat_runtime::execution::value_codec::decode_inline_value)
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(arguments) => arguments,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected an invalid parallel task input: {error}"),
+            }
+        }
+    };
+    let expected_arguments = executable.input_variables().count() + 1;
+    if arguments.len() != expected_arguments {
+        return ProgramExecutionResponse::Failure {
+            message: format!(
+                "parallel task received {} arguments; its executable contract requires {expected_arguments}",
+                arguments.len()
+            ),
+        };
+    }
+    let Value::Cell(iterations) = arguments.remove(0) else {
+        return ProgramExecutionResponse::Failure {
+            message: "parallel task iteration input must be a cell vector".into(),
+        };
+    };
+    if iterations.data.len() != task.chunk.len {
+        return ProgramExecutionResponse::Failure {
+            message: "parallel task iteration payload differs from its declared chunk".into(),
+        };
+    }
+    let callable_name = request.callable.display_name();
+    let result = crate::interpreter::runner::interpret_parfor_task_in_context(
+        crate::interpreter::runner::ParforTaskExecution {
+            bytecode: &bytecode,
+            region: executable,
+            inputs: arguments,
+            iterations: iterations.data,
+            randomness: task.randomness.clone(),
+            mode: crate::interpreter::runner::ParforTaskMode::IndependentIterations,
+            current_function_name: &callable_name,
+            runtime,
+        },
+    )
+    .await
+    .and_then(|outputs| {
+        runmat_value::CellArray::new(outputs, 1, executable.output_variables().count())
+            .map(Value::Cell)
+            .map_err(|error| {
+                runmat_runtime::runtime_error::semantic_error(
+                    "ParallelTaskOutput",
+                    error.to_string(),
+                )
+            })
+    });
+    match result {
+        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
+            Ok(value) => ProgramExecutionResponse::Success { value },
+            Err(error) => ProgramExecutionResponse::Failure {
+                message: format!("worker could not transfer its parallel task result: {error}"),
+            },
+        },
+        Err(error) => runtime_failure_response(error),
+    }
 }
 
 async fn execute_unit_request(
     request: ProgramExecutionRequest,
-    runtime: Option<runmat_runtime::context::RuntimeContext>,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
     let envelope = match request.artifact.executable_unit() {
         Ok(Some(envelope)) => envelope,
@@ -235,7 +409,7 @@ async fn execute_unit_request(
             execute_unit_script(bytecode, runtime).await
         }
         runmat_execution::ExecutableEntrypointKind::Function => {
-            execute_function_request(&request, &registry, runtime.as_ref()).await
+            execute_function_request(&request, &registry, &runtime).await
         }
     }
 }
@@ -243,7 +417,7 @@ async fn execute_unit_request(
 async fn execute_function_request(
     request: &ProgramExecutionRequest,
     registry: &crate::FunctionRegistry,
-    runtime: Option<&runmat_runtime::context::RuntimeContext>,
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
     let arguments = match request
         .arguments
@@ -260,27 +434,16 @@ async fn execute_function_request(
     };
     let requested_outputs = usize::from(request.requested_outputs);
     let result = match &request.callable {
-        runmat_execution::ProgramCallable::Semantic { function, .. } => match runtime {
-            Some(runtime) => {
-                crate::invoke_semantic_function_value_in_context(
-                    function.0 as usize,
-                    &arguments,
-                    requested_outputs,
-                    registry,
-                    runtime.clone(),
-                )
-                .await
-            }
-            None => {
-                crate::invoke_semantic_function_value(
-                    function.0 as usize,
-                    &arguments,
-                    requested_outputs,
-                    registry,
-                )
-                .await
-            }
-        },
+        runmat_execution::ProgramCallable::Semantic { function, .. } => {
+            crate::invoke_semantic_function_value_in_context(
+                function.0 as usize,
+                &arguments,
+                requested_outputs,
+                registry,
+                runtime.clone(),
+            )
+            .await
+        }
         runmat_execution::ProgramCallable::Builtin { name } => {
             let descriptor = runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                 runmat_hir::CallableIdentity::Builtin(runmat_hir::BuiltinId(name.clone())),
@@ -289,19 +452,13 @@ async fn execute_function_request(
                 runmat_hir::CallableFallbackPolicy::None,
                 runmat_runtime::call::descriptor::CallableCallKind::Direct,
             );
-            match runtime {
-                Some(runtime) => {
-                    runtime
-                        .scope(
-                            runmat_runtime::call::descriptor::execute_callable_descriptor(
-                                descriptor,
-                            ),
-                        )
-                        .await
-                }
-                None => {
-                    runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor).await
-                }
+            runtime
+                .scope(runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor))
+                .await
+        }
+        runmat_execution::ProgramCallable::ParallelRegion { .. } => {
+            return ProgramExecutionResponse::Failure {
+                message: "parallel callable reached the semantic function execution path".into(),
             }
         }
     };
@@ -312,36 +469,25 @@ async fn execute_function_request(
                 message: format!("worker could not transfer its result: {error}"),
             },
         },
-        Err(error) => ProgramExecutionResponse::Failure {
-            message: error.to_string(),
-        },
+        Err(error) => runtime_failure_response(error),
     }
 }
 
 async fn execute_unit_script(
     bytecode: crate::Bytecode,
-    runtime: Option<runmat_runtime::context::RuntimeContext>,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
     let result_slot = bytecode
         .var_names
         .iter()
         .find_map(|(slot, name)| (name == "ans").then_some(*slot));
-    let result = match runtime {
-        Some(runtime) => {
-            let mut variables = vec![runmat_value::Value::Num(0.0); bytecode.var_count];
-            crate::interpret_with_vars_in_context(
-                &bytecode,
-                &mut variables,
-                Some("<main>"),
-                runtime,
-            )
+    let mut variables = vec![runmat_value::Value::Num(0.0); bytecode.var_count];
+    let result =
+        crate::interpret_with_vars_in_context(&bytecode, &mut variables, Some("<main>"), runtime)
             .await
             .map(|outcome| match outcome {
                 crate::InterpreterOutcome::Completed(values) => values,
-            })
-        }
-        None => crate::interpret(&bytecode).await,
-    };
+            });
     match result {
         Ok(values) => {
             let value = result_slot
@@ -354,15 +500,24 @@ async fn execute_unit_script(
                 },
             }
         }
-        Err(error) => ProgramExecutionResponse::Failure {
-            message: error.to_string(),
+        Err(error) => runtime_failure_response(error),
+    }
+}
+
+fn runtime_failure_response(error: runmat_runtime::RuntimeError) -> ProgramExecutionResponse {
+    match runmat_runtime::execution::encode_runtime_failure(&error) {
+        Ok(failure) => ProgramExecutionResponse::RuntimeFailure { failure },
+        Err(protocol_error) => ProgramExecutionResponse::Failure {
+            message: format!(
+                "worker could not encode its structured runtime failure: {protocol_error}"
+            ),
         },
     }
 }
 
 async fn execute_script_request(
     request: ProgramExecutionRequest,
-    runtime: Option<runmat_runtime::context::RuntimeContext>,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
     let bytecode: crate::Bytecode = match serde_json::from_slice(&request.artifact.executable_bytes)
     {
@@ -386,7 +541,7 @@ mod tests {
     };
     use runmat_execution_artifact::{
         ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
     };
 
     use super::execute_program_request;
@@ -434,10 +589,13 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
+                context: runmat_execution::ProgramInvocationContext::Direct,
+                assignment: None,
+                job_id: None,
                 arguments: Vec::new(),
                 requested_outputs: 1,
             }));
@@ -481,10 +639,13 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
+                context: runmat_execution::ProgramInvocationContext::Direct,
+                assignment: None,
+                job_id: None,
                 arguments: Vec::new(),
                 requested_outputs: 1,
             }));

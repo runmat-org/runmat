@@ -52,17 +52,17 @@ impl NativeProgramSession {
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         if submission.request.inputs != program.arguments
             || submission.request.outputs.requested_outputs != program.requested_outputs
+            || submission.request.invocation_context != program.context
+            || submission.request.callable.program != program.callable
         {
             return Err(NativeExecutionError::Protocol(
-                "native task inputs or outputs differ from its exact program request".into(),
+                "native task inputs, outputs, or invocation context differ from its exact program request"
+                    .into(),
             ));
         }
-        let completion = self.driver.submit_task(
-            submission,
-            program.callable,
-            program.recipe,
-            program.artifact,
-        )?;
+        let completion = self
+            .driver
+            .submit_task(submission, program.recipe, program.artifact)?;
         Ok(NativeProgramTask { completion })
     }
 
@@ -75,9 +75,26 @@ pub struct NativeProgramTask {
     completion: Arc<TaskCompletion>,
 }
 
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum NativeProgramFailure {
+    #[error("execution failed: {0}")]
+    Execution(String),
+    #[error("execution failed: {}", .0.message)]
+    Runtime(runmat_execution::ProgramRuntimeFailure),
+}
+
 impl NativeProgramTask {
-    pub fn try_result(&self) -> Option<Result<AttemptSuccess, String>> {
-        self.completion.try_value()
+    pub fn try_result(&self) -> Option<Result<AttemptSuccess, NativeProgramFailure>> {
+        self.completion.try_value().map(|result| {
+            result.map_err(|failure| match failure {
+                crate::driver::TransferFailure::Message(message) => {
+                    NativeProgramFailure::Execution(message)
+                }
+                crate::driver::TransferFailure::Runtime(failure) => {
+                    NativeProgramFailure::Runtime(*failure)
+                }
+            })
+        })
     }
 
     pub fn drain_progress(&self) -> Vec<ProgramProgress> {

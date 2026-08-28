@@ -697,6 +697,7 @@ fn function_revision(
         argument_validations,
         resume_points,
         regions,
+        parfor_regions,
     } = function;
     let var_names = var_names.iter().collect::<BTreeMap<_, _>>();
     let initially_unassigned_slots = initially_unassigned_slots.iter().collect::<BTreeSet<_>>();
@@ -731,6 +732,7 @@ fn function_revision(
     append!(argument_validations);
     append!(&resume_points);
     append!(regions);
+    append!(parfor_regions);
     Ok(runmat_execution::Digest::sha256(&payload).to_string())
 }
 

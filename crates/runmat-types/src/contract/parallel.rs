@@ -8,14 +8,69 @@ use std::collections::BTreeSet;
 mod spmd;
 pub use spmd::SpmdLabRequirement;
 
-pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 1;
+pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum ParallelIndexConstant {
+    Signed(i64),
+    Unsigned(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum ParallelSliceOffsetOperand {
+    Constant(ParallelIndexConstant),
+    Broadcast(RegionValueId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "operand")]
+pub enum ParallelSliceOffset {
+    None,
+    Add(ParallelSliceOffsetOperand),
+    Subtract(ParallelSliceOffsetOperand),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "dimension")]
+pub enum ParallelSliceAxis {
+    /// One-subscript MATLAB linear indexing, such as `value(index)`.
+    Linear,
+    /// Multisubscript indexing with the loop variable in this one-based
+    /// dimension, such as `value(:, index)`.
+    Dimension(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParallelSliceAccess {
+    pub axis: ParallelSliceAxis,
+    pub offset: ParallelSliceOffset,
+}
+
+impl ParallelSliceAccess {
+    pub const fn linear() -> Self {
+        Self {
+            axis: ParallelSliceAxis::Linear,
+            offset: ParallelSliceOffset::None,
+        }
+    }
+
+    pub const fn dimension(dimension: u32) -> Self {
+        Self {
+            axis: ParallelSliceAxis::Dimension(dimension),
+            offset: ParallelSliceOffset::None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParallelVariableRole {
     Loop,
     Broadcast,
-    Sliced { dimensions: Vec<u32> },
+    Sliced { access: ParallelSliceAccess },
     Reduction { operator: OperatorKind },
     Temporary,
     Private,
@@ -55,6 +110,7 @@ pub struct ParforContract {
     pub iterable: ValueFact,
     pub variables: Vec<ParallelVariableContract>,
     pub maximum_workers: Option<LabCount>,
+    pub effects: crate::EffectSet,
     pub capabilities: CapabilitySet,
     pub randomness: ParallelRandomnessPolicy,
 }
@@ -321,12 +377,32 @@ fn validate_variables(
         ));
     }
     for variable in variables {
-        if let ParallelVariableRole::Sliced { dimensions } = &variable.role {
-            if dimensions.is_empty() || dimensions.windows(2).any(|pair| pair[0] >= pair[1]) {
+        if let ParallelVariableRole::Sliced { access } = &variable.role {
+            if matches!(access.axis, ParallelSliceAxis::Dimension(0)) {
                 return Err(SchemaValidationError::new(
                     path,
-                    "sliced dimensions must be sorted, unique, and non-empty",
+                    "sliced dimensions use one-based nonzero identities",
                 ));
+            }
+            let offset_value = match access.offset {
+                ParallelSliceOffset::Add(ParallelSliceOffsetOperand::Broadcast(value))
+                | ParallelSliceOffset::Subtract(ParallelSliceOffsetOperand::Broadcast(value)) => {
+                    Some(value)
+                }
+                _ => None,
+            };
+            if let Some(offset_value) = offset_value {
+                if offset_value.function != region.0.function
+                    || !variables.iter().any(|value| {
+                        value.value == offset_value
+                            && matches!(value.role, ParallelVariableRole::Broadcast)
+                    })
+                {
+                    return Err(SchemaValidationError::new(
+                        path,
+                        "sliced offsets must name a broadcast from the same region function",
+                    ));
+                }
             }
         }
     }

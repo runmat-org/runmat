@@ -144,12 +144,13 @@ pub(super) async fn run_durable_driver() {
     let invocation = prepare_batch_driver().unwrap();
     let BatchDriverInvocation::Program {
         job_directory,
+        job_id,
         submission,
     } = invocation
     else {
         panic!("meshing conformance durable driver received a script")
     };
-    let response = execute_program_batch(*submission).await;
+    let response = execute_program_batch(*submission, job_id).await;
     complete_batch_driver_with_response(&job_directory, response).unwrap();
 }
 

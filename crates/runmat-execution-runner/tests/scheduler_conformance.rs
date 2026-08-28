@@ -165,3 +165,48 @@ fn pool_resize_and_worker_drain_are_explicit_lifecycle_actions() {
     );
     assert_ne!(request.worker_id, fixture.workers[0]);
 }
+
+#[test]
+fn registered_pool_resize_changes_the_schedulable_worker_set() {
+    let mut fixture = common::fixture(3, 3);
+    let actions = fixture
+        .driver
+        .resize_registered_pool(fixture.pool, 1)
+        .unwrap();
+    assert!(actions.is_empty());
+    let snapshot = fixture.driver.snapshot();
+    let pool = &snapshot.pools[&fixture.pool];
+    assert_eq!(
+        pool.workers
+            .values()
+            .filter(|worker| worker.accepts_work())
+            .count(),
+        1
+    );
+
+    let request = common::submit(
+        &mut fixture.driver,
+        common::task(
+            "bounded-after-resize",
+            fixture.scope,
+            fixture.pool,
+            RetryPolicy::Never,
+        ),
+    );
+    assert_eq!(request.worker_id, fixture.workers[0]);
+
+    let actions = fixture
+        .driver
+        .resize_registered_pool(fixture.pool, 3)
+        .unwrap();
+    assert!(actions.is_empty());
+    let snapshot = fixture.driver.snapshot();
+    assert_eq!(
+        snapshot.pools[&fixture.pool]
+            .workers
+            .values()
+            .filter(|worker| worker.accepts_work())
+            .count(),
+        3
+    );
+}

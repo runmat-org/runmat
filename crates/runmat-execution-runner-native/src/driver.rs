@@ -12,7 +12,7 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionDescriptor,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
 };
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -37,7 +37,45 @@ pub(crate) fn next_task_completion_order() -> u64 {
     NEXT_TASK_COMPLETION_ORDER.fetch_add(1, Ordering::Relaxed)
 }
 
-pub(crate) type TransferResult = Result<AttemptSuccess, String>;
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TransferFailure {
+    Message(String),
+    Runtime(Box<runmat_execution::ProgramRuntimeFailure>),
+}
+
+impl std::fmt::Display for TransferFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Message(message) => formatter.write_str(message),
+            Self::Runtime(failure) => formatter.write_str(&failure.message),
+        }
+    }
+}
+
+impl From<String> for TransferFailure {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
+}
+
+impl From<&str> for TransferFailure {
+    fn from(message: &str) -> Self {
+        Self::Message(message.to_string())
+    }
+}
+
+pub(crate) type TransferResult = Result<AttemptSuccess, TransferFailure>;
+
+pub(crate) struct LocalProgramSubmission {
+    pub(crate) task_id: TaskId,
+    pub(crate) callable: ProgramCallable,
+    pub(crate) invocation_context: runmat_execution::ProgramInvocationContext,
+    pub(crate) recipe: ProgramBuildRecipe,
+    pub(crate) artifact: ProgramArtifact,
+    pub(crate) inputs: Vec<ValuePayload>,
+    pub(crate) outputs: OutputContract,
+    pub(crate) retry: RetryPolicy,
+}
 
 pub(crate) struct TaskCompletion {
     value: Mutex<Option<TransferResult>>,
@@ -141,7 +179,7 @@ impl LocalDriver {
         })?;
         driver.handle(DriverCommand::CreatePool(PoolSpec {
             id: pool_id,
-            min_workers: config.max_workers,
+            min_workers: 1,
             max_workers: config.max_workers,
             max_in_flight: config.max_workers,
             resource_limit: resources.clone(),
@@ -202,15 +240,48 @@ impl LocalDriver {
         self.config.max_workers
     }
 
+    pub(crate) fn active_workers(&self) -> NativeExecutionResult<u32> {
+        let driver = self.driver.lock().expect("local driver poisoned");
+        let pool = driver
+            .snapshot()
+            .pools
+            .get(&self.pool_id)
+            .cloned()
+            .ok_or_else(|| NativeExecutionError::Protocol("local pool disappeared".into()))?;
+        u32::try_from(
+            pool.workers
+                .values()
+                .filter(|worker| worker.accepts_work())
+                .count(),
+        )
+        .map_err(|_| NativeExecutionError::Protocol("local worker count exceeds u32".into()))
+    }
+
+    pub(crate) fn resize_pool(self: &Arc<Self>, desired_workers: u32) -> NativeExecutionResult<()> {
+        let actions = self
+            .driver
+            .lock()
+            .expect("local driver poisoned")
+            .resize_registered_pool(self.pool_id, desired_workers)?;
+        self.checkpoint()?;
+        Self::dispatch(Arc::clone(self), actions);
+        Ok(())
+    }
+
     pub(crate) fn submit(
         self: &Arc<Self>,
-        task_id: TaskId,
-        callable: ProgramCallable,
-        recipe: ProgramBuildRecipe,
-        artifact: ProgramArtifact,
-        inputs: Vec<ValuePayload>,
-        outputs: OutputContract,
+        submission: LocalProgramSubmission,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        let LocalProgramSubmission {
+            task_id,
+            callable,
+            invocation_context,
+            recipe,
+            artifact,
+            inputs,
+            outputs,
+            retry,
+        } = submission;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
         let request = TaskRequest {
             id: task_id,
@@ -218,6 +289,7 @@ impl LocalDriver {
             pool_id: self.pool_id,
             program_artifact_id: artifact_id,
             callable: Callable::for_program("local-session", &callable),
+            invocation_context,
             inputs,
             outputs,
             resources: ResourceRequest {
@@ -231,7 +303,7 @@ impl LocalDriver {
                 accelerators: Vec::new(),
                 required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
             },
-            retry: RetryPolicy::Never,
+            retry,
             deadline_unix_millis: None,
         };
         self.submit_task(
@@ -240,7 +312,6 @@ impl LocalDriver {
                 dependencies: BTreeSet::new(),
                 priority: 0,
             },
-            callable,
             recipe,
             artifact,
         )
@@ -249,12 +320,12 @@ impl LocalDriver {
     pub(crate) fn submit_task(
         self: &Arc<Self>,
         submission: TaskSubmission,
-        callable: ProgramCallable,
         recipe: ProgramBuildRecipe,
         artifact: ProgramArtifact,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        let callable = &submission.request.callable.program;
         ProgramExecutionDescriptor {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
             recipe: recipe.clone(),
             artifact: artifact.clone(),
             callable: callable.clone(),
@@ -270,7 +341,11 @@ impl LocalDriver {
         if submission.request.scope_id != self.scope_id
             || submission.request.pool_id != self.pool_id
             || submission.request.program_artifact_id != artifact_id
-            || !submission.request.callable.identifies_program(&callable)
+            || submission
+                .request
+                .invocation_context
+                .validate_for(callable)
+                .is_err()
         {
             return Err(NativeExecutionError::Protocol(
                 "local task submission differs from its session or program artifact".into(),
@@ -280,12 +355,8 @@ impl LocalDriver {
         callable
             .validate()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        let stored = serde_json::to_vec(&StoredProgram {
-            callable,
-            recipe,
-            artifact,
-        })
-        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let stored = serde_json::to_vec(&StoredProgram { recipe, artifact })
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         self.artifacts.put(artifact_id, &stored)?;
         let completion = Arc::new(TaskCompletion::new());
         self.completions
@@ -362,9 +433,12 @@ impl LocalDriver {
                     result: success.clone(),
                 },
                 Err(_) if completion.cancelled.load(Ordering::Acquire) => AttemptReport::Cancelled,
-                Err(message) => AttemptReport::Failed {
+                Err(TransferFailure::Message(message)) => AttemptReport::Failed {
                     kind: AttemptFailureKind::Execution,
                     message: message.clone(),
+                },
+                Err(TransferFailure::Runtime(failure)) => AttemptReport::RuntimeFailed {
+                    failure: *failure.clone(),
                 },
             };
             let actions = this
@@ -422,7 +496,11 @@ fn runmat_time_millis() -> u64 {
 
 #[cfg(test)]
 mod task_completion_tests {
-    use super::{TaskCompletion, TransferResult};
+    use std::collections::BTreeSet;
+
+    use runmat_execution::resource::Capability;
+
+    use super::{LocalDriver, TaskCompletion, TransferResult};
 
     #[test]
     fn completion_is_pollable_without_blocking_the_await_caller() {
@@ -432,5 +510,30 @@ mod task_completion_tests {
         let result: TransferResult = Err("completed".into());
         completion.complete(result.clone());
         assert_eq!(completion.try_value(), Some(result));
+    }
+
+    #[test]
+    fn local_pool_resizes_its_schedulable_worker_inventory() {
+        let temporary = tempfile::tempdir().unwrap();
+        let scope = crate::config::fresh_scope_id(b"resize-test", 1);
+        let driver = LocalDriver::new(
+            crate::NativeExecutionConfig {
+                executable: std::env::current_exe().unwrap(),
+                worker_arguments: vec!["--execution-worker".into()],
+                max_workers: 3,
+                max_message_bytes: 1024,
+                max_object_bytes: 1024,
+                max_stderr_bytes: 1024,
+                store_root: temporary.path().join("session"),
+                worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+            },
+            scope,
+        )
+        .unwrap();
+        assert_eq!(driver.active_workers().unwrap(), 3);
+        driver.resize_pool(1).unwrap();
+        assert_eq!(driver.active_workers().unwrap(), 1);
+        driver.resize_pool(3).unwrap();
+        assert_eq!(driver.active_workers().unwrap(), 3);
     }
 }

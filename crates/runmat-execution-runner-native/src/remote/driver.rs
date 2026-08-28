@@ -372,6 +372,29 @@ async fn commit_response(
             )
             .await
         }
+        ProgramExecutionResponse::RuntimeFailure { failure } => {
+            let response = ProgramExecutionResponse::RuntimeFailure { failure };
+            let plaintext = serde_json::to_vec(&response).map_err(protocol)?;
+            let diagnostic = store_encrypted(
+                control,
+                config,
+                run_key,
+                DriverArtifactKind::Diagnostic,
+                EncryptionPurpose::DetailedEvent,
+                &plaintext,
+                None,
+            )
+            .await?;
+            transition(
+                control,
+                config,
+                DriverRunTarget::Failed,
+                Some("runtime-execution-failed"),
+                None,
+                Some(diagnostic),
+            )
+            .await
+        }
     }
 }
 

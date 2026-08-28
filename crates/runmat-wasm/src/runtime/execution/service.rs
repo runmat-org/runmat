@@ -4,14 +4,14 @@ use std::rc::{Rc, Weak};
 
 use runmat_execution::identity::{ArtifactId, WorkerId};
 use runmat_execution::state::PoolState;
-use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
+use runmat_execution::task::{Callable, TaskRequest};
 use runmat_execution::{
-    CancellationReason, Digest, ExecutionHandleSnapshot, ExecutionHandleState, ExecutionScopeId,
+    CancellationReason, ExecutionHandleSnapshot, ExecutionHandleState, ExecutionScopeId,
     FutureHandle, FutureId, OutputContract, PoolBackend, PoolHandle, PoolId, PoolRequest,
     PoolSnapshot, TaskHandle, TaskId, TaskResultClaim,
 };
 use runmat_execution_artifact::{
-    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
 };
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -62,7 +62,7 @@ impl BrowserExecutionService {
         driver
             .handle(DriverCommand::CreatePool(PoolSpec {
                 id: pool_id,
-                min_workers: capabilities.max_workers,
+                min_workers: 1,
                 max_workers: capabilities.max_workers,
                 max_in_flight: capabilities.max_workers,
                 resource_limit: resources.clone(),
@@ -122,7 +122,7 @@ impl BrowserExecutionService {
         }
     }
 
-    fn pool_snapshot(&self, generation: u64) -> PoolSnapshot {
+    fn pool_snapshot(&self, generation: u64, workers: u32) -> PoolSnapshot {
         PoolSnapshot {
             handle: PoolHandle {
                 id: self.pool_id,
@@ -130,9 +130,24 @@ impl BrowserExecutionService {
                 generation,
             },
             backend: self.pool_backend(),
-            workers: self.capabilities.max_workers,
+            workers,
             state: PoolState::Ready,
         }
+    }
+
+    fn active_workers(state: &State, pool_id: PoolId) -> Result<u32, ExecutionServiceError> {
+        let snapshot = state.driver.snapshot();
+        let pool = snapshot
+            .pools
+            .get(&pool_id)
+            .ok_or_else(|| ExecutionServiceError::Failed("browser pool disappeared".into()))?;
+        u32::try_from(
+            pool.workers
+                .values()
+                .filter(|worker| worker.accepts_work())
+                .count(),
+        )
+        .map_err(|_| ExecutionServiceError::Failed("browser worker count exceeds u32".into()))
     }
 
     fn future_for_value(
@@ -187,13 +202,21 @@ impl BrowserExecutionService {
             self.dispatch(actions);
             self.state.borrow().requests.get(&attempt.task_id).cloned()
         };
-        let Some(program) = program else {
+        let Some(mut program) = program else {
             self.finish_attempt(
                 attempt,
                 Err("browser scheduler lost the exact program request".into()),
             );
             return;
         };
+        program.assignment = Some(runmat_execution::ProgramExecutionAssignment {
+            scope_id: attempt.scope_id,
+            pool_id: attempt.task.pool_id,
+            task_id: attempt.task_id,
+            attempt_id: attempt.id,
+            worker_id: attempt.worker_id,
+            backend: self.pool_backend(),
+        });
         let weak = self.self_weak.borrow().clone();
         let host = self.host.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -249,6 +272,13 @@ impl BrowserExecutionService {
                 };
                 (self.future_id(attempt.task_id), result, report)
             }
+            Ok(ProgramExecutionResponse::RuntimeFailure { failure }) => {
+                let result = Err(ExecutionServiceError::RuntimeFailure(Box::new(
+                    failure.clone(),
+                )));
+                let report = AttemptReport::RuntimeFailed { failure };
+                (self.future_id(attempt.task_id), result, report)
+            }
             Err(message) => {
                 let result = Err(ExecutionServiceError::Failed(message.clone()));
                 let report = AttemptReport::Failed {
@@ -302,9 +332,11 @@ impl RuntimeExecutionServices for BrowserExecutionService {
 
     fn current_pool(&self) -> Result<Option<PoolSnapshot>, ExecutionServiceError> {
         let state = self.state.borrow();
-        Ok(state
-            .pool_open
-            .then(|| self.pool_snapshot(state.pool_generation)))
+        if !state.pool_open {
+            return Ok(None);
+        }
+        let workers = Self::active_workers(&state, self.pool_id)?;
+        Ok(Some(self.pool_snapshot(state.pool_generation, workers)))
     }
 
     fn ensure_pool(&self, request: PoolRequest) -> Result<PoolSnapshot, ExecutionServiceError> {
@@ -312,18 +344,35 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         if request
             .backend
             .is_some_and(|requested| requested != backend)
-            || request
-                .workers
-                .is_some_and(|workers| workers != self.capabilities.max_workers)
         {
             return Err(ExecutionServiceError::Failed(format!(
-                "this browser session owns a fixed pool with {} worker(s)",
+                "this browser session supports the {backend:?} pool backend"
+            )));
+        }
+        if request.workers.is_none() {
+            let state = self.state.borrow();
+            if state.pool_open {
+                let workers = Self::active_workers(&state, self.pool_id)?;
+                return Ok(self.pool_snapshot(state.pool_generation, workers));
+            }
+        }
+        let workers = request.workers.unwrap_or(self.capabilities.max_workers);
+        if workers == 0 || workers > self.capabilities.max_workers {
+            return Err(ExecutionServiceError::Failed(format!(
+                "browser pool worker count must be between 1 and {}",
                 self.capabilities.max_workers
             )));
         }
         let mut state = self.state.borrow_mut();
+        let actions = state
+            .driver
+            .resize_registered_pool(self.pool_id, workers)
+            .map_err(driver_error)?;
         state.pool_open = true;
-        Ok(self.pool_snapshot(state.pool_generation))
+        let generation = state.pool_generation;
+        drop(state);
+        self.dispatch(actions);
+        Ok(self.pool_snapshot(generation, workers))
     }
 
     fn close_pool(&self, pool: &PoolHandle) -> Result<(), ExecutionServiceError> {
@@ -344,7 +393,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
     }
 
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError> {
-        let requested_outputs = u16::try_from(call.descriptor.requested_outputs)
+        let requested_outputs = u16::try_from(call.invocation.requested_outputs())
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let mut state = self.state.borrow_mut();
         let sequence = state.next_future;
@@ -372,13 +421,14 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             }
             None => return Err(ExecutionServiceError::UnknownHandle),
         };
-        let (callable, recipe, artifact, arguments) = runmat_vm::materialize_deferred_call(
-            &call,
-            future.outputs.clone(),
-            runmat_execution_artifact::ProgramTarget::portable(
-                "wasm32-browser-interpreter-bytecode-v1",
-            ),
-        )?;
+        let (callable, invocation_context, recipe, artifact, arguments) =
+            runmat_vm::materialize_deferred_call(
+                &call,
+                future.outputs.clone(),
+                runmat_execution_artifact::ProgramTarget::portable(
+                    "wasm32-browser-interpreter-bytecode-v1",
+                ),
+            )?;
         let sequence = state.next_task;
         state.next_task = sequence.wrapping_add(1);
         let task_id = TaskId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
@@ -392,10 +442,13 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             })
             .map_err(driver_error)?;
         let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
             recipe: recipe.clone(),
             artifact: artifact.clone(),
             callable: callable.clone(),
+            context: invocation_context.clone(),
+            assignment: None,
+            job_id: None,
             arguments: arguments.clone(),
             requested_outputs: future.outputs.requested_outputs,
         };
@@ -424,15 +477,12 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                     scope_id: task_scope_id,
                     pool_id: self.pool_id,
                     program_artifact_id: artifact_id,
-                    callable: Callable {
-                        owner_identity: "browser-session".into(),
-                        qualified_name: callable.display_name(),
-                        entrypoint_digest: callable.identity_digest(),
-                    },
+                    callable: Callable::for_program("browser-session", &callable),
+                    invocation_context,
                     inputs: arguments,
                     outputs: future.outputs.clone(),
                     resources: browser_request(self.capabilities),
-                    retry: RetryPolicy::Never,
+                    retry: call.retry,
                     deadline_unix_millis: None,
                 },
                 dependencies: BTreeSet::new(),
@@ -733,19 +783,24 @@ fn browser_future_state(state: &FutureState) -> ExecutionHandleState {
 mod tests {
     use wasm_bindgen_test::*;
 
+    use runmat_execution::task::RetryPolicy;
+
     use super::*;
 
     wasm_bindgen_test_configure!(run_in_browser);
 
     fn deferred_test_call(program: Vec<u8>) -> DeferredCall {
         DeferredCall {
-            descriptor: runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                runmat_hir::CallableIdentity::BoundFunction(runmat_hir::FunctionId(0)),
-                Vec::new(),
-                1,
-                runmat_hir::CallableFallbackPolicy::None,
-                runmat_runtime::call::descriptor::CallableCallKind::Direct,
+            invocation: runmat_runtime::execution::DeferredInvocation::Callable(
+                runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                    runmat_hir::CallableIdentity::BoundFunction(runmat_hir::FunctionId(0)),
+                    Vec::new(),
+                    1,
+                    runmat_hir::CallableFallbackPolicy::None,
+                    runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                ),
             ),
+            retry: RetryPolicy::Never,
             program_revision: None,
             program: Some(program),
         }

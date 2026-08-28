@@ -71,10 +71,13 @@ mod tests {
         .unwrap();
         artifact.executable_bytes.push(0);
         let response = execute(WorkerRequest {
-            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
             recipe,
             artifact,
             callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
             arguments: Vec::new(),
             requested_outputs: 1,
         })

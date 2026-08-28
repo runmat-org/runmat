@@ -22,7 +22,7 @@ use runmat_runtime::{
 };
 use runmat_value::{CellArray, Value};
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Once;
 use tracing::{debug, info_span};
@@ -281,12 +281,7 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
 
     let _active_semantic_function_guard =
         user_functions::push_active_semantic_function(function_id.0);
-    let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
-    bytecode.instr_spans = func.instr_spans.clone();
-    bytecode.call_arg_spans = func.call_arg_spans.clone();
-    bytecode.coverage_sites = func.coverage_sites.clone();
-    bytecode.source_id = func.source_id;
-    bytecode.var_names = func.var_names.clone();
+    let mut bytecode = func.execution_bytecode(function_registry);
     let mut initially_unassigned_slots = func.initially_unassigned_slots.clone();
     for slot in &func.capture_slots {
         initially_unassigned_slots.remove(slot);
@@ -309,8 +304,6 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
         initially_unassigned_slots.remove(&slot);
     }
     bytecode.initially_unassigned_slots = initially_unassigned_slots;
-    bytecode.bound_functions = function_registry.functions.clone();
-    bytecode.function_registry = function_registry.clone();
     let result_vars = {
         #[cfg(not(target_arch = "wasm32"))]
         let execution_runtime = runtime.clone();
@@ -894,6 +887,7 @@ async fn run_interpreter_inner(
         let dispatch_result = interp_dispatch::dispatch_instruction(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[pc],
+                bytecode: &bytecode,
                 var_names: &bytecode.var_names,
                 function_registry: &function_registry,
                 source_id: bytecode.source_id,
@@ -1098,6 +1092,7 @@ async fn run_interpreter_inner(
             | Instr::LogicalNot
             | Instr::LogicalAnd
             | Instr::LogicalOr
+            | Instr::ExecuteParfor { .. }
             | Instr::Unpack(_)
             | Instr::CreateMatrix(_, _)
             | Instr::CreateMatrixDynamic(_)
@@ -1157,6 +1152,204 @@ pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, RuntimeError> 
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),
         Err(e) => Err(e),
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ParforTaskMode {
+    Sequential,
+    IndependentIterations,
+}
+
+pub(crate) struct ParforTaskExecution<'a> {
+    pub bytecode: &'a Bytecode,
+    pub region: &'a crate::BytecodeParforRegion,
+    pub inputs: Vec<Value>,
+    pub iterations: Vec<Value>,
+    pub randomness: runmat_execution::ParallelRandomnessContext,
+    pub mode: ParforTaskMode,
+    pub current_function_name: &'a str,
+    pub runtime: runmat_runtime::context::RuntimeContext,
+}
+
+pub(crate) async fn interpret_parfor_task_in_context(
+    execution: ParforTaskExecution<'_>,
+) -> Result<Vec<Value>, RuntimeError> {
+    let ParforTaskExecution {
+        bytecode,
+        region,
+        inputs,
+        iterations,
+        randomness,
+        mode,
+        current_function_name,
+        runtime,
+    } = execution;
+    randomness
+        .validate_for_iterations(iterations.len())
+        .map_err(|error| mex("ParallelRandomness", &error.to_string()))?;
+    let deterministic_streams = match randomness {
+        runmat_execution::ParallelRandomnessContext::Deterministic { streams } => Some(streams),
+        runmat_execution::ParallelRandomnessContext::Inherit
+        | runmat_execution::ParallelRandomnessContext::Nondeterministic => None,
+    };
+    let input_variables = region.input_variables().collect::<Vec<_>>();
+    if inputs.len() != input_variables.len() {
+        return Err(mex(
+            "ParallelTaskInput",
+            "parallel task inputs do not match the compiler-owned region layout",
+        ));
+    }
+    let mut frame = vec![None; bytecode.var_count];
+    for (variable, value) in input_variables.into_iter().zip(inputs) {
+        let Some(slot) = frame.get_mut(variable.slot) else {
+            return Err(mex(
+                "ParallelFrame",
+                "parallel task input is outside its compiled VM frame",
+            ));
+        };
+        *slot = Some(value);
+    }
+    if region.loop_slot >= frame.len() {
+        return Err(mex(
+            "ParallelFrame",
+            "parallel loop value is outside its compiled VM frame",
+        ));
+    }
+    let reduction_inputs = region
+        .variables
+        .iter()
+        .filter(|variable| {
+            matches!(
+                variable.contract.role,
+                runmat_types::ParallelVariableRole::Reduction { .. }
+            )
+        })
+        .map(|variable| {
+            frame
+                .get(variable.slot)
+                .and_then(Clone::clone)
+                .map(|value| (variable.slot, value))
+                .ok_or_else(|| {
+                    mex(
+                        "ParallelTaskInput",
+                        "parallel reduction is missing its typed identity value",
+                    )
+                })
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    let mut reduction_outputs = reduction_inputs
+        .keys()
+        .copied()
+        .map(|slot| (slot, Vec::new()))
+        .collect::<HashMap<_, _>>();
+
+    let mut region_bytecode = bytecode.clone();
+    let Some(header) = region_bytecode.instructions.get_mut(region.header.pc) else {
+        return Err(mex(
+            "ParallelBoundary",
+            "parallel region header is outside its immutable bytecode product",
+        ));
+    };
+    *header = Instr::Return;
+    if let Some(sites) = region_bytecode.coverage_sites.get_mut(region.header.pc) {
+        sites.clear();
+    }
+
+    for (iteration_index, iteration) in iterations.into_iter().enumerate() {
+        for variable in &region.variables {
+            if matches!(
+                variable.contract.role,
+                runmat_types::ParallelVariableRole::Temporary
+                    | runmat_types::ParallelVariableRole::Private
+            ) {
+                let Some(slot) = frame.get_mut(variable.slot) else {
+                    return Err(mex(
+                        "ParallelFrame",
+                        "parallel private value is outside its compiled VM frame",
+                    ));
+                };
+                *slot = None;
+            }
+        }
+        if mode == ParforTaskMode::IndependentIterations {
+            for (slot, identity) in &reduction_inputs {
+                frame[*slot] = Some(identity.clone());
+            }
+        }
+        frame[region.loop_slot] = Some(iteration);
+        let _random_stream = deterministic_streams
+            .as_ref()
+            .and_then(|streams| streams.get(iteration_index).copied())
+            .map(|stream| {
+                runmat_runtime::builtins::common::random::enter_parallel_random_stream(
+                    &runtime, stream,
+                )
+            })
+            .transpose()?;
+        let resume = InterpreterResumeState {
+            pc: region.body.pc,
+            vars: frame,
+            supplied_inputs: 0,
+            requested_outputs: 0,
+            missing_input_slots: HashSet::new(),
+            global_aliases: HashMap::new(),
+            persistent_aliases: HashMap::new(),
+            side_effect_epoch: 0,
+        };
+        frame = match Box::pin(interpret_resume_in_context(
+            &region_bytecode,
+            resume,
+            Some(current_function_name),
+            runtime.clone(),
+        ))
+        .await?
+        {
+            InterpreterOutcome::Completed(values) => values.into_iter().map(Some).collect(),
+        };
+        if mode == ParforTaskMode::IndependentIterations {
+            for (slot, values) in &mut reduction_outputs {
+                let value = frame.get(*slot).and_then(Clone::clone).ok_or_else(|| {
+                    mex(
+                        "ParallelTaskOutput",
+                        "parallel task did not assign a declared reduction output",
+                    )
+                })?;
+                values.push(value);
+            }
+        }
+    }
+
+    region
+        .output_variables()
+        .map(|variable| {
+            if mode == ParforTaskMode::IndependentIterations
+                && matches!(
+                    variable.contract.role,
+                    runmat_types::ParallelVariableRole::Reduction { .. }
+                )
+            {
+                let values = reduction_outputs.remove(&variable.slot).ok_or_else(|| {
+                    mex(
+                        "ParallelTaskOutput",
+                        "parallel task lost a declared reduction output",
+                    )
+                })?;
+                let length = values.len();
+                return runmat_value::CellArray::new(values, 1, length)
+                    .map(Value::Cell)
+                    .map_err(|error| mex("ParallelTaskOutput", &error));
+            }
+            frame
+                .get(variable.slot)
+                .and_then(Clone::clone)
+                .ok_or_else(|| {
+                    mex(
+                        "ParallelTaskOutput",
+                        "parallel task did not assign a declared output",
+                    )
+                })
+        })
+        .collect()
 }
 
 pub async fn interpret_function(

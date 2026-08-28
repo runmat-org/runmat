@@ -116,6 +116,7 @@ fn parallel() -> ParallelManifest {
                 transferable: true,
             }],
             maximum_workers: Some(LabCount(4)),
+            effects: Default::default(),
             capabilities: CapabilitySet::default(),
             randomness: ParallelRandomnessPolicy::DeterministicSubstreams,
         }],

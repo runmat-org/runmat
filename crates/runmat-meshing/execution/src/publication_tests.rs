@@ -246,11 +246,14 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
                 scope_id: scope,
                 pool_id: pool,
                 program_artifact_id: ArtifactId::derive(&[b"meshing-host"]),
-                callable: Callable {
-                    owner_identity: "runmat.meshing".into(),
-                    qualified_name: "publish-stage".into(),
-                    entrypoint_digest: Digest::sha256(b"publish-stage"),
-                },
+                callable: Callable::for_program(
+                    "runmat.meshing",
+                    &runmat_execution::ProgramCallable::semantic(
+                        runmat_execution::ProgramFunctionId(0),
+                        None,
+                    ),
+                ),
+                invocation_context: runmat_execution::ProgramInvocationContext::Direct,
                 inputs: Vec::new(),
                 outputs: OutputContract {
                     requested_outputs: 1,

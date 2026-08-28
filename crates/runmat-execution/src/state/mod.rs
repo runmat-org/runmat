@@ -56,6 +56,7 @@ pub enum PoolState {
 pub enum CancellationReason {
     User,
     ParentScope,
+    DependencyFailed,
     Deadline,
     Quota,
     Shutdown,

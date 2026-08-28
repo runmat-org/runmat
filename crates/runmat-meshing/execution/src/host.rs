@@ -4,7 +4,7 @@ use runmat_execution::value::{ValuePayload, ValueRef};
 use runmat_execution::{OutputContract, ProgramRevision};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
 };
 use runmat_geometry_core::{
     decode_geometry_document, encode_geometry_document, GeometryDocument, GeometryModel,
@@ -244,13 +244,16 @@ impl MeshingHostWorkload {
             executable_bytes,
         )?;
         let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
             recipe,
             artifact,
             callable: runmat_execution::ProgramCallable::semantic(
                 runmat_execution::ProgramFunctionId(0),
                 None,
             ),
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
             arguments: input_roots
                 .iter()
                 .cloned()

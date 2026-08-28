@@ -31,6 +31,7 @@ impl ExecutableUnit {
             .map(|region| region.contract.clone())
             .collect::<Vec<_>>();
         bytecode.install_regions(&region_contracts)?;
+        bytecode.install_parallel_regions(&mir, &analysis.parallel)?;
         let coverage = CoveragePlan::instrument(&source, &revision, &source_map, &mut bytecode);
         let layout = bytecode
             .layout

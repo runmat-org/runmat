@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use super::region::BytecodeRegion;
+use super::{parallel::BytecodeParforRegion, region::BytecodeRegion};
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {
@@ -85,6 +85,8 @@ pub struct FunctionBytecode {
     pub resume_points: std::collections::BTreeMap<runmat_types::ProgramPointId, usize>,
     #[serde(default)]
     pub regions: Vec<BytecodeRegion>,
+    #[serde(default)]
+    pub parfor_regions: Vec<BytecodeParforRegion>,
 }
 
 impl Default for FunctionBytecode {
@@ -111,6 +113,56 @@ impl Default for FunctionBytecode {
             argument_validations: Vec::new(),
             resume_points: std::collections::BTreeMap::new(),
             regions: Vec::new(),
+            parfor_regions: Vec::new(),
+        }
+    }
+}
+
+impl FunctionBytecode {
+    /// Materializes the function-local executable view consumed by the VM.
+    /// All compiler-owned metadata travels with the instruction stream here so
+    /// function dispatch cannot accidentally discard executable contracts.
+    pub(crate) fn execution_bytecode(&self, registry: &FunctionRegistry) -> Bytecode {
+        let mut bytecode = Bytecode::with_instructions(self.instructions.clone(), self.var_count);
+        bytecode.instr_spans = self.instr_spans.clone();
+        bytecode.call_arg_spans = self.call_arg_spans.clone();
+        bytecode.coverage_sites = self.coverage_sites.clone();
+        bytecode.source_id = self.source_id;
+        bytecode.var_names = self.var_names.clone();
+        bytecode.initially_unassigned_slots = self.initially_unassigned_slots.clone();
+        bytecode.regions = self.regions.clone();
+        bytecode.parfor_regions = self.parfor_regions.clone();
+        bytecode.bound_functions = registry.functions.clone();
+        bytecode.function_registry = registry.clone();
+        bytecode
+    }
+
+    /// Rebinds every compiler-owned identity when a unit-local function is
+    /// installed into a session registry. Control-flow and parallel metadata
+    /// must move atomically with the function instruction stream.
+    pub fn rebind_identity(
+        &mut self,
+        function: FunctionId,
+        program_function: runmat_types::ProgramFunctionId,
+    ) {
+        self.function = function;
+        self.resume_points = std::mem::take(&mut self.resume_points)
+            .into_iter()
+            .map(|(mut point, pc)| {
+                point.function = program_function;
+                (point, pc)
+            })
+            .collect();
+        for region in &mut self.regions {
+            region.rebind_owner(program_function);
+        }
+        for region in &mut self.parfor_regions {
+            region.rebind_owner(program_function);
+        }
+        for instruction in &mut self.instructions {
+            if let Instr::ExecuteParfor { region, .. } = instruction {
+                region.0.function = program_function;
+            }
         }
     }
 }
@@ -609,6 +661,9 @@ pub struct Bytecode {
     /// Canonical region identities mapped onto function-local bytecode PCs.
     #[serde(default)]
     pub regions: Vec<BytecodeRegion>,
+    /// Compiler-bound executable records for analyzed `parfor` regions.
+    #[serde(default)]
+    pub parfor_regions: Vec<BytecodeParforRegion>,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub accel_graph: Option<AccelGraph>,
@@ -736,6 +791,7 @@ impl Bytecode {
             layout: None,
             async_metadata: AsyncMetadata::default(),
             regions: Vec::new(),
+            parfor_regions: Vec::new(),
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]
@@ -771,28 +827,10 @@ impl Bytecode {
         registry: FunctionRegistry,
         layout: VmAssemblyLayout,
     ) -> Self {
-        Self {
-            instructions: function.instructions.clone(),
-            instr_spans: function.instr_spans.clone(),
-            call_arg_spans: function.call_arg_spans.clone(),
-            coverage_sites: function.coverage_sites.clone(),
-            source_id: function.source_id,
-            var_count: function.var_count,
-            bound_functions: registry.functions.clone(),
-            function_registry: registry,
-            var_types: vec![Type::Unknown; function.var_count],
-            var_names: function.var_names.clone(),
-            initially_unassigned_slots: function.initially_unassigned_slots.clone(),
-            layout: Some(layout),
-            async_metadata: AsyncMetadata::default(),
-            regions: function.regions.clone(),
-            #[cfg(feature = "native-accel")]
-            accel_graph: None,
-            #[cfg(feature = "native-accel")]
-            fusion_groups: Vec::new(),
-            #[cfg(feature = "native-accel")]
-            fusion_metadata: FusionMetadata::default(),
-        }
+        let mut bytecode = function.execution_bytecode(&registry);
+        bytecode.var_types = vec![Type::Unknown; function.var_count];
+        bytecode.layout = Some(layout);
+        bytecode
     }
 
     #[cfg(feature = "native-accel")]
@@ -908,6 +946,7 @@ mod function_registry_tests {
             argument_validations: Vec::new(),
             resume_points: std::collections::BTreeMap::new(),
             regions: Vec::new(),
+            parfor_regions: Vec::new(),
         }
     }
 

@@ -117,6 +117,7 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                         transferable: true,
                     }],
                     maximum_workers: Some(LabCount(4)),
+                    effects: Default::default(),
                     capabilities: Default::default(),
                     randomness: ParallelRandomnessPolicy::DeterministicSubstreams,
                 }],

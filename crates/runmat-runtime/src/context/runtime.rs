@@ -23,6 +23,32 @@ pub struct RuntimeExecutionStackGuard {
     previous: RuntimeExecutionStack,
 }
 
+/// Restores the invocation assignment that was active before a nested program
+/// execution entered this runtime context.
+#[must_use]
+pub struct ProgramExecutionAssignmentGuard {
+    state: Rc<RuntimeContextState>,
+    previous: Option<runmat_execution::ProgramExecutionAssignment>,
+}
+
+#[must_use]
+pub struct ProgramExecutionJobGuard {
+    state: Rc<RuntimeContextState>,
+    previous: Option<runmat_execution::JobId>,
+}
+
+impl Drop for ProgramExecutionJobGuard {
+    fn drop(&mut self) {
+        *self.state.execution_job.borrow_mut() = self.previous.take();
+    }
+}
+
+impl Drop for ProgramExecutionAssignmentGuard {
+    fn drop(&mut self) {
+        *self.state.execution_assignment.borrow_mut() = self.previous.take();
+    }
+}
+
 impl Drop for RuntimeExecutionStackGuard {
     fn drop(&mut self) {
         self.state.execution_stack.set(self.previous);
@@ -183,6 +209,40 @@ impl RuntimeContext {
     ) -> RuntimeExecutionStackGuard {
         let previous = self.state.execution_stack.replace(stack);
         RuntimeExecutionStackGuard {
+            state: Rc::clone(&self.state),
+            previous,
+        }
+    }
+
+    pub fn execution_assignment(&self) -> Option<runmat_execution::ProgramExecutionAssignment> {
+        self.state.execution_assignment.borrow().clone()
+    }
+
+    /// Installs scheduler-owned invocation identity for one execution extent.
+    /// Dropping the returned guard restores the previous identity, which keeps
+    /// nested and cancelled executions from leaking worker state into their
+    /// caller's runtime context.
+    pub fn enter_execution_assignment(
+        &self,
+        assignment: Option<runmat_execution::ProgramExecutionAssignment>,
+    ) -> ProgramExecutionAssignmentGuard {
+        let previous = self.state.execution_assignment.replace(assignment);
+        ProgramExecutionAssignmentGuard {
+            state: Rc::clone(&self.state),
+            previous,
+        }
+    }
+
+    pub fn execution_job(&self) -> Option<runmat_execution::JobId> {
+        *self.state.execution_job.borrow()
+    }
+
+    pub fn enter_execution_job(
+        &self,
+        job_id: Option<runmat_execution::JobId>,
+    ) -> ProgramExecutionJobGuard {
+        let previous = self.state.execution_job.replace(job_id);
+        ProgramExecutionJobGuard {
             state: Rc::clone(&self.state),
             previous,
         }

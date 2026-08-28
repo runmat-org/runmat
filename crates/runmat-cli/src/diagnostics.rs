@@ -144,6 +144,23 @@ pub fn format_compact_runtime_diagnostic(diagnostic: &RuntimeDiagnostic) -> Stri
     )
 }
 
+/// Render a validated worker diagnostic with the same presentation policy as
+/// local runtime errors. Remote responses do not carry source text, so spans
+/// remain structured protocol data while identity, phase, task, and callstack
+/// details remain visible.
+pub fn format_program_runtime_failure(
+    failure: runmat_execution::ProgramRuntimeFailure,
+) -> Result<String, String> {
+    let error = runmat_runtime::execution::decode_runtime_failure(failure)?;
+    Ok(render_runtime_error(
+        &error,
+        DiagnosticSeverity::Error,
+        None,
+        None,
+        &presentation::stderr(),
+    ))
+}
+
 fn diagnostic_severity_label(severity: DiagnosticSeverity) -> &'static str {
     match severity {
         DiagnosticSeverity::Error => "error",
@@ -373,6 +390,28 @@ mod compat_tests {
 
         assert!(rendered.starts_with("warning: careful"));
         assert!(!rendered.starts_with("error: careful"));
+    }
+
+    #[test]
+    fn worker_runtime_failure_uses_the_local_diagnostic_renderer() {
+        let failure = runmat_execution::ProgramRuntimeFailure {
+            message: "parallel task failed".into(),
+            identifier: Some("RunMat:ParallelFailure".into()),
+            span: None,
+            builtin: Some("sample".into()),
+            task_id: Some("task_00000000000000000000000000000000".into()),
+            call_frames: Vec::new(),
+            call_frames_elided: 0,
+            call_stack: vec!["workerFunction at sample.m:2:4".into()],
+            phase: Some("execute".into()),
+        };
+        let rendered = format_program_runtime_failure(failure).unwrap();
+        assert!(rendered.contains("error: parallel task failed"));
+        assert!(rendered.contains("id: RunMat:ParallelFailure"));
+        assert!(rendered.contains("builtin: sample"));
+        assert!(rendered.contains("task: task_00000000000000000000000000000000"));
+        assert!(rendered.contains("phase: execute"));
+        assert!(rendered.contains("callstack:\n  workerFunction at sample.m:2:4"));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 //! Parallel Computing Toolbox-compatible language surface.
 
-mod future;
-mod pool;
+pub(crate) mod current;
+pub(crate) mod future;
+pub(crate) mod pool;

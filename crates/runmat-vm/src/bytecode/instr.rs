@@ -261,6 +261,12 @@ pub enum Instr {
     EnsurePool(usize),
     // Return the active pool, optionally creating it, from MATLAB-facing arguments.
     CurrentPool(usize),
+    // Execute one compiler-bound parallel loop region. The iterable and optional
+    // worker limit are evaluated exactly once before this instruction.
+    ExecuteParfor {
+        region: runmat_types::ParallelRegionId,
+        has_maximum_workers: bool,
+    },
 
     // Stack and exception-control operations.
     Swap,
@@ -601,6 +607,10 @@ impl Instr {
             Instr::SpawnOn => effect(2, 1),
             Instr::Await => effect(1, 1),
             Instr::EnsurePool(arg_count) | Instr::CurrentPool(arg_count) => effect(*arg_count, 1),
+            Instr::ExecuteParfor {
+                has_maximum_workers,
+                ..
+            } => effect(1 + usize::from(*has_maximum_workers), 0),
             Instr::EmitStackTop { .. } => effect(1, 1),
             Instr::EmitVar { .. } => effect(0, 0),
             Instr::StochasticEvolution => None,

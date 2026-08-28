@@ -104,6 +104,9 @@ pub(super) fn report(response: ProgramExecutionResponse) -> AttemptReport {
             kind: AttemptFailureKind::Execution,
             message,
         },
+        ProgramExecutionResponse::RuntimeFailure { failure } => {
+            AttemptReport::RuntimeFailed { failure }
+        }
     }
 }
 

@@ -66,6 +66,14 @@ impl Driver {
             AttemptReport::Failed { kind, .. } => {
                 self.fail_attempt(&attempt, report.task_id, report.attempt_id, kind)?;
             }
+            AttemptReport::RuntimeFailed { .. } => {
+                self.fail_attempt(
+                    &attempt,
+                    report.task_id,
+                    report.attempt_id,
+                    AttemptFailureKind::Execution,
+                )?;
+            }
             AttemptReport::Lost { .. } => {
                 self.finish_attempt(&attempt, AttemptState::Lost)?;
                 self.emit(DriverEventKind::AttemptLost {

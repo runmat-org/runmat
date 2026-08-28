@@ -45,6 +45,7 @@ pub fn complete_batch_driver_with_response(
             (true, Some(0), None)
         }
         WorkerResponse::Failure { message } => (false, None, Some(message.clone())),
+        WorkerResponse::RuntimeFailure { failure } => (false, None, Some(failure.message.clone())),
     };
     write_completion(
         job_directory,
@@ -58,8 +59,12 @@ pub fn complete_batch_driver_with_response(
     )
 }
 
-pub async fn execute_program_batch(submission: ProgramBatchSubmission) -> WorkerResponse {
-    let request = submission.program_request();
+pub async fn execute_program_batch(
+    submission: ProgramBatchSubmission,
+    job_id: runmat_execution::JobId,
+) -> WorkerResponse {
+    let mut request = submission.program_request();
+    request.job_id = Some(job_id);
     if request.artifact.form != runmat_execution_artifact::ExecutableForm::MeshingWorkload {
         return crate::worker::execute(request).await;
     }
