@@ -698,6 +698,9 @@ fn function_revision(
         resume_points,
         regions,
         parfor_regions,
+        spmd_regions,
+        distributed_values,
+        collective_contracts,
     } = function;
     let var_names = var_names.iter().collect::<BTreeMap<_, _>>();
     let initially_unassigned_slots = initially_unassigned_slots.iter().collect::<BTreeSet<_>>();
@@ -733,6 +736,9 @@ fn function_revision(
     append!(&resume_points);
     append!(regions);
     append!(parfor_regions);
+    append!(spmd_regions);
+    append!(distributed_values);
+    append!(collective_contracts);
     Ok(runmat_execution::Digest::sha256(&payload).to_string())
 }
 

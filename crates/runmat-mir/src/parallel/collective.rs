@@ -9,7 +9,7 @@ pub enum MirCollectiveOp {
     },
     Broadcast {
         id: CollectiveId,
-        input: MirOperand,
+        input: Option<MirOperand>,
         root: MirOperand,
     },
     Gather {
@@ -47,6 +47,14 @@ pub enum MirCollectiveOp {
         id: CollectiveId,
         source: Option<MirOperand>,
         tag: Option<MirOperand>,
+        requested_outputs: u8,
+    },
+    SendReceive {
+        id: CollectiveId,
+        destination: MirOperand,
+        source: MirOperand,
+        input: MirOperand,
+        tag: Option<MirOperand>,
     },
     Probe {
         id: CollectiveId,
@@ -67,6 +75,7 @@ impl MirCollectiveOp {
             | Self::AllReduce { id, .. }
             | Self::Send { id, .. }
             | Self::Receive { id, .. }
+            | Self::SendReceive { id, .. }
             | Self::Probe { id, .. } => id,
         }
     }
@@ -74,8 +83,13 @@ impl MirCollectiveOp {
     pub fn for_each_operand_mut(&mut self, mut operation: impl FnMut(&mut MirOperand)) {
         match self {
             Self::Barrier { .. } => {}
-            Self::Broadcast { input, root, .. }
-            | Self::Gather { input, root, .. }
+            Self::Broadcast { input, root, .. } => {
+                if let Some(input) = input {
+                    operation(input);
+                }
+                operation(root);
+            }
+            Self::Gather { input, root, .. }
             | Self::Scatter { input, root, .. }
             | Self::Reduce { input, root, .. } => {
                 operation(input);
@@ -102,18 +116,33 @@ impl MirCollectiveOp {
                     operation(tag);
                 }
             }
+            Self::SendReceive {
+                destination,
+                source,
+                input,
+                tag,
+                ..
+            } => {
+                operation(destination);
+                operation(source);
+                operation(input);
+                if let Some(tag) = tag {
+                    operation(tag);
+                }
+            }
         }
     }
 
     pub fn input(&self) -> Option<&MirOperand> {
         match self {
-            Self::Broadcast { input, .. }
-            | Self::Gather { input, .. }
+            Self::Broadcast { input, .. } => input.as_ref(),
+            Self::Gather { input, .. }
             | Self::Scatter { input, .. }
             | Self::AllGather { input, .. }
             | Self::Reduce { input, .. }
             | Self::AllReduce { input, .. }
-            | Self::Send { input, .. } => Some(input),
+            | Self::Send { input, .. }
+            | Self::SendReceive { input, .. } => Some(input),
             Self::Barrier { .. } | Self::Receive { .. } | Self::Probe { .. } => None,
         }
     }
@@ -123,8 +152,10 @@ impl MirCollectiveOp {
     pub fn operands(&self) -> Vec<&MirOperand> {
         match self {
             Self::Barrier { .. } => Vec::new(),
-            Self::Broadcast { input, root, .. }
-            | Self::Gather { input, root, .. }
+            Self::Broadcast { input, root, .. } => {
+                input.iter().chain(std::iter::once(root)).collect()
+            }
+            Self::Gather { input, root, .. }
             | Self::Scatter { input, root, .. }
             | Self::Reduce { input, root, .. } => vec![input, root],
             Self::AllGather { input, .. } | Self::AllReduce { input, .. } => vec![input],
@@ -140,6 +171,16 @@ impl MirCollectiveOp {
             Self::Receive { source, tag, .. } | Self::Probe { source, tag, .. } => {
                 source.iter().chain(tag.iter()).collect()
             }
+            Self::SendReceive {
+                destination,
+                source,
+                input,
+                tag,
+                ..
+            } => vec![destination, source, input]
+                .into_iter()
+                .chain(tag.iter())
+                .collect(),
         }
     }
 

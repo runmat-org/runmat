@@ -1,0 +1,394 @@
+use crate::{
+    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingAvailability,
+    BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
+    BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
+    BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
+    BuiltinFusionPolicy, BuiltinInferenceRuleId, BuiltinLinkContract, BuiltinLinkPolicy,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinPlacementContract, BuiltinPortability, BuiltinPurity, BuiltinReachability,
+    BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
+};
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
+
+const ANY_REQUIRED: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Value operated on by the parallel runtime.",
+};
+const ANY_OPTIONAL: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Optional value supplied by the designated lab.",
+};
+const LAB_REQUIRED: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "lab",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "One-based lab index.",
+};
+const LAB_OPTIONAL: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "lab",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Optional one-based source lab index.",
+};
+const TAG_OPTIONAL: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "tag",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Optional message tag.",
+};
+const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "result",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Result produced by the parallel operation.",
+}];
+
+const DISTRIBUTED_INPUTS: [BuiltinParamDescriptor; 1] = [ANY_REQUIRED];
+const LOCAL_PART_INPUTS: [BuiltinParamDescriptor; 1] = [ANY_REQUIRED];
+const BROADCAST_INPUTS: [BuiltinParamDescriptor; 2] = [LAB_REQUIRED, ANY_OPTIONAL];
+const SEND_INPUTS: [BuiltinParamDescriptor; 3] = [ANY_REQUIRED, LAB_REQUIRED, TAG_OPTIONAL];
+const RECEIVE_INPUTS: [BuiltinParamDescriptor; 2] = [LAB_OPTIONAL, TAG_OPTIONAL];
+const GPLUS_INPUTS: [BuiltinParamDescriptor; 2] = [ANY_REQUIRED, LAB_OPTIONAL];
+const SEND_RECEIVE_INPUTS: [BuiltinParamDescriptor; 4] =
+    [LAB_REQUIRED, LAB_REQUIRED, ANY_REQUIRED, TAG_OPTIONAL];
+const RECEIVE_OUTPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Received value.",
+    },
+    BuiltinParamDescriptor {
+        name: "source",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "One-based rank of the sending lab.",
+    },
+    BuiltinParamDescriptor {
+        name: "tag",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Tag attached to the received message.",
+    },
+];
+
+macro_rules! signature {
+    ($name:ident, $label:literal, $inputs:expr, $outputs:expr) => {
+        const $name: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+            label: $label,
+            inputs: $inputs,
+            outputs: $outputs,
+        }];
+    };
+}
+
+signature!(
+    DISTRIBUTED_SIGNATURES,
+    "D = distributed(value)",
+    &DISTRIBUTED_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(SPMD_BARRIER_SIGNATURES, "spmdBarrier()", &[], &[]);
+signature!(
+    SPMD_BROADCAST_SIGNATURES,
+    "value = spmdBroadcast(source, value)",
+    &BROADCAST_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    SPMD_SEND_SIGNATURES,
+    "spmdSend(value, destination, tag)",
+    &SEND_INPUTS,
+    &[]
+);
+signature!(
+    SPMD_RECEIVE_SIGNATURES,
+    "[value, source, tag] = spmdReceive(source, tag)",
+    &RECEIVE_INPUTS,
+    &RECEIVE_OUTPUTS
+);
+signature!(
+    SPMD_PROBE_SIGNATURES,
+    "ready = spmdProbe(source, tag)",
+    &RECEIVE_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    LAB_SEND_RECEIVE_SIGNATURES,
+    "value = labSendReceive(destination, source, value, tag)",
+    &SEND_RECEIVE_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    SPMD_SEND_RECEIVE_SIGNATURES,
+    "value = spmdSendReceive(destination, source, value, tag)",
+    &SEND_RECEIVE_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    SPMD_PLUS_SIGNATURES,
+    "value = spmdPlus(value, destination)",
+    &GPLUS_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    LOCAL_PART_SIGNATURES,
+    "L = getLocalPart(D)",
+    &LOCAL_PART_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(BARRIER_SIGNATURES, "labBarrier()", &[], &[]);
+signature!(
+    BROADCAST_SIGNATURES,
+    "value = labBroadcast(source, value)",
+    &BROADCAST_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    SEND_SIGNATURES,
+    "labSend(value, destination, tag)",
+    &SEND_INPUTS,
+    &[]
+);
+signature!(
+    RECEIVE_SIGNATURES,
+    "value = labReceive(source, tag)",
+    &RECEIVE_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    PROBE_SIGNATURES,
+    "ready = labProbe(source, tag)",
+    &RECEIVE_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    GPLUS_SIGNATURES,
+    "value = gplus(value, destination)",
+    &GPLUS_INPUTS,
+    &ANY_OUTPUT
+);
+
+const LOWERING_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+    code: "RM.PARALLEL.LOWERING_REQUIRED",
+    identifier: Some("RunMat:parallel:LoweringRequired"),
+    when: "The operation is invoked without an active compiler-owned SPMD or distributed execution context.",
+    message: "parallel operation requires executor-aware lowering",
+}];
+
+macro_rules! descriptor {
+    ($name:ident, $signatures:ident) => {
+        pub const $name: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$signatures,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &LOWERING_ERRORS,
+        };
+    };
+}
+
+descriptor!(DISTRIBUTED_DESCRIPTOR, DISTRIBUTED_SIGNATURES);
+descriptor!(GET_LOCAL_PART_DESCRIPTOR, LOCAL_PART_SIGNATURES);
+descriptor!(LAB_BARRIER_DESCRIPTOR, BARRIER_SIGNATURES);
+descriptor!(LAB_BROADCAST_DESCRIPTOR, BROADCAST_SIGNATURES);
+descriptor!(LAB_SEND_DESCRIPTOR, SEND_SIGNATURES);
+descriptor!(LAB_RECEIVE_DESCRIPTOR, RECEIVE_SIGNATURES);
+descriptor!(LAB_PROBE_DESCRIPTOR, PROBE_SIGNATURES);
+descriptor!(GPLUS_DESCRIPTOR, GPLUS_SIGNATURES);
+descriptor!(LAB_SEND_RECEIVE_DESCRIPTOR, LAB_SEND_RECEIVE_SIGNATURES);
+descriptor!(SPMD_BARRIER_DESCRIPTOR, SPMD_BARRIER_SIGNATURES);
+descriptor!(SPMD_BROADCAST_DESCRIPTOR, SPMD_BROADCAST_SIGNATURES);
+descriptor!(SPMD_SEND_DESCRIPTOR, SPMD_SEND_SIGNATURES);
+pub const SPMD_RECEIVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SPMD_RECEIVE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LOWERING_ERRORS,
+};
+descriptor!(SPMD_PROBE_DESCRIPTOR, SPMD_PROBE_SIGNATURES);
+descriptor!(SPMD_SEND_RECEIVE_DESCRIPTOR, SPMD_SEND_RECEIVE_SIGNATURES);
+descriptor!(SPMD_PLUS_DESCRIPTOR, SPMD_PLUS_SIGNATURES);
+
+const PARALLEL_RUNTIME: [CapabilityRequirement; 1] = [CapabilityRequirement::ParallelRuntime];
+const PARALLEL_EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
+const PARALLEL_PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
+    portability: BuiltinPortability::NativeAndWasm,
+    accelerator: BuiltinAcceleratorPolicy::Forbidden,
+    residency: BuiltinResidencyPolicy::Dynamic,
+    fusion: BuiltinFusionPolicy::Boundary,
+};
+const PARALLEL_LINK: BuiltinLinkContract = BuiltinLinkContract {
+    reachability: BuiltinReachability::Always,
+    policy: BuiltinLinkPolicy::PortableRuntime,
+    execution_stack: ExecutionStackRequirement::Any,
+    artifact_dependencies: &[],
+};
+
+macro_rules! parallel_data_entry {
+    ($constant:ident, $name:literal, $rule:literal, $summary:literal, $descriptor:ident) => {
+        pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            identity: BuiltinCatalogIdentity { name: $name },
+            category: "parallel",
+            documentation: BuiltinDocumentation {
+                summary: $summary,
+                keywords: &["parallel", "distributed", "spmd"],
+                related: &[],
+                introduced: None,
+                status: None,
+                examples: &[],
+            },
+            descriptor: &$descriptor,
+            contract: BuiltinContractDeclaration {
+                maturity: BuiltinContractMaturity::Complete,
+                inference_rule: BuiltinInferenceRuleId($rule),
+                compatibility: BuiltinCompatibility::Matlab,
+                async_behavior: BuiltinAsyncBehavior::MaySuspend,
+                purity: BuiltinPurity::Impure,
+                semantic_kind: BuiltinSemanticKind::General,
+                workspace_effect: None,
+                environment_effect: None,
+                effects: &PARALLEL_EFFECTS,
+                capabilities: &PARALLEL_RUNTIME,
+            },
+            placement: PARALLEL_PLACEMENT,
+            link: PARALLEL_LINK,
+            bindings: &[BuiltinBindingDeclaration {
+                identity: BuiltinBindingIdentity {
+                    builtin: BuiltinCatalogIdentity { name: $name },
+                    variant: "default",
+                },
+                availability: BuiltinBindingAvailability::Required,
+            }],
+            extensions: &[],
+            integer_capabilities: &[],
+            integer_audit: None,
+            suppress_auto_output: false,
+        };
+    };
+}
+
+parallel_data_entry!(
+    DISTRIBUTED_CATALOG_ENTRY,
+    "distributed",
+    "parallel.distributed",
+    "Create a distributed array.",
+    DISTRIBUTED_DESCRIPTOR
+);
+parallel_data_entry!(
+    GET_LOCAL_PART_CATALOG_ENTRY,
+    "getLocalPart",
+    "parallel.local-part",
+    "Return the partition local to the current lab.",
+    GET_LOCAL_PART_DESCRIPTOR
+);
+parallel_data_entry!(
+    LAB_BARRIER_CATALOG_ENTRY,
+    "labBarrier",
+    "parallel.barrier",
+    "Synchronize all labs in the current SPMD region.",
+    LAB_BARRIER_DESCRIPTOR
+);
+parallel_data_entry!(
+    LAB_BROADCAST_CATALOG_ENTRY,
+    "labBroadcast",
+    "parallel.broadcast",
+    "Broadcast a value from one lab to every lab.",
+    LAB_BROADCAST_DESCRIPTOR
+);
+parallel_data_entry!(
+    LAB_SEND_CATALOG_ENTRY,
+    "labSend",
+    "parallel.send",
+    "Send a value to another lab.",
+    LAB_SEND_DESCRIPTOR
+);
+parallel_data_entry!(
+    LAB_RECEIVE_CATALOG_ENTRY,
+    "labReceive",
+    "parallel.receive",
+    "Receive a value from another lab.",
+    LAB_RECEIVE_DESCRIPTOR
+);
+parallel_data_entry!(
+    LAB_PROBE_CATALOG_ENTRY,
+    "labProbe",
+    "parallel.probe",
+    "Test whether a matching lab message is available.",
+    LAB_PROBE_DESCRIPTOR
+);
+parallel_data_entry!(
+    GPLUS_CATALOG_ENTRY,
+    "gplus",
+    "parallel.gplus",
+    "Sum values across labs.",
+    GPLUS_DESCRIPTOR
+);
+parallel_data_entry!(
+    LAB_SEND_RECEIVE_CATALOG_ENTRY,
+    "labSendReceive",
+    "parallel.send-receive",
+    "Send and receive one value as an atomic point-to-point exchange.",
+    LAB_SEND_RECEIVE_DESCRIPTOR
+);
+parallel_data_entry!(
+    SPMD_BARRIER_CATALOG_ENTRY,
+    "spmdBarrier",
+    "parallel.barrier",
+    "Synchronize all labs in the current SPMD region.",
+    SPMD_BARRIER_DESCRIPTOR
+);
+parallel_data_entry!(
+    SPMD_BROADCAST_CATALOG_ENTRY,
+    "spmdBroadcast",
+    "parallel.broadcast",
+    "Broadcast a value from one lab to every lab.",
+    SPMD_BROADCAST_DESCRIPTOR
+);
+parallel_data_entry!(
+    SPMD_SEND_CATALOG_ENTRY,
+    "spmdSend",
+    "parallel.send",
+    "Send a value to another lab.",
+    SPMD_SEND_DESCRIPTOR
+);
+parallel_data_entry!(
+    SPMD_RECEIVE_CATALOG_ENTRY,
+    "spmdReceive",
+    "parallel.receive",
+    "Receive a value and optional sender metadata.",
+    SPMD_RECEIVE_DESCRIPTOR
+);
+parallel_data_entry!(
+    SPMD_PROBE_CATALOG_ENTRY,
+    "spmdProbe",
+    "parallel.probe",
+    "Test whether a matching lab message is available.",
+    SPMD_PROBE_DESCRIPTOR
+);
+parallel_data_entry!(
+    SPMD_SEND_RECEIVE_CATALOG_ENTRY,
+    "spmdSendReceive",
+    "parallel.send-receive",
+    "Send and receive one value as an atomic point-to-point exchange.",
+    SPMD_SEND_RECEIVE_DESCRIPTOR
+);
+parallel_data_entry!(
+    SPMD_PLUS_CATALOG_ENTRY,
+    "spmdPlus",
+    "parallel.gplus",
+    "Sum values across labs.",
+    SPMD_PLUS_DESCRIPTOR
+);

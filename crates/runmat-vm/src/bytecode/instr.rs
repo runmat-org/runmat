@@ -10,6 +10,95 @@ pub struct StackEffect {
     pub pushes: usize,
 }
 
+/// Source-level SPMD header form. Runtime operands are evaluated once and
+/// remain on the stack in source order for typed admission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BytecodeSpmdHeader {
+    Default,
+    Exact,
+    Range,
+    PoolRange,
+}
+
+impl BytecodeSpmdHeader {
+    pub const fn operand_count(self) -> usize {
+        match self {
+            Self::Default => 0,
+            Self::Exact => 1,
+            Self::Range => 2,
+            Self::PoolRange => 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BytecodeDistributedOp {
+    Create {
+        id: runmat_types::DistributedValueId,
+        owner: runmat_types::DistributedOwner,
+        scheme: runmat_types::DistributionScheme,
+    },
+    LocalPart,
+    Materialize,
+    Redistribute {
+        scheme: runmat_types::DistributionScheme,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BytecodeCollectiveOp {
+    Barrier,
+    Broadcast {
+        has_input: bool,
+    },
+    Gather,
+    Scatter,
+    AllGather,
+    Reduce {
+        operator: runmat_types::OperatorKind,
+    },
+    AllReduce {
+        operator: runmat_types::OperatorKind,
+    },
+    Send {
+        has_tag: bool,
+    },
+    Receive {
+        has_source: bool,
+        has_tag: bool,
+        requested_outputs: u8,
+    },
+    SendReceive {
+        has_tag: bool,
+    },
+    Probe {
+        has_source: bool,
+        has_tag: bool,
+    },
+}
+
+impl BytecodeCollectiveOp {
+    pub const fn operand_count(self) -> usize {
+        match self {
+            Self::Barrier => 0,
+            Self::Broadcast { has_input } => 1 + has_input as usize,
+            Self::Gather | Self::Scatter | Self::Reduce { .. } => 2,
+            Self::AllGather | Self::AllReduce { .. } => 1,
+            Self::Send { has_tag } => 2 + has_tag as usize,
+            Self::Receive {
+                has_source,
+                has_tag,
+                ..
+            }
+            | Self::Probe {
+                has_source,
+                has_tag,
+            } => has_source as usize + has_tag as usize,
+            Self::SendReceive { has_tag } => 3 + has_tag as usize,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EmitLabel {
     Ans,
@@ -266,6 +355,17 @@ pub enum Instr {
     ExecuteParfor {
         region: runmat_types::ParallelRegionId,
         has_maximum_workers: bool,
+    },
+    /// Execute one compiler-bound SPMD gang. Header operands are interpreted
+    /// according to the exact source form after they have been evaluated.
+    ExecuteSpmd {
+        region: runmat_types::ParallelRegionId,
+        header: BytecodeSpmdHeader,
+    },
+    Distributed(BytecodeDistributedOp),
+    Collective {
+        id: runmat_types::CollectiveId,
+        operation: BytecodeCollectiveOp,
     },
 
     // Stack and exception-control operations.
@@ -611,6 +711,9 @@ impl Instr {
                 has_maximum_workers,
                 ..
             } => effect(1 + usize::from(*has_maximum_workers), 0),
+            Instr::ExecuteSpmd { header, .. } => effect(header.operand_count(), 0),
+            Instr::Distributed(_) => effect(1, 1),
+            Instr::Collective { operation, .. } => effect(operation.operand_count(), 1),
             Instr::EmitStackTop { .. } => effect(1, 1),
             Instr::EmitVar { .. } => effect(0, 0),
             Instr::StochasticEvolution => None,

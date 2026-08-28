@@ -90,6 +90,7 @@ impl CollectiveCoordinator {
         }
         match &request.invocation {
             CollectiveInvocation::Send { .. } => self.submit_send(request),
+            CollectiveInvocation::SendReceive { .. } => self.submit_send_receive(request),
             CollectiveInvocation::Receive { .. } => self.submit_receive(request),
             CollectiveInvocation::Probe { .. } => self.submit_probe(request),
             _ => self.submit_round(request),
@@ -261,6 +262,84 @@ impl CollectiveCoordinator {
         Ok(Vec::new())
     }
 
+    fn submit_send_receive(
+        &mut self,
+        request: CollectiveRequest,
+    ) -> RunnerResult<Vec<CollectiveCompletion>> {
+        let CollectiveInvocation::SendReceive {
+            destination,
+            source: expected_source,
+            tag,
+            value,
+        } = request.invocation.clone()
+        else {
+            unreachable!()
+        };
+        let sender = request.context.rank;
+        let queue_key = gang_key(&request.context.gang);
+        let mut completions = Vec::new();
+        if let Some(destination) = destination {
+            let waiting = self.receivers.entry(queue_key).or_default();
+            if let Some(index) = waiting.iter().position(|receiver| {
+                receiver.request.context.rank == destination
+                    && matches_selection(&receiver.selection, sender, tag)
+            }) {
+                let receiver = waiting
+                    .remove(index)
+                    .expect("matching receiver index remains valid");
+                completions.push(completion(
+                    receiver.request,
+                    Ok(CollectiveResponse::Received {
+                        value: value.clone(),
+                        source: sender,
+                        tag,
+                    }),
+                ));
+            } else {
+                self.messages
+                    .entry(queue_key)
+                    .or_default()
+                    .push_back(Message {
+                        source: sender,
+                        destination,
+                        tag,
+                        value,
+                    });
+            }
+        }
+        let Some(expected_source) = expected_source else {
+            completions.push(completion(request, Ok(CollectiveResponse::Complete)));
+            return Ok(completions);
+        };
+        let selection = ReceiveSelection {
+            source: Some(expected_source),
+            tag: Some(tag),
+        };
+        let messages = self.messages.entry(queue_key).or_default();
+        if let Some(index) = messages.iter().position(|message| {
+            message.destination == request.context.rank
+                && matches_selection(&selection, message.source, message.tag)
+        }) {
+            let message = messages
+                .remove(index)
+                .expect("matching message index remains valid");
+            completions.push(completion(
+                request,
+                Ok(CollectiveResponse::Received {
+                    value: message.value,
+                    source: message.source,
+                    tag: message.tag,
+                }),
+            ));
+        } else {
+            self.receivers
+                .entry(queue_key)
+                .or_default()
+                .push_back(WaitingReceive { request, selection });
+        }
+        Ok(completions)
+    }
+
     fn submit_probe(
         &mut self,
         request: CollectiveRequest,
@@ -377,6 +456,7 @@ fn signature(invocation: &CollectiveInvocation) -> RunnerResult<RoundSignature> 
             Ok(RoundSignature::Reduce(*root, *operator))
         }
         CollectiveInvocation::Send { .. }
+        | CollectiveInvocation::SendReceive { .. }
         | CollectiveInvocation::Receive { .. }
         | CollectiveInvocation::Probe { .. } => Err(RunnerError::Invalid(
             "point-to-point operation cannot enter a synchronized collective round".into(),

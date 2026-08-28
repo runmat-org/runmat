@@ -279,13 +279,20 @@ fn remap_distributed(
             id, owner, input, ..
         } => {
             remap_program_function(&mut id.function, remap)?;
-            remap_parallel_region(owner, remap)?;
+            match owner {
+                runmat_types::DistributedOwner::Client(function) => {
+                    remap_program_function(function, remap)?;
+                }
+                runmat_types::DistributedOwner::Region(region) => {
+                    remap_parallel_region(region, remap)?;
+                }
+            }
             remap_operand(input, remap);
         }
         MirDistributedOp::LocalPart { value }
         | MirDistributedOp::Materialize { value }
         | MirDistributedOp::Redistribute { value, .. } => {
-            remap_program_function(&mut value.function, remap)?;
+            remap_operand(value, remap);
         }
     }
     Ok(())

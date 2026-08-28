@@ -11,6 +11,7 @@ mod execution;
 mod fusion;
 #[cfg(not(target_arch = "wasm32"))]
 mod generic_native;
+mod parallel_runtime;
 mod profiling;
 mod session;
 mod source_pool;

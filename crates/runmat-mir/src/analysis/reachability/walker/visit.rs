@@ -197,9 +197,7 @@ impl Walker<'_> {
                 }
             }
             MirRvalue::Distributed(operation) => {
-                if let crate::parallel::MirDistributedOp::Create { input, .. } = operation {
-                    self.operand(from, input, Reason::FunctionHandle);
-                }
+                self.operand(from, operation.input(), Reason::FunctionHandle);
             }
             MirRvalue::Collective(operation) => {
                 for operand in operation.operands() {

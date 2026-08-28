@@ -26,32 +26,22 @@ pub(crate) fn distributed_fact(
                 materializable: true,
             }))
         }
-        MirDistributedOp::LocalPart { value } | MirDistributedOp::Materialize { value } => state
-            .distributed
-            .get(value)
-            .cloned()
-            .unwrap_or_else(dynamic_value),
+        MirDistributedOp::LocalPart { value } | MirDistributedOp::Materialize { value } => {
+            match operand_fact(value, state).kind {
+                ValueKindFact::Distributed(distributed) => *distributed.value,
+                _ => dynamic_value(),
+            }
+        }
         MirDistributedOp::Redistribute { value, scheme } => {
-            let underlying = state
-                .distributed
-                .get(value)
-                .cloned()
-                .unwrap_or_else(dynamic_value);
-            let Some(owner) = state.locals.iter().find_map(|local| match &local.fact {
-                Some(ValueFact {
-                    kind: ValueKindFact::Distributed(distributed),
-                    ..
-                }) if distributed.id == *value => Some(distributed.owner),
-                _ => None,
-            }) else {
+            let ValueKindFact::Distributed(distributed) = operand_fact(value, state).kind else {
                 return dynamic_value();
             };
             ValueFact::scalar(ValueKindFact::Distributed(runmat_types::DistributedFact {
-                id: *value,
-                owner,
+                id: distributed.id,
+                owner: distributed.owner,
                 scheme: Some(scheme.clone()),
-                value: Box::new(underlying),
-                materializable: true,
+                value: distributed.value,
+                materializable: distributed.materializable,
             }))
         }
     }
@@ -66,12 +56,16 @@ pub(crate) fn collective_fact(
         MirCollectiveOp::Barrier { .. } | MirCollectiveOp::Send { .. } => {
             ValueFact::scalar(ValueKindFact::Void)
         }
-        MirCollectiveOp::Broadcast { input, .. }
-        | MirCollectiveOp::Gather { input, .. }
+        MirCollectiveOp::Broadcast { input, .. } => input.as_ref().map_or_else(
+            || ValueFact::unknown(DynamicReason::RuntimeValue),
+            |input| operand_fact(input, state),
+        ),
+        MirCollectiveOp::Gather { input, .. }
         | MirCollectiveOp::Scatter { input, .. }
         | MirCollectiveOp::AllGather { input, .. }
         | MirCollectiveOp::Reduce { input, .. }
-        | MirCollectiveOp::AllReduce { input, .. } => operand_fact(input, state),
+        | MirCollectiveOp::AllReduce { input, .. }
+        | MirCollectiveOp::SendReceive { input, .. } => operand_fact(input, state),
         MirCollectiveOp::Receive { .. } => ValueFact::unknown(DynamicReason::RuntimeValue),
         MirCollectiveOp::Probe { .. } => ValueFact::scalar(ValueKindFact::Logical),
     }

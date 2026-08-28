@@ -23,8 +23,9 @@ pub use services::{
     ForeignCall, HostInteraction, NativeCapability, ParallelCapability, RuntimeAccelerationService,
     RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService,
     RuntimeCollectiveService, RuntimeDistributedCallRequest, RuntimeDistributedService,
-    RuntimeErrorService, RuntimeForeignService, RuntimeHostService, RuntimeNativeService,
-    RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
-    RuntimePlacementService, RuntimeServicePorts, RuntimeWorkspaceService,
+    RuntimeDistributedSnapshot, RuntimeErrorService, RuntimeForeignService, RuntimeHostService,
+    RuntimeNativeService, RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
+    RuntimePlacementService, RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission,
+    RuntimeSpmdOutput, RuntimeSpmdService, RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;

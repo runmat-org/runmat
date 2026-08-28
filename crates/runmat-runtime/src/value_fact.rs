@@ -171,7 +171,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::Distributed(handle) => ValueFact {
             kind: ValueKindFact::Distributed(runmat_types::DistributedFact {
                 id: handle.contract,
-                owner: handle.owner_region,
+                owner: handle.owner,
                 scheme: Some(handle.scheme.clone()),
                 value: Box::new(handle.value.clone()),
                 materializable: handle.materializable,

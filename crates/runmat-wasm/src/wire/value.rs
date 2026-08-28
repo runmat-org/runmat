@@ -346,6 +346,22 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "generation": handle.generation,
             "requestedOutputs": handle.outputs.requested_outputs,
         }),
+        Value::Distributed(handle) => json!({
+            "kind": "distributed",
+            "className": "distributed",
+            "shape": handle.global_shape,
+            "partitionCount": handle.partition_count.0,
+            "scheme": handle.scheme,
+            "materializable": handle.materializable,
+            "valueFact": handle.value,
+        }),
+        Value::Composite(handle) => json!({
+            "kind": "composite",
+            "className": "Composite",
+            "shape": scalar_shape(),
+            "labCount": handle.gang.labs.0,
+            "valueFact": handle.value,
+        }),
         Value::Foreign(reference) => json!({
             "kind": "foreign",
             "family": reference.type_identity.family,

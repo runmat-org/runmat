@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 mod spmd;
 pub use spmd::SpmdLabRequirement;
 
-pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 5;
+pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
@@ -146,7 +146,7 @@ pub struct DistributedValueContract {
     pub id: DistributedValueId,
     pub value: ValueFact,
     pub scheme: DistributionScheme,
-    pub owner_region: ParallelRegionId,
+    pub owner: crate::DistributedOwner,
     pub materializable: bool,
 }
 
@@ -158,7 +158,8 @@ pub struct CollectiveContract {
     pub input: Option<ValueFact>,
     pub output: Option<ValueFact>,
     pub root: Option<ValueFact>,
-    pub peer: Option<ValueFact>,
+    pub source: Option<ValueFact>,
+    pub destination: Option<ValueFact>,
     pub tag: Option<ValueFact>,
 }
 
@@ -173,7 +174,8 @@ pub enum CollectiveOperation {
     Reduce { operator: OperatorKind },
     AllReduce { operator: OperatorKind },
     Send,
-    Receive,
+    Receive { requested_outputs: u8 },
+    SendReceive,
     Probe,
 }
 
@@ -291,12 +293,16 @@ impl ParallelManifest {
             }
         }
         for distributed in &self.distributed_values {
-            if !region_ids.contains(&distributed.owner_region)
-                || distributed.id.function != distributed.owner_region.0.function
-            {
+            let owner_valid = match distributed.owner {
+                crate::DistributedOwner::Client(function) => function == distributed.id.function,
+                crate::DistributedOwner::Region(region) => {
+                    region_ids.contains(&region) && region.0.function == distributed.id.function
+                }
+            };
+            if !owner_valid {
                 return Err(SchemaValidationError::new(
-                    "parallel.distributed_values.owner_region",
-                    "owner must name a declared parallel region in the same function",
+                    "parallel.distributed_values.owner",
+                    "owner must name the same client function or a declared parallel region in that function",
                 ));
             }
             if let DistributionScheme::Custom { partitioner } = &distributed.scheme {
@@ -390,21 +396,23 @@ impl CollectiveContract {
             self.input.is_some(),
             self.output.is_some(),
             self.root.is_some(),
-            self.peer.is_some(),
+            self.source.is_some(),
+            self.destination.is_some(),
         );
         let expected = match self.operation {
-            CollectiveOperation::Barrier => (false, false, false, false),
-            CollectiveOperation::Broadcast
-            | CollectiveOperation::Gather
+            CollectiveOperation::Barrier => (false, false, false, false, false),
+            CollectiveOperation::Broadcast => (self.input.is_some(), true, true, false, false),
+            CollectiveOperation::Gather
             | CollectiveOperation::Scatter
-            | CollectiveOperation::Reduce { .. } => (true, true, true, false),
+            | CollectiveOperation::Reduce { .. } => (true, true, true, false, false),
             CollectiveOperation::AllGather | CollectiveOperation::AllReduce { .. } => {
-                (true, true, false, false)
+                (true, true, false, false, false)
             }
-            CollectiveOperation::Send => (true, false, false, true),
-            CollectiveOperation::Receive | CollectiveOperation::Probe => {
-                (false, true, false, self.peer.is_some())
+            CollectiveOperation::Send => (true, false, false, false, true),
+            CollectiveOperation::Receive { .. } | CollectiveOperation::Probe => {
+                (false, true, false, self.source.is_some(), false)
             }
+            CollectiveOperation::SendReceive => (true, true, false, true, true),
         };
         if actual != expected {
             return Err(SchemaValidationError::new(
@@ -416,7 +424,8 @@ impl CollectiveContract {
             && !matches!(
                 self.operation,
                 CollectiveOperation::Send
-                    | CollectiveOperation::Receive
+                    | CollectiveOperation::Receive { .. }
+                    | CollectiveOperation::SendReceive
                     | CollectiveOperation::Probe
             )
         {

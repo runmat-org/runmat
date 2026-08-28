@@ -149,9 +149,6 @@ const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
     "RunMat:MirMethodFallbackPolicyUnsupported";
 const IDENT_MIR_METHOD_CALL_CALLEE_INVALID: &str = "RunMat:MirMethodCallCalleeInvalid";
 const IDENT_MIR_METHOD_CALL_RECEIVER_MISSING: &str = "RunMat:MirMethodCallReceiverMissing";
-const IDENT_MIR_PARALLEL_CAPABILITY_UNSUPPORTED: &str = "RunMat:MirParallelCapabilityUnsupported";
-const IDENT_MIR_DISTRIBUTED_CAPABILITY_UNSUPPORTED: &str =
-    "RunMat:MirDistributedCapabilityUnsupported";
 
 fn encode_cell_end_offset(offset: isize) -> f64 {
     if offset <= 0 {
@@ -790,12 +787,31 @@ impl Compiler {
                         has_maximum_workers: maximum_workers.is_some(),
                     });
                 }
-                MirTerminatorKind::Spmd { .. } => {
-                    return Err(CompileError::new(
-                        "parallel-region MIR requires the structured scheduler lowering capability",
-                    )
-                    .with_span(block.terminator.span)
-                    .with_identifier(IDENT_MIR_PARALLEL_CAPABILITY_UNSUPPORTED));
+                MirTerminatorKind::Spmd { region, header, .. } => {
+                    let header = match header.as_ref() {
+                        runmat_mir::parallel::MirSpmdHeader::Default => {
+                            crate::BytecodeSpmdHeader::Default
+                        }
+                        runmat_mir::parallel::MirSpmdHeader::One(value) => {
+                            self.compile_mir_rvalue(value)?;
+                            crate::BytecodeSpmdHeader::Exact
+                        }
+                        runmat_mir::parallel::MirSpmdHeader::Two(minimum, maximum) => {
+                            self.compile_mir_rvalue(minimum)?;
+                            self.compile_mir_rvalue(maximum)?;
+                            crate::BytecodeSpmdHeader::Range
+                        }
+                        runmat_mir::parallel::MirSpmdHeader::Three(pool, minimum, maximum) => {
+                            self.compile_mir_rvalue(pool)?;
+                            self.compile_mir_rvalue(minimum)?;
+                            self.compile_mir_rvalue(maximum)?;
+                            crate::BytecodeSpmdHeader::PoolRange
+                        }
+                    };
+                    self.emit(Instr::ExecuteSpmd {
+                        region: *region,
+                        header,
+                    });
                 }
                 MirTerminatorKind::Return(values) => {
                     for scope in exception_scopes.active_at(block.id) {
@@ -2394,11 +2410,112 @@ impl Compiler {
                 self.emit(Instr::Spawn);
                 Ok(())
             }
-            MirRvalue::Distributed(_) | MirRvalue::Collective(_) => Err(self
-                .compile_error(
-                    "distributed-value and collective MIR requires the distributed runtime capability",
-                )
-                .with_identifier(IDENT_MIR_DISTRIBUTED_CAPABILITY_UNSUPPORTED)),
+            MirRvalue::Distributed(operation) => {
+                use runmat_mir::parallel::MirDistributedOp;
+                let instruction = match operation {
+                    MirDistributedOp::Create {
+                        id,
+                        owner,
+                        input,
+                        scheme,
+                    } => {
+                        self.compile_mir_operand(input)?;
+                        crate::BytecodeDistributedOp::Create {
+                            id: *id,
+                            owner: *owner,
+                            scheme: scheme.clone(),
+                        }
+                    }
+                    MirDistributedOp::LocalPart { value } => {
+                        self.compile_mir_operand(value)?;
+                        crate::BytecodeDistributedOp::LocalPart
+                    }
+                    MirDistributedOp::Materialize { value } => {
+                        self.compile_mir_operand(value)?;
+                        crate::BytecodeDistributedOp::Materialize
+                    }
+                    MirDistributedOp::Redistribute { value, scheme } => {
+                        self.compile_mir_operand(value)?;
+                        crate::BytecodeDistributedOp::Redistribute {
+                            scheme: scheme.clone(),
+                        }
+                    }
+                };
+                self.emit(Instr::Distributed(instruction));
+                Ok(())
+            }
+            MirRvalue::Collective(operation) => {
+                for operand in operation.operands() {
+                    self.compile_mir_operand(operand)?;
+                }
+                use runmat_mir::parallel::MirCollectiveOp;
+                let (id, operation) = match operation {
+                    MirCollectiveOp::Barrier { id } => (*id, crate::BytecodeCollectiveOp::Barrier),
+                    MirCollectiveOp::Broadcast { id, input, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Broadcast {
+                            has_input: input.is_some(),
+                        },
+                    ),
+                    MirCollectiveOp::Gather { id, .. } => {
+                        (*id, crate::BytecodeCollectiveOp::Gather)
+                    }
+                    MirCollectiveOp::Scatter { id, .. } => {
+                        (*id, crate::BytecodeCollectiveOp::Scatter)
+                    }
+                    MirCollectiveOp::AllGather { id, .. } => {
+                        (*id, crate::BytecodeCollectiveOp::AllGather)
+                    }
+                    MirCollectiveOp::Reduce { id, operator, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Reduce {
+                            operator: *operator,
+                        },
+                    ),
+                    MirCollectiveOp::AllReduce { id, operator, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::AllReduce {
+                            operator: *operator,
+                        },
+                    ),
+                    MirCollectiveOp::Send { id, tag, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Send {
+                            has_tag: tag.is_some(),
+                        },
+                    ),
+                    MirCollectiveOp::Receive {
+                        id,
+                        source,
+                        tag,
+                        requested_outputs,
+                    } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Receive {
+                            has_source: source.is_some(),
+                            has_tag: tag.is_some(),
+                            requested_outputs: *requested_outputs,
+                        },
+                    ),
+                    MirCollectiveOp::SendReceive { id, tag, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::SendReceive {
+                            has_tag: tag.is_some(),
+                        },
+                    ),
+                    MirCollectiveOp::Probe {
+                        id, source, tag, ..
+                    } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Probe {
+                            has_source: source.is_some(),
+                            has_tag: tag.is_some(),
+                        },
+                    ),
+                };
+                self.emit(Instr::Collective { id, operation });
+                Ok(())
+            }
         }
     }
 

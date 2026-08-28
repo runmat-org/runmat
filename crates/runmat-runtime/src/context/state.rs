@@ -84,13 +84,13 @@ impl RuntimeContextState {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct SourceState {
     pub current: Option<SourceInfo>,
     pub catalog: HashMap<SourceId, SourceInfo>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct CallState {
     pub callsites: Vec<CallsiteInfo>,
     pub function_input_callsites: Vec<CallsiteInfo>,

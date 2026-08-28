@@ -19,8 +19,56 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
         "parallel.parfeval" | "parallel.parfeval-on-all" => infer_parallel_future(request, entry),
         "parallel.fetch-outputs" => infer_parallel_fetch(request, entry, false),
         "parallel.fetch-next" => infer_parallel_fetch(request, entry, true),
+        "parallel.distributed"
+        | "parallel.local-part"
+        | "parallel.barrier"
+        | "parallel.broadcast"
+        | "parallel.send"
+        | "parallel.send-receive"
+        | "parallel.receive"
+        | "parallel.probe"
+        | "parallel.gplus"
+        | "parallel.spmd-index"
+        | "parallel.spmd-size" => infer_parallel_data(request, entry),
         _ => unavailable_rule(entry, request),
     }
+}
+
+fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let output = match entry.contract.inference_rule.0 {
+        "parallel.barrier" | "parallel.send" => ValueFact::scalar(ValueKindFact::Void),
+        "parallel.probe" => ValueFact::scalar(ValueKindFact::Logical),
+        "parallel.spmd-index" | "parallel.spmd-size" => {
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }))
+        }
+        "parallel.local-part" => match request.arguments.first().map(|fact| &fact.kind) {
+            Some(ValueKindFact::Distributed(distributed)) => distributed.value.as_ref().clone(),
+            _ => ValueFact::unknown(DynamicReason::RuntimeValue),
+        },
+        "parallel.broadcast" => request
+            .arguments
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
+        "parallel.send-receive" => request
+            .arguments
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
+        "parallel.gplus" => request
+            .arguments
+            .first()
+            .cloned()
+            .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
+        "parallel.distributed" | "parallel.receive" => {
+            ValueFact::unknown(DynamicReason::RuntimeValue)
+        }
+        _ => unreachable!("parallel data inference is dispatched by a closed rule set"),
+    };
+    finish_fixed(entry, request, output, Vec::new())
 }
 
 fn infer_parallel_pool(

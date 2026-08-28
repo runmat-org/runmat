@@ -136,7 +136,7 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                     id: distributed,
                     value: dynamic_fact(),
                     scheme: DistributionScheme::Block { dimension: 1 },
-                    owner_region: spmd,
+                    owner: runmat_types::DistributedOwner::Region(spmd),
                     materializable: true,
                 }],
                 collectives: vec![CollectiveContract {
@@ -148,7 +148,8 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                     input: Some(dynamic_fact()),
                     output: Some(dynamic_fact()),
                     root: Some(dynamic_fact()),
-                    peer: None,
+                    source: None,
+                    destination: None,
                     tag: None,
                 }],
             },

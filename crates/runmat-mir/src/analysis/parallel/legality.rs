@@ -9,9 +9,15 @@ pub(super) fn validate_control_flow(
     blocks: &BTreeSet<BasicBlockId>,
     header: BasicBlockId,
     exit: BasicBlockId,
+    construct: &'static str,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) -> bool {
     let mut valid = true;
+    let category = if construct == "spmd" {
+        "spmd-legality"
+    } else {
+        "parfor-legality"
+    };
     for block in body
         .blocks
         .iter()
@@ -20,21 +26,21 @@ pub(super) fn validate_control_flow(
         let diagnostic = match &block.terminator.kind {
             MirTerminatorKind::Return(_) => Some((
                 "RM-MIR0015",
-                "return cannot leave a parfor iteration",
-                "return would escape the independently scheduled iteration",
-                "move the return outside the parfor or assign a sliced result",
+                format!("return cannot leave a {construct} region"),
+                "return would escape the independently scheduled region",
+                format!("move the return outside the {construct} region"),
             )),
             MirTerminatorKind::Await { .. } => Some((
                 "RM-MIR0016",
-                "await is not permitted inside parfor",
-                "a parfor iteration cannot suspend into an independently owned continuation",
-                "await the work outside the parfor or use parfeval explicitly",
+                format!("await is not permitted inside {construct}"),
+                "a parallel region cannot suspend into an independently owned continuation",
+                format!("await the work outside the {construct} region"),
             )),
-            MirTerminatorKind::Goto(target) if *target == exit => Some((
+            MirTerminatorKind::Goto(target) if *target == exit && construct == "parfor" => Some((
                 "RM-MIR0017",
-                "break cannot leave a parfor iteration",
-                "break would make the iteration set depend on worker execution order",
-                "express the condition inside the iteration or use a serial for loop",
+                format!("break cannot leave a {construct} region"),
+                "break would make parallel completion depend on worker execution order",
+                format!("express the condition inside the {construct} region"),
             )),
             kind if super::super::regions::successors(kind)
                 .into_iter()
@@ -42,9 +48,9 @@ pub(super) fn validate_control_flow(
             {
                 Some((
                     "RM-MIR0018",
-                    "parfor control flow leaves its compiled region",
-                    "this edge does not target the iteration header or a block owned by the region",
-                    "keep all iteration control flow inside the parfor body",
+                    format!("{construct} control flow leaves its compiled region"),
+                    "this edge does not target the region header or a block owned by the region",
+                    format!("keep all control flow inside the {construct} body"),
                 ))
             }
             _ => None,
@@ -59,7 +65,7 @@ pub(super) fn validate_control_flow(
                 )
                 .with_primary_label(label)
                 .with_help(help)
-                .with_category("parfor-legality"),
+                .with_category(category),
             );
             valid = false;
         }

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 ///
 /// Slot-to-local synchronization belongs to the executor. This state owns only
 /// values whose lifetime and identity cross an individual VM frame.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SessionVariableState {
     globals: HashMap<String, Value>,
     persistent_slots: HashMap<(String, usize), Value>,

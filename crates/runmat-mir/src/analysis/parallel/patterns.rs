@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::parallel::{MirCollectiveOp, MirDistributedOp};
+use crate::parallel::MirCollectiveOp;
 use crate::{
     BasicBlockId, MirBody, MirCallArg, MirCallee, MirIndexComponent, MirIndexing, MirLocalId,
     MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind,
@@ -222,10 +222,7 @@ fn rvalue_preserves_slice_pattern(
         MirRvalue::Future { args, .. } => args
             .iter()
             .all(|argument| !call_argument_mentions_local(argument, local)),
-        MirRvalue::Distributed(MirDistributedOp::Create { input, .. }) => {
-            !operand_is_local(input, local)
-        }
-        MirRvalue::Distributed(_) => true,
+        MirRvalue::Distributed(operation) => !operand_is_local(operation.input(), local),
         MirRvalue::Collective(operation) => {
             collective_input(operation).is_none_or(|input| !operand_is_local(input, local))
         }

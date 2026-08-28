@@ -1,5 +1,6 @@
 use runmat_types::{
-    DistributedValueId, DistributionScheme, LabCount, LabRank, ParallelRegionId, ValueFact,
+    DistributedOwner, DistributedValueId, DistributionScheme, LabCount, LabRank, ParallelRegionId,
+    ValueFact,
 };
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +16,7 @@ pub struct DistributedValueHandle {
     /// Stable compiler identity for the value contract that created this
     /// runtime object.
     pub contract: DistributedValueId,
-    pub owner_region: ParallelRegionId,
+    pub owner: DistributedOwner,
     pub scope_id: ExecutionScopeId,
     pub generation: u64,
     pub pool: PoolHandle,
@@ -33,6 +34,7 @@ impl DistributedValueHandle {
         if self.generation == 0
             || self.partition_count.0 == 0
             || self.scope_id != self.pool.scope_id
+            || self.owner.function() != self.contract.function
         {
             return Err(ContractError::invalid(
                 "distributed value handle",
@@ -143,12 +145,10 @@ impl PartitionSelection {
                     ));
                 }
                 if *count == 0 {
-                    if *start > extent {
-                        return Err(ContractError::invalid(
-                            "distributed strided selection",
-                            "empty selection start lies outside the dimension",
-                        ));
-                    }
+                    // Canonical cyclic layouts retain one rank-derived start
+                    // per lab. When there are more labs than elements, an
+                    // empty tail rank can therefore begin beyond the extent;
+                    // no element is selected or dereferenced.
                     return Ok(());
                 }
                 let last = start
@@ -463,7 +463,7 @@ mod tests {
                 function,
                 ordinal: 3,
             },
-            owner_region,
+            owner: DistributedOwner::Region(owner_region),
             scope_id,
             generation: 1,
             pool: PoolHandle {

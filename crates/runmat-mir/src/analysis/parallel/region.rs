@@ -57,3 +57,23 @@ pub(super) fn contains_parallel_region(body: &MirBody, blocks: &BTreeSet<BasicBl
             )
     })
 }
+
+pub(super) fn is_nested_parallel_header(body: &MirBody, candidate: BasicBlockId) -> bool {
+    body.blocks.iter().any(|header| {
+        let (body_block, exit_block) = match &header.terminator.kind {
+            MirTerminatorKind::ParFor {
+                body_block,
+                exit_block,
+                ..
+            }
+            | MirTerminatorKind::Spmd {
+                body_block,
+                exit_block,
+                ..
+            } => (*body_block, *exit_block),
+            _ => return false,
+        };
+        header.id != candidate
+            && body_blocks(body, header.id, body_block, exit_block).contains(&candidate)
+    })
+}

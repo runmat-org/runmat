@@ -143,7 +143,7 @@ fn index_scalar_i128(value: IndexScalar) -> i128 {
     }
 }
 
-fn value_shape(value: &Value) -> Option<Vec<usize>> {
+pub(crate) fn value_shape(value: &Value) -> Option<Vec<usize>> {
     match value {
         Value::Tensor(value) => Some(value.shape.clone()),
         Value::ComplexTensor(value) => Some(value.shape.clone()),
@@ -165,7 +165,7 @@ fn same_assembly_family(left: &Value, right: &Value) -> bool {
     )
 }
 
-fn read_with_plan(value: &Value, plan: &IndexPlan) -> Result<Value, RuntimeError> {
+pub(crate) fn read_with_plan(value: &Value, plan: &IndexPlan) -> Result<Value, RuntimeError> {
     match value {
         Value::Tensor(value) => read_slice::read_tensor_slice_from_plan(value, plan),
         Value::ComplexTensor(value) => read_slice::read_complex_slice_from_plan(value, plan),
@@ -179,7 +179,7 @@ fn read_with_plan(value: &Value, plan: &IndexPlan) -> Result<Value, RuntimeError
     }
 }
 
-async fn assign_with_plan(
+pub(crate) async fn assign_with_plan(
     destination: Value,
     plan: &IndexPlan,
     source: &Value,

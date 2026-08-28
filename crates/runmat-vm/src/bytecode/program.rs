@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use super::{parallel::BytecodeParforRegion, region::BytecodeRegion};
+use super::{
+    parallel::{BytecodeParforRegion, BytecodeSpmdRegion},
+    region::BytecodeRegion,
+};
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {
@@ -87,6 +90,12 @@ pub struct FunctionBytecode {
     pub regions: Vec<BytecodeRegion>,
     #[serde(default)]
     pub parfor_regions: Vec<BytecodeParforRegion>,
+    #[serde(default)]
+    pub spmd_regions: Vec<BytecodeSpmdRegion>,
+    #[serde(default)]
+    pub distributed_values: Vec<runmat_types::DistributedValueContract>,
+    #[serde(default)]
+    pub collective_contracts: Vec<runmat_types::CollectiveContract>,
 }
 
 impl Default for FunctionBytecode {
@@ -114,6 +123,9 @@ impl Default for FunctionBytecode {
             resume_points: std::collections::BTreeMap::new(),
             regions: Vec::new(),
             parfor_regions: Vec::new(),
+            spmd_regions: Vec::new(),
+            distributed_values: Vec::new(),
+            collective_contracts: Vec::new(),
         }
     }
 }
@@ -132,6 +144,9 @@ impl FunctionBytecode {
         bytecode.initially_unassigned_slots = self.initially_unassigned_slots.clone();
         bytecode.regions = self.regions.clone();
         bytecode.parfor_regions = self.parfor_regions.clone();
+        bytecode.spmd_regions = self.spmd_regions.clone();
+        bytecode.distributed_values = self.distributed_values.clone();
+        bytecode.collective_contracts = self.collective_contracts.clone();
         bytecode.bound_functions = registry.functions.clone();
         bytecode.function_registry = registry.clone();
         bytecode
@@ -159,9 +174,27 @@ impl FunctionBytecode {
         for region in &mut self.parfor_regions {
             region.rebind_owner(program_function);
         }
+        for region in &mut self.spmd_regions {
+            region.rebind_owner(program_function);
+        }
+        for distributed in &mut self.distributed_values {
+            distributed.id.function = program_function;
+            match &mut distributed.owner {
+                runmat_types::DistributedOwner::Client(function) => *function = program_function,
+                runmat_types::DistributedOwner::Region(region) => {
+                    region.0.function = program_function
+                }
+            }
+        }
+        for collective in &mut self.collective_contracts {
+            collective.id.region.0.function = program_function;
+        }
         for instruction in &mut self.instructions {
-            if let Instr::ExecuteParfor { region, .. } = instruction {
-                region.0.function = program_function;
+            match instruction {
+                Instr::ExecuteParfor { region, .. } | Instr::ExecuteSpmd { region, .. } => {
+                    region.0.function = program_function;
+                }
+                _ => {}
             }
         }
     }
@@ -664,6 +697,13 @@ pub struct Bytecode {
     /// Compiler-bound executable records for analyzed `parfor` regions.
     #[serde(default)]
     pub parfor_regions: Vec<BytecodeParforRegion>,
+    /// Compiler-bound executable records for analyzed SPMD regions.
+    #[serde(default)]
+    pub spmd_regions: Vec<BytecodeSpmdRegion>,
+    #[serde(default)]
+    pub distributed_values: Vec<runmat_types::DistributedValueContract>,
+    #[serde(default)]
+    pub collective_contracts: Vec<runmat_types::CollectiveContract>,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub accel_graph: Option<AccelGraph>,
@@ -792,6 +832,9 @@ impl Bytecode {
             async_metadata: AsyncMetadata::default(),
             regions: Vec::new(),
             parfor_regions: Vec::new(),
+            spmd_regions: Vec::new(),
+            distributed_values: Vec::new(),
+            collective_contracts: Vec::new(),
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]
@@ -947,6 +990,9 @@ mod function_registry_tests {
             resume_points: std::collections::BTreeMap::new(),
             regions: Vec::new(),
             parfor_regions: Vec::new(),
+            spmd_regions: Vec::new(),
+            distributed_values: Vec::new(),
+            collective_contracts: Vec::new(),
         }
     }
 

@@ -47,9 +47,18 @@ pub(super) fn classify_body(
         else {
             continue;
         };
+        if region::is_nested_parallel_header(body, header.id) {
+            continue;
+        }
         let blocks = region::body_blocks(body, header.id, *body_block, *exit_block);
-        let mut legal =
-            legality::validate_control_flow(body, &blocks, header.id, *exit_block, diagnostics);
+        let mut legal = legality::validate_control_flow(
+            body,
+            &blocks,
+            header.id,
+            *exit_block,
+            "parfor",
+            diagnostics,
+        );
         if region::contains_parallel_region(body, &blocks) {
             diagnostics.push(
                 MirDiagnostic::new(

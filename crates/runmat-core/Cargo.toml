@@ -18,6 +18,7 @@ runmat-mir = { workspace = true }
 runmat-vm = { workspace = true }
 runmat-config = { workspace = true }
 runmat-execution = { workspace = true }
+runmat-execution-runner = { workspace = true }
 runmat-package = { workspace = true }
 runmat-static-analysis = { workspace = true }
 runmat-test = { workspace = true }
@@ -35,6 +36,7 @@ runmat-filesystem = { workspace = true }
 sha2 = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }
+futures = "0.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.uuid]
 version = "1"
@@ -56,7 +58,6 @@ runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-native-executor = { workspace = true }
 runmat-jit = { workspace = true }
-futures = "0.3"
 pollster = "0.3"
 stacker = "0.1"
 tokio = { workspace = true, features = ["sync"] }

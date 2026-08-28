@@ -14408,6 +14408,105 @@ fn parfor_has_a_deterministic_serial_execution_fallback() {
     );
 }
 
+#[test]
+fn spmd_executes_in_an_isolated_rank_context_and_retains_composite_outputs() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-spmd-test@1",
+            "spmd_test.m",
+            "spmd; workerIndex = spmdIndex(); workerCount = spmdSize(); labBarrier(); end;",
+        ),
+        None,
+    ))
+    .expect("compile compiler-bound SPMD region");
+    assert_eq!(unit.bytecode().spmd_regions[0].outputs.len(), 2);
+    execute_text_request(
+        &mut session,
+        "spmd; workerIndex = spmdIndex(); workerCount = spmdSize(); labBarrier(); end;",
+    )
+    .expect("execute compiler-bound SPMD region");
+
+    let variables = session.get_variables();
+    let Some(runmat_value::Value::Composite(index)) = variables.get("workerIndex") else {
+        panic!(
+            "SPMD worker index must leave a Composite in the driver workspace: {:?}",
+            variables
+        );
+    };
+    let Some(runmat_value::Value::Composite(count)) = variables.get("workerCount") else {
+        panic!("SPMD worker count must leave a Composite in the driver workspace");
+    };
+    assert_eq!(index.gang.labs, runmat_types::LabCount(1));
+    assert_eq!(count.gang, index.gang);
+    assert_eq!(count.owner_region, index.owner_region);
+    assert_ne!(count.id, index.id);
+}
+
+#[test]
+fn modern_spmd_point_to_point_surface_executes_through_typed_bytecode() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "spmd; spmdSend(0x0020000000000001u64, 1, 7); [received, source, tag] = spmdReceive(\"any\", 7); exchanged = spmdSendReceive(1, 1, uint16(5)); total = spmdPlus(uint32(2)); spmdBarrier(); end;",
+    )
+    .expect("execute modern SPMD point-to-point and reduction operations");
+    for name in ["received", "source", "tag", "exchanged", "total"] {
+        assert!(
+            matches!(
+                session.get_variables().get(name),
+                Some(runmat_value::Value::Composite(_))
+            ),
+            "{name} must be retained as a compiler-declared Composite output: {:?}",
+            session.get_variables()
+        );
+    }
+    execute_text_request(
+        &mut session,
+        "receivedValue = received{1}; sourceValue = source{1}; tagValue = tag{1}; exchangedValue = exchanged{1}; totalValue = total{1};",
+    )
+    .expect("read retained Composite entries through explicit driver indexing");
+    let variables = session.get_variables();
+    assert_eq!(
+        variables.get("receivedValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(
+            9_007_199_254_740_993,
+        )))
+    );
+    assert_eq!(
+        variables.get("sourceValue"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert_eq!(
+        variables.get("tagValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(7)))
+    );
+    assert_eq!(
+        variables.get("exchangedValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U16(5)))
+    );
+    assert_eq!(
+        variables.get("totalValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U32(2)))
+    );
+}
+
+#[test]
+fn distributed_values_preserve_typed_local_storage_through_compiler_lowering() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = uint64([1, 9007199254740993]); value = distributed(source); local = getLocalPart(value);",
+    )
+    .expect("execute compiler-bound distributed operations");
+    let variables = session.get_variables();
+    assert!(matches!(
+        variables.get("value"),
+        Some(runmat_value::Value::Distributed(_))
+    ));
+    assert_eq!(variables.get("local"), variables.get("source"));
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn generic_native_deoptimizes_at_the_exact_parfor_boundary() {

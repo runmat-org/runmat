@@ -6466,6 +6466,7 @@ dependencies = [
  "runmat-config",
  "runmat-execution",
  "runmat-execution-artifact",
+ "runmat-execution-runner",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",

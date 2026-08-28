@@ -46,6 +46,12 @@ pub enum CollectiveInvocation {
         tag: CollectiveMessageTag,
         value: ValuePayload,
     },
+    SendReceive {
+        destination: Option<LabRank>,
+        source: Option<LabRank>,
+        tag: CollectiveMessageTag,
+        value: ValuePayload,
+    },
     Receive {
         selection: ReceiveSelection,
     },
@@ -125,6 +131,15 @@ fn validate_invocation(
             root.map(validate_rank).transpose().map(|_| ())
         }
         CollectiveInvocation::Send { destination, .. } => validate_rank(*destination),
+        CollectiveInvocation::SendReceive {
+            destination,
+            source,
+            ..
+        } => {
+            destination.map(validate_rank).transpose()?;
+            source.map(validate_rank).transpose()?;
+            Ok(())
+        }
         CollectiveInvocation::Receive { selection } | CollectiveInvocation::Probe { selection } => {
             selection.source.map(validate_rank).transpose().map(|_| ())
         }

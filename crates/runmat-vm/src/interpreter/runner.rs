@@ -1093,6 +1093,9 @@ async fn run_interpreter_inner(
             | Instr::LogicalAnd
             | Instr::LogicalOr
             | Instr::ExecuteParfor { .. }
+            | Instr::ExecuteSpmd { .. }
+            | Instr::Distributed(_)
+            | Instr::Collective { .. }
             | Instr::Unpack(_)
             | Instr::CreateMatrix(_, _)
             | Instr::CreateMatrixDynamic(_)

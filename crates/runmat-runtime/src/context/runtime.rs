@@ -279,6 +279,49 @@ impl RuntimeContext {
         self
     }
 
+    /// Create an isolated worker runtime that retains immutable resolution and
+    /// host capabilities while owning independent mutable language state.
+    pub fn fork_parallel_lab(&self, services: RuntimeServicePorts) -> Self {
+        let child = Self::with_cancellation(self.execution.clone(), self.cancellation())
+            .with_program_revision(self.program_revision.clone())
+            .with_service_ports(services);
+        let child = if let Some(search_path) = &self.search_path {
+            child.with_search_path(Arc::clone(search_path))
+        } else {
+            child
+        };
+        *child.state.source.borrow_mut() = self.state.source.borrow().clone();
+        *child.state.call.borrow_mut() = self.state.call.borrow().clone();
+        *child.state.classes.borrow_mut() = self.state.classes.borrow().clone();
+        *child.state.session_variables.borrow_mut() = self.state.session_variables.borrow().clone();
+        child
+            .state
+            .runmat_extensions_enabled
+            .set(self.state.runmat_extensions_enabled.get());
+        child
+            .state
+            .language_mode
+            .set(self.state.language_mode.get());
+        child
+            .state
+            .top_level_await_enabled
+            .set(self.state.top_level_await_enabled.get());
+        child
+            .state
+            .dynamic_eval_enabled
+            .set(self.state.dynamic_eval_enabled.get());
+        child
+            .state
+            .execution_stack
+            .set(self.state.execution_stack.get());
+        child
+            .state
+            .callstack_limit
+            .set(self.state.callstack_limit.get());
+        *child.state.error_namespace.borrow_mut() = self.state.error_namespace.borrow().clone();
+        child
+    }
+
     /// Scope every poll of `future` to this context. This is the supported
     /// bridge for async code that still reaches ambient compatibility APIs.
     pub fn scope<F: Future>(&self, future: F) -> ContextFuture<F> {
