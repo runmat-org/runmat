@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PythonFrame {
     pub file: String,
     pub line: Option<u32>,
@@ -6,7 +6,7 @@ pub struct PythonFrame {
     pub source: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, thiserror::Error)]
 #[error("{type_name}: {message}")]
 pub struct PythonError {
     pub type_name: String,
