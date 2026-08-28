@@ -143,8 +143,9 @@ pub fn admit_interop_manifest(
 #[cfg(test)]
 mod tests {
     use runmat_types::{
-        CapabilitySet, ForeignAdapterRequirement, ForeignAffinity, ForeignLifetime,
-        ForeignOwnership, ForeignRequirement, ForeignTypeIdentity, INTEROP_MANIFEST_SCHEMA_VERSION,
+        CapabilitySet, ForeignAdapterContractReference, ForeignAdapterRequirement, ForeignAffinity,
+        ForeignLifetime, ForeignOwnership, ForeignRequirement, ForeignTypeIdentity,
+        PlannedForeignAdapter, INTEROP_MANIFEST_SCHEMA_VERSION,
     };
 
     use super::*;
@@ -188,6 +189,7 @@ mod tests {
                 ])),
                 artifact_identities: vec!["jre:21".into()],
             }],
+            adapter_contracts: Vec::new(),
         }
     }
 
@@ -232,5 +234,35 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:Foreign:UnsupportedOnWasm"));
+    }
+
+    #[test]
+    fn planned_contracts_never_enter_runtime_admission() {
+        let manifest = InteropManifest {
+            adapter_contracts: vec![
+                ForeignAdapterContractReference::planned(PlannedForeignAdapter::DotNet),
+                ForeignAdapterContractReference::planned(PlannedForeignAdapter::WindowsCom),
+            ],
+            ..InteropManifest::empty()
+        };
+        let available = BTreeMap::from([
+            (
+                PlannedForeignAdapter::DotNet.adapter_id().into(),
+                ForeignAdapterDescriptor {
+                    adapter: PlannedForeignAdapter::DotNet.adapter_id().into(),
+                    ..descriptor()
+                },
+            ),
+            (
+                PlannedForeignAdapter::WindowsCom.adapter_id().into(),
+                ForeignAdapterDescriptor {
+                    adapter: PlannedForeignAdapter::WindowsCom.adapter_id().into(),
+                    ..descriptor()
+                },
+            ),
+        ]);
+        let plan = admit_interop_manifest(&manifest, &available, ForeignPlatform::Native).unwrap();
+        assert!(plan.adapters.is_empty());
+        assert_eq!(plan.foreign_type_count, 0);
     }
 }

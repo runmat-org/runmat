@@ -113,6 +113,7 @@ impl RunMatSession {
                         .map(|(identity, _)| identity.to_string())
                         .collect(),
                 }],
+                adapter_contracts: Vec::new(),
             });
         }
         if !handoff.project.python_artifacts.is_empty() {
@@ -160,6 +161,7 @@ impl RunMatSession {
                     ])),
                     artifact_identities: bundle.artifact_identities().into_iter().collect(),
                 }],
+                adapter_contracts: Vec::new(),
             });
         }
         let interop =

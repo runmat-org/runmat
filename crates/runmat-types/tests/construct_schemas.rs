@@ -86,6 +86,7 @@ fn interop() -> InteropManifest {
             capabilities: CapabilitySet::default(),
             artifact_identities: vec!["sha256:abc".into()],
         }],
+        adapter_contracts: Vec::new(),
     }
 }
 

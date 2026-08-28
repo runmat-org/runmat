@@ -102,6 +102,7 @@ async fn browser_rejects_native_mex_artifact_before_program_execution() {
             ])),
             artifact_identities: vec!["mex:v1:sha256:fixture".into()],
         }],
+        adapter_contracts: Vec::new(),
     };
     let request = request_with_contract(interop, BTreeSet::new()).await;
     let response =

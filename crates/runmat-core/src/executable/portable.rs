@@ -173,6 +173,7 @@ impl ExecutableUnit {
                 ])),
                 artifact_identities: Vec::new(),
             }],
+            adapter_contracts: Vec::new(),
         }
     }
 

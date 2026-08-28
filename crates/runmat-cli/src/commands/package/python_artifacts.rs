@@ -103,6 +103,7 @@ pub(super) fn prepare(
             capabilities: CapabilitySet(BTreeSet::from([CapabilityRequirement::ForeignRuntime])),
             artifact_identities: bundle.artifact_identities().into_iter().collect(),
         }],
+        adapter_contracts: Vec::new(),
     };
     interop
         .validate()
