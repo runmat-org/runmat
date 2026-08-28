@@ -3,7 +3,7 @@ use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
 use crate::warning_store::RuntimeWarning;
 use crate::RuntimeError;
-use runmat_types::{CallableIdentity, SourceId};
+use runmat_types::{CallableFallbackPolicy, CallableIdentity, SourceId};
 use runmat_value::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -28,6 +28,51 @@ pub trait RuntimeCallService {
 
     fn source_functions(&self, _source_id: SourceId) -> Vec<(String, usize)> {
         Vec::new()
+    }
+}
+
+/// Canonical call router for callbacks that re-enter the active RunMat
+/// executor. The executor installs its semantic and external invokers in the
+/// invocation context; this service keeps foreign adapters independent of VM,
+/// JIT, and AOT implementation details.
+#[derive(Debug, Default)]
+pub struct RuntimeCallRouter;
+
+impl RuntimeCallService for RuntimeCallRouter {
+    fn resolve(&self, name: &str) -> Option<usize> {
+        crate::user_functions::resolve_semantic_function_by_name(name)
+    }
+
+    fn invoke(
+        &self,
+        request: RuntimeCallRequest,
+    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>> {
+        let fallback_policy = match &request.identity {
+            CallableIdentity::DynamicName(_)
+            | CallableIdentity::Imported(_)
+            | CallableIdentity::Method(_) => CallableFallbackPolicy::RuntimeNameResolution,
+            CallableIdentity::ExternalName(_) => CallableFallbackPolicy::ExternalBoundary,
+            _ => CallableFallbackPolicy::None,
+        };
+        Box::pin(async move {
+            crate::call::descriptor::execute_callable_descriptor(
+                crate::call::descriptor::CallableDescriptor::resolved(
+                    request.identity,
+                    request.arguments,
+                    request.requested_outputs,
+                    fallback_policy,
+                    crate::call::descriptor::CallableCallKind::Direct,
+                ),
+            )
+            .await
+        })
+    }
+
+    fn source_functions(&self, source_id: SourceId) -> Vec<(String, usize)> {
+        crate::user_functions::source_functions_for(source_id)
+            .into_iter()
+            .map(|function| (function.name, function.function))
+            .collect()
     }
 }
 

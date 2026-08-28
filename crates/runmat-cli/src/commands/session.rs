@@ -31,6 +31,9 @@ pub(crate) fn create_session(
     engine
         .set_java_config(&config.foreign.java)
         .context("failed to configure Java runtime")?;
+    engine
+        .set_python_config(&config.foreign.python)
+        .context("failed to configure Python runtime")?;
     if let Some(client_id) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(client_id));
     }

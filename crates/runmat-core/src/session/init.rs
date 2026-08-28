@@ -29,9 +29,17 @@ impl RunMatSession {
         );
         let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
+            .with_call(std::rc::Rc::new(runmat_runtime::context::RuntimeCallRouter))
             .with_placement(placement.clone());
         #[cfg(not(target_arch = "wasm32"))]
-        let (runtime_services, foreign_runtime, native_ffi_adapter, java_adapter, mex_runtime) = {
+        let (
+            runtime_services,
+            foreign_runtime,
+            native_ffi_adapter,
+            java_adapter,
+            python_adapter,
+            mex_runtime,
+        ) = {
             let foreign_runtime = std::rc::Rc::new(runmat_runtime::foreign::ForeignRuntime::new(
                 runmat_runtime::foreign::ForeignPlatform::Native,
             ));
@@ -41,6 +49,9 @@ impl RunMatSession {
             let java =
                 runmat_runtime::foreign::JavaAdapter::new(foreign_runtime.handles().clone())?;
             foreign_runtime.register_adapter(java.clone())?;
+            let python =
+                runmat_runtime::foreign::PythonAdapter::new(foreign_runtime.handles().clone())?;
+            foreign_runtime.register_adapter(python.clone())?;
             let mex = std::rc::Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
             foreign_runtime.register_adapter(mex.clone())?;
             (
@@ -48,6 +59,7 @@ impl RunMatSession {
                 foreign_runtime,
                 adapter,
                 java,
+                python,
                 mex,
             )
         };
@@ -70,6 +82,8 @@ impl RunMatSession {
             native_ffi_adapter,
             #[cfg(not(target_arch = "wasm32"))]
             java_adapter,
+            #[cfg(not(target_arch = "wasm32"))]
+            python_adapter,
             #[cfg(not(target_arch = "wasm32"))]
             generic_native_cache: crate::generic_native::GenericNativeCache::default(),
             #[cfg(not(target_arch = "wasm32"))]

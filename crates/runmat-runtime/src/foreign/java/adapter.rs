@@ -19,8 +19,8 @@ use runmat_value::{
 
 use super::super::{
     foreign_error, invoke_foreign_callback, ForeignAdapter, ForeignAdapterDescriptor,
-    ForeignAdapterFuture, ForeignCallbackRequest, ForeignErrorKind, ForeignExecutionPolicy,
-    ForeignHandleRegistry, ForeignHostRegistration, ForeignHostRelease, ForeignResourceMetadata,
+    ForeignAdapterFuture, ForeignErrorKind, ForeignExecutionPolicy, ForeignHandleRegistry,
+    ForeignHostRegistration, ForeignHostRelease, ForeignResourceMetadata,
 };
 use super::conversion::{array_from_java, invalid_conversion, scalar_from_java, value_to_java};
 use crate::context::{ForeignCall, RuntimeContext};
@@ -519,7 +519,12 @@ impl JavaAdapter {
                         .collect::<Result<Vec<_>, _>>()
                         .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
                     let requested_outputs = usize::from(invocation.returns_value);
-                    let request = callback_request(&callback, arguments, requested_outputs)?;
+                    let request = super::super::foreign_callback_request(
+                        &callback,
+                        arguments,
+                        requested_outputs,
+                    )
+                    .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
                     let result = pollster::block_on(invoke_foreign_callback(context, request))
                         .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
                     if !invocation.returns_value {
@@ -774,42 +779,6 @@ fn value_from_java_parts(
         java_to_foreign.borrow_mut().insert(handle, weak);
     }
     Ok(Value::Foreign(reference))
-}
-
-fn callback_request(
-    callback: &Value,
-    mut arguments: Vec<Value>,
-    requested_outputs: usize,
-) -> Result<ForeignCallbackRequest, JavaInvocationError> {
-    use runmat_types::{CallableIdentity, FunctionId, MethodId};
-
-    let callable = match callback {
-        Value::FunctionHandle(name) => crate::callable_identity_for_handle_name(name).0,
-        Value::ExternalFunctionHandle(name) => crate::external_callable_identity_for_name(name),
-        Value::MethodFunctionHandle(name) => CallableIdentity::Method(MethodId(name.clone())),
-        Value::BoundFunctionHandle { function, .. } => {
-            CallableIdentity::BoundFunction(FunctionId(*function))
-        }
-        Value::Closure(closure) => {
-            let mut captured = closure.captures.clone();
-            captured.append(&mut arguments);
-            arguments = captured;
-            closure.bound_function.map_or_else(
-                || crate::callable_identity_for_handle_name(&closure.function_name).0,
-                |function| CallableIdentity::AnonymousFunction(FunctionId(function)),
-            )
-        }
-        _ => {
-            return Err(JavaInvocationError::Callback(
-                "Java callback is not a callable RunMat value".into(),
-            ))
-        }
-    };
-    Ok(ForeignCallbackRequest {
-        callable,
-        arguments,
-        requested_outputs,
-    })
 }
 
 fn classpath_paths<'a>(

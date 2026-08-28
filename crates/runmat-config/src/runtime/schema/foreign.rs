@@ -12,6 +12,47 @@ pub struct ForeignConfig {
     pub native: NativeFfiConfig,
     #[serde(default)]
     pub java: JavaConfig,
+    #[serde(default)]
+    pub python: PythonConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PythonExecutionModeConfig {
+    #[default]
+    InProcess,
+    OutOfProcess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PythonConfig {
+    #[serde(default)]
+    pub executable: Option<PathBuf>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default = "default_python_minimum_version")]
+    pub minimum_version: String,
+    #[serde(default)]
+    pub maximum_version: Option<String>,
+    #[serde(default)]
+    pub execution_mode: PythonExecutionModeConfig,
+}
+
+impl Default for PythonConfig {
+    fn default() -> Self {
+        Self {
+            executable: None,
+            version: None,
+            minimum_version: default_python_minimum_version(),
+            maximum_version: None,
+            execution_mode: PythonExecutionModeConfig::InProcess,
+        }
+    }
+}
+
+fn default_python_minimum_version() -> String {
+    "3.9".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,5 +176,20 @@ mod tests {
         );
         assert_eq!(config.java.options, vec!["-Xmx512m"]);
         assert!(toml::from_str::<ForeignConfig>("[java]\nminimum_version = 0").is_err());
+    }
+
+    #[test]
+    fn python_configuration_keeps_version_and_execution_policy_explicit() {
+        let config: ForeignConfig = toml::from_str(
+            "[python]\nversion = '3.13'\nminimum_version = '3.9'\nmaximum_version = '3.13'\nexecution_mode = 'out_of_process'",
+        )
+        .unwrap();
+        assert_eq!(config.python.version.as_deref(), Some("3.13"));
+        assert_eq!(config.python.minimum_version, "3.9");
+        assert_eq!(config.python.maximum_version.as_deref(), Some("3.13"));
+        assert_eq!(
+            config.python.execution_mode,
+            PythonExecutionModeConfig::OutOfProcess
+        );
     }
 }

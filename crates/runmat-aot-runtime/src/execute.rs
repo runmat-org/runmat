@@ -45,6 +45,11 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_program_revision(Some(assembly.program.clone()));
+    let ports = runtime
+        .service_ports()
+        .clone()
+        .with_call(Rc::new(runmat_runtime::context::RuntimeCallRouter));
+    runtime = runtime.with_service_ports(ports);
     if let Some(builtins) = crate::builtin::resolve(&program, input.builtin_resolver)? {
         let ports = runtime.service_ports().clone().with_builtin(builtins);
         runtime = runtime.with_service_ports(ports);
@@ -66,6 +71,11 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     foreign
         .register_adapter(java.clone())
+        .map_err(|error| error.to_string())?;
+    let python = runmat_runtime::foreign::PythonAdapter::new(foreign.handles().clone())
+        .map_err(|error| error.to_string())?;
+    foreign
+        .register_adapter(python)
         .map_err(|error| error.to_string())?;
     let mex = Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
     foreign
