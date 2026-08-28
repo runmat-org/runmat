@@ -174,7 +174,6 @@ jobs:
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          MACOS_CERT_IDENTITY: ${{ secrets.MACOS_CERT_IDENTITY }}
           APPLE_NOTARIZE_KEY_ID: ${{ secrets.APPLE_NOTARIZE_KEY_ID }}
           APPLE_NOTARIZE_ISSUER_ID: ${{ secrets.APPLE_NOTARIZE_ISSUER_ID }}
           APPLE_NOTARIZE_PRIVATE_KEY: ${{ secrets.APPLE_NOTARIZE_PRIVATE_KEY }}

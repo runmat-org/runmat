@@ -16,7 +16,6 @@ binary="$(cd "$(dirname "$binary")" && pwd)/$(basename "$binary")"
 required_environment=(
   MACOS_CERT_P12
   MACOS_CERT_PASSWORD
-  MACOS_CERT_IDENTITY
   APPLE_NOTARIZE_KEY_ID
   APPLE_NOTARIZE_ISSUER_ID
   APPLE_NOTARIZE_PRIVATE_KEY
@@ -49,6 +48,19 @@ security unlock-keychain -p "$keychain_password" "$keychain"
 security import "$certificate" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
 security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
 
+identity_listing="$(security find-identity -v -p codesigning "$keychain")"
+signing_identities="$(
+  printf '%s\n' "$identity_listing" |
+    awk '$2 ~ /^[[:xdigit:]]+$/ && length($2) == 40 { print $2 }'
+)"
+signing_identity_count="$(printf '%s\n' "$signing_identities" | awk 'NF { count += 1 } END { print count + 0 }')"
+if [[ "$signing_identity_count" -ne 1 ]]; then
+  echo "expected exactly one valid code-signing identity in the imported certificate, found $signing_identity_count" >&2
+  printf '%s\n' "$identity_listing" >&2
+  exit 1
+fi
+signing_identity="$signing_identities"
+
 cat > "$entitlements" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -62,7 +74,7 @@ cat > "$entitlements" <<'EOF'
 EOF
 
 codesign --force --timestamp --options runtime --entitlements "$entitlements" \
-  --keychain "$keychain" --sign "$MACOS_CERT_IDENTITY" "$binary"
+  --keychain "$keychain" --sign "$signing_identity" "$binary"
 codesign --verify --strict --verbose=2 "$binary"
 
 printf '%s' "$APPLE_NOTARIZE_PRIVATE_KEY" | base64 --decode > "$notary_key"
