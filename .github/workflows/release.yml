@@ -42,6 +42,8 @@ jobs:
     name: Validate release with CI
     needs: [validate-release-state]
     uses: ./.github/workflows/ci.yml
+    with:
+      release_validation: true
 
   build-release:
     if: github.event_name == 'push'
