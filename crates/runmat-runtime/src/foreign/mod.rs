@@ -11,6 +11,8 @@ mod mex;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_ffi;
 mod policy;
+#[cfg(not(target_arch = "wasm32"))]
+mod python;
 mod runtime;
 mod telemetry;
 
@@ -27,6 +29,8 @@ pub use mex::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_ffi::*;
 pub use policy::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use python::*;
 pub use runtime::*;
 pub use telemetry::*;
 
@@ -73,6 +77,43 @@ pub async fn store_foreign_member(
         vec![
             runmat_value::Value::Foreign(reference),
             runmat_value::Value::String(member),
+            value,
+        ],
+    )
+    .await
+}
+
+/// Read one Python-style item through the resource's owning adapter. Source
+/// indices remain one-based until the adapter performs its language-specific
+/// conversion, so the VM does not acquire Python indexing policy.
+pub async fn index_foreign_resource(
+    reference: runmat_value::ForeignRef,
+    indices: Vec<runmat_value::Value>,
+) -> Result<runmat_value::Value, crate::RuntimeError> {
+    invoke_foreign_member(
+        reference.clone(),
+        "get_item",
+        vec![
+            runmat_value::Value::Foreign(reference),
+            runmat_value::Value::OutputList(indices),
+        ],
+    )
+    .await
+}
+
+/// Assign one Python-style item and return the same foreign resource identity,
+/// matching handle-object assignment semantics.
+pub async fn assign_foreign_resource_index(
+    reference: runmat_value::ForeignRef,
+    indices: Vec<runmat_value::Value>,
+    value: runmat_value::Value,
+) -> Result<runmat_value::Value, crate::RuntimeError> {
+    invoke_foreign_member(
+        reference.clone(),
+        "set_item",
+        vec![
+            runmat_value::Value::Foreign(reference),
+            runmat_value::Value::OutputList(indices),
             value,
         ],
     )
@@ -274,6 +315,41 @@ pub async fn try_invoke_java(
     } else {
         Some(result)
     }
+}
+
+/// Resolve the explicit `py.<module>.<callable>` namespace through the
+/// session's Python adapter. No other dotted namespace is claimed here.
+pub async fn try_invoke_python(
+    context: crate::context::RuntimeContext,
+    name: &str,
+    arguments: Vec<runmat_value::Value>,
+    requested_outputs: usize,
+) -> Option<Result<runmat_value::Value, crate::RuntimeError>> {
+    if !name.starts_with("py.") || name.len() <= 3 {
+        return None;
+    }
+    let Some(service) = context.service_ports().foreign().cloned() else {
+        return Some(Err(foreign_error(
+            ForeignErrorKind::UnsupportedOnWasm,
+            format!("Python call `{name}` is unavailable on this host"),
+        )));
+    };
+    let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
+    call_arguments.push(runmat_value::Value::String(name.into()));
+    call_arguments.extend(arguments);
+    Some(
+        context
+            .scope(service.invoke(
+                context.clone(),
+                crate::context::ForeignCall {
+                    adapter: "python".into(),
+                    symbol: "invoke_qualified".into(),
+                    arguments: call_arguments,
+                    requested_outputs,
+                },
+            ))
+            .await,
+    )
 }
 
 fn is_java_qualified_candidate(name: &str) -> bool {

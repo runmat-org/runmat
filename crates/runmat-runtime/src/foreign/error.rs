@@ -16,6 +16,7 @@ pub enum ForeignErrorKind {
     InvalidCall,
     LoadFailed,
     InvocationFailed,
+    ConversionFailed,
 }
 
 impl ForeignErrorKind {
@@ -35,6 +36,7 @@ impl ForeignErrorKind {
             Self::InvalidCall => "RunMat:Foreign:InvalidCall",
             Self::LoadFailed => "RunMat:Foreign:LoadFailed",
             Self::InvocationFailed => "RunMat:Foreign:InvocationFailed",
+            Self::ConversionFailed => "RunMat:Foreign:ConversionFailed",
         }
     }
 }

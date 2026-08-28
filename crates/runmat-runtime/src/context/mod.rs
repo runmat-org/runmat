@@ -20,9 +20,9 @@ pub use runtime::{
 pub use scope::{ContextFuture, RuntimeContextGuard};
 pub use services::{
     ForeignCall, HostInteraction, NativeCapability, ParallelCapability, RuntimeAccelerationService,
-    RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallService, RuntimeErrorService,
-    RuntimeForeignService, RuntimeHostService, RuntimeNativeService, RuntimeObjectService,
-    RuntimeParallelResources, RuntimeParallelService, RuntimePlacementService, RuntimeServicePorts,
-    RuntimeWorkspaceService,
+    RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService,
+    RuntimeErrorService, RuntimeForeignService, RuntimeHostService, RuntimeNativeService,
+    RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
+    RuntimePlacementService, RuntimeServicePorts, RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;

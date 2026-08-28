@@ -6476,6 +6476,7 @@ dependencies = [
  "runmat-native-ffi",
  "runmat-package",
  "runmat-parser",
+ "runmat-python",
  "runmat-runtime",
  "runmat-static-analysis",
  "runmat-telemetry",
@@ -7216,6 +7217,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-python"
+version = "0.6.2"
+dependencies = [
+ "libloading 0.8.9",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-runtime"
 version = "0.6.2"
 dependencies = [
@@ -7280,6 +7292,7 @@ dependencies = [
  "runmat-native-ffi",
  "runmat-plot",
  "runmat-process-host",
+ "runmat-python",
  "runmat-test",
  "runmat-thread-local",
  "runmat-time",

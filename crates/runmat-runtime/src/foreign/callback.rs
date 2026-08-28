@@ -14,6 +14,46 @@ pub struct ForeignCallbackRequest {
     pub requested_outputs: usize,
 }
 
+/// Normalize every supported RunMat callable value into the executor-neutral
+/// callback request shared by foreign adapters. Closure captures are prepended
+/// exactly once before the request crosses the adapter boundary.
+pub fn foreign_callback_request(
+    callback: &Value,
+    mut arguments: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<ForeignCallbackRequest, RuntimeError> {
+    use runmat_types::{FunctionId, MethodId};
+
+    let callable = match callback {
+        Value::FunctionHandle(name) => crate::callable_identity_for_handle_name(name).0,
+        Value::ExternalFunctionHandle(name) => crate::external_callable_identity_for_name(name),
+        Value::MethodFunctionHandle(name) => CallableIdentity::Method(MethodId(name.clone())),
+        Value::BoundFunctionHandle { function, .. } => {
+            CallableIdentity::BoundFunction(FunctionId(*function))
+        }
+        Value::Closure(closure) => {
+            let mut captured = closure.captures.clone();
+            captured.append(&mut arguments);
+            arguments = captured;
+            closure.bound_function.map_or_else(
+                || crate::callable_identity_for_handle_name(&closure.function_name).0,
+                |function| CallableIdentity::AnonymousFunction(FunctionId(function)),
+            )
+        }
+        _ => {
+            return Err(foreign_error(
+                ForeignErrorKind::CallbackFailed,
+                "foreign callback target is not a callable RunMat value",
+            ));
+        }
+    };
+    Ok(ForeignCallbackRequest {
+        callable,
+        arguments,
+        requested_outputs,
+    })
+}
+
 pub fn invoke_foreign_callback(
     context: RuntimeContext,
     request: ForeignCallbackRequest,

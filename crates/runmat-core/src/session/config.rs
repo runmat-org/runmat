@@ -260,6 +260,60 @@ impl RunMatSession {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    pub fn configure_python_runtime(
+        &mut self,
+        configuration: runmat_runtime::foreign::PythonRuntimeConfiguration,
+    ) -> Result<(), RuntimeError> {
+        self.python_adapter.configure(configuration)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_python_config(
+        &mut self,
+        config: &runmat_config::runtime::PythonConfig,
+    ) -> Result<(), RuntimeError> {
+        fn version(value: &str, label: &str) -> Result<(u16, u16), RuntimeError> {
+            let mut parts = value.split('.');
+            let major = parts.next().and_then(|value| value.parse().ok());
+            let minor = parts.next().and_then(|value| value.parse().ok());
+            if parts.next().is_some() || major.is_none() || minor.is_none() {
+                return Err(
+                    build_runtime_error(format!("{label} must use major.minor form"))
+                        .with_builtin("python")
+                        .with_identifier("RunMat:Python:InvalidVersion")
+                        .build(),
+                );
+            }
+            Ok((major.expect("checked"), minor.expect("checked")))
+        }
+        let minimum_version = version(&config.minimum_version, "Python minimum_version")?;
+        let maximum_version = config
+            .maximum_version
+            .as_deref()
+            .map(|value| version(value, "Python maximum_version"))
+            .transpose()?;
+        let required_version = config
+            .version
+            .as_deref()
+            .map(|value| version(value, "Python version"))
+            .transpose()?;
+        self.configure_python_runtime(runmat_runtime::foreign::PythonRuntimeConfiguration {
+            executable: config.executable.clone(),
+            version: required_version,
+            minimum_version,
+            maximum_version,
+            execution_mode: match config.execution_mode {
+                runmat_config::runtime::PythonExecutionModeConfig::InProcess => {
+                    runmat_python::PythonExecutionMode::InProcess
+                }
+                runmat_config::runtime::PythonExecutionModeConfig::OutOfProcess => {
+                    runmat_python::PythonExecutionMode::OutOfProcess
+                }
+            },
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn set_desktop_host_available(&mut self, available: bool) {
         self.java_adapter.set_desktop_available(available);
     }

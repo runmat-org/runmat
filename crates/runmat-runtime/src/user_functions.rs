@@ -532,8 +532,18 @@ pub async fn try_call_semantic_descriptor(
             {
                 return Some(result);
             }
+            if let Some(result) = crate::foreign::try_invoke_clib(
+                context.clone(),
+                &name,
+                args.clone(),
+                requested_outputs,
+            )
+            .await
+            {
+                return Some(result);
+            }
             if let Some(result) =
-                crate::foreign::try_invoke_clib(context, &name, args.clone(), requested_outputs)
+                crate::foreign::try_invoke_python(context, &name, args.clone(), requested_outputs)
                     .await
             {
                 return Some(result);

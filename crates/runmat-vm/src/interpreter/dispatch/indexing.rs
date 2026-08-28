@@ -929,6 +929,9 @@ pub async fn paren_index_value(
     function_registry: &crate::bytecode::FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
     match &base {
+        Value::Foreign(reference) => {
+            runmat_runtime::foreign::index_foreign_resource(reference.clone(), raw_indices).await
+        }
         Value::ObjectArray(array) => {
             let selectors =
                 build_slice_selectors(raw_indices.len(), 0, 0, &raw_indices, array.shape()).await?;
@@ -1191,6 +1194,24 @@ pub async fn dispatch_indexing(
                 "stack underflow",
             ))?;
             match base {
+                Value::Foreign(reference) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "ForeignIndexDelete",
+                            "Indexed deletion is not supported for foreign objects",
+                        ));
+                    }
+                    let indices = indices
+                        .into_iter()
+                        .map(|index| Value::Int(IntValue::U64(index as u64)))
+                        .collect();
+                    stack.push(
+                        runmat_runtime::foreign::assign_foreign_resource_index(
+                            reference, indices, rhs,
+                        )
+                        .await?,
+                    );
+                }
                 Value::Object(obj) => {
                     if let Some(err) = missing_member_index_overload_error(
                         &Value::Object(obj.clone()),

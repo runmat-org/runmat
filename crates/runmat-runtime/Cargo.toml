@@ -92,6 +92,7 @@ hdf5 = { package = "hdf5-metno", version = "0.13.0" }
 runmat-process-host = { workspace = true }
 runmat-native-ffi = { workspace = true }
 runmat-java = { workspace = true }
+runmat-python = { workspace = true }
 arrow-array = "59.0.0"
 arrow-schema = "59.0.0"
 bytes = "1.12.0"
