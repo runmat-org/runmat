@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use runmat_types::{ProgramFunctionId, ProgramPointId};
 
-use crate::parallel::{MirCollectiveOp, MirDistributedOp, MirSpmdHeader};
+use crate::parallel::{MirDistributedOp, MirSpmdHeader};
 use crate::{
     BasicBlockId, MirBody, MirCallArg, MirCallee, MirIndexComponent, MirIndexing, MirLocalId,
     MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
@@ -291,16 +291,11 @@ fn rvalue_uses(value: &MirRvalue, uses: &mut Locals, defs: &mut Locals) {
         }
         MirRvalue::Distributed(MirDistributedOp::Create { input, .. }) => operand_uses(input, uses),
         MirRvalue::Distributed(_) => {}
-        MirRvalue::Collective(operation) => match operation {
-            MirCollectiveOp::Barrier { .. } | MirCollectiveOp::Receive { .. } => {}
-            MirCollectiveOp::Broadcast { input, .. }
-            | MirCollectiveOp::Gather { input, .. }
-            | MirCollectiveOp::Scatter { input, .. }
-            | MirCollectiveOp::AllGather { input, .. }
-            | MirCollectiveOp::Reduce { input, .. }
-            | MirCollectiveOp::AllReduce { input, .. }
-            | MirCollectiveOp::Send { input, .. } => operand_uses(input, uses),
-        },
+        MirRvalue::Collective(operation) => {
+            for operand in operation.operands() {
+                operand_uses(operand, uses);
+            }
+        }
         MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon

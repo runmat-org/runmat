@@ -365,6 +365,8 @@ fn value_tag(value: &Value) -> &'static str {
         Value::Task(_) => "Task",
         Value::Pool(_) => "Pool",
         Value::Job(_) => "Job",
+        Value::Distributed(_) => "Distributed",
+        Value::Composite(_) => "Composite",
         Value::Foreign(_) => "Foreign",
     }
 }

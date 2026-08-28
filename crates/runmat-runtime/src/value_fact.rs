@@ -168,6 +168,46 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::Job(_) => execution(ExecutionFact::Job {
             output: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
         }),
+        Value::Distributed(handle) => ValueFact {
+            kind: ValueKindFact::Distributed(runmat_types::DistributedFact {
+                id: handle.contract,
+                owner: handle.owner_region,
+                scheme: Some(handle.scheme.clone()),
+                value: Box::new(handle.value.clone()),
+                materializable: handle.materializable,
+            }),
+            shape: shape_u64(&handle.global_shape),
+            storage: StorageFact::Opaque,
+            layout: LayoutFact::Unknown,
+            contiguity: ContiguityFact::Unknown,
+            view: ViewFact::Unknown,
+            residency: ResidencyFact::Remote {
+                pool: Some(handle.pool.id.to_string()),
+            },
+            alias: AliasFact::Identity,
+            mutation: MutationFact::HandleSemantics,
+            certainty: CertaintyFact::Proven,
+            invalidation: InvalidationVector::default(),
+        },
+        Value::Composite(handle) => ValueFact {
+            kind: ValueKindFact::Composite(runmat_types::CompositeFact {
+                owner: handle.owner_region,
+                labs: handle.gang.labs,
+                value: Box::new(handle.value.clone()),
+            }),
+            shape: ShapeFact::Scalar,
+            storage: StorageFact::Opaque,
+            layout: LayoutFact::Unknown,
+            contiguity: ContiguityFact::Unknown,
+            view: ViewFact::Unknown,
+            residency: ResidencyFact::Remote {
+                pool: Some(handle.gang.pool.id.to_string()),
+            },
+            alias: AliasFact::Identity,
+            mutation: MutationFact::HandleSemantics,
+            certainty: CertaintyFact::Proven,
+            invalidation: InvalidationVector::default(),
+        },
         Value::Foreign(reference) => {
             let mut fact = fact(
                 ValueKindFact::Foreign(ForeignFact {
@@ -216,6 +256,20 @@ fn scalar(kind: ValueKindFact) -> ValueFact {
 
 fn dense(kind: ValueKindFact, dimensions: &[usize]) -> ValueFact {
     fact(kind, shape(dimensions), StorageFact::Dense)
+}
+
+fn shape_u64(dimensions: &[u64]) -> ShapeFact {
+    ShapeFact::Shaped {
+        dims: dimensions
+            .iter()
+            .copied()
+            .map(|dimension| {
+                usize::try_from(dimension)
+                    .map(DimensionFact::Known)
+                    .unwrap_or(DimensionFact::Unknown)
+            })
+            .collect(),
+    }
 }
 
 fn sparse(kind: ValueKindFact, dimensions: &[usize]) -> ValueFact {

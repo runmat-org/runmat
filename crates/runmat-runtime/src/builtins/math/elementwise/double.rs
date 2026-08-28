@@ -270,7 +270,9 @@ async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
-        | Value::Job(_) => Err(conversion_error("MException")),
+        | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_) => Err(conversion_error("MException")),
         Value::Foreign(_) => Err(conversion_error("foreign")),
         Value::OutputList(_) => Err(conversion_error("OutputList")),
     }?;

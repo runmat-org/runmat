@@ -501,16 +501,7 @@ fn call_argument_mentions_local(argument: &MirCallArg, local: MirLocalId) -> boo
 }
 
 fn collective_input(operation: &MirCollectiveOp) -> Option<&MirOperand> {
-    match operation {
-        MirCollectiveOp::Barrier { .. } | MirCollectiveOp::Receive { .. } => None,
-        MirCollectiveOp::Broadcast { input, .. }
-        | MirCollectiveOp::Gather { input, .. }
-        | MirCollectiveOp::Scatter { input, .. }
-        | MirCollectiveOp::AllGather { input, .. }
-        | MirCollectiveOp::Reduce { input, .. }
-        | MirCollectiveOp::AllReduce { input, .. }
-        | MirCollectiveOp::Send { input, .. } => Some(input),
-    }
+    operation.input()
 }
 
 fn operand_is_local(operand: &MirOperand, local: MirLocalId) -> bool {

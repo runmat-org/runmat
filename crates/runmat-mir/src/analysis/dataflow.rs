@@ -764,19 +764,11 @@ fn diagnose_rvalue_reads(
             | crate::parallel::MirDistributedOp::Materialize { .. }
             | crate::parallel::MirDistributedOp::Redistribute { .. } => {}
         },
-        MirRvalue::Collective(operation) => match operation {
-            crate::parallel::MirCollectiveOp::Broadcast { input, .. }
-            | crate::parallel::MirCollectiveOp::Gather { input, .. }
-            | crate::parallel::MirCollectiveOp::Scatter { input, .. }
-            | crate::parallel::MirCollectiveOp::AllGather { input, .. }
-            | crate::parallel::MirCollectiveOp::Reduce { input, .. }
-            | crate::parallel::MirCollectiveOp::AllReduce { input, .. }
-            | crate::parallel::MirCollectiveOp::Send { input, .. } => {
-                diagnose_operand_read(input, state, span, diagnostics);
+        MirRvalue::Collective(operation) => {
+            for operand in operation.operands() {
+                diagnose_operand_read(operand, state, span, diagnostics);
             }
-            crate::parallel::MirCollectiveOp::Barrier { .. }
-            | crate::parallel::MirCollectiveOp::Receive { .. } => {}
-        },
+        }
     }
 }
 

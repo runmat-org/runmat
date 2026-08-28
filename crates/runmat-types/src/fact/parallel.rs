@@ -1,4 +1,4 @@
-use crate::{DistributedValueId, DistributionScheme, ParallelRegionId, ValueFact};
+use crate::{DistributedValueId, DistributionScheme, LabCount, ParallelRegionId, ValueFact};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -9,4 +9,12 @@ pub struct DistributedFact {
     pub scheme: Option<DistributionScheme>,
     pub value: Box<ValueFact>,
     pub materializable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompositeFact {
+    pub owner: ParallelRegionId,
+    pub labs: LabCount,
+    pub value: Box<ValueFact>,
 }

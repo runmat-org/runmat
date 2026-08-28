@@ -70,6 +70,7 @@ fn format_kind(kind: &ValueKindFact) -> String {
             runmat_types::ExecutionFact::Job { .. } => "job".to_string(),
         },
         ValueKindFact::Distributed(_) => "distributed".to_string(),
+        ValueKindFact::Composite(_) => "Composite".to_string(),
         ValueKindFact::Foreign(foreign) => foreign.type_name.as_ref().map_or_else(
             || format!("foreign<{}>", foreign.family),
             |name| format!("foreign<{name}>"),

@@ -201,26 +201,14 @@ impl Walker<'_> {
                     self.operand(from, input, Reason::FunctionHandle);
                 }
             }
-            MirRvalue::Collective(operation) => match operation {
-                crate::parallel::MirCollectiveOp::Broadcast { input, .. }
-                | crate::parallel::MirCollectiveOp::Gather { input, .. }
-                | crate::parallel::MirCollectiveOp::Scatter { input, .. }
-                | crate::parallel::MirCollectiveOp::AllGather { input, .. }
-                | crate::parallel::MirCollectiveOp::Send { input, .. } => {
-                    self.operand(from, input, Reason::FunctionHandle);
+            MirRvalue::Collective(operation) => {
+                for operand in operation.operands() {
+                    self.operand(from, operand, Reason::FunctionHandle);
                 }
-                crate::parallel::MirCollectiveOp::Reduce {
-                    input, operator, ..
+                if let Some(operator) = operation.operator() {
+                    self.operator(from, operator);
                 }
-                | crate::parallel::MirCollectiveOp::AllReduce {
-                    input, operator, ..
-                } => {
-                    self.operand(from, input, Reason::FunctionHandle);
-                    self.operator(from, *operator);
-                }
-                crate::parallel::MirCollectiveOp::Barrier { .. }
-                | crate::parallel::MirCollectiveOp::Receive { .. } => {}
-            },
+            }
             MirRvalue::Colon | MirRvalue::End => {}
         }
     }

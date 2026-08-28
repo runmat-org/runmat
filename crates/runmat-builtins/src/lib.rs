@@ -397,6 +397,8 @@ impl Type {
             | Value::Task(_)
             | Value::Pool(_)
             | Value::Job(_)
+            | Value::Distributed(_)
+            | Value::Composite(_)
             | Value::Foreign(_) => Type::Unknown,
             Value::CharArray(ca) => {
                 // Treat as cell of char for type purposes; or a 2-D char matrix conceptually

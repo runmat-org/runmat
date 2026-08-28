@@ -1,6 +1,6 @@
 use crate::{
-    CapabilitySet, CollectiveId, DistributedValueId, LabCount, LabRank, OperatorKind,
-    ParallelRegionId, RegionValueId, SchemaValidationError, ValueFact,
+    CapabilitySet, CollectiveId, DistributedValueId, LabCount, OperatorKind, ParallelRegionId,
+    RegionValueId, SchemaValidationError, ValueFact,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 mod spmd;
 pub use spmd::SpmdLabRequirement;
 
-pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 4;
+pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
@@ -121,6 +121,8 @@ pub struct SpmdContract {
     pub id: ParallelRegionId,
     pub labs: SpmdLabRequirement,
     pub captures: Vec<ParallelVariableContract>,
+    pub outputs: Vec<ParallelVariableContract>,
+    pub effects: crate::EffectSet,
     pub capabilities: CapabilitySet,
 }
 
@@ -153,50 +155,26 @@ pub struct DistributedValueContract {
 pub struct CollectiveContract {
     pub id: CollectiveId,
     pub operation: CollectiveOperation,
+    pub input: Option<ValueFact>,
+    pub output: Option<ValueFact>,
+    pub root: Option<ValueFact>,
+    pub peer: Option<ValueFact>,
+    pub tag: Option<ValueFact>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CollectiveOperation {
     Barrier,
-    Broadcast {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        root: LabRank,
-    },
-    Gather {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        root: LabRank,
-    },
-    Scatter {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        root: LabRank,
-    },
-    AllGather {
-        input: DistributedValueId,
-        output: DistributedValueId,
-    },
-    Reduce {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        root: LabRank,
-        operator: OperatorKind,
-    },
-    AllReduce {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        operator: OperatorKind,
-    },
-    Send {
-        input: DistributedValueId,
-        peer: LabRank,
-    },
-    Receive {
-        output: DistributedValueId,
-        peer: LabRank,
-    },
+    Broadcast,
+    Gather,
+    Scatter,
+    AllGather,
+    Reduce { operator: OperatorKind },
+    AllReduce { operator: OperatorKind },
+    Send,
+    Receive,
+    Probe,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -299,9 +277,11 @@ impl ParallelManifest {
                 region.id,
                 &region.captures,
             )?;
+            validate_variables("parallel.spmd_regions.outputs", region.id, &region.outputs)?;
             if region
                 .captures
                 .iter()
+                .chain(&region.outputs)
                 .any(|variable| matches!(&variable.role, ParallelVariableRole::Loop))
             {
                 return Err(SchemaValidationError::new(
@@ -310,11 +290,6 @@ impl ParallelManifest {
                 ));
             }
         }
-        let distributed_ids = self
-            .distributed_values
-            .iter()
-            .map(|value| value.id)
-            .collect::<BTreeSet<_>>();
         for distributed in &self.distributed_values {
             if !region_ids.contains(&distributed.owner_region)
                 || distributed.id.function != distributed.owner_region.0.function
@@ -331,25 +306,25 @@ impl ParallelManifest {
                     256,
                 )?;
             }
+            if matches!(
+                distributed.scheme,
+                DistributionScheme::Block { dimension: 0 }
+                    | DistributionScheme::Cyclic { dimension: 0 }
+            ) {
+                return Err(SchemaValidationError::new(
+                    "parallel.distributed_values.scheme",
+                    "distribution dimensions use one-based nonzero identities",
+                ));
+            }
         }
         for collective in &self.collectives {
-            if !region_ids.contains(&collective.id.region) {
+            if !spmd_ids.contains(&collective.id.region) {
                 return Err(SchemaValidationError::new(
                     "parallel.collectives.region",
-                    "collective must belong to a declared parallel region",
+                    "collective must belong to a declared SPMD region",
                 ));
             }
-            if collective
-                .operation
-                .values()
-                .iter()
-                .any(|value| !distributed_ids.contains(value))
-            {
-                return Err(SchemaValidationError::new(
-                    "parallel.collectives.values",
-                    "collective inputs and outputs must name declared distributed values",
-                ));
-            }
+            collective.validate()?;
         }
         Ok(())
     }
@@ -409,19 +384,48 @@ fn validate_variables(
     Ok(())
 }
 
-impl CollectiveOperation {
-    fn values(&self) -> Vec<DistributedValueId> {
-        match self {
-            Self::Barrier => Vec::new(),
-            Self::Broadcast { input, output, .. }
-            | Self::Gather { input, output, .. }
-            | Self::Scatter { input, output, .. }
-            | Self::AllGather { input, output }
-            | Self::Reduce { input, output, .. }
-            | Self::AllReduce { input, output, .. } => vec![*input, *output],
-            Self::Send { input, .. } => vec![*input],
-            Self::Receive { output, .. } => vec![*output],
+impl CollectiveContract {
+    fn validate(&self) -> Result<(), SchemaValidationError> {
+        let actual = (
+            self.input.is_some(),
+            self.output.is_some(),
+            self.root.is_some(),
+            self.peer.is_some(),
+        );
+        let expected = match self.operation {
+            CollectiveOperation::Barrier => (false, false, false, false),
+            CollectiveOperation::Broadcast
+            | CollectiveOperation::Gather
+            | CollectiveOperation::Scatter
+            | CollectiveOperation::Reduce { .. } => (true, true, true, false),
+            CollectiveOperation::AllGather | CollectiveOperation::AllReduce { .. } => {
+                (true, true, false, false)
+            }
+            CollectiveOperation::Send => (true, false, false, true),
+            CollectiveOperation::Receive | CollectiveOperation::Probe => {
+                (false, true, false, self.peer.is_some())
+            }
+        };
+        if actual != expected {
+            return Err(SchemaValidationError::new(
+                "parallel.collectives",
+                "collective operand facts do not match the operation contract",
+            ));
         }
+        if self.tag.is_some()
+            && !matches!(
+                self.operation,
+                CollectiveOperation::Send
+                    | CollectiveOperation::Receive
+                    | CollectiveOperation::Probe
+            )
+        {
+            return Err(SchemaValidationError::new(
+                "parallel.collectives.tag",
+                "only point-to-point operations may declare a tag operand",
+            ));
+        }
+        Ok(())
     }
 }
 

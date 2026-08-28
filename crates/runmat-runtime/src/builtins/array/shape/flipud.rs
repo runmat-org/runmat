@@ -253,6 +253,8 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)

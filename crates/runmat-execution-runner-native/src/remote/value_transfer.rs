@@ -53,6 +53,7 @@ pub(super) fn materialize(
 fn visit(value: &ValuePayload, references: &mut Vec<ValueRef>) {
     match value {
         ValuePayload::Object(reference) => references.push((**reference).clone()),
+        ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {}
         ValuePayload::Inline(value) => match value.as_ref() {
             InlineValue::Cell { values, .. } | InlineValue::OutputList(values) => {
                 values.iter().for_each(|value| visit(value, references));
@@ -121,6 +122,7 @@ fn materialize_inner(
             }
             Ok(ValuePayload::Inline(Box::new(inline)))
         }
+        ValuePayload::Distributed(_) | ValuePayload::Composite(_) => Ok(value.clone()),
     }
 }
 

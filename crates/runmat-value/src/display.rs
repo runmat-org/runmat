@@ -321,6 +321,8 @@ impl fmt::Display for Value {
             Value::Task(handle) => write!(f, "<task {}>", handle.id),
             Value::Pool(handle) => write!(f, "<pool {}>", handle.id),
             Value::Job(handle) => write!(f, "<job {}>", handle.id),
+            Value::Distributed(handle) => write!(f, "<distributed {}>", handle.id),
+            Value::Composite(handle) => write!(f, "<composite {}>", handle.id),
             Value::Foreign(reference) => write!(
                 f,
                 "<foreign {}:{}@{}>",

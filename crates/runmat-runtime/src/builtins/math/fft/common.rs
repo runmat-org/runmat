@@ -142,6 +142,8 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(builtin_error(
             builtin,
@@ -1374,6 +1376,8 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(builtin_error(
             builtin,

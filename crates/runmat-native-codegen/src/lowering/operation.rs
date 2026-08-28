@@ -352,16 +352,8 @@ fn collect_rvalue_inputs(
             }
         }
         R::Collective(operation) => {
-            use runmat_mir::parallel::MirCollectiveOp as C;
-            match operation {
-                C::Broadcast { input, .. }
-                | C::Gather { input, .. }
-                | C::Scatter { input, .. }
-                | C::AllGather { input, .. }
-                | C::Reduce { input, .. }
-                | C::AllReduce { input, .. }
-                | C::Send { input, .. } => collect_operand(input, locals, output)?,
-                C::Barrier { .. } | C::Receive { .. } => {}
+            for operand in operation.operands() {
+                collect_operand(operand, locals, output)?;
             }
         }
         R::WorkspaceFirstStaticProperty { .. } | R::MetaClass(_) | R::Colon | R::End => {}

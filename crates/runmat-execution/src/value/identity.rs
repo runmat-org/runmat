@@ -5,8 +5,25 @@ use crate::{ContractError, Digest};
 
 pub(super) fn logical_digest(payload: &ValuePayload) -> Result<Digest, ContractError> {
     payload.validate(ValueLimits::default())?;
-    if let ValuePayload::Object(reference) = payload {
-        return Ok(reference.logical_digest);
+    match payload {
+        ValuePayload::Object(reference) => return Ok(reference.logical_digest),
+        ValuePayload::Distributed(handle) => {
+            return Ok(handle_digest(
+                b"runmat-distributed-value-v1\0",
+                handle.scope_id.bytes(),
+                handle.id.bytes(),
+                handle.generation,
+            ));
+        }
+        ValuePayload::Composite(handle) => {
+            return Ok(handle_digest(
+                b"runmat-composite-value-v1\0",
+                handle.scope_id.bytes(),
+                handle.id.bytes(),
+                handle.generation,
+            ));
+        }
+        ValuePayload::Inline(_) => {}
     }
     let mut bytes = b"runmat-logical-value-v1\0".to_vec();
     encode_payload(&mut Encoder::new(&mut bytes), payload)?;
@@ -31,7 +48,47 @@ fn encode_payload(
             .and_then(|encoder| encoder.bytes(reference.logical_digest.bytes()))
             .map(|_| ())
             .map_err(encoding),
+        ValuePayload::Distributed(handle) => encode_handle(
+            encoder,
+            2,
+            handle.scope_id.bytes(),
+            handle.id.bytes(),
+            handle.generation,
+        ),
+        ValuePayload::Composite(handle) => encode_handle(
+            encoder,
+            3,
+            handle.scope_id.bytes(),
+            handle.id.bytes(),
+            handle.generation,
+        ),
     }
+}
+
+fn handle_digest(domain: &[u8], scope: &[u8], id: &[u8], generation: u64) -> Digest {
+    let mut bytes = Vec::with_capacity(domain.len() + scope.len() + id.len() + 8);
+    bytes.extend_from_slice(domain);
+    bytes.extend_from_slice(scope);
+    bytes.extend_from_slice(id);
+    bytes.extend_from_slice(&generation.to_be_bytes());
+    Digest::sha256(bytes)
+}
+
+fn encode_handle(
+    encoder: &mut Encoder<&mut Vec<u8>>,
+    tag: u8,
+    scope: &[u8],
+    id: &[u8],
+    generation: u64,
+) -> Result<(), ContractError> {
+    encoder
+        .array(4)
+        .and_then(|encoder| encoder.u8(tag))
+        .and_then(|encoder| encoder.bytes(scope))
+        .and_then(|encoder| encoder.bytes(id))
+        .and_then(|encoder| encoder.u64(generation))
+        .map(|_| ())
+        .map_err(encoding)
 }
 
 fn encode_inline(

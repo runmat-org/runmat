@@ -184,6 +184,15 @@ impl FactJoin for ValueKindFact {
                     materializable: left.materializable && right.materializable,
                 })
             }
+            (Composite(left), Composite(right))
+                if left.owner == right.owner && left.labs == right.labs =>
+            {
+                Composite(crate::CompositeFact {
+                    owner: left.owner,
+                    labs: left.labs,
+                    value: Box::new(left.value.join(&right.value)),
+                })
+            }
             (Foreign(left), Foreign(right)) if left.family == right.family => {
                 Foreign(ForeignFact {
                     family: left.family.clone(),

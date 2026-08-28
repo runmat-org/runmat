@@ -1,7 +1,10 @@
 //! Portable execution contracts shared by native, browser, test, and remote hosts.
 
+pub mod collective;
+pub mod distributed;
 mod error;
 pub mod executable;
+pub mod gang;
 pub mod handle;
 pub mod identity;
 pub mod placement;
@@ -13,6 +16,15 @@ pub mod state;
 pub mod task;
 pub mod value;
 
+pub use collective::{
+    CollectiveInvocation, CollectiveMessageTag, CollectiveRequest, CollectiveResponse,
+    CollectiveSequence, ReceiveSelection,
+};
+pub use distributed::{
+    validate_partition_layouts, CompositeHandle, CompositeSnapshot, DistributedPartition,
+    DistributedPartitionLayout, DistributedValueHandle, DistributedValueSnapshot, PartitionRange,
+    PartitionSelection,
+};
 pub use error::ContractError;
 pub use executable::{
     ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
@@ -21,12 +33,16 @@ pub use executable::{
     ExecutableUnitManifest, SectionRequirement, EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES,
     EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
+pub use gang::{GangHandle, GangRequest, GangSnapshot, SpmdTaskContext};
 pub use handle::{
     ExecutionHandleSnapshot, ExecutionHandleState, FutureHandle, JobHandle, OutputContract,
     PoolBackend, PoolHandle, PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
 };
+pub use identity::{
+    CompositeId, DistributedObjectId, ExecutionScopeId, FutureId, GangId, JobId, PoolId, RunId,
+    TaskId,
+};
 pub use identity::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
-pub use identity::{ExecutionScopeId, FutureId, JobId, PoolId, RunId, TaskId};
 pub use placement::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor,

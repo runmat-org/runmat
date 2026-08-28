@@ -109,7 +109,9 @@ async fn full_builtin(value: Value) -> BuiltinResult<Value> {
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
-        | Value::Job(_) => Err(invalid_input("MException")),
+        | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_) => Err(invalid_input("MException")),
         Value::Foreign(_) => Err(invalid_input("foreign")),
         Value::OutputList(_) => Err(invalid_input("OutputList")),
     }

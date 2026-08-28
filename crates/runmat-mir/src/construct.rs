@@ -44,6 +44,7 @@ pub enum MirConstructKind {
     CollectiveAllReduce,
     CollectiveSend,
     CollectiveReceive,
+    CollectiveProbe,
     Assign,
     MultiAssign,
     Expr,
@@ -102,6 +103,7 @@ pub fn rvalue_construct_kind(value: &crate::MirRvalue) -> MirConstructKind {
             C::AllReduce { .. } => K::CollectiveAllReduce,
             C::Send { .. } => K::CollectiveSend,
             C::Receive { .. } => K::CollectiveReceive,
+            C::Probe { .. } => K::CollectiveProbe,
         },
     }
 }
@@ -253,7 +255,7 @@ pub fn statement_declared_effects(statement: &crate::MirStmtKind) -> runmat_type
 }
 
 impl MirConstructKind {
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 48] = [
         Self::Use,
         Self::Unary,
         Self::Binary,
@@ -285,6 +287,7 @@ impl MirConstructKind {
         Self::CollectiveAllReduce,
         Self::CollectiveSend,
         Self::CollectiveReceive,
+        Self::CollectiveProbe,
         Self::Assign,
         Self::MultiAssign,
         Self::Expr,
@@ -348,7 +351,8 @@ impl MirConstructKind {
             | K::CollectiveReduce
             | K::CollectiveAllReduce
             | K::CollectiveSend
-            | K::CollectiveReceive => C::CapabilityRejection,
+            | K::CollectiveReceive
+            | K::CollectiveProbe => C::CapabilityRejection,
             K::Unreachable => C::ProvenUnreachable,
         }
     }

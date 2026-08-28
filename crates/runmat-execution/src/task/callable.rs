@@ -21,6 +21,9 @@ pub enum ProgramCallable {
     ParallelRegion {
         region: ParallelRegionId,
     },
+    SpmdRegion {
+        region: ParallelRegionId,
+    },
 }
 
 impl ProgramCallable {
@@ -39,6 +42,10 @@ impl ProgramCallable {
 
     pub fn parallel_region(region: ParallelRegionId) -> Self {
         Self::ParallelRegion { region }
+    }
+
+    pub fn spmd_region(region: ParallelRegionId) -> Self {
+        Self::SpmdRegion { region }
     }
 
     pub fn validate(&self) -> Result<(), ContractError> {
@@ -62,6 +69,7 @@ impl ProgramCallable {
             }
             Self::Builtin { .. } => {}
             Self::ParallelRegion { .. } => {}
+            Self::SpmdRegion { .. } => {}
         }
         Ok(())
     }
@@ -70,6 +78,7 @@ impl ProgramCallable {
         match self {
             Self::Semantic { function, .. } => Some(*function),
             Self::ParallelRegion { region } => Some(region.0.function),
+            Self::SpmdRegion { region } => Some(region.0.function),
             Self::Builtin { .. } => None,
         }
     }
@@ -82,6 +91,9 @@ impl ProgramCallable {
                 "parallel-region:{}:{}",
                 region.0.function.0, region.0.ordinal
             ),
+            Self::SpmdRegion { region } => {
+                format!("spmd-region:{}:{}", region.0.function.0, region.0.ordinal)
+            }
         }
     }
 
@@ -96,6 +108,9 @@ impl ProgramCallable {
             Self::Builtin { name } => name.clone(),
             Self::ParallelRegion { region } => {
                 format!("parfor region {}:{}", region.0.function.0, region.0.ordinal)
+            }
+            Self::SpmdRegion { region } => {
+                format!("spmd region {}:{}", region.0.function.0, region.0.ordinal)
             }
         }
     }

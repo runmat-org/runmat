@@ -233,6 +233,8 @@ fn summarize_value(
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_) => {
             summary.unknown_values = summary.unknown_values.saturating_add(1);
         }

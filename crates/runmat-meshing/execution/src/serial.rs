@@ -328,9 +328,11 @@ fn input_roots(
         .iter()
         .map(|value| match value {
             ValuePayload::Object(root) => Ok((**root).clone()),
-            ValuePayload::Inline(_) => Err(MeshingExecutionError::Invalid(
-                "serial meshing inputs must remain externalized artifact roots".into(),
-            )),
+            ValuePayload::Inline(_) | ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {
+                Err(MeshingExecutionError::Invalid(
+                    "serial meshing inputs must remain externalized artifact roots".into(),
+                ))
+            }
         })
         .collect()
 }
