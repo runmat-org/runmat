@@ -10,11 +10,14 @@ use runmat_execution::identity::{ArtifactId, WorkerId};
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::{InlineValue, ValuePayload};
-use runmat_execution::{Digest, ExecutionScopeId, OutputContract, PoolId, ProgramRevision, TaskId};
+use runmat_execution::{
+    Digest, ExecutionScopeId, OutputContract, PoolId, ProgramCallable, ProgramFunctionId,
+    ProgramRevision, TaskId,
+};
 use runmat_execution_artifact::{
     archive::{write_bundle, ArchiveLimits},
     ExecutableForm, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
-    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_execution_runner::{
     AttemptReport, AttemptSuccess, PoolSpec, TaskSubmission, WorkerSpec,
@@ -819,10 +822,13 @@ async fn build_executable_bundle(
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
     let program = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe,
         artifact,
-        function,
+        callable: ProgramCallable::semantic(
+            ProgramFunctionId(u32::try_from(function).expect("portable function id")),
+            None,
+        ),
         arguments: Vec::new(),
         requested_outputs: 1,
     };

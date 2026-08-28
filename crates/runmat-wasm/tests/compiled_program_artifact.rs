@@ -3,11 +3,11 @@
 use std::collections::BTreeSet;
 
 use runmat_execution::value::{InlineValue, ValuePayload};
-use runmat_execution::OutputContract;
+use runmat_execution::{OutputContract, ProgramCallable, ProgramFunctionId};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
     ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -49,10 +49,13 @@ async fn request_with_contract(
     )
     .unwrap();
     ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe,
         artifact,
-        function,
+        callable: ProgramCallable::semantic(
+            ProgramFunctionId(u32::try_from(function).expect("portable function id")),
+            None,
+        ),
         arguments: Vec::new(),
         requested_outputs: 1,
     }

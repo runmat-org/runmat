@@ -5,6 +5,7 @@ mod control_flow;
 mod exceptions;
 mod indexing;
 mod object;
+mod parallel;
 mod stack;
 
 use crate::bytecode::Instr;
@@ -163,110 +164,6 @@ fn pop_aggregate_literal_values(
     Ok(values)
 }
 
-fn execution_error(error: runmat_runtime::execution::ExecutionServiceError) -> RuntimeError {
-    crate::interpreter::errors::mex("ExecutionService", &error.to_string())
-}
-
-fn create_async_future_value(
-    context: &crate::bytecode::program::ExecutionContext,
-    function: runmat_hir::FunctionId,
-    requested_outputs: usize,
-    arguments: Vec<Value>,
-    function_registry: &crate::bytecode::FunctionRegistry,
-) -> Result<Value, RuntimeError> {
-    runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(arguments.clone()))?;
-    let program = context
-        .runtime
-        .execution()
-        .requires_program_capture()
-        .then(|| {
-            serde_json::to_vec(function_registry).map_err(|error| {
-                crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    &format!("failed to capture the exact async program: {error}"),
-                )
-            })
-        })
-        .transpose()?;
-    context
-        .runtime
-        .execution()
-        .create_future(runmat_runtime::execution::DeferredCall {
-            function: function.0,
-            arguments,
-            requested_outputs,
-            program_revision: context.runtime.program_revision().cloned(),
-            program,
-        })
-        .map(Value::Future)
-        .map_err(execution_error)
-}
-
-async fn await_execution_value(
-    context: &crate::bytecode::program::ExecutionContext,
-    value: Value,
-    function_registry: &crate::bytecode::FunctionRegistry,
-) -> Result<Value, RuntimeError> {
-    use runmat_runtime::execution::AwaitAction;
-
-    let mut value = value;
-    loop {
-        match context
-            .runtime
-            .execution()
-            .begin_await(value)
-            .map_err(execution_error)?
-        {
-            AwaitAction::Passthrough(value) | AwaitAction::Completed(value) => return Ok(value),
-            AwaitAction::Pending(pending) => {
-                yield_once().await;
-                value = pending;
-            }
-            AwaitAction::ExecuteFuture { handle, call } => {
-                let descriptor = runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                    runmat_hir::CallableIdentity::BoundFunction(runmat_hir::FunctionId(
-                        call.function,
-                    )),
-                    call.arguments,
-                    call.requested_outputs,
-                    runmat_hir::CallableFallbackPolicy::None,
-                    runmat_runtime::call::descriptor::CallableCallKind::Direct,
-                );
-                let result =
-                    runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor)
-                        .await
-                        .map(|value| {
-                            calls::normalize_requested_outputs(value, call.requested_outputs)
-                        });
-                let stored = result.as_ref().map(Clone::clone).map_err(|error| {
-                    runmat_runtime::execution::ExecutionServiceError::Failed(error.to_string())
-                });
-                context
-                    .runtime
-                    .execution()
-                    .complete_future(&handle, stored)
-                    .map_err(execution_error)?;
-                let _ = function_registry;
-                return result;
-            }
-        }
-    }
-}
-
-async fn yield_once() {
-    let mut yielded = false;
-    futures::future::poll_fn(|context| {
-        if yielded {
-            std::task::Poll::Ready(())
-        } else {
-            yielded = true;
-            context.waker().wake_by_ref();
-            std::task::Poll::Pending
-        }
-    })
-    .await;
-}
-
 #[cfg(feature = "native-accel")]
 fn clear_popped_value_residency_excluding_live_values(
     popped: &Value,
@@ -384,6 +281,9 @@ pub async fn dispatch_instruction(
         store_local_after_store,
         store_local_after_fallback_store,
     } = hooks;
+    if let Some(handled) = parallel::dispatch(instr, stack, context, function_registry).await? {
+        return Ok(Some(handled));
+    }
     match instr {
         _ if indexing::dispatch_indexing(
             instr,
@@ -399,9 +299,13 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        _ if object::dispatch_object(instr, stack, current_function_name).await? => Ok(Some(
-            DispatchHandled::Generic(DispatchDecision::FallThrough),
-        )),
+        _ if object::dispatch_object(instr, stack, &context.runtime, current_function_name)
+            .await? =>
+        {
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         _ if arithmetic::dispatch_arithmetic(instr, stack).await? => Ok(Some(
             DispatchHandled::Generic(DispatchDecision::FallThrough),
         )),
@@ -1038,68 +942,6 @@ pub async fn dispatch_instruction(
                     stack.push(calls::normalize_requested_outputs(result, out_count));
                 }
             }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CreateSemanticFuture(function, arg_count, out_count) => {
-            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
-            stack.push(create_async_future_value(
-                context,
-                *function,
-                *out_count,
-                args,
-                function_registry,
-            )?);
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
-            let args = build_user_function_expand_multi_args(stack, specs).await?;
-            stack.push(create_async_future_value(
-                context,
-                *function,
-                *out_count,
-                args,
-                function_registry,
-            )?);
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::Spawn => {
-            let value = stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "spawn instruction expected a value on the stack",
-                )
-            })?;
-            let Value::Future(future) = value else {
-                return Err(crate::interpreter::errors::mex(
-                    "SpawnOperandInvalid",
-                    "spawn expects a lazy future produced by an async call",
-                ));
-            };
-            let task = context
-                .runtime
-                .execution()
-                .spawn(&future)
-                .map_err(execution_error)?;
-            stack.push(Value::Task(task));
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::Await => {
-            let value = stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "await instruction expected a value on the stack",
-                )
-            })?;
-            let value = await_execution_value(context, value, function_registry).await?;
-            stack.push(value);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

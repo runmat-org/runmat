@@ -1,5 +1,6 @@
 use runmat_execution::{
-    value::ValuePayload, Digest, OutputContract, ProgramEnvironment, ProgramRevision,
+    value::ValuePayload, Digest, OutputContract, ProgramCallable, ProgramEnvironment,
+    ProgramFunctionId, ProgramRevision,
 };
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
@@ -11,7 +12,41 @@ pub fn materialize_deferred_call(
     call: &DeferredCall,
     outputs: OutputContract,
     target: runmat_execution_artifact::ProgramTarget,
-) -> Result<(ProgramBuildRecipe, ProgramArtifact, Vec<ValuePayload>), ExecutionServiceError> {
+) -> Result<
+    (
+        ProgramCallable,
+        ProgramBuildRecipe,
+        ProgramArtifact,
+        Vec<ValuePayload>,
+    ),
+    ExecutionServiceError,
+> {
+    let callable = match &call.descriptor.target {
+        runmat_runtime::call::descriptor::CallableTarget::Resolved {
+            identity:
+                runmat_hir::CallableIdentity::BoundFunction(function)
+                | runmat_hir::CallableIdentity::AnonymousFunction(function)
+                | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
+            ..
+        } => ProgramCallable::semantic(
+            ProgramFunctionId(u32::try_from(function.0).map_err(|_| {
+                ExecutionServiceError::Failed(
+                    "semantic function identity exceeds its portable representation".into(),
+                )
+            })?),
+            call.descriptor.metadata.display_name.clone(),
+        ),
+        runmat_runtime::call::descriptor::CallableTarget::Resolved {
+            identity: runmat_hir::CallableIdentity::Builtin(name),
+            ..
+        } => ProgramCallable::builtin(name.0.clone())
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?,
+        _ => {
+            return Err(ExecutionServiceError::Failed(
+                "isolated execution requires a resolved semantic callable".into(),
+            ))
+        }
+    };
     let program = call.program.as_deref().ok_or_else(|| {
         ExecutionServiceError::Failed("execution is missing its exact program".into())
     })?;
@@ -22,7 +57,7 @@ pub fn materialize_deferred_call(
     let recipe = ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision,
-        entrypoint: call.function.to_string(),
+        entrypoint: callable.recipe_entrypoint(),
         outputs,
         execution_mode: "interpreter".into(),
         target,
@@ -38,12 +73,13 @@ pub fn materialize_deferred_call(
     )
     .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
     let arguments = call
-        .arguments
+        .descriptor
+        .args
         .iter()
         .map(runmat_runtime::execution::value_codec::encode_inline_value)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-    Ok((recipe, artifact, arguments))
+    Ok((callable, recipe, artifact, arguments))
 }
 
 fn captured_program_revision(program: &[u8]) -> ProgramRevision {
@@ -222,25 +258,51 @@ async fn execute_function_request(
             }
         }
     };
-    let result = match runtime {
-        Some(runtime) => {
-            crate::invoke_semantic_function_value_in_context(
-                request.function,
-                &arguments,
-                usize::from(request.requested_outputs),
-                registry,
-                runtime.clone(),
-            )
-            .await
-        }
-        None => {
-            crate::invoke_semantic_function_value(
-                request.function,
-                &arguments,
-                usize::from(request.requested_outputs),
-                registry,
-            )
-            .await
+    let requested_outputs = usize::from(request.requested_outputs);
+    let result = match &request.callable {
+        runmat_execution::ProgramCallable::Semantic { function, .. } => match runtime {
+            Some(runtime) => {
+                crate::invoke_semantic_function_value_in_context(
+                    function.0 as usize,
+                    &arguments,
+                    requested_outputs,
+                    registry,
+                    runtime.clone(),
+                )
+                .await
+            }
+            None => {
+                crate::invoke_semantic_function_value(
+                    function.0 as usize,
+                    &arguments,
+                    requested_outputs,
+                    registry,
+                )
+                .await
+            }
+        },
+        runmat_execution::ProgramCallable::Builtin { name } => {
+            let descriptor = runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                runmat_hir::CallableIdentity::Builtin(runmat_hir::BuiltinId(name.clone())),
+                arguments,
+                requested_outputs,
+                runmat_hir::CallableFallbackPolicy::None,
+                runmat_runtime::call::descriptor::CallableCallKind::Direct,
+            );
+            match runtime {
+                Some(runtime) => {
+                    runtime
+                        .scope(
+                            runmat_runtime::call::descriptor::execute_callable_descriptor(
+                                descriptor,
+                            ),
+                        )
+                        .await
+                }
+                None => {
+                    runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor).await
+                }
+            }
         }
     };
     match result {
@@ -318,10 +380,13 @@ async fn execute_script_request(
 mod tests {
     use std::collections::HashMap;
 
-    use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
+    use runmat_execution::{
+        Digest, OutputContract, ProgramCallable, ProgramEnvironment, ProgramFunctionId,
+        ProgramRevision,
+    };
     use runmat_execution_artifact::{
         ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
     };
 
     use super::execute_program_request;
@@ -369,10 +434,10 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
                 recipe,
                 artifact,
-                function: 0,
+                callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
                 arguments: Vec::new(),
                 requested_outputs: 1,
             }));
@@ -416,10 +481,10 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
                 recipe,
                 artifact,
-                function: 0,
+                callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
                 arguments: Vec::new(),
                 requested_outputs: 1,
             }));

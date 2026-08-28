@@ -15,10 +15,11 @@ use runmat_runtime::indexing::write_slice as idx_write_slice;
 use runmat_runtime::indexing::EndExpr;
 use runmat_runtime::object::dispatch::{
     call_object_index_descriptor_method, call_object_index_descriptor_method_with_outputs,
-    class_defines_member_subsasgn, class_defines_member_subsref,
+    class_defines_member_subsasgn, class_defines_member_subsref, value_defines_index_overload,
 };
 use runmat_runtime::object::indexing::{
-    ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector, ObjectParenExprSelectorSpec,
+    class_name_from_base, ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector,
+    ObjectParenExprSelectorSpec,
 };
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
@@ -168,11 +169,7 @@ async fn read_scalar_like_slice(
 }
 
 fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Option<RuntimeError> {
-    let class_name = match base {
-        Value::Object(obj) => obj.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
-        _ => return None,
-    };
+    let class_name = class_name_from_base(base)?;
     let class = runmat_runtime::class_registry::get_class(class_name)?;
     let supported = match op {
         ObjectIndexOp::Subsref => class_defines_member_subsref(&class),
@@ -191,6 +188,23 @@ fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Optio
             "class does not define subsasgn for indexed assignment",
         )),
     }
+}
+
+async fn assign_object_scalar_indices(
+    base: Value,
+    indices: Vec<usize>,
+    rhs: Value,
+    delete: bool,
+) -> Result<Value, RuntimeError> {
+    if value_defines_index_overload(&base, ObjectIndexOp::Subsasgn) {
+        return call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
+            base,
+            ObjectIndexSelector::ScalarIndices { indices },
+            rhs,
+        ))
+        .await;
+    }
+    runmat_runtime::indexing::object::assign_scalar_indices(base, &indices, rhs, delete)
 }
 
 async fn linear_index_values(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
@@ -395,29 +409,6 @@ fn gather_cell_with_plan(
 ) -> Result<Value, RuntimeError> {
     let indices: Vec<usize> = plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
     runmat_runtime::object::cell::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
-}
-
-fn gather_object_array_with_plan(
-    array: &runmat_value::ObjectArray,
-    plan: &runmat_runtime::indexing::plan::IndexPlan,
-) -> Result<Value, RuntimeError> {
-    if plan.indices.len() == 1 {
-        return array
-            .get_linear(plan.indices[0] as usize)
-            .cloned()
-            .ok_or_else(|| {
-                crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")
-            });
-    }
-    let indices = plan
-        .indices
-        .iter()
-        .map(|index| *index as usize)
-        .collect::<Vec<_>>();
-    array
-        .select_linear(&indices, plan.output_shape.clone())
-        .map(Value::ObjectArray)
-        .map_err(|error| crate::interpreter::errors::mex("IndexOutOfBounds", &error))
 }
 
 fn pop_index_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
@@ -932,23 +923,26 @@ pub async fn paren_index_value(
         Value::Foreign(reference) => {
             runmat_runtime::foreign::index_foreign_resource(reference.clone(), raw_indices).await
         }
-        Value::ObjectArray(array) => {
-            let selectors =
-                build_slice_selectors(raw_indices.len(), 0, 0, &raw_indices, array.shape()).await?;
-            let plan = build_index_plan(&selectors, raw_indices.len(), array.shape())?;
-            gather_object_array_with_plan(array, &plan)
-        }
-        Value::Object(_) | Value::HandleObject(_) => {
-            if let Some(err) = missing_member_index_overload_error(&base, ObjectIndexOp::Subsref) {
-                return Err(err);
+        Value::ObjectArray(_) | Value::Object(_) | Value::HandleObject(_) => {
+            if value_defines_index_overload(&base, ObjectIndexOp::Subsref) {
+                let descriptor = ObjectIndexDescriptor::subsref_paren(
+                    base,
+                    ObjectIndexSelector::IndexValues {
+                        values: raw_indices,
+                    },
+                );
+                return call_object_index_descriptor_method_with_outputs(
+                    descriptor,
+                    requested_outputs,
+                )
+                .await;
             }
-            let descriptor = ObjectIndexDescriptor::subsref_paren(
-                base,
-                ObjectIndexSelector::IndexValues {
-                    values: raw_indices,
-                },
-            );
-            call_object_index_descriptor_method_with_outputs(descriptor, requested_outputs).await
+            let shape = runmat_runtime::indexing::object::shape(&base)
+                .expect("object-like values have an object-array shape");
+            let selectors =
+                build_slice_selectors(raw_indices.len(), 0, 0, &raw_indices, &shape).await?;
+            let plan = build_index_plan(&selectors, raw_indices.len(), &shape)?;
+            runmat_runtime::indexing::object::read_with_plan(&base, &plan)
         }
         Value::Cell(ca) => {
             let selectors = build_cell_scalar_selectors(&raw_indices).await?;
@@ -1212,34 +1206,17 @@ pub async fn dispatch_indexing(
                         .await?,
                     );
                 }
-                Value::Object(obj) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::Object(obj.clone()),
-                        ObjectIndexOp::Subsasgn,
-                    ) {
-                        return Err(err);
-                    }
-                    let descriptor = ObjectIndexDescriptor::subsasgn_paren(
-                        Value::Object(obj),
-                        ObjectIndexSelector::ScalarIndices { indices },
-                        rhs,
-                    );
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
-                }
-                Value::HandleObject(handle) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::HandleObject(handle.clone()),
-                        ObjectIndexOp::Subsasgn,
-                    ) {
-                        return Err(err);
-                    }
-                    let descriptor = ObjectIndexDescriptor::subsasgn_paren(
-                        Value::HandleObject(handle),
-                        ObjectIndexSelector::ScalarIndices { indices },
-                        rhs,
-                    );
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
-                }
+                Value::Object(obj) => stack.push(
+                    assign_object_scalar_indices(Value::Object(obj), indices, rhs, delete).await?,
+                ),
+                Value::HandleObject(handle) => stack.push(
+                    assign_object_scalar_indices(Value::HandleObject(handle), indices, rhs, delete)
+                        .await?,
+                ),
+                Value::ObjectArray(array) => stack.push(
+                    assign_object_scalar_indices(Value::ObjectArray(array), indices, rhs, delete)
+                        .await?,
+                ),
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
@@ -1363,37 +1340,27 @@ pub async fn dispatch_indexing(
                 other => other,
             };
             match base {
-                Value::Object(obj) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::Object(obj.clone()),
-                        ObjectIndexOp::Subsref,
-                    ) {
-                        return Err(err);
+                base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
+                    if value_defines_index_overload(&base, ObjectIndexOp::Subsref) {
+                        let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
+                            base,
+                            *dims,
+                            *colon_mask,
+                            *end_mask,
+                            &numeric,
+                        )?;
+                        stack.push(call_object_index_descriptor_method(descriptor).await?);
+                    } else {
+                        let shape = runmat_runtime::indexing::object::shape(&base)
+                            .expect("object-like values have an object-array shape");
+                        let selectors =
+                            build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
+                                .await?;
+                        let plan = build_index_plan(&selectors, *dims, &shape)?;
+                        stack.push(runmat_runtime::indexing::object::read_with_plan(
+                            &base, &plan,
+                        )?);
                     }
-                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
-                        Value::Object(obj),
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        &numeric,
-                    )?;
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
-                }
-                Value::HandleObject(handle) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::HandleObject(handle.clone()),
-                        ObjectIndexOp::Subsref,
-                    ) {
-                        return Err(err);
-                    }
-                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
-                        Value::HandleObject(handle),
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        &numeric,
-                    )?;
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
@@ -1538,39 +1505,28 @@ pub async fn dispatch_indexing(
                 "stack underflow",
             ))?;
             match base {
-                Value::Object(obj) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::Object(obj.clone()),
-                        ObjectIndexOp::Subsasgn,
-                    ) {
-                        return Err(err);
+                base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
+                    if value_defines_index_overload(&base, ObjectIndexOp::Subsasgn) {
+                        let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
+                            base,
+                            *dims,
+                            *colon_mask,
+                            *end_mask,
+                            &numeric,
+                            rhs,
+                        )?;
+                        stack.push(call_object_index_descriptor_method(descriptor).await?);
+                    } else {
+                        let shape = runmat_runtime::indexing::object::shape(&base)
+                            .expect("object-like values have an object-array shape");
+                        let selectors =
+                            build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
+                                .await?;
+                        let plan = build_index_plan(&selectors, *dims, &shape)?;
+                        stack.push(runmat_runtime::indexing::object::assign_with_plan(
+                            base, &plan, rhs, delete,
+                        )?);
                     }
-                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
-                        Value::Object(obj),
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        &numeric,
-                        rhs,
-                    )?;
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
-                }
-                Value::HandleObject(handle) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::HandleObject(handle.clone()),
-                        ObjectIndexOp::Subsasgn,
-                    ) {
-                        return Err(err);
-                    }
-                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
-                        Value::HandleObject(handle),
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        &numeric,
-                        rhs,
-                    )?;
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
@@ -1874,6 +1830,17 @@ pub async fn dispatch_indexing(
                         )
                         .await?
                     }
+                    value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
+                        let shape = runmat_runtime::indexing::object::shape(value)
+                            .expect("object-like values have an object-array shape");
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
                     _ => numeric,
                 };
             }
@@ -1917,53 +1884,46 @@ pub async fn dispatch_indexing(
                 base = Value::Tensor(tensor);
             }
             match base {
-                Value::Object(obj) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::Object(obj.clone()),
-                        ObjectIndexOp::Subsref,
-                    ) {
-                        return Err(err);
+                base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
+                    let spec = ObjectParenExprSelectorSpec {
+                        dims: *dims,
+                        colon_mask: *colon_mask,
+                        end_mask: *end_mask,
+                        range_dims,
+                        range_params: &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        end_numeric_exprs,
+                        numeric: &numeric,
+                    };
+                    if value_defines_index_overload(&base, ObjectIndexOp::Subsref) {
+                        let descriptor =
+                            ObjectIndexDescriptor::subsref_paren_from_expr_slice(base, spec)?;
+                        stack.push(call_object_index_descriptor_method(descriptor).await?);
+                    } else {
+                        let shape = runmat_runtime::indexing::object::shape(&base)
+                            .expect("object-like values have an object-array shape");
+                        let vm_plan = build_expr_slice_plan(
+                            ExprPlanSpec {
+                                dims: *dims,
+                                colon_mask: *colon_mask,
+                                end_mask: *end_mask,
+                                range_dims,
+                                range_params: &range_params,
+                                range_start_exprs,
+                                range_step_exprs,
+                                range_end_exprs,
+                                numeric: &numeric,
+                                shape: &shape,
+                            },
+                            vars,
+                        )
+                        .await?;
+                        stack.push(runmat_runtime::indexing::object::read_with_plan(
+                            &base, &vm_plan,
+                        )?);
                     }
-                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_expr_slice(
-                        Value::Object(obj),
-                        ObjectParenExprSelectorSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            end_numeric_exprs,
-                            numeric: &numeric,
-                        },
-                    )?;
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
-                }
-                Value::HandleObject(handle) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::HandleObject(handle.clone()),
-                        ObjectIndexOp::Subsref,
-                    ) {
-                        return Err(err);
-                    }
-                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_expr_slice(
-                        Value::HandleObject(handle),
-                        ObjectParenExprSelectorSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            end_numeric_exprs,
-                            numeric: &numeric,
-                        },
-                    )?;
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::ComplexTensor(t) => {
                     let vm_plan = build_expr_slice_plan(
@@ -2250,6 +2210,17 @@ pub async fn dispatch_indexing(
                         )
                         .await?
                     }
+                    value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
+                        let shape = runmat_runtime::indexing::object::shape(value)
+                            .expect("object-like values have an object-array shape");
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
                     _ => numeric,
                 };
             }
@@ -2380,55 +2351,46 @@ pub async fn dispatch_indexing(
                         idx_write_slice::assign_sparse_with_plan(sparse, &vm_plan, &rhs).await?
                     });
                 }
-                Value::Object(obj) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::Object(obj.clone()),
-                        ObjectIndexOp::Subsasgn,
-                    ) {
-                        return Err(err);
+                base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
+                    let spec = ObjectParenExprSelectorSpec {
+                        dims: *dims,
+                        colon_mask: *colon_mask,
+                        end_mask: *end_mask,
+                        range_dims,
+                        range_params: &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        end_numeric_exprs,
+                        numeric: &numeric,
+                    };
+                    if value_defines_index_overload(&base, ObjectIndexOp::Subsasgn) {
+                        let descriptor =
+                            ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(base, spec, rhs)?;
+                        stack.push(call_object_index_descriptor_method(descriptor).await?);
+                    } else {
+                        let shape = runmat_runtime::indexing::object::shape(&base)
+                            .expect("object-like values have an object-array shape");
+                        let vm_plan = build_expr_slice_plan(
+                            ExprPlanSpec {
+                                dims: *dims,
+                                colon_mask: *colon_mask,
+                                end_mask: *end_mask,
+                                range_dims,
+                                range_params: &range_params,
+                                range_start_exprs,
+                                range_step_exprs,
+                                range_end_exprs,
+                                numeric: &numeric,
+                                shape: &shape,
+                            },
+                            vars,
+                        )
+                        .await?;
+                        stack.push(runmat_runtime::indexing::object::assign_with_plan(
+                            base, &vm_plan, rhs, delete,
+                        )?);
                     }
-                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
-                        Value::Object(obj),
-                        ObjectParenExprSelectorSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            end_numeric_exprs,
-                            numeric: &numeric,
-                        },
-                        rhs,
-                    )?;
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
-                }
-                Value::HandleObject(handle) => {
-                    if let Some(err) = missing_member_index_overload_error(
-                        &Value::HandleObject(handle.clone()),
-                        ObjectIndexOp::Subsasgn,
-                    ) {
-                        return Err(err);
-                    }
-                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
-                        Value::HandleObject(handle),
-                        ObjectParenExprSelectorSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            end_numeric_exprs,
-                            numeric: &numeric,
-                        },
-                        rhs,
-                    )?;
-                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::StringArray(mut sa) => {
                     if delete {

@@ -5,6 +5,7 @@ use runmat_value::Value;
 pub async fn dispatch_object(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
+    runtime: &runmat_runtime::context::RuntimeContext,
     current_function_name: &str,
 ) -> Result<bool, RuntimeError> {
     let caller_function_name = if current_function_name.is_empty() {
@@ -18,8 +19,14 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value =
-                obj_resolve::load_member(base, field.clone(), false, caller_function_name).await?;
+            let value = obj_resolve::load_member_with_context(
+                Some(runtime),
+                base,
+                field.clone(),
+                false,
+                caller_function_name,
+            )
+            .await?;
             stack.push(value);
             Ok(true)
         }
@@ -28,8 +35,14 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value =
-                obj_resolve::load_member(base, field.clone(), true, caller_function_name).await?;
+            let value = obj_resolve::load_member_with_context(
+                Some(runtime),
+                base,
+                field.clone(),
+                true,
+                caller_function_name,
+            )
+            .await?;
             stack.push(value);
             Ok(true)
         }
@@ -43,8 +56,14 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let name: String = (&name_val).try_into()?;
-            let value =
-                obj_resolve::load_member_dynamic(base, name, false, caller_function_name).await?;
+            let value = obj_resolve::load_member_dynamic_with_context(
+                Some(runtime),
+                base,
+                name,
+                false,
+                caller_function_name,
+            )
+            .await?;
             stack.push(value);
             Ok(true)
         }
@@ -58,8 +77,14 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let name: String = (&name_val).try_into()?;
-            let value =
-                obj_resolve::load_member_dynamic(base, name, true, caller_function_name).await?;
+            let value = obj_resolve::load_member_dynamic_with_context(
+                Some(runtime),
+                base,
+                name,
+                true,
+                caller_function_name,
+            )
+            .await?;
             stack.push(value);
             Ok(true)
         }

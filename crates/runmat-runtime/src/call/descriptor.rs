@@ -28,7 +28,7 @@ impl CallableCallKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CallableMetadata {
     pub call_kind: CallableCallKind,
     pub display_name: Option<String>,
@@ -58,7 +58,7 @@ impl CallableMetadata {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CallableTarget {
     Resolved {
         identity: CallableIdentity,
@@ -67,7 +67,7 @@ pub enum CallableTarget {
     FevalForward(Value),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CallableDescriptor {
     pub target: CallableTarget,
     pub args: Vec<Value>,

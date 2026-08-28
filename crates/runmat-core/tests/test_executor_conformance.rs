@@ -35,11 +35,11 @@ fn result_for<'a>(
 async fn execute_portable_envelope(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
 ) -> runmat_execution_artifact::ProgramExecutionResponse {
-    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+    let function = envelope.manifest.identity.entrypoint_function;
     let recipe = runmat_execution_artifact::ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: function.to_string(),
+        entrypoint: function.0.to_string(),
         outputs: runmat_execution::OutputContract {
             requested_outputs: 1,
         },
@@ -59,10 +59,10 @@ async fn execute_portable_envelope(
     )
     .unwrap();
     runmat_vm::execute_program_request(runmat_execution_artifact::ProgramExecutionRequest {
-        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe,
         artifact,
-        function,
+        callable: runmat_execution::ProgramCallable::semantic(function, None),
         arguments: Vec::new(),
         requested_outputs: 1,
     })

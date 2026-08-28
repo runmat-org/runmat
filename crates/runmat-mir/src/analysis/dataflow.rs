@@ -584,7 +584,7 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
     }
 
     match &block.terminator.kind {
-        MirTerminatorKind::For { binding, .. } => {
+        MirTerminatorKind::For { binding, .. } | MirTerminatorKind::ParFor { binding, .. } => {
             state[binding.0] = InitFact::DefinitelyAssigned;
         }
         MirTerminatorKind::Await {

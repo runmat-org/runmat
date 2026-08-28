@@ -4205,17 +4205,12 @@ fn subsasgn_missing_protocol_errors_with_identifier_contract() {
 }
 
 #[test]
-fn object_paren_index_missing_subsref_errors_with_identifier_contract() {
-    let err = execute_source_result_with_extensions(
-        "__register_test_classes(); p = new_object('Point'); p(1);",
+fn object_paren_index_uses_default_scalar_array_semantics_without_subsref() {
+    let values = execute_source_result_with_extensions(
+        "__register_test_classes(); p = new_object('Point'); q = p(1);",
     )
-    .expect_err("object paren indexing without subsref should fail");
-    assert_eq!(
-        err.identifier(),
-        Some("RunMat:MissingSubsref"),
-        "unexpected error: {}",
-        err.message()
-    );
+    .expect("ordinary object indexing does not require a subsref overload");
+    assert!(has_object_class(&values, "Point"));
 }
 
 #[test]
@@ -4231,16 +4226,12 @@ fn feval_unsupported_callable_value_errors_with_identifier_contract() {
 }
 
 #[test]
-fn object_paren_assign_missing_subsasgn_errors_with_identifier_contract() {
-    let err =
-        execute_source_result("__register_test_classes(); p = new_object('Point'); p(1) = 2;")
-            .expect_err("object paren assignment without subsasgn should fail");
-    assert_eq!(
-        err.identifier(),
-        Some("RunMat:MissingSubsasgn"),
-        "unexpected error: {}",
-        err.message()
-    );
+fn object_paren_assign_uses_default_homogeneous_array_semantics_without_subsasgn() {
+    let values = execute_source_result(
+        "__register_test_classes(); p = new_object('Point'); q = new_object('Point'); p(2) = q; n = numel(p);",
+    )
+    .expect("ordinary object assignment does not require a subsasgn overload");
+    assert!(has_num(&values, 2.0));
 }
 
 #[test]

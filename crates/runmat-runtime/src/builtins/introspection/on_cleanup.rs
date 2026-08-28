@@ -29,7 +29,7 @@ const ON_CLEANUP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAu
 const CANCEL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
-    notes: "cancel accepts only an onCleanup handle and returns a fixed double status; it has no integer data, control, or class-preserving form.",
+    notes: "cancel accepts lifecycle and execution handles and returns a fixed double status; it has no integer data, control, or class-preserving form.",
 };
 
 #[cfg(test)]
@@ -213,7 +213,50 @@ pub(crate) async fn on_cleanup_delete_builtin(value: Value) -> BuiltinResult<Val
     builtin_path = "crate::builtins::introspection::on_cleanup"
 )]
 async fn on_cleanup_cancel_builtin(value: Value) -> BuiltinResult<Value> {
-    cancel_on_cleanup_value(&value)?;
+    if let Some(tasks) = crate::parallel::future::output_tasks(&value) {
+        let context = crate::context::legacy::active().ok_or_else(|| {
+            crate::build_runtime_error("cancel: no active runtime context")
+                .with_builtin("cancel")
+                .with_identifier("RunMat:parallel:RuntimeContextUnavailable")
+                .build()
+        })?;
+        for task in tasks {
+            context
+                .execution()
+                .cancel(
+                    &Value::Task(task),
+                    runmat_execution::CancellationReason::User,
+                )
+                .map_err(|error| {
+                    crate::build_runtime_error(format!("cancel: {error}"))
+                        .with_builtin("cancel")
+                        .with_identifier("RunMat:cancel:ExecutionService")
+                        .build()
+                })?;
+        }
+        return Ok(Value::Num(0.0));
+    }
+    let execution_value = crate::parallel::future::execution_value(&value).unwrap_or(&value);
+    match execution_value {
+        Value::Future(_) | Value::Task(_) | Value::Job(_) => {
+            let context = crate::context::legacy::active().ok_or_else(|| {
+                crate::build_runtime_error("cancel: no active runtime context")
+                    .with_builtin("cancel")
+                    .with_identifier("RunMat:parallel:RuntimeContextUnavailable")
+                    .build()
+            })?;
+            context
+                .execution()
+                .cancel(execution_value, runmat_execution::CancellationReason::User)
+                .map_err(|error| {
+                    crate::build_runtime_error(format!("cancel: {error}"))
+                        .with_builtin("cancel")
+                        .with_identifier("RunMat:cancel:ExecutionService")
+                        .build()
+                })?;
+        }
+        _ => cancel_on_cleanup_value(&value)?,
+    }
     Ok(Value::Num(0.0))
 }
 

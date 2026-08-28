@@ -767,7 +767,6 @@ fn analyze_body_records_future_and_task_async_value_facts() {
 async function y = make(); y = 1; end",
     );
     let store = analyze_assembly(&mir);
-
     let async_values: Vec<_> = store
         .program_points
         .iter()
@@ -2558,6 +2557,63 @@ fn parallel_regions_lower_to_structured_terminators_with_stable_controls() {
     ));
     assert_ne!(spmd.2, spmd.3);
     assert_eq!(body.blocks[spmd.3 .0].statements.len(), 1);
+}
+
+#[test]
+fn parfor_analysis_classifies_loop_broadcast_sliced_reduction_and_private_values() {
+    use runmat_types::ParallelVariableRole;
+
+    let mir = lower_mir(
+        "a = ones(1, 4); y = zeros(1, 4); total = 0; parfor (i = 1:4, 3); y(i) = a(i); total = total + i; temporary = i * 2; end;",
+    );
+    let store = analyze_assembly(&mir);
+    assert!(
+        !store
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-MIR0001"),
+        "parfor binding should be initialized on the body edge: {:?}",
+        store.diagnostics
+    );
+    let contract = store
+        .parallel
+        .parfor_regions
+        .first()
+        .expect("parfor contract");
+    assert_eq!(contract.maximum_workers, Some(runmat_types::LabCount(3)));
+    assert!(contract
+        .variables
+        .iter()
+        .any(|variable| matches!(variable.role, ParallelVariableRole::Loop)));
+    assert!(contract
+        .variables
+        .iter()
+        .any(|variable| matches!(variable.role, ParallelVariableRole::Broadcast)));
+    assert!(contract.variables.iter().any(|variable| matches!(
+        variable.role,
+        ParallelVariableRole::Sliced { ref dimensions } if dimensions == &[1]
+    )));
+    assert!(contract.variables.iter().any(|variable| matches!(
+        variable.role,
+        ParallelVariableRole::Reduction {
+            operator: OperatorKind::Add
+        }
+    )));
+    assert!(contract
+        .variables
+        .iter()
+        .any(|variable| matches!(variable.role, ParallelVariableRole::Private)));
+    store.parallel.validate().expect("valid parallel manifest");
+}
+
+#[test]
+fn parfor_analysis_rejects_nested_parallel_regions() {
+    let mir = lower_mir("parfor i = 1:2; parfor j = 1:2; y(i,j) = i + j; end; end;");
+    let store = analyze_assembly(&mir);
+    assert!(store
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-MIR0014"));
 }
 
 #[test]

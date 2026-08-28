@@ -21,7 +21,10 @@ pub use executable::{
     ExecutableUnitManifest, SectionRequirement, EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES,
     EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
-pub use handle::{FutureHandle, JobHandle, OutputContract, PoolHandle, TaskHandle};
+pub use handle::{
+    ExecutionHandleSnapshot, ExecutionHandleState, FutureHandle, JobHandle, OutputContract,
+    PoolBackend, PoolHandle, PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
+};
 pub use identity::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
 pub use identity::{ExecutionScopeId, FutureId, JobId, PoolId, RunId, TaskId};
 pub use placement::{
@@ -33,4 +36,6 @@ pub use placement::{
     PlacementResourceSnapshot, PlacementRevision, PlacementSignature, ProviderResourceSnapshot,
     SelectedExecutionCandidate,
 };
-pub use state::CancellationReason;
+pub use runmat_types::ProgramFunctionId;
+pub use state::{CancellationReason, PoolState};
+pub use task::ProgramCallable;

@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use runmat_execution::security::{
     EndpointIdentityEvidence, EndpointRecipientKey, ExecutionTrustTier,
 };
-use runmat_execution::{Digest, OutputContract, ProgramRevision};
+use runmat_execution::{
+    Digest, OutputContract, ProgramCallable, ProgramFunctionId, ProgramRevision,
+};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::{
     encode_run_key_envelope, EncryptionPurpose, PortableExecutionEncryption, RunKeyMaterial,
@@ -15,7 +17,7 @@ use runmat_execution_artifact::encryption::{
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_execution_transport_native::control::{
     DriverArtifactDownload, DriverArtifactKind, DriverAuthority, DriverBootstrap,
@@ -450,15 +452,15 @@ async fn run_encrypted_remote_request(
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe,
         artifact,
-        function: 0,
+        callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
         requested_outputs: 1,
     })
     .unwrap();
     let inputs = serde_json::to_vec(&ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         arguments: Vec::new(),
     })
     .unwrap();

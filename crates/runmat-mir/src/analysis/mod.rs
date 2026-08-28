@@ -1,6 +1,7 @@
 mod dataflow;
 mod engine;
 mod inference;
+mod parallel;
 mod reachability;
 mod regions;
 mod spawn_safety;

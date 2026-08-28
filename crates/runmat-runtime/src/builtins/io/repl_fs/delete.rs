@@ -244,6 +244,16 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "delete: resident arguments are not supported",
         ));
     }
+    if let [Value::Pool(pool)] = args.as_slice() {
+        let context = crate::context::legacy::active().ok_or_else(|| {
+            crate::build_runtime_error("delete: no active runtime context")
+                .with_builtin("delete")
+                .with_identifier("RunMat:parallel:RuntimeContextUnavailable")
+                .build()
+        })?;
+        crate::parallel::pool::close(&context, pool)?;
+        return Ok(Value::Num(0.0));
+    }
     let (operands, resolve_symbolic_links) = parse_delete_options(&args)?;
     let gathered = gather_arguments(operands).await?;
 

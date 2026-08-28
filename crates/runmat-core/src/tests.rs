@@ -14332,6 +14332,208 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
 }
 
 #[test]
+fn portable_product_preserves_analyzed_parfor_contracts() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-parfor-manifest-test@1",
+            "parallel_manifest.m",
+            "input = ones(1, 4); output = zeros(1, 4); parfor (index = 1:4, 2); output(index) = input(index); end;\n",
+        ),
+        None,
+    ))
+    .expect("compile portable unit");
+
+    let envelope = unit.portable_envelope().expect("portable parallel product");
+    assert_eq!(envelope.manifest.parallel.parfor_regions.len(), 1);
+    assert_eq!(
+        envelope.manifest.parallel.parfor_regions[0].maximum_workers,
+        Some(runmat_types::LabCount(2))
+    );
+    envelope
+        .manifest
+        .validate()
+        .expect("parallel contract remains valid in the executable manifest");
+}
+
+#[test]
+fn parfor_has_a_deterministic_serial_execution_fallback() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "total = 0; parfor index = 1:4; total = total + index; end;",
+    )
+    .expect("execute parfor through serial scheduler fallback");
+    assert_eq!(
+        session.get_variables().get("total"),
+        Some(&runmat_value::Value::Num(10.0))
+    );
+}
+
+#[test]
+fn parallel_pool_and_future_surface_uses_the_session_execution_service() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "pool = parpool(); current = gcp('nocreate'); workerCount = pool.NumWorkers; callable = @(x) x + 1; requestedOutputs = 1; future = parfeval(pool, callable, requestedOutputs, 4); answer = fetchOutputs(future); futureState = future.State; outputCount = future.NumOutputArguments; cancelledFuture = parfeval(pool, callable, requestedOutputs, 8); cancelStatus = cancel(cancelledFuture); cancelledState = cancelledFuture.State; delete(pool); afterClose = gcp('nocreate');",
+    )
+    .expect("execute pool-backed future");
+
+    let variables = session.get_variables();
+    assert!(matches!(
+        variables.get("pool"),
+        Some(runmat_value::Value::Pool(_))
+    ));
+    assert_eq!(variables.get("current"), variables.get("pool"));
+    assert_eq!(
+        variables.get("workerCount"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert!(matches!(
+        variables.get("future"),
+        Some(runmat_value::Value::Object(object))
+            if object.class_name == runmat_runtime::parallel::future::FEVAL_FUTURE_CLASS
+    ));
+    assert_eq!(
+        variables.get("answer"),
+        Some(&runmat_value::Value::Num(5.0))
+    );
+    assert_eq!(
+        variables.get("futureState"),
+        Some(&runmat_value::Value::String("finished".into()))
+    );
+    assert_eq!(
+        variables.get("outputCount"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert_eq!(
+        variables.get("cancelStatus"),
+        Some(&runmat_value::Value::Num(0.0))
+    );
+    assert_eq!(
+        variables.get("cancelledState"),
+        Some(&runmat_value::Value::String("cancelled".into()))
+    );
+    assert!(matches!(
+        variables.get("afterClose"),
+        Some(runmat_value::Value::Tensor(value)) if value.is_empty()
+    ));
+}
+
+#[test]
+fn fetch_outputs_preserves_multiple_requested_outputs() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "pool = parpool(); callable = @pair; requestedOutputs = 2; future = parfeval(pool, callable, requestedOutputs, 3, 4); [sumValue, productValue] = fetchOutputs(future); function [sumValue, productValue] = pair(left, right); sumValue = left + right; productValue = left * right; end;",
+    )
+    .expect("fetch multiple future outputs");
+
+    let variables = session.get_variables();
+    assert_eq!(
+        variables.get("sumValue"),
+        Some(&runmat_value::Value::Num(7.0))
+    );
+    assert_eq!(
+        variables.get("productValue"),
+        Some(&runmat_value::Value::Num(12.0))
+    );
+}
+
+#[test]
+fn parfeval_without_explicit_pool_and_fetch_next_use_typed_future_state() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "pool = parpool(); first = parfeval(@(x) x + 1, 1, 4); second = parfeval(@(x) x + 2, 1, 8); futures = first; futures(2) = second; futureCount = numel(futures); beforeRead = first.Read; [firstIndex, firstValue] = fetchNext(futures); afterRead = first.Read; [secondIndex, secondValue] = fetchNext(futures);",
+    )
+    .expect("fetch future results in completion order");
+
+    let variables = session.get_variables();
+    assert_eq!(
+        variables.get("beforeRead"),
+        Some(&runmat_value::Value::Bool(false))
+    );
+    assert_eq!(
+        variables.get("firstIndex"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert_eq!(
+        variables.get("firstValue"),
+        Some(&runmat_value::Value::Num(5.0))
+    );
+    assert_eq!(
+        variables.get("afterRead"),
+        Some(&runmat_value::Value::Bool(true))
+    );
+    assert_eq!(
+        variables.get("secondIndex"),
+        Some(&runmat_value::Value::Num(2.0))
+    );
+    assert_eq!(
+        variables.get("secondValue"),
+        Some(&runmat_value::Value::Num(10.0))
+    );
+}
+
+#[test]
+fn parfeval_on_all_returns_one_aggregate_future() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "pool = parpool(); future = parfevalOnAll(pool, @(x) x + 2, 1, 5); workerCount = pool.NumWorkers; futureCount = numel(future); answer = fetchOutputs(future);",
+    )
+    .expect("execute one invocation per pool worker");
+
+    let variables = session.get_variables();
+    assert_eq!(
+        variables.get("workerCount"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert_eq!(
+        variables.get("futureCount"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert!(matches!(
+        variables.get("future"),
+        Some(runmat_value::Value::Object(object))
+            if object.class_name == runmat_runtime::parallel::future::FEVAL_ON_ALL_FUTURE_CLASS
+    ));
+    assert_eq!(
+        variables.get("answer"),
+        Some(&runmat_value::Value::Num(7.0))
+    );
+}
+
+#[test]
+fn fetch_outputs_can_return_nonuniform_future_arrays_as_cells() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "first = parfeval(@(x) x + 1, 1, 4); second = parfeval(@(x) x + 2, 1, 8); futures = first; futures(2) = second; answers = fetchOutputs(futures, \"UniformOutput\", false); onAll = parfevalOnAll(@(x) x + 3, 1, 9); onAllAnswer = fetchOutputs(onAll);",
+    )
+    .expect("fetch nonuniform outputs and schedule on the automatic pool");
+
+    let variables = session.get_variables();
+    let answers = match variables.get("answers") {
+        Some(runmat_value::Value::Cell(answers)) => answers,
+        other => panic!("expected a cell array, got {other:?}"),
+    };
+    assert_eq!(answers.shape, vec![2, 1]);
+    assert_eq!(
+        answers.data,
+        vec![
+            runmat_value::Value::Num(5.0),
+            runmat_value::Value::Num(10.0)
+        ]
+    );
+    assert_eq!(
+        variables.get("onAllAnswer"),
+        Some(&runmat_value::Value::Num(12.0))
+    );
+}
+
+#[test]
 fn portable_product_derives_python_runtime_and_browser_rejection_contracts() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let unit = block_on(session.compile_executable_unit(

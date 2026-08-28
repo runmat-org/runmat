@@ -480,6 +480,21 @@ pub fn class_defines_member_subsasgn(class: &crate::class_registry::RuntimeClass
         .is_some()
 }
 
+/// Reports whether an object-like value has opted into class-defined indexing.
+/// Executors use this before choosing between protocol dispatch and the shared
+/// default object-array implementation.
+pub fn value_defines_index_overload(base: &Value, op: ObjectIndexOp) -> bool {
+    let Some(class_name) = class_name_from_base(base) else {
+        return false;
+    };
+    let registered = crate::class_registry::get_class(class_name).is_some_and(|class| match op {
+        ObjectIndexOp::Subsref => class_defines_member_subsref(&class),
+        ObjectIndexOp::Subsasgn => class_defines_member_subsasgn(&class),
+    });
+    registered
+        || runmat_builtins::builtin_name_is_known(&format!("{class_name}.{}", op.protocol_name()))
+}
+
 pub async fn call_object_index_descriptor_method(
     descriptor: ObjectIndexDescriptor,
 ) -> Result<Value, RuntimeError> {
