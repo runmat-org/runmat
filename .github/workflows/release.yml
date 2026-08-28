@@ -53,6 +53,7 @@ jobs:
     env:
       RUNMAT_TELEMETRY_KEY: ${{ secrets.TELEMETRY_INGESTION_KEY }}
     strategy:
+      fail-fast: false
       max-parallel: 8
       matrix:
         platform:

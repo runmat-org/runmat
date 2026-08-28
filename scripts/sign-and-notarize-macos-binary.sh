@@ -34,8 +34,18 @@ certificate="$work_directory/certificate.p12"
 notary_key="$work_directory/notary-key.p8"
 notary_archive="$work_directory/notarize-submit.zip"
 entitlements="$work_directory/entitlements.plist"
+original_keychains=()
+while IFS= read -r listed_keychain; do
+  if [[ -n "$listed_keychain" ]]; then
+    original_keychains+=("$listed_keychain")
+  fi
+done < <(
+  security list-keychains -d user |
+    sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//'
+)
 
 cleanup() {
+  security list-keychains -d user -s "${original_keychains[@]}" >/dev/null 2>&1 || true
   security delete-keychain "$keychain" >/dev/null 2>&1 || true
   rm -rf "$work_directory"
 }
@@ -47,6 +57,7 @@ security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$keychain_password" "$keychain"
 security import "$certificate" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
 security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+security list-keychains -d user -s "$keychain" "${original_keychains[@]}"
 
 identity_listing="$(security find-identity -v -p codesigning "$keychain")"
 signing_identities="$(
