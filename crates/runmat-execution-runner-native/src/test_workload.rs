@@ -353,6 +353,7 @@ mod tests {
                 ])),
                 artifact_identities: vec!["native-ffi:v1:missing-fixture".into()],
             }],
+            adapter_contracts: Vec::new(),
         };
         let envelope = unit
             .portable_envelope_for_with_interop(None, interop)
@@ -622,6 +623,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 ])),
                 artifact_identities: vec![java_identity.to_string()],
             }],
+            adapter_contracts: Vec::new(),
         };
         let envelope = unit
             .portable_envelope_for_with_interop(Some("main"), interop)

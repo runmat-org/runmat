@@ -85,6 +85,7 @@ pub(super) fn prepare(project: &FrozenProject) -> Result<PreparedJavaArtifacts> 
                 ])),
                 artifact_identities,
             }],
+            adapter_contracts: Vec::new(),
         }
     };
     interop

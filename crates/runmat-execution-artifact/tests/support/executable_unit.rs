@@ -101,6 +101,7 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                     wasm: WasmInteropPolicy::HostBridge,
                 }],
                 adapters: Vec::new(),
+                adapter_contracts: Vec::new(),
             },
             parallel: ParallelManifest {
                 schema_version: runmat_types::PARALLEL_MANIFEST_SCHEMA_VERSION,

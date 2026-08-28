@@ -8,14 +8,14 @@ use runmat_execution::{
     EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 use runmat_types::{
-    CapabilityRequirement, CapabilitySet, ForeignAffinity, ForeignCapability, ForeignLifetime,
-    ForeignOwnership, ForeignRequirement, ForeignTypeIdentity, InteropManifest, LabCount,
-    ParallelAccess, ParallelManifest, ParallelRandomnessPolicy, ParallelRegionId,
-    ParallelVariableContract, ParallelVariableRole, ParforContract, ProgramFunctionId,
-    ProgramPointId, ProgramSourceId, ProgramSpan, RegionContract, RegionId, RegionProvenance,
-    RegionValueId, SpmdContract, SpmdLabRequirement, ValueFact, ValueKindFact, WasmInteropPolicy,
-    INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
-    REGION_CONTRACT_SCHEMA_VERSION,
+    CapabilityRequirement, CapabilitySet, ForeignAdapterContractReference, ForeignAffinity,
+    ForeignCapability, ForeignLifetime, ForeignOwnership, ForeignRequirement, ForeignTypeIdentity,
+    InteropManifest, LabCount, ParallelAccess, ParallelManifest, ParallelRandomnessPolicy,
+    ParallelRegionId, ParallelVariableContract, ParallelVariableRole, ParforContract,
+    PlannedForeignAdapter, ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan,
+    RegionContract, RegionId, RegionProvenance, RegionValueId, SpmdContract, SpmdLabRequirement,
+    ValueFact, ValueKindFact, WasmInteropPolicy, INTEROP_MANIFEST_SCHEMA_VERSION,
+    PARALLEL_MANIFEST_SCHEMA_VERSION, REGION_CONTRACT_SCHEMA_VERSION,
 };
 
 fn program() -> ProgramRevision {
@@ -129,6 +129,10 @@ fn manifest() -> ExecutableUnitManifest {
                 wasm: WasmInteropPolicy::HostBridge,
             }],
             adapters: Vec::new(),
+            adapter_contracts: vec![
+                ForeignAdapterContractReference::planned(PlannedForeignAdapter::DotNet),
+                ForeignAdapterContractReference::planned(PlannedForeignAdapter::WindowsCom),
+            ],
         },
         parallel: ParallelManifest {
             schema_version: PARALLEL_MANIFEST_SCHEMA_VERSION,
@@ -193,7 +197,7 @@ fn executable_manifest_round_trips_all_contract_families() {
     round_trip_vector();
     assert_eq!(
         manifest().cache_key().unwrap().to_string(),
-        "sha256:f19f3e2aab64c58611c48210de564e6b9a2d275a4d4b96c5285ac636efa00c7f"
+        "sha256:b47785269dfca2097437e19559c0e32db6825ee3a8500432d015b6eb9038a2e9"
     );
 }
 

@@ -14294,6 +14294,7 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
             ])),
             artifact_identities: vec!["native-test:fixture".into()],
         }],
+        adapter_contracts: Vec::new(),
     };
 
     let first = unit

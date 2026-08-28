@@ -206,6 +206,7 @@ impl MexArtifactManifest {
                 capabilities: CapabilitySet(capabilities),
                 artifact_identities: vec![self.identity.to_string()],
             }],
+            adapter_contracts: Vec::new(),
         }
     }
 }

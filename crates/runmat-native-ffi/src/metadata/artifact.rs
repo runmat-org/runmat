@@ -257,6 +257,7 @@ impl NativeInterfaceArtifactManifest {
                 ])),
                 artifact_identities: vec![self.identity.to_string()],
             }],
+            adapter_contracts: Vec::new(),
         }
     }
 
