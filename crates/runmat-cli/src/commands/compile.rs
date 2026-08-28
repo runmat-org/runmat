@@ -102,6 +102,7 @@ pub async fn execute(
             retained_builtin_bindings: program_link_plan.retained_builtin_bindings.clone(),
             interop: program_link_plan.interop.clone(),
             native_interfaces: foreign_artifacts.native_interfaces,
+            mex_artifacts: foreign_artifacts.mex_artifacts,
             java_artifacts: foreign_artifacts.java_artifacts,
         },
     )?;

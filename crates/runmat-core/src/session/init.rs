@@ -31,7 +31,7 @@ impl RunMatSession {
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_placement(placement.clone());
         #[cfg(not(target_arch = "wasm32"))]
-        let (runtime_services, foreign_runtime, native_ffi_adapter, java_adapter) = {
+        let (runtime_services, foreign_runtime, native_ffi_adapter, java_adapter, mex_runtime) = {
             let foreign_runtime = std::rc::Rc::new(runmat_runtime::foreign::ForeignRuntime::new(
                 runmat_runtime::foreign::ForeignPlatform::Native,
             ));
@@ -41,11 +41,14 @@ impl RunMatSession {
             let java =
                 runmat_runtime::foreign::JavaAdapter::new(foreign_runtime.handles().clone())?;
             foreign_runtime.register_adapter(java.clone())?;
+            let mex = std::rc::Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
+            foreign_runtime.register_adapter(mex.clone())?;
             (
                 runtime_services.with_foreign(foreign_runtime.clone()),
                 foreign_runtime,
                 adapter,
                 java,
+                mex,
             )
         };
         let session = Self {
@@ -60,7 +63,7 @@ impl RunMatSession {
             next_semantic_function_id: 0,
             dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(not(target_arch = "wasm32"))]
-            mex_runtime: std::rc::Rc::new(runmat_runtime::foreign::MexRuntimeSession::new()),
+            mex_runtime,
             #[cfg(not(target_arch = "wasm32"))]
             foreign_runtime,
             #[cfg(not(target_arch = "wasm32"))]

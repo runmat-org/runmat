@@ -46,6 +46,34 @@ pub(super) fn default_fortran_compiler() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("gfortran"))
 }
 
+pub(super) fn default_cuda_compiler() -> PathBuf {
+    std::env::var_os("NVCC")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("MW_NVCC_PATH").map(|directory| {
+                PathBuf::from(directory).join(if cfg!(target_os = "windows") {
+                    "nvcc.exe"
+                } else {
+                    "nvcc"
+                })
+            })
+        })
+        .unwrap_or_else(|| {
+            PathBuf::from(if cfg!(target_os = "windows") {
+                "nvcc.exe"
+            } else {
+                "nvcc"
+            })
+        })
+}
+
+pub(super) fn is_supported_cuda_compiler(compiler: &Path) -> bool {
+    compiler
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| matches!(name.to_ascii_lowercase().as_str(), "nvcc" | "nvcc.exe"))
+}
+
 pub(super) fn is_supported_fortran_compiler(compiler: &Path) -> bool {
     compiler
         .file_name()

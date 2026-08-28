@@ -35,6 +35,14 @@ impl RunMatSession {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_mex_artifact(
+        &self,
+        module_path: &std::path::Path,
+    ) -> Result<String, RuntimeError> {
+        self.mex_runtime.install_artifact(module_path)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn admit_interop_manifest(
         &self,
         manifest: &runmat_types::InteropManifest,
@@ -47,6 +55,7 @@ impl RunMatSession {
         revision: runmat_execution::ProgramRevision,
     ) -> runmat_runtime::context::RuntimeContext {
         self.configure_runtime_context();
+        self.configure_dynamic_function_services();
         self.runtime_context
             .clone()
             .with_program_revision(Some(revision))

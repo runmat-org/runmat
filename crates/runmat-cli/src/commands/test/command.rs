@@ -177,6 +177,10 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
             .project_handoff
             .clone()
             .context("remote tests require a project manifest with an exact frozen graph")?;
+        let foreign_artifacts =
+            crate::commands::package::prepare_foreign_artifacts(&project_handoff.project)
+                .context("failed to prepare project foreign artifacts for remote tests")?
+                .objects;
         let backend = RemoteTestBackend::new(RemoteTestBackendConfig {
             project: args.project,
             cluster: cluster.clone(),
@@ -184,6 +188,7 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
             trust_identity,
             max_workers: jobs,
             project_handoff,
+            foreign_artifacts,
         })
         .map_err(|error| anyhow::anyhow!("failed to configure remote tests: {error}"))?;
         run_coordinator(

@@ -33,8 +33,10 @@ impl Drop for MexRuntimeGuard {
     }
 }
 
-pub fn install(runtime: &runmat_runtime::context::RuntimeContext) -> MexRuntimeGuard {
-    let mex_runtime = Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
+pub fn install(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    mex_runtime: Rc<runmat_runtime::foreign::MexRuntimeSession>,
+) -> MexRuntimeGuard {
     let load_runtime = Rc::clone(&mex_runtime);
     let guard_runtime = Rc::clone(&mex_runtime);
     let loader: Rc<runmat_runtime::user_functions::DynamicFunctionLoader> =

@@ -236,6 +236,11 @@ fn relocatable_object_embeds_canonical_bounded_runtime_data() {
             alignment: 8,
         },
         NativeObjectData {
+            symbol: "runmat_aot_mex_artifacts".into(),
+            bytes: b"mex-artifacts".to_vec(),
+            alignment: 8,
+        },
+        NativeObjectData {
             symbol: "runmat_aot_java_artifacts".into(),
             bytes: b"java-artifacts".to_vec(),
             alignment: 8,
@@ -253,6 +258,7 @@ fn relocatable_object_embeds_canonical_bounded_runtime_data() {
             .collect::<Vec<_>>(),
         [
             "runmat_aot_java_artifacts",
+            "runmat_aot_mex_artifacts",
             "runmat_aot_native_interfaces",
             "runmat_aot_native_ir",
             "runmat_aot_program",

@@ -49,6 +49,7 @@ pub(super) struct LoadedPackage {
     pub(super) instance: PackageInstanceId,
     pub(super) sources: Vec<LoadedSource>,
     pub(super) native_interfaces: Vec<LoadedNativeInterface>,
+    pub(super) mex_artifacts: Vec<LoadedMexArtifact>,
     pub(super) java_artifacts: Vec<LoadedJavaArtifact>,
     pub(super) enabled_features: BTreeSet<String>,
     pub(super) dependencies: Vec<LoadedDependency>,
@@ -66,6 +67,14 @@ pub(super) struct LoadedNativeInterface {
     pub(super) manifest_bytes: Vec<u8>,
     pub(super) library_path: PathBuf,
     pub(super) library_bytes: Vec<u8>,
+}
+
+pub(super) struct LoadedMexArtifact {
+    pub(super) name: String,
+    pub(super) manifest_path: PathBuf,
+    pub(super) manifest_bytes: Vec<u8>,
+    pub(super) module_path: PathBuf,
+    pub(super) module_bytes: Vec<u8>,
 }
 
 pub(super) struct LoadedJavaArtifact {
@@ -147,6 +156,7 @@ impl Loader<'_> {
                 .to_path_buf();
             let (sources, source_index) = load_sources(&root, &config).await?;
             let native_interfaces = super::source::load_native_interfaces(&root, &config).await?;
+            let mex_artifacts = super::source::load_mex_artifacts(&root, &config).await?;
             let java_artifacts = load_java_artifacts(&root, &config).await?;
             let source = source_identity(
                 &self.workspace_root,
@@ -156,6 +166,7 @@ impl Loader<'_> {
                 PackageContent {
                     sources: &sources,
                     native_interfaces: &native_interfaces,
+                    mex_artifacts: &mex_artifacts,
                     java_artifacts: &java_artifacts,
                 },
                 &origin,
@@ -188,6 +199,7 @@ impl Loader<'_> {
                     instance: instance.clone(),
                     sources,
                     native_interfaces,
+                    mex_artifacts,
                     java_artifacts,
                     enabled_features: active_features.clone(),
                     dependencies: Vec::new(),

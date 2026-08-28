@@ -15,7 +15,6 @@ pub(super) struct PreparedJavaArtifacts {
     pub(super) interop: InteropManifest,
     pub(super) objects: Vec<LogicalObject>,
     pub(super) bundle: JavaArtifactBundle,
-    pub(super) installation: Vec<(JavaArtifactIdentity, std::path::PathBuf)>,
 }
 
 pub(super) fn prepare(project: &FrozenProject) -> Result<PreparedJavaArtifacts> {
@@ -34,7 +33,6 @@ pub(super) fn prepare(project: &FrozenProject) -> Result<PreparedJavaArtifacts> 
     let mut identities = BTreeSet::new();
     let mut entries = Vec::with_capacity(project.java_artifacts.len());
     let mut objects = Vec::with_capacity(project.java_artifacts.len());
-    let mut installation = Vec::with_capacity(project.java_artifacts.len());
     for (logical_name, declaration) in declarations {
         let bytes = std::fs::read(&declaration.path).with_context(|| {
             format!(
@@ -61,7 +59,6 @@ pub(super) fn prepare(project: &FrozenProject) -> Result<PreparedJavaArtifacts> 
             identity: identity.clone(),
             bytes: bytes.clone(),
         });
-        installation.push((identity, declaration.path.clone()));
         objects.push(LogicalObject::new(
             ObjectNamespace::ForeignArtifact,
             format!("java/{logical_name}.jar"),
@@ -97,7 +94,6 @@ pub(super) fn prepare(project: &FrozenProject) -> Result<PreparedJavaArtifacts> 
         interop,
         objects,
         bundle,
-        installation,
     })
 }
 
@@ -192,14 +188,6 @@ mod tests {
                 .map(|object| object.descriptor.logical_name.as_str())
                 .collect::<Vec<_>>(),
             ["java/alpha.jar", "java/zeta.jar"]
-        );
-        assert_eq!(
-            prepared.installation[0].1,
-            project.workspace_root.join("lib/alpha.jar")
-        );
-        assert_eq!(
-            prepared.installation[1].1,
-            project.workspace_root.join("lib/fixture.jar")
         );
     }
 }

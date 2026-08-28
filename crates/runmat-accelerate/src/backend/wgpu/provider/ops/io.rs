@@ -5,6 +5,10 @@ use runmat_accelerate_api::{
     IntegerElementType, NumericElementType,
 };
 
+fn record_provider_copy(reason: runmat_value::HostCopyReason, bytes: u64) {
+    runmat_value::record_host_copy(reason, usize::try_from(bytes).unwrap_or(usize::MAX));
+}
+
 fn integer_words(data: HostIntegerDataView<'_>) -> Vec<u32> {
     match data {
         HostIntegerDataView::I8(values) => {
@@ -315,6 +319,7 @@ impl WgpuProvider {
                 }
             };
         self.telemetry.record_upload_bytes(bytes);
+        record_provider_copy(runmat_value::HostCopyReason::ProviderUpload, bytes);
         Ok(self.register_existing_buffer(buffer, shape, len))
     }
 
@@ -393,6 +398,7 @@ impl WgpuProvider {
             )
         };
         self.telemetry.record_upload_bytes(bytes);
+        record_provider_copy(runmat_value::HostCopyReason::ProviderUpload, bytes);
         Ok(self.register_numeric_buffer(
             buffer,
             NumericBufferRegistration {
@@ -487,6 +493,10 @@ impl WgpuProvider {
             }
         }
         self.telemetry.record_download_bytes(entry.allocated_bytes);
+        record_provider_copy(
+            runmat_value::HostCopyReason::ProviderReadback,
+            entry.allocated_bytes,
+        );
         let owned = HostNumericTensorOwned {
             data,
             shape,
@@ -568,6 +578,7 @@ impl WgpuProvider {
             staging.unmap();
             log::trace!("wgpu download finished copy id={}", handle.buffer_id);
             self.telemetry.record_download_bytes(size_bytes);
+            record_provider_copy(runmat_value::HostCopyReason::ProviderReadback, size_bytes);
 
             let lane_factor = match storage {
                 GpuTensorStorage::Real => 1usize,

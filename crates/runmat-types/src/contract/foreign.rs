@@ -1,5 +1,6 @@
 use crate::{CapabilitySet, SchemaValidationError};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const INTEROP_MANIFEST_SCHEMA_VERSION: u16 = 1;
 
@@ -180,10 +181,95 @@ impl InteropManifest {
         }
         Ok(())
     }
+
+    /// Merge independently prepared requirements into one canonical manifest.
+    ///
+    /// Adapter versions take the strictest minimum and their capabilities and
+    /// exact artifact identities are unioned. Repeated foreign type identities
+    /// must describe the same contract; silently choosing between conflicting
+    /// ownership or affinity rules would make admission order-dependent.
+    pub fn merge(manifests: impl IntoIterator<Item = Self>) -> Result<Self, SchemaValidationError> {
+        let mut foreign_types = BTreeMap::new();
+        let mut adapters: BTreeMap<String, ForeignAdapterRequirement> = BTreeMap::new();
+        for manifest in manifests {
+            manifest.validate()?;
+            for requirement in manifest.foreign_types {
+                match foreign_types.entry(requirement.type_identity.clone()) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(requirement);
+                    }
+                    std::collections::btree_map::Entry::Occupied(entry)
+                        if entry.get() == &requirement => {}
+                    std::collections::btree_map::Entry::Occupied(_) => {
+                        return Err(SchemaValidationError::new(
+                            "interop.foreign_types",
+                            "the same type identity has conflicting requirements",
+                        ));
+                    }
+                }
+            }
+            for requirement in manifest.adapters {
+                let adapter = adapters
+                    .entry(requirement.adapter.clone())
+                    .or_insert_with(|| ForeignAdapterRequirement {
+                        adapter: requirement.adapter.clone(),
+                        minimum_version: requirement.minimum_version,
+                        capabilities: CapabilitySet(BTreeSet::new()),
+                        artifact_identities: Vec::new(),
+                    });
+                adapter.minimum_version = adapter.minimum_version.max(requirement.minimum_version);
+                adapter.capabilities.0.extend(requirement.capabilities.0);
+                let mut identities = adapter
+                    .artifact_identities
+                    .drain(..)
+                    .collect::<BTreeSet<_>>();
+                identities.extend(requirement.artifact_identities);
+                adapter.artifact_identities = identities.into_iter().collect();
+            }
+        }
+        let merged = Self {
+            schema_version: INTEROP_MANIFEST_SCHEMA_VERSION,
+            foreign_types: foreign_types.into_values().collect(),
+            adapters: adapters.into_values().collect(),
+        };
+        merged.validate()?;
+        Ok(merged)
+    }
 }
 
 impl Default for InteropManifest {
     fn default() -> Self {
         Self::empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::CapabilityRequirement;
+
+    #[test]
+    fn merge_is_canonical_and_unions_adapter_contracts() {
+        let requirement = |capability, artifact: &str| ForeignAdapterRequirement {
+            adapter: "native".into(),
+            minimum_version: 1,
+            capabilities: CapabilitySet(BTreeSet::from([capability])),
+            artifact_identities: vec![artifact.into()],
+        };
+        let merged = InteropManifest::merge([
+            InteropManifest {
+                schema_version: INTEROP_MANIFEST_SCHEMA_VERSION,
+                foreign_types: Vec::new(),
+                adapters: vec![requirement(CapabilityRequirement::NativeCode, "b")],
+            },
+            InteropManifest {
+                schema_version: INTEROP_MANIFEST_SCHEMA_VERSION,
+                foreign_types: Vec::new(),
+                adapters: vec![requirement(CapabilityRequirement::ForeignRuntime, "a")],
+            },
+        ])
+        .unwrap();
+        assert_eq!(merged.adapters[0].artifact_identities, ["a", "b"]);
+        assert_eq!(merged.adapters[0].capabilities.0.len(), 2);
     }
 }

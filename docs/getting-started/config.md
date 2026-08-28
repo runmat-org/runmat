@@ -187,6 +187,16 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 
 Modules with a valid RunMat build manifest retain exact admission and run in the owning session. The `unmanifested` setting applies only to the separately checked binary-compatibility tier; it does not bypass architecture, suffix, or adapter-ABI checks.
 
+Use `[mex-artifacts.<name>]` for a RunMat-built MEX module that belongs to the project. The declaration names the module and its canonical sidecar manifest relative to the package root. RunMat freezes both files, validates their shared identity for the current target, and carries them through packages, native compilation, and remote execution:
+
+```toml
+[mex-artifacts.filters]
+manifest = "mex/filters.mexa64.runmat.json"
+module = "mex/filters.mexa64"
+```
+
+The table name must match the module name recorded by the manifest. The filename suffix remains platform-specific, so packages that support several native targets should select target-specific dependencies or artifacts rather than presenting one binary as portable. Browser resolution rejects packages that require MEX before execution.
+
 ### `[runtime.foreign.native]`
 
 | Key | Type | Default | Allowed values | Notes |

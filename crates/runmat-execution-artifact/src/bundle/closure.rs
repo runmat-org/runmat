@@ -7,7 +7,7 @@ use crate::{ArtifactError, ArtifactResult};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BundleCodeClosure {
-    SourceProject { handoff: FrozenProjectHandoff },
+    SourceProject { handoff: Box<FrozenProjectHandoff> },
     Compiled { package: CompiledPackageClosure },
 }
 

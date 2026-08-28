@@ -35,6 +35,7 @@ pub enum MexSourceLanguage {
     C,
     Cxx,
     Fortran,
+    Cuda,
 }
 
 impl MexSourceLanguage {
@@ -47,6 +48,7 @@ impl MexSourceLanguage {
         {
             Some("cc" | "cpp" | "cxx" | "c++") => Self::Cxx,
             Some("f" | "for" | "f77" | "f90" | "f95" | "f03" | "f08") => Self::Fortran,
+            Some("cu") => Self::Cuda,
             _ => Self::C,
         }
     }
@@ -59,6 +61,7 @@ pub struct MexBuild {
     pub(super) c_compiler: PathBuf,
     pub(super) cxx_compiler: PathBuf,
     pub(super) fortran_compiler: PathBuf,
+    pub(super) cuda_compiler: PathBuf,
     pub(super) sources: Vec<PathBuf>,
     pub(super) output_directory: PathBuf,
     pub(super) output_name: String,
@@ -71,6 +74,7 @@ pub struct MexBuild {
     pub(super) c_compiler_arguments: Vec<String>,
     pub(super) cxx_compiler_arguments: Vec<String>,
     pub(super) fortran_compiler_arguments: Vec<String>,
+    pub(super) cuda_compiler_arguments: Vec<String>,
     pub(super) linker_arguments: Vec<String>,
     pub(super) target: MexTarget,
 }
@@ -84,6 +88,10 @@ pub struct MexBuildOutput {
 }
 
 impl MexBuild {
+    pub const fn language(&self) -> MexSourceLanguage {
+        self.language
+    }
+
     pub fn new(source: impl Into<PathBuf>, output_directory: impl Into<PathBuf>) -> Self {
         let source = source.into();
         let output_name = source
@@ -102,16 +110,19 @@ impl MexBuild {
         let c_compiler = super::default_c_compiler();
         let cxx_compiler = super::default_cxx_compiler();
         let fortran_compiler = super::default_fortran_compiler();
+        let cuda_compiler = super::default_cuda_compiler();
         Self {
             compiler: match language {
                 MexSourceLanguage::C => c_compiler.clone(),
                 MexSourceLanguage::Cxx => cxx_compiler.clone(),
                 MexSourceLanguage::Fortran => fortran_compiler.clone(),
+                MexSourceLanguage::Cuda => cuda_compiler.clone(),
             },
             compiler_explicit: false,
             c_compiler,
             cxx_compiler,
             fortran_compiler,
+            cuda_compiler,
             sources: vec![source],
             output_directory: output_directory.into(),
             output_name,
@@ -120,6 +131,7 @@ impl MexBuild {
                 MexSourceLanguage::C => MexApi::default(),
                 MexSourceLanguage::Cxx => MexApi::R2018a,
                 MexSourceLanguage::Fortran => MexApi::default(),
+                MexSourceLanguage::Cuda => MexApi::R2018a,
             },
             api_explicit: false,
             include_directories: Vec::new(),
@@ -128,6 +140,7 @@ impl MexBuild {
             c_compiler_arguments: Vec::new(),
             cxx_compiler_arguments: Vec::new(),
             fortran_compiler_arguments: Vec::new(),
+            cuda_compiler_arguments: Vec::new(),
             linker_arguments: Vec::new(),
             target,
         }
@@ -135,6 +148,9 @@ impl MexBuild {
 
     pub fn compiler(mut self, compiler: impl Into<PathBuf>) -> Self {
         self.compiler = compiler.into();
+        if self.language == MexSourceLanguage::Cuda {
+            self.cuda_compiler = self.compiler.clone();
+        }
         self.compiler_explicit = true;
         self
     }
@@ -163,10 +179,21 @@ impl MexBuild {
         self
     }
 
+    pub fn cuda_compiler(mut self, compiler: impl Into<PathBuf>) -> Self {
+        self.cuda_compiler = compiler.into();
+        if self.language == MexSourceLanguage::Cuda && !self.compiler_explicit {
+            self.compiler = self.cuda_compiler.clone();
+        }
+        self
+    }
+
     pub fn source(mut self, source: impl Into<PathBuf>) -> Self {
         let source = source.into();
         let source_language = MexSourceLanguage::detect(&source);
         let selected_language = match (self.language, source_language) {
+            (MexSourceLanguage::Cuda, MexSourceLanguage::Fortran)
+            | (MexSourceLanguage::Fortran, MexSourceLanguage::Cuda) => self.language,
+            (MexSourceLanguage::Cuda, _) | (_, MexSourceLanguage::Cuda) => MexSourceLanguage::Cuda,
             (MexSourceLanguage::Fortran, _) | (_, MexSourceLanguage::Fortran) => {
                 MexSourceLanguage::Fortran
             }
@@ -180,12 +207,14 @@ impl MexBuild {
                     MexSourceLanguage::C => self.c_compiler.clone(),
                     MexSourceLanguage::Cxx => self.cxx_compiler.clone(),
                     MexSourceLanguage::Fortran => self.fortran_compiler.clone(),
+                    MexSourceLanguage::Cuda => self.cuda_compiler.clone(),
                 };
             }
             if !self.api_explicit {
                 self.api = match selected_language {
                     MexSourceLanguage::Cxx => MexApi::R2018a,
                     MexSourceLanguage::C | MexSourceLanguage::Fortran => MexApi::R2017b,
+                    MexSourceLanguage::Cuda => MexApi::R2018a,
                 };
             }
         }
@@ -231,6 +260,11 @@ impl MexBuild {
 
     pub fn fortran_compiler_argument(mut self, argument: impl Into<String>) -> Self {
         self.fortran_compiler_arguments.push(argument.into());
+        self
+    }
+
+    pub fn cuda_compiler_argument(mut self, argument: impl Into<String>) -> Self {
+        self.cuda_compiler_arguments.push(argument.into());
         self
     }
 
@@ -316,7 +350,11 @@ impl MexBuild {
             plan.target.clone(),
             self.api,
             self.language,
-            compiler_family(&plan.compiler),
+            if self.language == MexSourceLanguage::Cuda {
+                compiler_family(&self.c_compiler)
+            } else {
+                compiler_family(&plan.compiler)
+            },
             &module_bytes,
         )?;
         let manifest = MexArtifactManifest::path_for_module(&plan.module);

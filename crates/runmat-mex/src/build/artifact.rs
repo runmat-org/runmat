@@ -190,16 +190,20 @@ impl MexArtifactManifest {
     }
 
     pub fn interop_manifest(&self) -> InteropManifest {
+        let mut capabilities = BTreeSet::from([
+            CapabilityRequirement::NativeCode,
+            CapabilityRequirement::ForeignRuntime,
+        ]);
+        if self.source_language == MexSourceLanguage::Cuda {
+            capabilities.insert(CapabilityRequirement::Accelerator);
+        }
         InteropManifest {
             schema_version: INTEROP_MANIFEST_SCHEMA_VERSION,
             foreign_types: Vec::new(),
             adapters: vec![ForeignAdapterRequirement {
                 adapter: MEX_ADAPTER_ID.to_string(),
                 minimum_version: MEX_ADAPTER_VERSION,
-                capabilities: CapabilitySet(BTreeSet::from([
-                    CapabilityRequirement::NativeCode,
-                    CapabilityRequirement::ForeignRuntime,
-                ])),
+                capabilities: CapabilitySet(capabilities),
                 artifact_identities: vec![self.identity.to_string()],
             }],
         }
@@ -264,5 +268,30 @@ mod tests {
         first.validate_module(b"module bytes").unwrap();
         assert!(first.validate_module(b"different").is_err());
         first.interop_manifest().validate().unwrap();
+    }
+
+    #[test]
+    fn cuda_artifacts_require_the_accelerator_capability() {
+        let artifact = MexArtifactManifest::from_module(
+            "gpu_fixture",
+            MexTarget {
+                triple: "x86_64-unknown-linux-gnu".into(),
+                architecture: "x86_64".into(),
+                operating_system: "linux".into(),
+                pointer_width: 64,
+                suffix: "mexa64".into(),
+            },
+            MexApi::R2018a,
+            MexSourceLanguage::Cuda,
+            CCompilerFamily::GnuLike,
+            b"cuda module bytes",
+        )
+        .unwrap();
+        let manifest = artifact.interop_manifest();
+        manifest.validate().unwrap();
+        let capabilities = &manifest.adapters[0].capabilities.0;
+        assert!(capabilities.contains(&CapabilityRequirement::NativeCode));
+        assert!(capabilities.contains(&CapabilityRequirement::ForeignRuntime));
+        assert!(capabilities.contains(&CapabilityRequirement::Accelerator));
     }
 }

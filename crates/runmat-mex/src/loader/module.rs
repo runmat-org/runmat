@@ -266,6 +266,7 @@ impl MexModule {
                 MexSourceLanguage::C => MxBoundaryInterface::CMatrix,
                 MexSourceLanguage::Cxx => MxBoundaryInterface::CxxData,
                 MexSourceLanguage::Fortran => MxBoundaryInterface::FortranMatrix,
+                MexSourceLanguage::Cuda => MxBoundaryInterface::CMatrix,
             }
         } else {
             MxBoundaryInterface::CMatrix

@@ -289,7 +289,7 @@ TEST_EXPORT void mexFunction(int nlhs, void **plhs, int nrhs, const void **prhs)
         .filter(|argument| {
             std::path::Path::new(argument)
                 .file_name()
-                .is_none_or(|name| name != "runmat_mex_shim.c")
+                .is_none_or(|name| name != "runmat_mex_support.c")
         })
         .collect::<Vec<_>>();
     let compiler = Command::new(&plan.compiler)

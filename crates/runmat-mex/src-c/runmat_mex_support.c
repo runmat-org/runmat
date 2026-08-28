@@ -1,6 +1,7 @@
 #define RUNMAT_MEX_INTERNAL 1
 #include "runmat_mex_host.h"
 #include "mex.h"
+#include "gpu/mxGPUArray.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -10,12 +11,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_MSC_VER)
+#define RUNMAT_MEX_THREAD_LOCAL __declspec(thread)
+#define RUNMAT_MEX_NORETURN __declspec(noreturn)
+#else
+#define RUNMAT_MEX_THREAD_LOCAL _Thread_local
+#define RUNMAT_MEX_NORETURN _Noreturn
+#endif
+
 static const RunMatMexHostApiV1 *runmat_host = NULL;
-static _Thread_local jmp_buf *runmat_error_target = NULL;
+static RUNMAT_MEX_THREAD_LOCAL jmp_buf *runmat_error_target = NULL;
 static mexExitFcn runmat_exit_function = NULL;
 static unsigned int runmat_lock_count = 0;
 
-static void runmat_raise(const char *identifier, const char *message);
+RUNMAT_MEX_NORETURN static void runmat_raise(const char *identifier,
+                                             const char *message);
 
 #include "sparse_index_compat.inc"
 
@@ -29,7 +39,8 @@ static void runmat_require_host(void) {
     }
 }
 
-static void runmat_raise(const char *identifier, const char *message) {
+RUNMAT_MEX_NORETURN static void runmat_raise(const char *identifier,
+                                             const char *message) {
     runmat_require_host();
     runmat_host->set_error(runmat_host->host, identifier, message);
     if (runmat_error_target != NULL) {
@@ -38,7 +49,7 @@ static void runmat_raise(const char *identifier, const char *message) {
     abort();
 }
 
-static void runmat_propagate_host_error(void) {
+RUNMAT_MEX_NORETURN static void runmat_propagate_host_error(void) {
     if (runmat_error_target != NULL) {
         longjmp(*runmat_error_target, 1);
     }
@@ -60,6 +71,8 @@ static char *runmat_format(const char *format, va_list arguments) {
     (void)vsnprintf(message, (size_t)length + 1u, format, arguments);
     return message;
 }
+
+#include "gpu_api.inc"
 
 RUNMAT_MEX_HOST_EXPORT int runmatMexBindHost(const RunMatMexHostApiV1 *api) {
     if (api == NULL) {
@@ -85,8 +98,14 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
     if (setjmp(target) != 0) {
         runmat_error_target = NULL;
         (void)runmat_cleanup_sparse_index_proxies(0);
+        (void)runmat_gpu_leave_context();
         return 1;
     }
+#if defined(RUNMAT_MEX_GPU)
+    if (runmat_gpu_enter_context() != MX_GPU_SUCCESS) {
+        runmat_propagate_host_error();
+    }
+#endif
 #if defined(RUNMAT_MEX_FORTRAN)
 #define RUNMAT_FORTRAN_SYMBOL_INNER(name) name##_
 #define RUNMAT_FORTRAN_SYMBOL(name) RUNMAT_FORTRAN_SYMBOL_INNER(name)
@@ -127,6 +146,9 @@ RUNMAT_MEX_HOST_EXPORT int runmatMexInvoke(int nlhs, mxArray *plhs[], int nrhs,
         runmat_host->set_error(runmat_host->host, "RunMat:MEX:Sparse",
                                "could not synchronize 32-bit sparse indices");
     }
+    if (runmat_gpu_leave_context() != 0) {
+        return 1;
+    }
     int failed = runmat_host->has_error(runmat_host->host) ? 1 : 0;
     return failed;
 }
@@ -156,6 +178,7 @@ RUNMAT_MEX_HOST_EXPORT void runmatMexUnload(void) {
     }
     runmat_lock_count = 0;
     (void)runmat_cleanup_sparse_index_proxies(0);
+    (void)runmat_gpu_leave_context();
     runmat_error_target = NULL;
     runmat_host = NULL;
 }

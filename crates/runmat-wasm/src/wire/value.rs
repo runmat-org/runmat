@@ -163,7 +163,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                     let (preview, truncated) = preview_slice(values, MAX_DATA_PREVIEW);
                     let preview = preview
                         .into_iter()
-                        .map(|(real, imag)| json!({ "real": real, "imag": imag }))
+                        .map(|value| json!({ "real": value.0, "imag": value.1 }))
                         .collect();
                     (preview, truncated, values.len(), "double")
                 }
@@ -171,7 +171,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                     let (preview, truncated) = preview_slice(values, MAX_DATA_PREVIEW);
                     let preview = preview
                         .into_iter()
-                        .map(|(real, imag)| json!({ "real": real, "imag": imag }))
+                        .map(|value| json!({ "real": value.0, "imag": value.1 }))
                         .collect();
                     (preview, truncated, values.len(), "single")
                 }
@@ -520,6 +520,26 @@ mod tests {
         assert_eq!(json["dtype"], "single");
         assert_eq!(json["preview"], json!([1.25, -3.5]));
         assert_eq!(json["length"], 2);
+    }
+
+    #[test]
+    fn floating_complex_json_uses_the_canonical_element_layout() {
+        let double = ComplexTensor::new(vec![(1.25, -2.5)], vec![1, 1]).expect("double complex");
+        let double_json = value_to_json(&Value::ComplexTensor(double), 0);
+        assert_eq!(double_json["dtype"], "double");
+        assert_eq!(
+            double_json["preview"],
+            json!([{"real": 1.25, "imag": -2.5}])
+        );
+
+        let single =
+            ComplexTensor::from_f32(vec![(3.5, -4.25)], vec![1, 1]).expect("single complex");
+        let single_json = value_to_json(&Value::ComplexTensor(single), 0);
+        assert_eq!(single_json["dtype"], "single");
+        assert_eq!(
+            single_json["preview"],
+            json!([{"real": 3.5, "imag": -4.25}])
+        );
     }
 
     #[wasm_bindgen_test]

@@ -6,8 +6,10 @@ use runmat_package::FrozenProjectHandoff;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 mod java_artifacts;
+mod mex_artifacts;
 mod native_interfaces;
 pub(crate) use java_artifacts::MaterializedJavaArtifact;
+pub(crate) use mex_artifacts::MaterializedMexArtifact;
 pub(crate) use native_interfaces::MaterializedNativeInterface;
 
 /// One private, exact, credential-free materialization of a portable bundle.
@@ -18,6 +20,7 @@ pub(crate) struct MaterializedProject {
     _root: tempfile::TempDir,
     handoff: Option<FrozenProjectHandoff>,
     native_interfaces: Vec<MaterializedNativeInterface>,
+    mex_artifacts: Vec<MaterializedMexArtifact>,
     java_artifacts: Vec<MaterializedJavaArtifact>,
 }
 
@@ -44,7 +47,7 @@ impl MaterializedProject {
             make_private(parent)?;
             write_exact(&target, &object.bytes)?;
         }
-        let handoff = bundle
+        let mut handoff = bundle
             .requires_source_project()
             .then(|| bundle.project_handoff_at(root.path()))
             .transpose()
@@ -59,11 +62,16 @@ impl MaterializedProject {
             .cloned()
             .collect::<Vec<_>>();
         let native_interfaces = native_interfaces::discover(&foreign_objects, root.path())?;
+        let mex_artifacts = mex_artifacts::discover(&foreign_objects, root.path())?;
         let java_artifacts = java_artifacts::discover(&foreign_objects, root.path())?;
+        if let Some(handoff) = handoff.as_mut() {
+            rebase_foreign_artifacts(handoff, &native_interfaces, &mex_artifacts, &java_artifacts)?;
+        }
         Ok(Self {
             _root: root,
             handoff,
             native_interfaces,
+            mex_artifacts,
             java_artifacts,
         })
     }
@@ -84,9 +92,93 @@ impl MaterializedProject {
             .find(|artifact| artifact.identity.as_str() == identity)
     }
 
+    pub(crate) fn mex_artifact(&self, identity: &str) -> Option<&MaterializedMexArtifact> {
+        self.mex_artifacts
+            .iter()
+            .find(|artifact| artifact.manifest.identity.as_str() == identity)
+    }
+
+    pub(crate) fn requires_cuda_mex(&self) -> bool {
+        self.mex_artifacts.iter().any(|artifact| {
+            artifact.manifest.source_language == runmat_mex::MexSourceLanguage::Cuda
+        })
+    }
+
     pub(crate) fn java_artifacts(&self) -> &[MaterializedJavaArtifact] {
         &self.java_artifacts
     }
+}
+
+fn rebase_foreign_artifacts(
+    handoff: &mut FrozenProjectHandoff,
+    native_interfaces: &[MaterializedNativeInterface],
+    mex_artifacts: &[MaterializedMexArtifact],
+    java_artifacts: &[MaterializedJavaArtifact],
+) -> NativeExecutionResult<()> {
+    for interface in &mut handoff.project.native_interfaces {
+        let materialized = native_interfaces
+            .iter()
+            .find(|materialized| {
+                materialized.manifest.interface_name == interface.name
+                    && digest_path(&materialized.manifest_path).ok().as_ref()
+                        == Some(&interface.manifest_digest)
+                    && digest_path(&materialized.library_path).ok().as_ref()
+                        == Some(&interface.library_digest)
+            })
+            .ok_or_else(|| {
+                protocol(format!(
+                    "frozen native interface {} has no exact materialized artifact",
+                    interface.name
+                ))
+            })?;
+        interface.manifest_path = materialized.manifest_path.clone();
+        interface.library_path = materialized.library_path.clone();
+    }
+    for artifact in &mut handoff.project.mex_artifacts {
+        let materialized = mex_artifacts
+            .iter()
+            .find(|materialized| {
+                materialized.manifest.module_name == artifact.name
+                    && digest_path(&runmat_mex::MexArtifactManifest::path_for_module(
+                        &materialized.module_path,
+                    ))
+                    .ok()
+                    .as_ref()
+                        == Some(&artifact.manifest_digest)
+                    && digest_path(&materialized.module_path).ok().as_ref()
+                        == Some(&artifact.module_digest)
+            })
+            .ok_or_else(|| {
+                protocol(format!(
+                    "frozen MEX artifact {} has no exact materialized module",
+                    artifact.name
+                ))
+            })?;
+        artifact.module_path = materialized.module_path.clone();
+        artifact.manifest_path =
+            runmat_mex::MexArtifactManifest::path_for_module(&materialized.module_path);
+    }
+    for artifact in &mut handoff.project.java_artifacts {
+        let materialized = java_artifacts
+            .iter()
+            .find(|materialized| {
+                digest_path(&materialized.path).ok().as_ref() == Some(&artifact.digest)
+            })
+            .ok_or_else(|| {
+                protocol(format!(
+                    "frozen Java artifact {} has no exact materialized archive",
+                    artifact.name
+                ))
+            })?;
+        artifact.path = materialized.path.clone();
+    }
+    handoff.validate().map_err(protocol)
+}
+
+fn digest_path(path: &Path) -> NativeExecutionResult<runmat_package::ContentDigest> {
+    std::fs::read(path)
+        .map(|bytes| runmat_package::ContentDigest::sha256(&bytes))
+        .map_err(protocol)
 }
 
 fn write_exact(path: &Path, bytes: &[u8]) -> NativeExecutionResult<()> {
@@ -143,6 +235,9 @@ mod tests {
     use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::{
         ExecutableForm, ExecutionBundleBuilder, LogicalObject, ObjectNamespace, ProgramBuildRecipe,
+    };
+    use runmat_mex::{
+        MexArtifactManifest, MexBuild, MEX_ARTIFACT_MANIFEST_MEDIA_TYPE, MEX_MODULE_MEDIA_TYPE,
     };
     use runmat_native_ffi::{
         NativeInterfaceArtifactManifest, NativeLibrary, NativeLibraryMetadata,
@@ -291,6 +386,39 @@ mod tests {
             java_bytes.clone(),
         )
         .unwrap();
+        let mex_source = temp.path().join("materialized_mex.c");
+        std::fs::write(
+            &mex_source,
+            r#"
+#include "mex.h"
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nrhs; (void)prhs;
+    if (nlhs > 0) plhs[0] = mxCreateDoubleScalar(7.0);
+}
+"#,
+        )
+        .unwrap();
+        let mex_output = MexBuild::new(&mex_source, temp.path()).compile().unwrap();
+        let mex_manifest_bytes = std::fs::read(&mex_output.manifest).unwrap();
+        let mex_module_bytes = std::fs::read(&mex_output.module).unwrap();
+        let mex_manifest = MexArtifactManifest::from_canonical_bytes(&mex_manifest_bytes).unwrap();
+        let mex_identity = mex_manifest.identity.to_string();
+        let mex_root = format!("mex/{mex_identity}");
+        let mex_filename = mex_output.module.file_name().unwrap().to_string_lossy();
+        let mex_sidecar = LogicalObject::new(
+            ObjectNamespace::ForeignArtifact,
+            format!("{mex_root}/{mex_filename}.runmat.json"),
+            MEX_ARTIFACT_MANIFEST_MEDIA_TYPE,
+            mex_manifest_bytes,
+        )
+        .unwrap();
+        let mex_module = LogicalObject::new(
+            ObjectNamespace::ForeignArtifact,
+            format!("{mex_root}/{mex_filename}"),
+            MEX_MODULE_MEDIA_TYPE,
+            mex_module_bytes.clone(),
+        )
+        .unwrap();
         let recipe = ProgramBuildRecipe {
             schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision.clone(),
@@ -329,6 +457,10 @@ mod tests {
             .with_foreign_artifact(library)
             .unwrap()
             .with_foreign_artifact(java)
+            .unwrap()
+            .with_foreign_artifact(mex_sidecar)
+            .unwrap()
+            .with_foreign_artifact(mex_module)
             .unwrap()
             .with_materialized_program(
                 recipe,
@@ -372,5 +504,17 @@ mod tests {
             .unwrap()
             .permissions()
             .readonly());
+        let mex = materialized.mex_artifact(&mex_identity).unwrap();
+        assert_eq!(std::fs::read(&mex.module_path).unwrap(), mex_module_bytes);
+        assert!(std::fs::metadata(&mex.module_path)
+            .unwrap()
+            .permissions()
+            .readonly());
+        let mex_sidecar = MexArtifactManifest::path_for_module(&mex.module_path);
+        assert_eq!(
+            MexArtifactManifest::from_canonical_bytes(&std::fs::read(mex_sidecar).unwrap())
+                .unwrap(),
+            mex_manifest
+        );
     }
 }

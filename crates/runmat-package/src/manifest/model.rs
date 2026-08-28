@@ -156,6 +156,9 @@ impl TryFrom<&runmat_config::project::ProjectManifest> for PackageManifest {
         if !manifest.native_interfaces.is_empty() {
             required_capabilities.insert(HostCapability::NativeLibrary);
         }
+        if !manifest.mex_artifacts.is_empty() {
+            required_capabilities.insert(HostCapability::Mex);
+        }
         if !manifest.java_artifacts.is_empty() {
             required_capabilities.insert(HostCapability::Jvm);
         }

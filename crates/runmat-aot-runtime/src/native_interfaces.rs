@@ -1,5 +1,3 @@
-use std::io::Write as _;
-use std::path::Path;
 use std::rc::Rc;
 
 use runmat_native_ffi::{NativeInterfaceArtifactBundle, NativeInterfaceArtifactManifest};
@@ -29,45 +27,11 @@ pub(crate) fn install(
             .map_err(|error| format!("create native-interface directory: {error}"))?;
         let manifest_path = directory.join("manifest.json");
         let library_path = directory.join("library.bin");
-        write_private_read_only(&manifest_path, &entry.manifest)?;
-        write_private_read_only(&library_path, &entry.library)?;
+        crate::materialize::write_private_read_only(&manifest_path, &entry.manifest)?;
+        crate::materialize::write_private_read_only(&library_path, &entry.library)?;
         adapter
             .install_prepared_artifact(&library_path, &manifest_path)
             .map_err(|error| format!("install standalone native interface: {error}"))?;
     }
     Ok(InstalledNativeInterfaces { _root: root })
-}
-
-fn write_private_read_only(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| {
-            format!(
-                "create native-interface artifact {}: {error}",
-                path.display()
-            )
-        })?;
-    file.write_all(bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|error| {
-            format!(
-                "write native-interface artifact {}: {error}",
-                path.display()
-            )
-        })?;
-    let mut permissions = file
-        .metadata()
-        .map_err(|error| {
-            format!(
-                "inspect native-interface artifact {}: {error}",
-                path.display()
-            )
-        })?
-        .permissions();
-    permissions.set_readonly(true);
-    std::fs::set_permissions(path, permissions)
-        .map_err(|error| format!("seal native-interface artifact {}: {error}", path.display()))?;
-    Ok(())
 }

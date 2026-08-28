@@ -63,7 +63,31 @@ Cell, structure, and object element indices use the Fortran interface's one-base
 
 RunMat compiles the gateway and any helper sources separately, compiles one bundled native-support translation unit, and links the result with the Fortran driver so the language runtime is retained. Extension authors do not need to compile or order RunMat's private support files. The generated manifest records Fortran as the source boundary and otherwise uses the same identity, API-pin, admission, package, and isolation contracts as C and C++ modules. Native Fortran modules are unavailable in browser/WASM sessions; the runtime reports that capability boundary before execution.
 
+### GPU MEX modules
+
+Use `mexcuda` for a source set containing at least one `.cu` translation unit. The shell and language forms share the same build planner:
+
+```bash
+runmat mexcuda -o vector_add vector_add.cu support.cpp
+```
+
+```matlab
+mexcuda("vector_add.cu", "support.cpp", "-output", "vector_add")
+```
+
+GPU MEX builds use the interleaved-complex `-R2018a` API by default. An explicit compatibility pin still takes precedence. `NVCC` selects the CUDA compiler, with `MW_NVCC_PATH` as a compatibility fallback; `NVCCFLAGS` applies only to CUDA translation units. C and C++ helpers continue to use `CC`/`CFLAGS` and `CXX`/`CXXFLAGS`. RunMat compiles its bundled native-support translation unit with the platform C compiler and links the completed module with `nvcc`. CUDA MEX builds are supported on Linux x86-64 and Windows x86-64. macOS reports the unsupported target before launching a compiler.
+
+The public `gpu/mxGPUArray.h` surface uses the active CUDA provider. RunMat keeps WGPU as the ordinary ambient acceleration provider when configured; it registers CUDA separately for native extension interoperability. A CUDA-resident input with matching provider, device, context, layout, and lifetime is exposed through the same provider-owned allocation. A CPU input is uploaded, and an input owned by another provider is downloaded and uploaded through the central transfer contracts. A WGPU buffer is never presented as a CUDA pointer.
+
+`mxGPUCreateFromMxArray` returns a read-only control object. It retains the allocation identity of a compatible CUDA input, while `mxGPUCopyFromMxArray` and `mxGPUCopyGPUArray` allocate independent writable device storage. `mxGPUCreateMxArrayOnGPU` publishes the provider-owned allocation without a device copy; `mxGPUCreateMxArrayOnCPU` performs an explicit readback. The pointer returned by `mxGPUGetData` or `mxGPUGetDataReadOnly` is valid only for the array lease and the invocation's current CUDA context. RunMat synchronizes provider work and checks context teardown before completing the gateway.
+
+The CUDA provider preserves `double`, `single`, all eight fixed-width integer classes, logical storage, and supported interleaved complex layouts. Real and imaginary component extraction and combination use device-to-device strided copies. Sparse GPU storage is not yet an admitted provider representation: converting a sparse host array through the GPU MEX API returns a structured error, and `mxGPUIsSparse` remains false for currently admitted GPU handles. This is distinct from native-width sparse host arrays in the C, C++, and Fortran Matrix APIs.
+
+GPU MEX manifests add the accelerator capability to the normal native-code and foreign-runtime requirements. Project freezing, packages, AOT products, and remote workers therefore admit the exact module only on a host that provides all three capabilities. Browser/WASM products reject the native and accelerator requirements before execution; they do not emulate CUDA or send the call to an undeclared remote host.
+
 Each successful build writes a canonical `.runmat.json` manifest beside the platform MEX module. The manifest binds the module name and bytes to its target triple, Matrix API selection, compiler family, embedded SDK revision, and RunMat MEX host ABI. Its content identity can be carried in executable and package interop manifests for capability admission and cache validation. Moving a module does not change its identity, while changing the module or its compatibility contract does.
+
+Project-owned modules can be declared with `[mex-artifacts.<name>]` in `runmat.toml`. RunMat freezes the module and manifest as one exact artifact, installs it by module name for ordinary project execution, embeds it in a standalone native program, and materializes it in worker-owned storage for remote execution. These paths do not depend on the original build directory or an ambient `addpath`. The module remains native and target-specific; a browser or mismatched worker rejects its capabilities or target before invocation.
 
 Loaded modules belong to the current session. A native library image may contain process-global state, so one RunMat session owns each canonical image in-process at a time. A concurrent session uses an exact manifest-admitted isolated extension host, which gives it independent module state instead of rebinding the first image's globals. Releasing the owning session makes that image eligible for another in-process owner. `clear mex`, `clear functions`, `clear all`, and named `clear` requests unload eligible modules and run registered `mexAtExit` handlers. A locked, currently executing, or asynchronously active module stays loaded. Native MEX loading is not available in a browser/WASM runtime; capability checks report that boundary before native execution.
 

@@ -4,12 +4,20 @@ use crate::cli::MexArgs;
 use crate::presentation;
 
 pub fn execute(args: MexArgs) -> Result<()> {
+    execute_with_mode(args, false)
+}
+
+pub fn execute_cuda(args: MexArgs) -> Result<()> {
+    execute_with_mode(args, true)
+}
+
+fn execute_with_mode(args: MexArgs, require_cuda: bool) -> Result<()> {
     let MexArgs {
         mut sources,
         output,
         out_dir,
         compiler,
-        r2017b: _,
+        r2017b,
         r2018a,
         large_array_dims,
         compatible_array_dims,
@@ -20,7 +28,8 @@ pub fn execute(args: MexArgs) -> Result<()> {
         verbose,
     } = args;
     let first = sources.remove(0);
-    let api = if r2018a {
+    let api = if r2018a || (require_cuda && !r2017b && !large_array_dims && !compatible_array_dims)
+    {
         runmat_mex::MexApi::R2018a
     } else if large_array_dims {
         runmat_mex::MexApi::LargeArrayDims
@@ -32,6 +41,9 @@ pub fn execute(args: MexArgs) -> Result<()> {
     let mut build = runmat_mex::MexBuild::new(first, out_dir).api(api);
     for source in sources {
         build = build.source(source);
+    }
+    if require_cuda && build.language() != runmat_mex::MexSourceLanguage::Cuda {
+        anyhow::bail!("mexcuda requires at least one CUDA (.cu) source file");
     }
     if let Some(output) = output {
         build = build.output_name(output);

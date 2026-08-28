@@ -107,6 +107,7 @@ fn native_capabilities() -> BTreeSet<HostCapability> {
     [
         HostCapability::Network,
         HostCapability::NativeLibrary,
+        HostCapability::Mex,
         HostCapability::Jvm,
         HostCapability::Subprocess,
     ]
@@ -138,10 +139,6 @@ pub(crate) async fn install_project_for_source(
     let Some(project) = resolve_for_source(source, cli).await? else {
         return Ok(None);
     };
-    let java_artifacts = super::java_artifacts::prepare(&project.resolved.frozen)?;
-    session
-        .install_java_project_artifacts(&java_artifacts.installation)
-        .context("failed to install resolved Java artifacts")?;
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(
             project.resolved.frozen.clone(),

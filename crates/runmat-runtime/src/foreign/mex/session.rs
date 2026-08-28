@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{atomic::Ordering, Arc};
@@ -8,6 +8,7 @@ use futures::FutureExt;
 use runmat_mex::{
     DirectMexBoundaryHostServices, MexApi, MexInvocation, MexNativeInvocation, MxValueContext,
 };
+use runmat_types::{CapabilityRequirement, ForeignCapability};
 use runmat_value::Value;
 
 use super::{
@@ -15,9 +16,16 @@ use super::{
     IsolatedMexClient, MexBinaryTier, MexIsolationPolicy, MexLifecycleOutcome, MexWireError,
     RuntimeMexHostServices, UnmanifestedMexPolicy,
 };
+use crate::context::ForeignCall;
 use crate::context::RuntimeContext;
 use crate::user_functions::DynamicFunctionClearRequest;
 use crate::{build_runtime_error, RuntimeError};
+
+#[derive(Clone)]
+struct InstalledMexArtifact {
+    path: PathBuf,
+    identity: String,
+}
 
 /// Session-scoped owner of dynamically loaded MEX modules.
 ///
@@ -26,6 +34,7 @@ use crate::{build_runtime_error, RuntimeError};
 /// `mexAtExit` lifecycle behavior cannot drift between execution modes.
 #[derive(Default)]
 pub struct MexRuntimeSession {
+    installed_modules: RefCell<HashMap<String, InstalledMexArtifact>>,
     native_lane: RefCell<Option<Rc<NativeMexLane>>>,
     native_modules: RefCell<HashSet<PathBuf>>,
     native_values: RefCell<HashMap<PathBuf, Rc<MxValueContext>>>,
@@ -43,6 +52,85 @@ impl MexRuntimeSession {
 
     pub fn set_isolation_policy(&self, policy: MexIsolationPolicy) {
         *self.isolation_policy.borrow_mut() = policy;
+    }
+
+    pub fn clear_installed_artifacts(&self) {
+        self.installed_modules.borrow_mut().clear();
+    }
+
+    /// Register an exact, already-materialized MEX artifact with this session.
+    ///
+    /// The module remains owned by its caller. Its canonical sidecar manifest
+    /// is verified before the name becomes visible to dynamic resolution.
+    pub fn install_artifact(&self, module: &Path) -> Result<String, RuntimeError> {
+        let module = std::fs::canonicalize(module).map_err(|error| {
+            runtime_error(
+                "MEX:Artifact",
+                format!(
+                    "could not resolve MEX artifact '{}': {error}",
+                    module.display()
+                ),
+            )
+        })?;
+        let bytes = std::fs::read(&module).map_err(|error| {
+            runtime_error(
+                "MEX:Artifact",
+                format!(
+                    "could not read MEX artifact '{}': {error}",
+                    module.display()
+                ),
+            )
+        })?;
+        let manifest_path = runmat_mex::MexArtifactManifest::path_for_module(&module);
+        let manifest_bytes = std::fs::read(&manifest_path).map_err(|error| {
+            runtime_error(
+                "MEX:Artifact",
+                format!(
+                    "could not read MEX artifact manifest '{}': {error}",
+                    manifest_path.display()
+                ),
+            )
+        })?;
+        let manifest = runmat_mex::MexArtifactManifest::from_canonical_bytes(&manifest_bytes)
+            .and_then(|manifest| {
+                manifest.validate_current_module(&bytes)?;
+                Ok(manifest)
+            })
+            .map_err(|error| {
+                runtime_error(
+                    "MEX:Artifact",
+                    format!("MEX artifact '{}' is invalid: {error}", module.display()),
+                )
+            })?;
+        if module.file_stem().and_then(|stem| stem.to_str()) != Some(&manifest.module_name) {
+            return Err(runtime_error(
+                "MEX:Artifact",
+                format!(
+                    "MEX artifact '{}' does not match module name '{}'",
+                    module.display(),
+                    manifest.module_name
+                ),
+            ));
+        }
+        let installed = InstalledMexArtifact {
+            path: module,
+            identity: manifest.identity.to_string(),
+        };
+        let mut modules = self.installed_modules.borrow_mut();
+        if let Some(existing) = modules.get(&manifest.module_name) {
+            if existing.path != installed.path || existing.identity != installed.identity {
+                return Err(runtime_error(
+                    "MEX:ArtifactConflict",
+                    format!(
+                        "MEX module '{}' is already installed with a different artifact",
+                        manifest.module_name
+                    ),
+                ));
+            }
+            return Ok(existing.identity.clone());
+        }
+        modules.insert(manifest.module_name, installed.clone());
+        Ok(installed.identity)
     }
 
     /// Service one callback submitted by native MEX work after its gateway
@@ -122,17 +210,26 @@ impl MexRuntimeSession {
             )));
         }
 
-        let extension = format!(".{}", runmat_mex::mex_suffix()?);
-        let path = match crate::builtins::common::path_search::find_file_with_extensions(
-            name,
-            &[extension.as_str()],
-            "MEX function resolution",
-        )
-        .await
-        {
-            Ok(Some(path)) => path,
-            Ok(None) => return None,
-            Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
+        let installed = self
+            .installed_modules
+            .borrow()
+            .get(name)
+            .map(|artifact| artifact.path.clone());
+        let path = if let Some(path) = installed {
+            path
+        } else {
+            let extension = format!(".{}", runmat_mex::mex_suffix()?);
+            match crate::builtins::common::path_search::find_file_with_extensions(
+                name,
+                &[extension.as_str()],
+                "MEX function resolution",
+            )
+            .await
+            {
+                Ok(Some(path)) => path,
+                Ok(None) => return None,
+                Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
+            }
         };
         let canonical = runmat_filesystem::canonicalize_async(&path)
             .await
@@ -484,6 +581,54 @@ impl MexRuntimeSession {
         self.native_modules.borrow_mut().clear();
         self.native_values.borrow_mut().clear();
         first_error.map_or(Ok(()), Err)
+    }
+}
+
+impl super::super::ForeignAdapter for MexRuntimeSession {
+    fn descriptor(&self) -> super::super::ForeignAdapterDescriptor {
+        let mut capabilities = BTreeSet::from([
+            CapabilityRequirement::ForeignRuntime,
+            CapabilityRequirement::NativeCode,
+        ]);
+        if runmat_accelerate_api::provider_for_native_device(
+            runmat_accelerate_api::NativeDeviceApi::Cuda,
+        )
+        .is_some()
+        {
+            capabilities.insert(CapabilityRequirement::Accelerator);
+        }
+        super::super::ForeignAdapterDescriptor {
+            adapter: runmat_mex::MEX_ADAPTER_ID.into(),
+            version: runmat_mex::MEX_ADAPTER_VERSION,
+            capabilities,
+            foreign_capabilities: BTreeSet::from([
+                ForeignCapability::Invoke,
+                ForeignCapability::Callback,
+                ForeignCapability::Transfer,
+            ]),
+            artifact_identities: self
+                .installed_modules
+                .borrow()
+                .values()
+                .map(|artifact| artifact.identity.clone())
+                .collect(),
+            supports_wasm: false,
+            supports_host_bridge: false,
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
+        }
+    }
+
+    fn invoke(
+        &self,
+        _context: RuntimeContext,
+        _call: ForeignCall,
+    ) -> super::super::ForeignAdapterFuture {
+        Box::pin(async {
+            Err(runtime_error(
+                "MEX:InvalidDispatch",
+                "MEX modules are invoked through function resolution",
+            ))
+        })
     }
 }
 

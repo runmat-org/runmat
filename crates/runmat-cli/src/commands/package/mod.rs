@@ -2,6 +2,7 @@ mod cache;
 mod credentials;
 mod foreign_artifacts;
 mod java_artifacts;
+mod mex_artifacts;
 mod native_interfaces;
 mod private_keys;
 mod publication;

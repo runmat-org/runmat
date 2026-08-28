@@ -2,8 +2,8 @@ use super::loader::{Loader, PackageOrigin};
 use super::source::{canonical_path, is_file};
 use super::{PackageSourceProvider, ProjectResolveError, ProjectResolveOptions, ResolvedProject};
 use crate::source::catalog::{
-    assemble_frozen_project, FrozenJavaArtifactInput, FrozenNativeInterfaceInput,
-    FrozenPackageInput, FrozenSourceInput,
+    assemble_frozen_project, FrozenJavaArtifactInput, FrozenMexArtifactInput,
+    FrozenNativeInterfaceInput, FrozenPackageInput, FrozenSourceInput,
 };
 use crate::{
     build_resolved_graph, reconcile_path_lock, PackageLock, PathLockMode, ResolvedDependencyInput,
@@ -126,6 +126,17 @@ pub async fn resolve_project_async(
                     manifest_bytes: interface.manifest_bytes,
                     library_path: interface.library_path,
                     library_bytes: interface.library_bytes,
+                })
+                .collect(),
+            mex_artifacts: package
+                .mex_artifacts
+                .into_iter()
+                .map(|artifact| FrozenMexArtifactInput {
+                    name: artifact.name,
+                    manifest_path: artifact.manifest_path,
+                    manifest_bytes: artifact.manifest_bytes,
+                    module_path: artifact.module_path,
+                    module_bytes: artifact.module_bytes,
                 })
                 .collect(),
             java_artifacts: package

@@ -29,11 +29,17 @@ const BUILD_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Variadic,
     default: None,
-    description: "C source files and MATLAB-compatible MEX build options.",
+    description: "Native source files and compatible MEX build options.",
 }];
 
 const BUILD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "mex(arguments)",
+    inputs: &BUILD_INPUTS,
+    outputs: &[],
+}];
+
+const CUDA_BUILD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "mexcuda(arguments)",
     inputs: &BUILD_INPUTS,
     outputs: &[],
 }];
@@ -90,6 +96,20 @@ pub const MEX_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAudit
     notes: "mex accepts source paths and compiler options; it does not operate on numeric values.",
 };
 
+pub const MEXCUDA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CUDA_BUILD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &BUILD_ERRORS,
+};
+
+pub const MEXCUDA_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes:
+        "mexcuda accepts source paths and compiler options; it does not operate on numeric values.",
+};
+
 #[runtime_builtin(
     name = "mex",
     category = "interop/mex",
@@ -102,12 +122,31 @@ pub const MEX_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAudit
     builtin_path = "crate::builtins::interop::mex"
 )]
 fn mex_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+    build_mex(arguments, "mex", false)
+}
+
+#[runtime_builtin(
+    name = "mexcuda",
+    category = "interop/mex",
+    summary = "Build a CUDA MEX module with the configured nvcc toolchain.",
+    keywords = "mexcuda,mex,cuda,gpu,native,extension,build",
+    sink = true,
+    suppress_auto_output = true,
+    descriptor(crate::builtins::interop::mex::MEXCUDA_DESCRIPTOR),
+    integer_audit(crate::builtins::interop::mex::MEXCUDA_INTEGER_AUDIT),
+    builtin_path = "crate::builtins::interop::mex"
+)]
+fn mexcuda_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+    build_mex(arguments, "mexcuda", true)
+}
+
+fn build_mex(arguments: Vec<Value>, builtin: &'static str, cuda: bool) -> BuiltinResult<Value> {
     let arguments = arguments
         .iter()
         .map(|argument| {
             String::try_from(argument).map_err(|error| {
-                build_runtime_error(format!("mex: expected text arguments: {error}"))
-                    .with_builtin("mex")
+                build_runtime_error(format!("{builtin}: expected text arguments: {error}"))
+                    .with_builtin(builtin)
                     .with_identifier(
                         ERROR_BUILD_ARGUMENTS
                             .identifier
@@ -119,22 +158,29 @@ fn mex_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
         .collect::<BuiltinResult<Vec<_>>>()?;
     let working_directory = runmat_filesystem::current_dir().map_err(|error| {
         mex_build_error(
+            builtin,
             &ERROR_BUILD_FAILED,
-            format!("mex: could not resolve the current directory: {error}"),
+            format!("{builtin}: could not resolve the current directory: {error}"),
         )
     })?;
-    let invocation = runmat_mex::MexBuildInvocation::parse(&arguments, &working_directory)
-        .map_err(|error| mex_build_error(&ERROR_BUILD_ARGUMENTS, error.to_string()))?;
+    let invocation = if cuda {
+        runmat_mex::MexBuildInvocation::parse_cuda(&arguments, &working_directory)
+    } else {
+        runmat_mex::MexBuildInvocation::parse(&arguments, &working_directory)
+    }
+    .map_err(|error| mex_build_error(builtin, &ERROR_BUILD_ARGUMENTS, error.to_string()))?;
     if invocation.verbose {
         let command = invocation
             .build
             .plan()
-            .map_err(map_mex_build_error)?
+            .map_err(|error| map_mex_build_error(builtin, error))?
             .command()
             .join(" ");
         crate::console::record_console_line(crate::console::ConsoleStream::Stdout, command);
     }
-    let output = invocation.compile().map_err(map_mex_build_error)?;
+    let output = invocation
+        .compile()
+        .map_err(|error| map_mex_build_error(builtin, error))?;
     crate::console::record_console_line(
         crate::console::ConsoleStream::Stdout,
         format!("Built {}", output.module.display()),
@@ -142,21 +188,26 @@ fn mex_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
     Ok(Value::OutputList(Vec::new()))
 }
 
-fn map_mex_build_error(error: runmat_mex::MexBuildError) -> crate::RuntimeError {
+fn map_mex_build_error(
+    builtin: &'static str,
+    error: runmat_mex::MexBuildError,
+) -> crate::RuntimeError {
     match error {
-        runmat_mex::MexBuildError::UnsupportedTarget => {
-            mex_build_error(&ERROR_UNAVAILABLE, error.to_string())
+        runmat_mex::MexBuildError::UnsupportedTarget
+        | runmat_mex::MexBuildError::UnsupportedCudaTarget => {
+            mex_build_error(builtin, &ERROR_UNAVAILABLE, error.to_string())
         }
-        other => mex_build_error(&ERROR_BUILD_FAILED, other.to_string()),
+        other => mex_build_error(builtin, &ERROR_BUILD_FAILED, other.to_string()),
     }
 }
 
 fn mex_build_error(
+    builtin: &'static str,
     descriptor: &'static BuiltinErrorDescriptor,
     message: String,
 ) -> crate::RuntimeError {
     build_runtime_error(message)
-        .with_builtin("mex")
+        .with_builtin(builtin)
         .with_identifier(
             descriptor
                 .identifier
@@ -211,6 +262,12 @@ mod tests {
         assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
     }
 
+    #[test]
+    fn mexcuda_requires_a_cuda_translation_unit() {
+        let error = mexcuda_builtin(vec![Value::from("gateway.cpp")]).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
+    }
+
     #[cfg(not(target_family = "wasm"))]
     #[test]
     fn mex_builds_source_with_the_shared_adapter_service() {
@@ -242,5 +299,15 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 runmat_mex::mex_suffix().unwrap()
             ))
             .is_file());
+    }
+
+    #[test]
+    fn mexcuda_reports_an_unsupported_host_as_unavailable() {
+        let error =
+            map_mex_build_error("mexcuda", runmat_mex::MexBuildError::UnsupportedCudaTarget);
+        assert_eq!(
+            error.identifier().expect("identifier"),
+            "RunMat:MEX:UnsupportedTarget"
+        );
     }
 }

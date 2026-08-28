@@ -13,9 +13,12 @@ crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 runmat-execution = { workspace = true }
+runmat-accelerate = { workspace = true, features = ["cuda"] }
+runmat-accelerate-api = { workspace = true }
 runmat-native-codegen = { workspace = true, default-features = false }
 runmat-native-executor = { workspace = true }
 runmat-native-ffi = { workspace = true }
+runmat-mex = { workspace = true }
 runmat-java = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }

@@ -7,10 +7,14 @@ use sha2::{Digest as _, Sha256};
 
 use super::MexBuildError;
 
-const FILES: [(&str, &[u8]); 26] = [
+const FILES: [(&str, &[u8]); 28] = [
     ("include/matrix.h", include_bytes!("../../include/matrix.h")),
     ("include/mex.h", include_bytes!("../../include/mex.h")),
     ("include/fintrf.h", include_bytes!("../../include/fintrf.h")),
+    (
+        "include/gpu/mxGPUArray.h",
+        include_bytes!("../../include/gpu/mxGPUArray.h"),
+    ),
     ("include/mex.hpp", include_bytes!("../../include/mex.hpp")),
     (
         "include/mexAdapter.hpp",
@@ -77,28 +81,32 @@ const FILES: [(&str, &[u8]); 26] = [
         include_bytes!("../../include/runmat_mex_host.h"),
     ),
     (
-        "native/runmat_mex_support.c",
-        include_bytes!("../../native/runmat_mex_support.c"),
+        "src-c/runmat_mex_support.c",
+        include_bytes!("../../src-c/runmat_mex_support.c"),
     ),
     (
-        "native/data_engine.inc",
-        include_bytes!("../../native/data_engine.inc"),
+        "src-c/data_engine.inc",
+        include_bytes!("../../src-c/data_engine.inc"),
     ),
     (
-        "native/sparse_index_compat.inc",
-        include_bytes!("../../native/sparse_index_compat.inc"),
+        "src-c/sparse_index_compat.inc",
+        include_bytes!("../../src-c/sparse_index_compat.inc"),
     ),
     (
-        "native/matrix_api.inc",
-        include_bytes!("../../native/matrix_api.inc"),
+        "src-c/matrix_api.inc",
+        include_bytes!("../../src-c/matrix_api.inc"),
     ),
     (
-        "native/mex_api.inc",
-        include_bytes!("../../native/mex_api.inc"),
+        "src-c/mex_api.inc",
+        include_bytes!("../../src-c/mex_api.inc"),
     ),
     (
-        "native/fortran_api.inc",
-        include_bytes!("../../native/fortran_api.inc"),
+        "src-c/fortran_api.inc",
+        include_bytes!("../../src-c/fortran_api.inc"),
+    ),
+    (
+        "src-c/gpu_api.inc",
+        include_bytes!("../../src-c/gpu_api.inc"),
     ),
 ];
 
@@ -118,7 +126,7 @@ pub(super) fn prepare() -> Result<MexSdk, MexBuildError> {
     }
     Ok(MexSdk {
         include_directory: root.join("include"),
-        support_source: root.join("native/runmat_mex_support.c"),
+        support_source: root.join("src-c/runmat_mex_support.c"),
     })
 }
 
@@ -193,11 +201,26 @@ mod tests {
         assert!(sdk.include_directory.join("mex.h").is_file());
         assert!(sdk.include_directory.join("mex.hpp").is_file());
         assert!(sdk.include_directory.join("mexAdapter.hpp").is_file());
+        assert!(sdk.include_directory.join("gpu/mxGPUArray.h").is_file());
         assert!(sdk
             .include_directory
             .join("MatlabDataArray/ArrayFactory.hpp")
             .is_file());
         assert!(sdk.include_directory.join("runmat_mex_host.h").is_file());
         assert!(sdk.support_source.is_file());
+        assert_eq!(
+            sdk.support_source
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("runmat_mex_support.c")
+        );
+        assert_eq!(
+            FILES
+                .iter()
+                .filter(|(path, _)| path.starts_with("src-c/") && path.ends_with(".c"))
+                .count(),
+            1,
+            "the embedded SDK must expose one automatically compiled support unit"
+        );
     }
 }

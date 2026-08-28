@@ -20,7 +20,7 @@ pub(crate) async fn execute_host_program_request_with_project(
     if request.artifact.form != ExecutableForm::TestAttemptV1 {
         return execute_portable_request(request, materialized).await;
     }
-    match execute_test_attempt(&request, materialized.and_then(|value| value.handoff())).await {
+    match execute_test_attempt(&request, materialized).await {
         Ok(execution) => match runmat_test_runner_execution::encode_execution(&execution) {
             Ok(value) => ProgramExecutionResponse::Success { value },
             Err(message) => ProgramExecutionResponse::Failure { message },
@@ -88,6 +88,33 @@ async fn execute_portable_request(
     if let Some(requirement) = interop
         .adapters
         .iter()
+        .find(|requirement| requirement.adapter == runmat_mex::MEX_ADAPTER_ID)
+    {
+        for identity in &requirement.artifact_identities {
+            let Some(artifact) =
+                materialized.and_then(|materialized| materialized.mex_artifact(identity))
+            else {
+                return ProgramExecutionResponse::Failure {
+                    message: format!(
+                        "worker has no materialized MEX module for required artifact {identity}"
+                    ),
+                };
+            };
+            if artifact.manifest.source_language == runmat_mex::MexSourceLanguage::Cuda {
+                if let Err(message) = ensure_cuda_mex_provider("worker") {
+                    return ProgramExecutionResponse::Failure { message };
+                }
+            }
+            if let Err(error) = session.install_mex_artifact(&artifact.module_path) {
+                return ProgramExecutionResponse::Failure {
+                    message: format!("worker could not install MEX artifact: {error}"),
+                };
+            }
+        }
+    }
+    if let Some(requirement) = interop
+        .adapters
+        .iter()
         .find(|requirement| requirement.adapter == runmat_java::JAVA_ADAPTER_ID)
     {
         let Some(materialized) = materialized else {
@@ -138,9 +165,10 @@ async fn execute_portable_request(
 
 async fn execute_test_attempt(
     request: &ProgramExecutionRequest,
-    project: Option<&runmat_package::FrozenProjectHandoff>,
+    materialized: Option<&crate::materialized_project::MaterializedProject>,
 ) -> Result<WorkerExecution, String> {
     let workload = TestAttemptWorkload::from_program_request(request)?;
+    let project = materialized.and_then(|materialized| materialized.handoff());
     if let Some(project) = project {
         let revision = project.revision();
         if request.recipe.program_revision.graph_digest().bytes() != revision.graph_digest.bytes()
@@ -154,6 +182,9 @@ async fn execute_test_attempt(
     }
     let mut session = runmat_core::RunMatSession::with_options(true, false)
         .map_err(|error| format!("failed to initialize test execution session: {error}"))?;
+    if materialized.is_some_and(|materialized| materialized.requires_cuda_mex()) {
+        ensure_cuda_mex_provider("test worker")?;
+    }
     if let Some(project) = project {
         session
             .install_project_handoff(project.clone())
@@ -180,6 +211,25 @@ async fn execute_test_attempt(
             coverage: execution.coverage,
         }),
         (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+    }
+}
+
+fn ensure_cuda_mex_provider(host: &str) -> Result<(), String> {
+    if runmat_accelerate_api::provider_for_native_device(
+        runmat_accelerate_api::NativeDeviceApi::Cuda,
+    )
+    .is_some()
+    {
+        return Ok(());
+    }
+    match runmat_accelerate::backend::cuda::register_cuda_provider() {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(format!(
+            "{host} requires an available CUDA driver and device for this MEX artifact"
+        )),
+        Err(error) => Err(format!(
+            "{host} could not initialize its CUDA MEX provider: {error}"
+        )),
     }
 }
 
@@ -277,7 +327,7 @@ mod tests {
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: unit.revision().program_revision.clone(),
-            entrypoint: envelope.manifest.identity.entrypoint.clone(),
+            entrypoint: function.to_string(),
             outputs: runmat_execution::OutputContract {
                 requested_outputs: 1,
             },
@@ -307,6 +357,146 @@ mod tests {
             panic!("host executed a program before satisfying its native interface");
         };
         assert!(message.contains("missing-fixture"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn host_executes_a_packaged_mex_module_from_the_exact_bundle() {
+        if Command::new(if cfg!(windows) { "gcc" } else { "clang" })
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("remote MEX execution requires a C compiler");
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("remote_fixture.c");
+        std::fs::write(
+            &source,
+            r#"
+#include "mex.h"
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    (void)nrhs; (void)prhs;
+    if (nlhs > 0) plhs[0] = mxCreateDoubleScalar(73.0);
+}
+"#,
+        )
+        .unwrap();
+        let output = runmat_mex::MexBuild::new(&source, temp.path())
+            .compile()
+            .unwrap();
+        let manifest_bytes = std::fs::read(&output.manifest).unwrap();
+        let module_bytes = std::fs::read(&output.module).unwrap();
+        let manifest =
+            runmat_mex::MexArtifactManifest::from_canonical_bytes(&manifest_bytes).unwrap();
+
+        let project_root = temp.path().join("project");
+        std::fs::create_dir_all(project_root.join("src")).unwrap();
+        std::fs::write(
+            project_root.join("runmat.toml"),
+            "[package]\nname = \"remote-mex-application\"\n[sources]\nroots = [\"src\"]\n",
+        )
+        .unwrap();
+        let project = runmat_package::build_frozen_project(
+            &project_root.join("runmat.toml"),
+            BTreeSet::new(),
+        )
+        .unwrap();
+        let project_revision = project.revision();
+        let revision = runmat_execution::ProgramRevision::new(
+            Digest::from_bytes(*project_revision.graph_digest.bytes()),
+            Digest::from_bytes(*project_revision.source_revision.bytes()),
+            runmat_core::program_environment(runmat_core::CompatMode::RunMat),
+        )
+        .unwrap();
+
+        let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+        let unit = session
+            .compile_executable_unit(
+                runmat_core::ExecutableSource::new(
+                    "remote-mex-test@1",
+                    "remote_mex.m",
+                    "function value = main(); value = remote_fixture(); end\n",
+                ),
+                Some(revision),
+            )
+            .await
+            .unwrap();
+        let envelope = unit
+            .portable_envelope_for_with_interop(Some("main"), manifest.interop_manifest())
+            .unwrap();
+        let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+        let recipe = ProgramBuildRecipe {
+            schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+            program_revision: unit.revision().program_revision.clone(),
+            entrypoint: function.to_string(),
+            outputs: runmat_execution::OutputContract {
+                requested_outputs: 1,
+            },
+            execution_mode: "interpreter".into(),
+            target: ProgramTarget::portable("remote-mex-execution"),
+            features: BTreeSet::new(),
+            compile_options: BTreeSet::new(),
+            source_objects: Vec::new(),
+            expected_artifact_id: None,
+        };
+        let identity = manifest.identity.to_string();
+        let root = format!("mex/{identity}");
+        let filename = output.module.file_name().unwrap().to_string_lossy();
+        let sidecar = LogicalObject::new(
+            ObjectNamespace::ForeignArtifact,
+            format!("{root}/{filename}.runmat.json"),
+            runmat_mex::MEX_ARTIFACT_MANIFEST_MEDIA_TYPE,
+            manifest_bytes,
+        )
+        .unwrap();
+        let module = LogicalObject::new(
+            ObjectNamespace::ForeignArtifact,
+            format!("{root}/{filename}"),
+            runmat_mex::MEX_MODULE_MEDIA_TYPE,
+            module_bytes,
+        )
+        .unwrap();
+        let bundle =
+            ExecutionBundleBuilder::native(&project, unit.revision().program_revision.clone())
+                .unwrap()
+                .with_compiled_package_closure()
+                .with_foreign_artifact(sidecar)
+                .unwrap()
+                .with_foreign_artifact(module)
+                .unwrap()
+                .with_materialized_program(
+                    recipe,
+                    ExecutableForm::ExecutableUnitV3,
+                    envelope.canonical_bytes().unwrap(),
+                )
+                .build()
+                .unwrap();
+        std::fs::remove_file(&output.manifest).unwrap();
+        std::fs::remove_file(&output.module).unwrap();
+
+        let materialized =
+            crate::materialized_project::MaterializedProject::from_bundle(&bundle).unwrap();
+        let recipe = bundle.manifest.recipes.first().cloned().unwrap();
+        let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
+        let response = execute_host_program_request_with_project(
+            ProgramExecutionRequest {
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                recipe,
+                artifact,
+                function,
+                arguments: Vec::new(),
+                requested_outputs: 1,
+            },
+            Some(&materialized),
+        )
+        .await;
+        assert_eq!(
+            response,
+            ProgramExecutionResponse::Success {
+                value: ValuePayload::Inline(Box::new(InlineValue::F64Bits(73.0_f64.to_bits()))),
+            }
+        );
     }
 
     #[tokio::test]

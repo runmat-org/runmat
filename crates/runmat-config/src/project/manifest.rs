@@ -29,6 +29,7 @@ pub struct ProjectManifest {
     pub publish: Option<ProjectPublication>,
     pub entrypoints: Vec<ProjectEntrypoint>,
     pub native_interfaces: BTreeMap<String, ProjectNativeInterface>,
+    pub mex_artifacts: BTreeMap<String, ProjectMexArtifact>,
     pub java_artifacts: BTreeMap<String, ProjectJavaArtifact>,
     pub test: ProjectTestConfig,
 }
@@ -74,6 +75,13 @@ pub struct ProjectNativeInterface {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ProjectMexArtifact {
+    pub manifest: PathBuf,
+    pub module: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectJavaArtifact {
     pub path: PathBuf,
 }
@@ -105,6 +113,8 @@ struct RawProjectManifest {
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
     #[serde(default, rename = "native-interfaces")]
     native_interfaces: BTreeMap<String, ProjectNativeInterface>,
+    #[serde(default, rename = "mex-artifacts")]
+    mex_artifacts: BTreeMap<String, ProjectMexArtifact>,
     #[serde(default, rename = "java-artifacts")]
     java_artifacts: BTreeMap<String, ProjectJavaArtifact>,
     #[serde(default, rename = "runtime")]
@@ -152,6 +162,7 @@ impl From<RawProjectManifest> for ProjectManifest {
             publish: value.publish,
             entrypoints,
             native_interfaces: value.native_interfaces,
+            mex_artifacts: value.mex_artifacts,
             java_artifacts: value.java_artifacts,
             test: value.test,
         }
@@ -193,6 +204,8 @@ impl Serialize for ProjectManifest {
             entrypoints: BTreeMap<&'a str, CanonicalEntrypoint<'a>>,
             #[serde(rename = "native-interfaces")]
             native_interfaces: &'a BTreeMap<String, ProjectNativeInterface>,
+            #[serde(rename = "mex-artifacts")]
+            mex_artifacts: &'a BTreeMap<String, ProjectMexArtifact>,
             #[serde(rename = "java-artifacts")]
             java_artifacts: &'a BTreeMap<String, ProjectJavaArtifact>,
             #[serde(skip_serializing_if = "ProjectTestConfig::is_default")]
@@ -237,6 +250,7 @@ impl Serialize for ProjectManifest {
             publish: &self.publish,
             entrypoints,
             native_interfaces: &self.native_interfaces,
+            mex_artifacts: &self.mex_artifacts,
             java_artifacts: &self.java_artifacts,
             test: &self.test,
         }
@@ -527,6 +541,31 @@ impl ProjectManifest {
                         path: project_root.join(path),
                         missing_message: format!(
                             "native interface `{name}` {kind} path `{}` does not exist as a file under project root",
+                            path.display()
+                        ),
+                    });
+                }
+            }
+        }
+        for (name, artifact) in &self.mex_artifacts {
+            if name.trim().is_empty() {
+                messages.push("MEX artifact names must be non-empty".to_string());
+                continue;
+            }
+            for (kind, path) in [
+                ("manifest", &artifact.manifest),
+                ("module", &artifact.module),
+            ] {
+                if !is_relative_without_parent(path) {
+                    messages.push(format!(
+                        "MEX artifact `{name}` {kind} path `{}` must be project-relative without `..` segments",
+                        path.display()
+                    ));
+                } else {
+                    path_requirements.push(PathRequirement::File {
+                        path: project_root.join(path),
+                        missing_message: format!(
+                            "MEX artifact `{name}` {kind} path `{}` does not exist as a file under project root",
                             path.display()
                         ),
                     });

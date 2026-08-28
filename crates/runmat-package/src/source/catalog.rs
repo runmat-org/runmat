@@ -117,6 +117,7 @@ pub struct FrozenProject {
     #[serde(with = "stable_source_path_map")]
     pub access_paths: BTreeMap<StableSourceId, PathBuf>,
     pub native_interfaces: Vec<FrozenNativeInterface>,
+    pub mex_artifacts: Vec<FrozenMexArtifact>,
     pub java_artifacts: Vec<FrozenJavaArtifact>,
 }
 
@@ -129,6 +130,17 @@ pub struct FrozenNativeInterface {
     pub manifest_path: PathBuf,
     pub library_digest: ContentDigest,
     pub library_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrozenMexArtifact {
+    pub package_instance: ContentDigest,
+    pub name: String,
+    pub manifest_digest: ContentDigest,
+    pub manifest_path: PathBuf,
+    pub module_digest: ContentDigest,
+    pub module_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,6 +159,7 @@ pub(crate) struct FrozenPackageInput {
     pub root: PathBuf,
     pub files: Vec<FrozenSourceInput>,
     pub native_interfaces: Vec<FrozenNativeInterfaceInput>,
+    pub mex_artifacts: Vec<FrozenMexArtifactInput>,
     pub java_artifacts: Vec<FrozenJavaArtifactInput>,
 }
 
@@ -161,6 +174,14 @@ pub(crate) struct FrozenNativeInterfaceInput {
     pub manifest_bytes: Vec<u8>,
     pub library_path: PathBuf,
     pub library_bytes: Vec<u8>,
+}
+
+pub(crate) struct FrozenMexArtifactInput {
+    pub name: String,
+    pub manifest_path: PathBuf,
+    pub manifest_bytes: Vec<u8>,
+    pub module_path: PathBuf,
+    pub module_bytes: Vec<u8>,
 }
 
 pub(crate) struct FrozenJavaArtifactInput {
@@ -178,6 +199,7 @@ pub(crate) fn assemble_frozen_project(
     let mut packages = BTreeMap::new();
     let mut access_paths = BTreeMap::new();
     let mut native_interfaces = Vec::new();
+    let mut mex_artifacts = Vec::new();
     let mut java_artifacts = Vec::new();
     for package in package_inputs {
         if !graph.packages.contains_key(&package.instance) {
@@ -217,6 +239,16 @@ pub(crate) fn assemble_frozen_project(
                 library_path: interface.library_path,
             });
         }
+        for artifact in package.mex_artifacts {
+            mex_artifacts.push(FrozenMexArtifact {
+                package_instance: package.instance.clone(),
+                name: artifact.name,
+                manifest_digest: ContentDigest::sha256(&artifact.manifest_bytes),
+                manifest_path: artifact.manifest_path,
+                module_digest: ContentDigest::sha256(&artifact.module_bytes),
+                module_path: artifact.module_path,
+            });
+        }
         for artifact in package.java_artifacts {
             java_artifacts.push(FrozenJavaArtifact {
                 package_instance: package.instance.clone(),
@@ -246,6 +278,9 @@ pub(crate) fn assemble_frozen_project(
     native_interfaces.sort_by(|left, right| {
         (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
     });
+    mex_artifacts.sort_by(|left, right| {
+        (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
+    });
     java_artifacts.sort_by(|left, right| {
         (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
     });
@@ -256,6 +291,7 @@ pub(crate) fn assemble_frozen_project(
         sources: SourceCatalog { packages, revision },
         access_paths,
         native_interfaces,
+        mex_artifacts,
         java_artifacts,
     })
 }

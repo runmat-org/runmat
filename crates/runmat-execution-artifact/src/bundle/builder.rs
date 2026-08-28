@@ -185,7 +185,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                     }
                 }
                 BundleCodeClosure::SourceProject {
-                    handoff: project_handoff,
+                    handoff: Box::new(project_handoff),
                 }
             }
             CodeClosureMode::Compiled => {

@@ -11,8 +11,8 @@ use runmat_value::{
 };
 
 use crate::mxarray::{
-    MxApiMode, MxArray, MxArrayData, MxBoundaryInterface, MxHandleToken, MxInterleavedStorage,
-    MxNumeric, MxSparse, MxSparseValues,
+    MxApiMode, MxArray, MxArrayData, MxBoundaryInterface, MxClassId, MxHandleToken,
+    MxInterleavedStorage, MxNumeric, MxSparse, MxSparseValues,
 };
 
 #[derive(Debug)]
@@ -222,6 +222,10 @@ pub(crate) fn value_to_mx_for_interface_in_context(
             })?
             .register_handle(value)
             .map(MxArray::handle),
+        Value::GpuTensor(handle) => {
+            let class_id = gpu_class_id(handle)?;
+            MxArray::gpu_borrowed(class_id, handle.clone()).map_err(MxConversionError::new)
+        }
         other => Err(MxConversionError::new(format!(
             "{} values do not have a C Matrix API representation",
             value_kind(other)
@@ -301,6 +305,51 @@ pub(crate) fn value_from_mx_in_context(
             .resolve_handle(value)
             .map(Value::HandleObject),
         MxArrayData::Sparse(value) => sparse_from_mx(value),
+        MxArrayData::Gpu(gpu) => {
+            let handle = gpu.lease.publish(value.shape());
+            runmat_accelerate_api::set_handle_class_name(&handle, mx_class_name(gpu.class_id));
+            Ok(Value::GpuTensor(handle))
+        }
+    }
+}
+
+fn gpu_class_id(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> Result<MxClassId, MxConversionError> {
+    if runmat_accelerate_api::handle_class_name(handle).as_deref() == Some("logical") {
+        return Ok(MxClassId::Logical);
+    }
+    let element = handle.descriptor.element_type.ok_or_else(|| {
+        MxConversionError::new("GPU-resident value is missing its physical element type")
+    })?;
+    Ok(match element {
+        runmat_accelerate_api::NumericElementType::F64 => MxClassId::Double,
+        runmat_accelerate_api::NumericElementType::F32 => MxClassId::Single,
+        runmat_accelerate_api::NumericElementType::I8 => MxClassId::Int8,
+        runmat_accelerate_api::NumericElementType::I16 => MxClassId::Int16,
+        runmat_accelerate_api::NumericElementType::I32 => MxClassId::Int32,
+        runmat_accelerate_api::NumericElementType::I64 => MxClassId::Int64,
+        runmat_accelerate_api::NumericElementType::U8 => MxClassId::Uint8,
+        runmat_accelerate_api::NumericElementType::U16 => MxClassId::Uint16,
+        runmat_accelerate_api::NumericElementType::U32 => MxClassId::Uint32,
+        runmat_accelerate_api::NumericElementType::U64 => MxClassId::Uint64,
+    })
+}
+
+fn mx_class_name(class_id: MxClassId) -> &'static str {
+    match class_id {
+        MxClassId::Logical => "logical",
+        MxClassId::Double => "double",
+        MxClassId::Single => "single",
+        MxClassId::Int8 => "int8",
+        MxClassId::Uint8 => "uint8",
+        MxClassId::Int16 => "int16",
+        MxClassId::Uint16 => "uint16",
+        MxClassId::Int32 => "int32",
+        MxClassId::Uint32 => "uint32",
+        MxClassId::Int64 => "int64",
+        MxClassId::Uint64 => "uint64",
+        _ => "gpuArray",
     }
 }
 

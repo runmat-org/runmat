@@ -9,7 +9,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [features]
 # Backends are opt-in features
-cuda = []
+cuda = ["dep:libloading"]
 rocm = []
 metal = []
 vulkan = []
@@ -73,4 +73,5 @@ web-sys = { version = "0.3", features = [
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = { version = "0.19", optional = true, features = ["trace"] }
+libloading = { version = "0.8.9", optional = true }
 tokio = { workspace = true, default-features = false, features = ["macros", "rt-multi-thread"] }

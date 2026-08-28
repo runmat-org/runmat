@@ -90,8 +90,9 @@ sha2 = { workspace = true }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)
-default = ["gui", "blas-lapack", "wgpu", "jit", "occt-native"]
+default = ["gui", "blas-lapack", "wgpu", "cuda", "jit", "occt-native"]
 wgpu = ["runmat-accelerate/wgpu", "runmat-runtime/wgpu"]
+cuda = ["runmat-accelerate/cuda"]
 gui = ["runmat-plot/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
 blas-only = ["runmat-runtime/blas-only"]

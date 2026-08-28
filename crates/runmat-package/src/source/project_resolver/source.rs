@@ -1,4 +1,6 @@
-use super::loader::{LoadedJavaArtifact, LoadedNativeInterface, LoadedSource, PackageOrigin};
+use super::loader::{
+    LoadedJavaArtifact, LoadedMexArtifact, LoadedNativeInterface, LoadedSource, PackageOrigin,
+};
 use super::ProjectResolveError;
 use crate::{ContentDigest, NormalizedRelativePath, PathSourceId, SourceId};
 use runmat_config::project::{
@@ -79,9 +81,31 @@ pub(super) async fn load_java_artifacts(
     Ok(artifacts)
 }
 
+pub(super) async fn load_mex_artifacts(
+    root: &Path,
+    manifest: &ProjectManifest,
+) -> Result<Vec<LoadedMexArtifact>, ProjectResolveError> {
+    let mut artifacts = Vec::with_capacity(manifest.mex_artifacts.len());
+    for (name, declaration) in &manifest.mex_artifacts {
+        let manifest_path = root.join(&declaration.manifest);
+        let manifest_bytes = read_project_artifact(&manifest_path).await?;
+        let module_path = root.join(&declaration.module);
+        let module_bytes = read_project_artifact(&module_path).await?;
+        artifacts.push(LoadedMexArtifact {
+            name: name.clone(),
+            manifest_path,
+            manifest_bytes,
+            module_path,
+            module_bytes,
+        });
+    }
+    Ok(artifacts)
+}
+
 pub(super) struct PackageContent<'a> {
     pub(super) sources: &'a [LoadedSource],
     pub(super) native_interfaces: &'a [LoadedNativeInterface],
+    pub(super) mex_artifacts: &'a [LoadedMexArtifact],
     pub(super) java_artifacts: &'a [LoadedJavaArtifact],
 }
 
@@ -198,6 +222,20 @@ fn path_tree_digest(
             root,
             &interface.library_path,
             &interface.library_bytes,
+        )?;
+    }
+    for artifact in content.mex_artifacts {
+        append_project_artifact(
+            &mut input,
+            root,
+            &artifact.manifest_path,
+            &artifact.manifest_bytes,
+        )?;
+        append_project_artifact(
+            &mut input,
+            root,
+            &artifact.module_path,
+            &artifact.module_bytes,
         )?;
     }
     for artifact in content.java_artifacts {

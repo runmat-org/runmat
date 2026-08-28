@@ -181,7 +181,11 @@ impl MxApi {
     }
 
     pub fn duplicate(&mut self, source: *const MxArray) -> Result<*mut MxArray, MxArenaError> {
-        let duplicate = self.arena.get(source)?.deep_duplicate();
+        let duplicate = self
+            .arena
+            .get(source)?
+            .deep_duplicate()
+            .map_err(MxArenaError::Operation)?;
         Ok(self.arena.allocate(duplicate))
     }
 

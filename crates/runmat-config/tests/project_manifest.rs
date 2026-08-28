@@ -103,6 +103,65 @@ library = "/tmp/fixture.bin"
 }
 
 #[test]
+fn validates_explicit_mex_artifacts() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("mex")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(tmp.path().join("mex/fixture.mex.runmat.json"), "{}").unwrap();
+    fs::write(tmp.path().join("mex/fixture.mex"), b"module").unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[mex-artifacts.fixture]
+manifest = "mex/fixture.mex.runmat.json"
+module = "mex/fixture.mex"
+"#,
+    );
+
+    let loaded = load_project_manifest(&manifest_path).expect("MEX artifact should validate");
+    let artifact = loaded.mex_artifacts.get("fixture").unwrap();
+    assert_eq!(
+        artifact.manifest,
+        std::path::Path::new("mex/fixture.mex.runmat.json")
+    );
+    assert_eq!(artifact.module, std::path::Path::new("mex/fixture.mex"));
+}
+
+#[test]
+fn rejects_mex_artifact_paths_outside_the_package() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[mex-artifacts.fixture]
+manifest = "../fixture.json"
+module = "/tmp/fixture.mex"
+"#,
+    )
+    .unwrap();
+    let error = parsed.validate(std::path::Path::new(".")).unwrap_err();
+    assert_eq!(
+        error
+            .messages
+            .iter()
+            .filter(|message| message.contains("must be project-relative"))
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn validates_explicit_java_artifacts() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();

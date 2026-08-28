@@ -26,6 +26,8 @@ impl RunMatSession {
                     "could not clear loaded MEX modules before installing project: {error}"
                 ))
             })?;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.install_project_foreign_artifacts(&handoff)?;
         let revision = handoff.revision();
         let program_revision = runmat_execution::ProgramRevision::new(
             runmat_execution::Digest::from_bytes(*revision.graph_digest.bytes()),
@@ -52,6 +54,72 @@ impl RunMatSession {
         Ok(revision)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn install_project_foreign_artifacts(
+        &self,
+        handoff: &runmat_package::FrozenProjectHandoff,
+    ) -> std::result::Result<(), runmat_package::FrozenProjectHandoffError> {
+        self.mex_runtime.clear_installed_artifacts();
+        let mut manifests = Vec::new();
+        for interface in &handoff.project.native_interfaces {
+            self.native_ffi_adapter
+                .install_prepared_artifact(&interface.library_path, &interface.manifest_path)
+                .map_err(project_artifact_error)?;
+            let manifest =
+                runmat_native_ffi::NativeInterfaceArtifactManifest::read(&interface.manifest_path)
+                    .map_err(project_artifact_error)?;
+            manifests.push(manifest.interop_manifest());
+        }
+        for artifact in &handoff.project.mex_artifacts {
+            self.mex_runtime
+                .install_artifact(&artifact.module_path)
+                .map_err(project_artifact_error)?;
+            let bytes = std::fs::read(&artifact.manifest_path).map_err(project_artifact_error)?;
+            let manifest = runmat_mex::MexArtifactManifest::from_canonical_bytes(&bytes)
+                .map_err(project_artifact_error)?;
+            manifests.push(manifest.interop_manifest());
+        }
+        let mut java = handoff
+            .project
+            .java_artifacts
+            .iter()
+            .map(|artifact| {
+                let bytes = std::fs::read(&artifact.path).map_err(project_artifact_error)?;
+                Ok((
+                    runmat_java::JavaArtifactIdentity::for_bytes(&bytes),
+                    artifact.path.clone(),
+                ))
+            })
+            .collect::<std::result::Result<Vec<_>, runmat_package::FrozenProjectHandoffError>>()?;
+        java.sort_by(|left, right| left.0.cmp(&right.0));
+        self.java_adapter
+            .install_project_artifacts(&java)
+            .map_err(project_artifact_error)?;
+        if !java.is_empty() {
+            manifests.push(runmat_types::InteropManifest {
+                schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+                foreign_types: Vec::new(),
+                adapters: vec![runmat_types::ForeignAdapterRequirement {
+                    adapter: runmat_java::JAVA_ADAPTER_ID.into(),
+                    minimum_version: runmat_java::JAVA_ADAPTER_VERSION,
+                    capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
+                        runmat_types::CapabilityRequirement::ForeignRuntime,
+                    ])),
+                    artifact_identities: java
+                        .iter()
+                        .map(|(identity, _)| identity.to_string())
+                        .collect(),
+                }],
+            });
+        }
+        let interop =
+            runmat_types::InteropManifest::merge(manifests).map_err(project_artifact_error)?;
+        self.foreign_runtime
+            .admit(&interop)
+            .map_err(project_artifact_error)?;
+        Ok(())
+    }
+
     /// Remove the host-frozen snapshot and restore normal project discovery.
     pub fn clear_project_handoff(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
@@ -72,6 +140,8 @@ impl RunMatSession {
         ) {
             tracing::warn!(%error, "could not clear loaded MEX modules while clearing project");
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.mex_runtime.clear_installed_artifacts();
     }
 
     /// Return the revision currently installed at the session boundary.
@@ -85,4 +155,13 @@ impl RunMatSession {
     pub fn project_handoff(&self) -> Option<&runmat_package::FrozenProjectHandoff> {
         self.project_handoff.as_ref()
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn project_artifact_error(
+    error: impl std::fmt::Display,
+) -> runmat_package::FrozenProjectHandoffError {
+    runmat_package::FrozenProjectHandoffError::Revision(format!(
+        "could not install frozen project artifact: {error}"
+    ))
 }

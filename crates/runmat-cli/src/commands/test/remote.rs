@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::{
-    ExecutableForm, ExecutionBundleBuilder, ProgramExecutionDescriptor, ProgramExecutionInputs,
-    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ExecutableForm, ExecutionBundleBuilder, LogicalObject, ProgramExecutionDescriptor,
+    ProgramExecutionInputs, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_package::FrozenProjectHandoff;
 use runmat_test::protocol::{ProtocolHandshake, WorkerCapability};
@@ -33,6 +33,7 @@ pub(super) struct RemoteTestBackendConfig {
     pub trust_identity: String,
     pub max_workers: usize,
     pub project_handoff: FrozenProjectHandoff,
+    pub foreign_artifacts: Vec<LogicalObject>,
 }
 
 impl RemoteTestBackend {
@@ -136,7 +137,7 @@ impl WorkerBackend for RemoteTestBackend {
             )
             .map_err(protocol)?;
             let program = workload.program_request().map_err(protocol)?;
-            let bundle = ExecutionBundleBuilder::native(
+            let mut builder = ExecutionBundleBuilder::native(
                 &self.config.project_handoff.project,
                 program.recipe.program_revision.clone(),
             )
@@ -145,9 +146,13 @@ impl WorkerBackend for RemoteTestBackend {
                 program.recipe.clone(),
                 ExecutableForm::TestAttemptV1,
                 program.artifact.executable_bytes.clone(),
-            )
-            .build()
-            .map_err(protocol)?;
+            );
+            for artifact in &self.config.foreign_artifacts {
+                builder = builder
+                    .with_foreign_artifact(artifact.clone())
+                    .map_err(protocol)?;
+            }
+            let bundle = builder.build().map_err(protocol)?;
             let mut bundle_archive = Vec::new();
             write_bundle(&bundle, &mut bundle_archive, ArchiveLimits::default())
                 .map_err(protocol)?;

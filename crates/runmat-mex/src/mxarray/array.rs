@@ -6,7 +6,7 @@ use runmat_value::{
     HostNumericBuffer, NumericDType, NumericStorage,
 };
 
-use super::{MxClassId, MxInterleavedStorage};
+use super::{MxClassId, MxGpuArray, MxGpuLease, MxInterleavedStorage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MxApiMode {
@@ -87,6 +87,7 @@ pub enum MxArrayData {
     },
     Handle(MxHandleToken),
     Sparse(MxSparse),
+    Gpu(MxGpuArray),
 }
 
 /// Boundary-owned C Matrix API value. C consumers see only an opaque
@@ -100,13 +101,13 @@ pub struct MxArray {
 }
 
 impl MxArray {
-    pub fn deep_duplicate(&self) -> Self {
+    pub fn deep_duplicate(&self) -> Result<Self, String> {
         let mut duplicate = self.clone();
-        duplicate.detach_shared_storage();
-        duplicate
+        duplicate.detach_shared_storage()?;
+        Ok(duplicate)
     }
 
-    fn detach_shared_storage(&mut self) {
+    fn detach_shared_storage(&mut self) -> Result<(), String> {
         match &mut self.data {
             MxArrayData::Numeric(value) => {
                 value.real.make_unique();
@@ -118,7 +119,7 @@ impl MxArray {
             | MxArrayData::Struct { values, .. }
             | MxArrayData::Object { values, .. } => {
                 for value in values.iter_mut().filter_map(Option::as_deref_mut) {
-                    value.detach_shared_storage();
+                    value.detach_shared_storage()?;
                 }
             }
             MxArrayData::Logical(values) => values.make_unique(),
@@ -184,7 +185,11 @@ impl MxArray {
                 values.iter().map(String::len).sum(),
             ),
             MxArrayData::Handle(_) => {}
+            MxArrayData::Gpu(value) => {
+                value.lease = value.lease.duplicate().map_err(|error| error.to_string())?;
+            }
         }
+        Ok(())
     }
 
     pub(crate) fn encoded_storage_bytes(&self) -> usize {
@@ -385,6 +390,31 @@ impl MxArray {
         }
     }
 
+    pub fn gpu_borrowed(
+        class_id: MxClassId,
+        handle: runmat_accelerate_api::GpuTensorHandle,
+    ) -> Result<Self, String> {
+        Self::gpu(class_id, MxGpuLease::borrowed(handle))
+    }
+
+    pub fn gpu_owned(class_id: MxClassId, lease: MxGpuLease) -> Result<Self, String> {
+        Self::gpu(class_id, lease)
+    }
+
+    fn gpu(class_id: MxClassId, lease: MxGpuLease) -> Result<Self, String> {
+        if !class_id.is_numeric() && class_id != MxClassId::Logical {
+            return Err("GPU arrays require a numeric or logical underlying class".into());
+        }
+        let shape = lease.handle().shape.clone();
+        checked_numel(&shape)?;
+        Ok(Self {
+            class_id: MxClassId::Object,
+            shape,
+            data: MxArrayData::Gpu(MxGpuArray { class_id, lease }),
+            persistent: false,
+        })
+    }
+
     pub fn sparse(value: MxSparse) -> Result<Self, String> {
         if value.col_ptrs.len() != value.cols.saturating_add(1)
             || value.col_ptrs.first().copied() != Some(0)
@@ -443,6 +473,7 @@ impl MxArray {
         match &self.data {
             MxArrayData::Object { class_name, .. } => class_name,
             MxArrayData::Handle(value) => &value.class_name,
+            MxArrayData::Gpu(_) => "gpuArray",
             _ => super::super::libmx::class_name(self.class_id),
         }
     }
@@ -460,16 +491,20 @@ impl MxArray {
     }
 
     pub fn is_complex(&self) -> bool {
-        matches!(
-            &self.data,
+        match &self.data {
             MxArrayData::Numeric(MxNumeric { imag: Some(_), .. })
-                | MxArrayData::Interleaved(_)
-                | MxArrayData::Sparse(MxSparse {
-                    values: MxSparseValues::InterleavedComplex(_)
-                        | MxSparseValues::SeparateComplex { .. },
-                    ..
-                })
-        )
+            | MxArrayData::Interleaved(_)
+            | MxArrayData::Sparse(MxSparse {
+                values:
+                    MxSparseValues::InterleavedComplex(_) | MxSparseValues::SeparateComplex { .. },
+                ..
+            }) => true,
+            MxArrayData::Gpu(MxGpuArray { lease, .. }) => {
+                lease.handle().descriptor.storage
+                    == Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
+            }
+            _ => false,
+        }
     }
 
     pub const fn is_persistent(&self) -> bool {
@@ -493,7 +528,14 @@ impl MxArray {
     }
 
     pub fn set_shape(&mut self, shape: Vec<usize>) -> Result<(), String> {
-        validate_shape(self.numel(), &shape)?;
+        let requested = checked_numel(&shape)?;
+        if matches!(self.data, MxArrayData::Gpu(_)) {
+            if requested > self.numel() {
+                return Err("GPU dimensions cannot exceed the allocated element count".into());
+            }
+        } else {
+            validate_shape(self.numel(), &shape)?;
+        }
         self.shape = shape;
         Ok(())
     }
@@ -529,7 +571,8 @@ impl MxArray {
             | MxArrayData::Cell(_)
             | MxArrayData::Struct { .. }
             | MxArrayData::Object { .. }
-            | MxArrayData::Handle(_) => std::ptr::null_mut(),
+            | MxArrayData::Handle(_)
+            | MxArrayData::Gpu(_) => std::ptr::null_mut(),
         }
     }
 
@@ -621,7 +664,8 @@ impl MxArray {
             | MxArrayData::Cell(_)
             | MxArrayData::Struct { .. }
             | MxArrayData::Object { .. }
-            | MxArrayData::Handle(_) => None,
+            | MxArrayData::Handle(_)
+            | MxArrayData::Gpu(_) => None,
         }
     }
 
@@ -734,6 +778,10 @@ impl MxArray {
             MxArrayData::Handle(_) => Err((
                 allocation,
                 "handle objects do not expose replaceable storage".into(),
+            )),
+            MxArrayData::Gpu(_) => Err((
+                allocation,
+                "GPU arrays do not expose replaceable host storage".into(),
             )),
         }
     }
@@ -914,7 +962,7 @@ mod tests {
         )
         .unwrap();
 
-        let duplicate = source.deep_duplicate();
+        let duplicate = source.deep_duplicate().unwrap();
         let MxArrayData::Cell(values) = duplicate.data() else {
             panic!("duplicate must remain a cell array");
         };
@@ -943,7 +991,7 @@ mod tests {
         })
         .unwrap();
 
-        let duplicate = source.deep_duplicate();
+        let duplicate = source.deep_duplicate().unwrap();
         let MxArrayData::Sparse(duplicate) = duplicate.data() else {
             panic!("duplicate must remain sparse");
         };
@@ -976,7 +1024,7 @@ mod tests {
             values.foreign_data_pointer()
         });
 
-        let duplicate = source.deep_duplicate();
+        let duplicate = source.deep_duplicate().unwrap();
         let MxArrayData::Sparse(MxSparse {
             values: MxSparseValues::InterleavedComplex(duplicate_values),
             ..

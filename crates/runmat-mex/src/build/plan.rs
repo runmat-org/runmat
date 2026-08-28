@@ -30,7 +30,11 @@ impl MexBuildPlan {
     ) -> Result<Self, MexBuildError> {
         validate(build)?;
         build.target.validate()?;
-        let family = compiler_family(&build.compiler);
+        let family = if build.language == MexSourceLanguage::Cuda {
+            compiler_family(&build.c_compiler)
+        } else {
+            compiler_family(&build.compiler)
+        };
         build.target.validate_compiler(family)?;
         let module = build
             .output_directory
@@ -89,6 +93,14 @@ impl MexBuildPlan {
                     compiler: build.compiler.clone(),
                 });
             }
+            (_, MexSourceLanguage::Cuda) => cuda_steps(
+                build,
+                &module,
+                &function_name,
+                &sdk.include_directory,
+                &sdk.support_source,
+                object_directory,
+            ),
         };
         let arguments = flatten_step_arguments(&steps);
         Ok(Self {
@@ -154,6 +166,27 @@ fn validate(build: &MexBuild) -> Result<(), MexBuildError> {
             compiler: build.compiler.clone(),
         });
     }
+    let has_fortran = build
+        .sources
+        .iter()
+        .any(|source| MexSourceLanguage::detect(source) == MexSourceLanguage::Fortran);
+    let has_cuda = build
+        .sources
+        .iter()
+        .any(|source| MexSourceLanguage::detect(source) == MexSourceLanguage::Cuda);
+    if has_fortran && has_cuda {
+        return Err(MexBuildError::MixedFortranCudaSources);
+    }
+    if has_cuda {
+        if !matches!(build.target.operating_system.as_str(), "linux" | "windows") {
+            return Err(MexBuildError::UnsupportedCudaTarget);
+        }
+        if !super::is_supported_cuda_compiler(&build.cuda_compiler) {
+            return Err(MexBuildError::UnsupportedCudaCompiler {
+                compiler: build.cuda_compiler.clone(),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -178,6 +211,7 @@ fn gnu_arguments(
             MexSourceLanguage::C => "-std=c11",
             MexSourceLanguage::Cxx => "-std=c++17",
             MexSourceLanguage::Fortran => unreachable!("Fortran uses a multi-step build"),
+            MexSourceLanguage::Cuda => unreachable!("CUDA uses a multi-step build"),
         }
         .into(),
         "-O2".into(),
@@ -197,6 +231,7 @@ fn gnu_arguments(
                     MexSourceLanguage::C => "c",
                     MexSourceLanguage::Cxx => "c++",
                     MexSourceLanguage::Fortran => "f95",
+                    MexSourceLanguage::Cuda => "cuda",
                 }
                 .into(),
                 source.display().to_string(),
@@ -232,6 +267,7 @@ fn msvc_arguments(
             MexSourceLanguage::C => "/std:c11",
             MexSourceLanguage::Cxx => "/std:c++17",
             MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
+            MexSourceLanguage::Cuda => unreachable!("CUDA uses a multi-step build"),
         }
         .into(),
         format!("/I{}", sdk_include.display()),
@@ -253,6 +289,7 @@ fn msvc_arguments(
                 MexSourceLanguage::C => "/TC",
                 MexSourceLanguage::Cxx => "/TP",
                 MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
+                MexSourceLanguage::Cuda => unreachable!("CUDA uses a multi-step build"),
             };
             format!("{mode}{}", path.display())
         }));
@@ -288,12 +325,14 @@ fn cxx_gnu_steps(
                 MexSourceLanguage::C => "c",
                 MexSourceLanguage::Cxx => "c++",
                 MexSourceLanguage::Fortran => "f95",
+                MexSourceLanguage::Cuda => "cuda",
             }
             .into(),
             match language {
                 MexSourceLanguage::C => "-std=c11",
                 MexSourceLanguage::Cxx => "-std=c++17",
                 MexSourceLanguage::Fortran => "-std=legacy",
+                MexSourceLanguage::Cuda => "-std=c++17",
             }
             .into(),
             format!("-I{}", sdk_include.display()),
@@ -313,6 +352,7 @@ fn cxx_gnu_steps(
                 arguments.extend(build.cxx_compiler_arguments.iter().cloned());
             }
             MexSourceLanguage::Fortran => unreachable!("C++ builds do not compile Fortran"),
+            MexSourceLanguage::Cuda => unreachable!("CUDA uses its own build plan"),
         }
         arguments.extend([
             "-c".into(),
@@ -325,6 +365,7 @@ fn cxx_gnu_steps(
                 MexSourceLanguage::C => build.c_compiler.clone(),
                 MexSourceLanguage::Cxx => build.compiler.clone(),
                 MexSourceLanguage::Fortran => unreachable!("C++ builds do not compile Fortran"),
+                MexSourceLanguage::Cuda => unreachable!("CUDA uses its own build plan"),
             },
             arguments,
         });
@@ -393,6 +434,7 @@ fn cxx_msvc_steps(
                 MexSourceLanguage::C => "/std:c11",
                 MexSourceLanguage::Cxx => "/std:c++17",
                 MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
+                MexSourceLanguage::Cuda => unreachable!("CUDA uses its own build plan"),
             }
             .into(),
             format!("/I{}", sdk_include.display()),
@@ -412,6 +454,7 @@ fn cxx_msvc_steps(
                 arguments.extend(build.cxx_compiler_arguments.iter().cloned());
             }
             MexSourceLanguage::Fortran => unreachable!("C++ builds do not compile Fortran"),
+            MexSourceLanguage::Cuda => unreachable!("CUDA uses its own build plan"),
         }
         arguments.push(format!(
             "{}{}",
@@ -419,6 +462,7 @@ fn cxx_msvc_steps(
                 MexSourceLanguage::C => "/TC",
                 MexSourceLanguage::Cxx => "/TP",
                 MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
+                MexSourceLanguage::Cuda => unreachable!("CUDA uses its own build plan"),
             },
             source.display()
         ));
@@ -428,6 +472,7 @@ fn cxx_msvc_steps(
                 MexSourceLanguage::C => build.c_compiler.clone(),
                 MexSourceLanguage::Cxx => build.compiler.clone(),
                 MexSourceLanguage::Fortran => unreachable!("C++ builds do not compile Fortran"),
+                MexSourceLanguage::Cuda => unreachable!("CUDA uses its own build plan"),
             },
             arguments,
         });
@@ -518,6 +563,7 @@ fn fortran_gnu_steps(
                     format!("-I{}", sdk_include.display()),
                 ],
             ),
+            MexSourceLanguage::Cuda => unreachable!("Fortran builds do not compile CUDA"),
         };
         for include in &build.include_directories {
             arguments.push(format!("-I{}", include.display()));
@@ -534,6 +580,7 @@ fn fortran_gnu_steps(
             MexSourceLanguage::Cxx => {
                 arguments.extend(build.cxx_compiler_arguments.iter().cloned());
             }
+            MexSourceLanguage::Cuda => unreachable!("Fortran builds do not compile CUDA"),
         }
         arguments.extend([
             "-c".into(),
@@ -591,6 +638,165 @@ fn fortran_gnu_steps(
     link_arguments.extend(["-o".into(), module.display().to_string()]);
     steps.push(MexBuildStep {
         compiler: build.compiler.clone(),
+        arguments: link_arguments,
+    });
+    steps
+}
+
+fn cuda_steps(
+    build: &MexBuild,
+    module: &Path,
+    function_name: &str,
+    sdk_include: &Path,
+    support_source: &Path,
+    object_directory: &Path,
+) -> Vec<MexBuildStep> {
+    let windows = build.target.operating_system == "windows";
+    let object_extension = if windows { "obj" } else { "o" };
+    let mut steps = Vec::new();
+    let mut objects = Vec::new();
+
+    for (index, source) in build.sources.iter().enumerate() {
+        let language = MexSourceLanguage::detect(source);
+        let object = object_path(object_directory, index, source, object_extension);
+        let (compiler, mut arguments) = match language {
+            MexSourceLanguage::Cuda => {
+                let mut arguments = vec!["-O2".into(), "-std=c++17".into()];
+                arguments.push(if windows {
+                    "-Xcompiler=/MD".into()
+                } else {
+                    "-Xcompiler=-fPIC".into()
+                });
+                arguments.push(format!("-I{}", sdk_include.display()));
+                arguments.extend(build.compiler_arguments.iter().cloned());
+                arguments.extend(build.cuda_compiler_arguments.iter().cloned());
+                (build.cuda_compiler.clone(), arguments)
+            }
+            MexSourceLanguage::C => {
+                let mut arguments = if windows {
+                    vec!["/nologo".into(), "/O2".into(), "/MD".into(), "/TC".into()]
+                } else {
+                    vec!["-O2".into(), "-std=c11".into(), "-fPIC".into()]
+                };
+                arguments.push(if windows {
+                    format!("/I{}", sdk_include.display())
+                } else {
+                    format!("-I{}", sdk_include.display())
+                });
+                arguments.extend(build.c_compiler_arguments.iter().cloned());
+                (build.c_compiler.clone(), arguments)
+            }
+            MexSourceLanguage::Cxx => {
+                let mut arguments = if windows {
+                    vec![
+                        "/nologo".into(),
+                        "/O2".into(),
+                        "/MD".into(),
+                        "/TP".into(),
+                        "/std:c++17".into(),
+                    ]
+                } else {
+                    vec!["-O2".into(), "-std=c++17".into(), "-fPIC".into()]
+                };
+                arguments.push(if windows {
+                    format!("/I{}", sdk_include.display())
+                } else {
+                    format!("-I{}", sdk_include.display())
+                });
+                arguments.extend(build.cxx_compiler_arguments.iter().cloned());
+                (build.cxx_compiler.clone(), arguments)
+            }
+            MexSourceLanguage::Fortran => unreachable!("validated CUDA source set"),
+        };
+        for include in &build.include_directories {
+            arguments.push(if windows && language != MexSourceLanguage::Cuda {
+                format!("/I{}", include.display())
+            } else {
+                format!("-I{}", include.display())
+            });
+        }
+        let msvc_source = windows && language != MexSourceLanguage::Cuda;
+        push_definitions(
+            build,
+            function_name,
+            if msvc_source { "/D" } else { "-D" },
+            &mut arguments,
+        );
+        if msvc_source {
+            arguments.extend([
+                "/c".into(),
+                source.display().to_string(),
+                format!("/Fo{}", object.display()),
+            ]);
+        } else {
+            arguments.extend([
+                "-c".into(),
+                source.display().to_string(),
+                "-o".into(),
+                object.display().to_string(),
+            ]);
+        }
+        objects.push(object);
+        steps.push(MexBuildStep {
+            compiler,
+            arguments,
+        });
+    }
+
+    let support_object = object_path(
+        object_directory,
+        build.sources.len(),
+        support_source,
+        object_extension,
+    );
+    let mut support_arguments = if windows {
+        vec!["/nologo".into(), "/O2".into(), "/MD".into(), "/TC".into()]
+    } else {
+        vec!["-O2".into(), "-std=c11".into(), "-fPIC".into()]
+    };
+    support_arguments.push(if windows {
+        format!("/I{}", sdk_include.display())
+    } else {
+        format!("-I{}", sdk_include.display())
+    });
+    push_definitions(
+        build,
+        function_name,
+        if windows { "/D" } else { "-D" },
+        &mut support_arguments,
+    );
+    support_arguments.extend(build.c_compiler_arguments.iter().cloned());
+    if windows {
+        support_arguments.extend([
+            "/c".into(),
+            support_source.display().to_string(),
+            format!("/Fo{}", support_object.display()),
+        ]);
+    } else {
+        support_arguments.extend([
+            "-c".into(),
+            support_source.display().to_string(),
+            "-o".into(),
+            support_object.display().to_string(),
+        ]);
+    }
+    objects.push(support_object);
+    steps.push(MexBuildStep {
+        compiler: build.c_compiler.clone(),
+        arguments: support_arguments,
+    });
+
+    let mut link_arguments = vec!["-shared".into()];
+    if windows {
+        link_arguments.push("-Xcompiler=/LD".into());
+    } else {
+        link_arguments.push("-Xcompiler=-fPIC".into());
+    }
+    link_arguments.extend(objects.iter().map(|path| path.display().to_string()));
+    link_arguments.extend(build.linker_arguments.iter().cloned());
+    link_arguments.extend(["-o".into(), module.display().to_string()]);
+    steps.push(MexBuildStep {
+        compiler: build.cuda_compiler.clone(),
         arguments: link_arguments,
     });
     steps
@@ -655,6 +861,9 @@ fn push_definitions(
     if build.language == MexSourceLanguage::Fortran {
         let gateway = fortran_gateway_name(function_name);
         arguments.push(format!("{prefix}RUNMAT_MEX_FORTRAN_GATEWAY={gateway}"));
+    }
+    if build.language == MexSourceLanguage::Cuda {
+        arguments.push(format!("{prefix}RUNMAT_MEX_GPU=1"));
     }
     arguments.extend(
         build
@@ -860,6 +1069,101 @@ mod tests {
             .iter()
             .any(|argument| argument.starts_with("/TC")));
         assert!(plan.steps[3].arguments.contains(&"/LD".to_string()));
+    }
+
+    #[test]
+    fn linux_cuda_plan_uses_nvcc_and_keeps_native_support_in_c_mode() {
+        let temporary = tempfile::tempdir().unwrap();
+        let cuda = temporary.path().join("gateway.cu");
+        let helper = temporary.path().join("helper.cpp");
+        std::fs::write(&cuda, "__global__ void kernel(void) {} ").unwrap();
+        std::fs::write(&helper, "void helper(void) {} ").unwrap();
+        let build = MexBuild::new(&cuda, temporary.path())
+            .source(&helper)
+            .cuda_compiler("nvcc")
+            .c_compiler("cc")
+            .cxx_compiler("c++")
+            .target(MexTarget {
+                triple: "x86_64-unknown-linux-gnu".into(),
+                architecture: "x86_64".into(),
+                operating_system: "linux".into(),
+                pointer_width: 64,
+                suffix: "mexa64".into(),
+            });
+        let plan = build.plan().unwrap();
+
+        assert_eq!(build.api, MexApi::R2018a);
+        assert_eq!(plan.steps.len(), 4);
+        assert_eq!(plan.steps[0].compiler, PathBuf::from("nvcc"));
+        assert!(plan.steps[0]
+            .arguments
+            .contains(&"-DRUNMAT_MEX_GPU=1".to_string()));
+        assert_eq!(plan.steps[1].compiler, PathBuf::from("c++"));
+        assert!(plan.steps[1].arguments.contains(&"-std=c++17".to_string()));
+        assert_eq!(plan.steps[2].compiler, PathBuf::from("cc"));
+        assert!(plan.steps[2].arguments.contains(&"-std=c11".to_string()));
+        assert_eq!(plan.steps[3].compiler, PathBuf::from("nvcc"));
+        assert!(plan.steps[3].arguments.contains(&"-shared".to_string()));
+    }
+
+    #[test]
+    fn windows_cuda_plan_uses_msvc_spelling_for_host_translation_units() {
+        let temporary = tempfile::tempdir().unwrap();
+        let cuda = temporary.path().join("gateway.cu");
+        let helper = temporary.path().join("helper.c");
+        std::fs::write(&cuda, "__global__ void kernel(void) {} ").unwrap();
+        std::fs::write(&helper, "void helper(void) {} ").unwrap();
+        let build = MexBuild::new(&cuda, temporary.path())
+            .source(&helper)
+            .cuda_compiler("nvcc.exe")
+            .c_compiler("cl.exe")
+            .target(MexTarget {
+                triple: "x86_64-pc-windows-msvc".into(),
+                architecture: "x86_64".into(),
+                operating_system: "windows".into(),
+                pointer_width: 64,
+                suffix: "mexw64".into(),
+            });
+        let plan =
+            MexBuildPlan::for_build_with_msvc_object_directory(&build, Some(temporary.path()))
+                .unwrap();
+
+        assert_eq!(plan.steps.len(), 4);
+        assert_eq!(plan.steps[0].compiler, PathBuf::from("nvcc.exe"));
+        assert_eq!(plan.steps[1].compiler, PathBuf::from("cl.exe"));
+        assert!(plan.steps[1].arguments.contains(&"/TC".to_string()));
+        assert!(plan.steps[1]
+            .arguments
+            .iter()
+            .any(|argument| argument.starts_with("/Fo")));
+        assert_eq!(plan.steps[2].compiler, PathBuf::from("cl.exe"));
+        assert!(plan.steps[2].arguments.contains(&"/TC".to_string()));
+        assert!(plan.steps[2]
+            .arguments
+            .contains(&"/DRUNMAT_MEX_GPU=1".to_string()));
+        assert_eq!(plan.steps[3].compiler, PathBuf::from("nvcc.exe"));
+    }
+
+    #[test]
+    fn cuda_and_fortran_sources_are_rejected_as_one_unsupported_abi_mix() {
+        let temporary = tempfile::tempdir().unwrap();
+        let cuda = temporary.path().join("gateway.cu");
+        let fortran = temporary.path().join("helper.F90");
+        std::fs::write(&cuda, "__global__ void kernel(void) {} ").unwrap();
+        std::fs::write(&fortran, "subroutine helper\nend").unwrap();
+        let error = MexBuild::new(&cuda, temporary.path())
+            .source(&fortran)
+            .cuda_compiler("nvcc")
+            .target(MexTarget {
+                triple: "x86_64-unknown-linux-gnu".into(),
+                architecture: "x86_64".into(),
+                operating_system: "linux".into(),
+                pointer_width: 64,
+                suffix: "mexa64".into(),
+            })
+            .plan()
+            .unwrap_err();
+        assert!(matches!(error, MexBuildError::MixedFortranCudaSources));
     }
 
     #[test]
