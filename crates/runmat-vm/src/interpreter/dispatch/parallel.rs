@@ -304,7 +304,7 @@ async fn execute_collective(
             invocation,
         })
         .await?;
-    collective_response(response, operation).await
+    collective_response(response, operation, &bytecode.function_registry).await
 }
 
 fn collective_operation_matches(
@@ -320,6 +320,8 @@ fn collective_operation_matches(
         | (Contract::Gather, Bytecode::Gather)
         | (Contract::Scatter, Bytecode::Scatter)
         | (Contract::AllGather, Bytecode::AllGather)
+        | (Contract::Cat, Bytecode::Cat { .. })
+        | (Contract::FunctionalReduce, Bytecode::FunctionalReduce { .. })
         | (Contract::Send, Bytecode::Send { .. })
         | (Contract::SendReceive, Bytecode::SendReceive { .. })
         | (Contract::Probe, Bytecode::Probe { .. }) => true,
@@ -406,6 +408,31 @@ fn collective_invocation(
             operator,
             value: encode(&arguments.remove(0))?,
         },
+        Op::Cat { has_root } => {
+            let value = encode(&arguments.remove(0))?;
+            let dimension = positive_u32(arguments.remove(0), "concatenation dimension")?;
+            let root = has_root
+                .then(|| lab_rank(arguments.remove(0), context))
+                .transpose()?;
+            CollectiveInvocation::Cat {
+                root,
+                dimension,
+                value,
+            }
+        }
+        Op::FunctionalReduce { has_root } => {
+            let reducer = encode(&arguments.remove(0))?;
+            let value = encode(&arguments.remove(0))?;
+            let root = has_root
+                .then(|| optional_lab_rank(arguments.remove(0), context))
+                .transpose()?
+                .flatten();
+            CollectiveInvocation::FunctionalReduce {
+                root,
+                reducer,
+                value,
+            }
+        }
         Op::Send { has_tag } => {
             let value = encode(&arguments.remove(0))?;
             let destination = lab_rank(arguments.remove(0), context)?;
@@ -466,6 +493,7 @@ fn collective_invocation(
 async fn collective_response(
     response: runmat_execution::CollectiveResponse,
     operation: crate::BytecodeCollectiveOp,
+    function_registry: &crate::FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
     use runmat_execution::CollectiveResponse;
 
@@ -528,6 +556,60 @@ async fn collective_response(
                     contribution,
                 )
                 .await?;
+            }
+            Ok(accumulator)
+        }
+        CollectiveResponse::ConcatenationInputs { dimension, values } => {
+            if values.len() == 1 {
+                return runmat_runtime::execution::value_codec::decode_inline_value(&values[0])
+                    .map_err(value_codec_error);
+            }
+            let mut arguments = Vec::with_capacity(values.len() + 1);
+            arguments.push(Value::Int(runmat_value::IntValue::U32(dimension)));
+            arguments.extend(
+                values
+                    .iter()
+                    .map(runmat_runtime::execution::value_codec::decode_inline_value)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(value_codec_error)?,
+            );
+            runmat_runtime::call::descriptor::execute_callable_descriptor(
+                runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                    runmat_hir::CallableIdentity::Builtin(runmat_types::BuiltinId("cat".into())),
+                    arguments,
+                    1,
+                    runmat_hir::CallableFallbackPolicy::None,
+                    runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                ),
+            )
+            .await
+        }
+        CollectiveResponse::FunctionalReductionInputs { reducer, values } => {
+            let reducer = runmat_runtime::execution::value_codec::decode_inline_value(&reducer)
+                .map_err(value_codec_error)?;
+            let mut values = values
+                .iter()
+                .map(runmat_runtime::execution::value_codec::decode_inline_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(value_codec_error)?
+                .into_iter();
+            let mut accumulator = values.next().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "CollectiveReductionEmpty",
+                    "functional reduction received no lab contributions",
+                )
+            })?;
+            for contribution in values {
+                let descriptor =
+                    runmat_runtime::call::descriptor::CallableDescriptor::from_feval_value(
+                        reducer.clone(),
+                        vec![accumulator, contribution],
+                        1,
+                        function_registry,
+                    );
+                accumulator =
+                    runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor)
+                        .await?;
             }
             Ok(accumulator)
         }

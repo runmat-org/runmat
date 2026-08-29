@@ -239,6 +239,9 @@ async fn call_builtin_async_impl(
     ensure_wasm_builtins_registered();
 
     let _output_guard = crate::output_count::push_output_count(output_count);
+    if let Some(result) = try_distributed_builtin(name, args, output_count).await? {
+        return Ok(result);
+    }
     let scoped_builtin_service = crate::context::legacy::active()
         .and_then(|context| context.service_ports().builtin().cloned());
     let matching_bindings = scoped_builtin_service.as_ref().map_or_else(
@@ -355,6 +358,100 @@ async fn call_builtin_async_impl(
     .with_source(last_error);
     builder = builder.with_identifier(identifier);
     Err(builder.build())
+}
+
+async fn try_distributed_builtin(
+    name: &str,
+    args: &[Value],
+    output_count: Option<usize>,
+) -> Result<Option<Value>, RuntimeError> {
+    if !args
+        .iter()
+        .any(|value| matches!(value, Value::Distributed(_)))
+    {
+        return Ok(None);
+    }
+    let entry = runmat_builtins::builtin_catalog_entry_by_name(name).ok_or_else(|| {
+        build_runtime_error(format!(
+            "{name}: distributed arguments require a canonical builtin placement contract"
+        ))
+        .with_identifier("RunMat:parallel:DistributedBuiltinUnsupported")
+        .build()
+    })?;
+    let context = crate::context::legacy::active().ok_or_else(|| {
+        build_runtime_error(format!(
+            "{name}: distributed arguments require an active RunMat execution context"
+        ))
+        .with_identifier("RunMat:parallel:DistributedRuntimeUnavailable")
+        .build()
+    })?;
+    let service = context
+        .service_ports()
+        .require_distributed("distributed builtin")
+        .map_err(|error| {
+            build_runtime_error(error.to_string())
+                .with_identifier("RunMat:parallel:DistributedRuntimeUnavailable")
+                .build()
+        })?
+        .clone();
+    match entry.placement.distributed {
+        runmat_builtins::BuiltinDistributedPolicy::Unsupported => Err(build_runtime_error(
+            format!("{name}: distributed inputs are not supported by this builtin"),
+        )
+        .with_identifier("RunMat:parallel:DistributedBuiltinUnsupported")
+        .build()),
+        runmat_builtins::BuiltinDistributedPolicy::MaterializeArguments => {
+            let mut materialized = Vec::with_capacity(args.len());
+            for argument in args {
+                if let Value::Distributed(handle) = argument {
+                    materialized.push(service.materialize((**handle).clone()).await?);
+                } else {
+                    materialized.push(argument.clone());
+                }
+            }
+            call_builtin_async_impl(name, &materialized, output_count)
+                .await
+                .map(Some)
+        }
+        runmat_builtins::BuiltinDistributedPolicy::MapUnary => {
+            let requested_outputs = output_count.unwrap_or(1);
+            let inference = runmat_builtins::infer_partition_local_call(
+                entry,
+                &runmat_types::CallRequest {
+                    arguments: args.iter().map(crate::value_fact::value_fact).collect(),
+                    literals: runmat_types::LiteralContext::default(),
+                    outputs: runmat_types::OutputSelection::new(match requested_outputs {
+                        0 => runmat_types::RequestedOutputCount::Zero,
+                        1 => runmat_types::RequestedOutputCount::One,
+                        count => runmat_types::RequestedOutputCount::Exactly(count),
+                    }),
+                },
+            );
+            if !inference.diagnostics.is_empty() {
+                return Err(build_runtime_error(format!(
+                    "{name}: distributed execution does not satisfy the builtin input contract"
+                ))
+                .with_identifier("RunMat:parallel:DistributedInputContract")
+                .build());
+            }
+            let output = inference.outputs.into_iter().next().ok_or_else(|| {
+                build_runtime_error(format!(
+                    "{name}: distributed execution requires one statically described output"
+                ))
+                .with_identifier("RunMat:parallel:DistributedOutputContract")
+                .build()
+            })?;
+            service
+                .invoke(crate::context::RuntimeDistributedCallRequest {
+                    builtin: runmat_types::BuiltinId(name.into()),
+                    arguments: args.to_vec(),
+                    requested_outputs,
+                    output,
+                })
+                .await
+                .map(Some)
+        }
+    }
 }
 
 fn compatibility_checked_builtin_result(

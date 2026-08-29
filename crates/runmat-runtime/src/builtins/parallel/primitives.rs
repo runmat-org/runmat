@@ -39,3 +39,7 @@ lowering_builtin!(spmd_receive_builtin, "spmdReceive");
 lowering_builtin!(spmd_probe_builtin, "spmdProbe");
 lowering_builtin!(spmd_send_receive_builtin, "spmdSendReceive");
 lowering_builtin!(spmd_plus_builtin, "spmdPlus");
+lowering_builtin!(gcat_builtin, "gcat");
+lowering_builtin!(gop_builtin, "gop");
+lowering_builtin!(spmd_cat_builtin, "spmdCat");
+lowering_builtin!(spmd_reduce_builtin, "spmdReduce");

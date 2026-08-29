@@ -43,6 +43,8 @@ enum RoundSignature {
     Scatter(LabRank),
     AllGather,
     Reduce(Option<LabRank>, OperatorKind),
+    Cat(Option<LabRank>, u32),
+    FunctionalReduce(Option<LabRank>),
 }
 
 #[derive(Clone, Debug)]
@@ -370,7 +372,9 @@ fn complete_round(round: Round) -> RunnerResult<Vec<CollectiveCompletion>> {
         .filter_map(|request| match &request.invocation {
             CollectiveInvocation::Gather { value, .. }
             | CollectiveInvocation::AllGather { value }
-            | CollectiveInvocation::Reduce { value, .. } => Some(value.clone()),
+            | CollectiveInvocation::Reduce { value, .. }
+            | CollectiveInvocation::Cat { value, .. }
+            | CollectiveInvocation::FunctionalReduce { value, .. } => Some(value.clone()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -392,6 +396,24 @@ fn complete_round(round: Round) -> RunnerResult<Vec<CollectiveCompletion>> {
             } if *root == request.context.rank => Some(values.clone()),
             _ => None,
         });
+    let reducer = submissions
+        .iter()
+        .find_map(|request| match &request.invocation {
+            CollectiveInvocation::FunctionalReduce { reducer, .. } => Some(reducer.clone()),
+            _ => None,
+        });
+    if matches!(round.signature, RoundSignature::FunctionalReduce(_))
+        && submissions.iter().any(|request| match &request.invocation {
+            CollectiveInvocation::FunctionalReduce {
+                reducer: candidate, ..
+            } => Some(candidate) != reducer.as_ref(),
+            _ => false,
+        })
+    {
+        return Err(RunnerError::Invalid(
+            "labs disagreed on the callable used by a functional reduction".into(),
+        ));
+    }
     if matches!(round.signature, RoundSignature::Broadcast(_)) && broadcast.is_none() {
         return Err(RunnerError::Invalid(
             "broadcast root did not provide a value".into(),
@@ -439,6 +461,30 @@ fn complete_round(round: Round) -> RunnerResult<Vec<CollectiveCompletion>> {
                     operator,
                     values: values.clone(),
                 },
+                RoundSignature::Cat(Some(root), dimension) if request.context.rank == root => {
+                    CollectiveResponse::ConcatenationInputs {
+                        dimension,
+                        values: values.clone(),
+                    }
+                }
+                RoundSignature::Cat(Some(_), _) => CollectiveResponse::Complete,
+                RoundSignature::Cat(None, dimension) => CollectiveResponse::ConcatenationInputs {
+                    dimension,
+                    values: values.clone(),
+                },
+                RoundSignature::FunctionalReduce(Some(root)) if request.context.rank == root => {
+                    CollectiveResponse::FunctionalReductionInputs {
+                        reducer: reducer.clone().expect("validated reduction callable"),
+                        values: values.clone(),
+                    }
+                }
+                RoundSignature::FunctionalReduce(Some(_)) => CollectiveResponse::Complete,
+                RoundSignature::FunctionalReduce(None) => {
+                    CollectiveResponse::FunctionalReductionInputs {
+                        reducer: reducer.clone().expect("validated reduction callable"),
+                        values: values.clone(),
+                    }
+                }
             };
             Ok(completion(request, Ok(response)))
         })
@@ -454,6 +500,12 @@ fn signature(invocation: &CollectiveInvocation) -> RunnerResult<RoundSignature> 
         CollectiveInvocation::AllGather { .. } => Ok(RoundSignature::AllGather),
         CollectiveInvocation::Reduce { root, operator, .. } => {
             Ok(RoundSignature::Reduce(*root, *operator))
+        }
+        CollectiveInvocation::Cat {
+            root, dimension, ..
+        } => Ok(RoundSignature::Cat(*root, *dimension)),
+        CollectiveInvocation::FunctionalReduce { root, .. } => {
+            Ok(RoundSignature::FunctionalReduce(*root))
         }
         CollectiveInvocation::Send { .. }
         | CollectiveInvocation::SendReceive { .. }
@@ -550,6 +602,20 @@ mod tests {
         )))
     }
 
+    fn callable(name: &str) -> ValuePayload {
+        let owner = "builtin";
+        ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Callable(
+            runmat_execution::value::CallableValue {
+                owner_identity: owner.into(),
+                qualified_name: name.into(),
+                callable_digest: runmat_execution::value::CallableValue::identity_digest(
+                    owner, name,
+                ),
+                captures: Vec::new(),
+            },
+        )))
+    }
+
     #[test]
     fn allgather_completes_in_rank_order_regardless_of_arrival_order() {
         let mut coordinator = CollectiveCoordinator::default();
@@ -608,6 +674,90 @@ mod tests {
         };
         assert_eq!(*source, LabRank(1));
         assert_eq!(value, &number(10.0));
+    }
+
+    #[test]
+    fn language_owned_aggregates_return_rank_ordered_inputs() {
+        let mut coordinator = CollectiveCoordinator::default();
+        for rank in [2, 3, 1] {
+            let completions = coordinator
+                .submit(request(
+                    rank,
+                    CollectiveInvocation::Cat {
+                        root: None,
+                        dimension: 2,
+                        value: number(rank as f64),
+                    },
+                ))
+                .unwrap();
+            if rank == 1 {
+                assert_eq!(completions.len(), 3);
+                let CollectiveResponse::ConcatenationInputs { dimension, values } =
+                    completions[0].result.as_ref().unwrap()
+                else {
+                    panic!("expected concatenation inputs")
+                };
+                assert_eq!(*dimension, 2);
+                assert_eq!(values, &vec![number(1.0), number(2.0), number(3.0)]);
+            } else {
+                assert!(completions.is_empty());
+            }
+        }
+
+        let mut coordinator = CollectiveCoordinator::default();
+        for rank in [3, 1, 2] {
+            let completions = coordinator
+                .submit(request(
+                    rank,
+                    CollectiveInvocation::FunctionalReduce {
+                        root: None,
+                        reducer: callable("plus"),
+                        value: number(rank as f64),
+                    },
+                ))
+                .unwrap();
+            if rank == 2 {
+                assert_eq!(completions.len(), 3);
+                let CollectiveResponse::FunctionalReductionInputs { reducer, values } =
+                    completions[0].result.as_ref().unwrap()
+                else {
+                    panic!("expected functional reduction inputs")
+                };
+                assert_eq!(reducer, &callable("plus"));
+                assert_eq!(values, &vec![number(1.0), number(2.0), number(3.0)]);
+            } else {
+                assert!(completions.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn functional_reduction_rejects_callable_disagreement() {
+        let mut coordinator = CollectiveCoordinator::default();
+        for rank in [1, 2] {
+            assert!(coordinator
+                .submit(request(
+                    rank,
+                    CollectiveInvocation::FunctionalReduce {
+                        root: None,
+                        reducer: callable("plus"),
+                        value: number(rank as f64),
+                    },
+                ))
+                .unwrap()
+                .is_empty());
+        }
+        let error = coordinator
+            .submit(request(
+                3,
+                CollectiveInvocation::FunctionalReduce {
+                    root: None,
+                    reducer: callable("max"),
+                    value: number(3.0),
+                },
+            ))
+            .expect_err("labs must agree on the reducer identity");
+        assert!(error.to_string().contains("disagreed on the callable"));
     }
 
     #[test]

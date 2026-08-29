@@ -200,7 +200,7 @@ fn executable_manifest_round_trips_all_contract_families() {
     round_trip_vector();
     assert_eq!(
         manifest().cache_key().unwrap().to_string(),
-        "sha256:d035930fa6cf989a390551aa11f6760af37dbb1c8ecff8f18bd23ec909630a21"
+        "sha256:396279f4d9404edc91827980e17153594861da0b33f838f269ba017b77c89f7c"
     );
 }
 

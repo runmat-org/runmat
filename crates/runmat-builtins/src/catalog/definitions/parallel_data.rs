@@ -45,6 +45,20 @@ const TAG_OPTIONAL: BuiltinParamDescriptor = BuiltinParamDescriptor {
     default: None,
     description: "Optional message tag.",
 };
+const DIMENSION_OPTIONAL: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "dimension",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("2"),
+    description: "One-based concatenation dimension.",
+};
+const REDUCER_REQUIRED: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "reducer",
+    ty: BuiltinParamType::Callable,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Associative binary reduction function.",
+};
 const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "result",
     ty: BuiltinParamType::Any,
@@ -59,6 +73,8 @@ const BROADCAST_INPUTS: [BuiltinParamDescriptor; 2] = [LAB_REQUIRED, ANY_OPTIONA
 const SEND_INPUTS: [BuiltinParamDescriptor; 3] = [ANY_REQUIRED, LAB_REQUIRED, TAG_OPTIONAL];
 const RECEIVE_INPUTS: [BuiltinParamDescriptor; 2] = [LAB_OPTIONAL, TAG_OPTIONAL];
 const GPLUS_INPUTS: [BuiltinParamDescriptor; 2] = [ANY_REQUIRED, LAB_OPTIONAL];
+const GCAT_INPUTS: [BuiltinParamDescriptor; 3] = [ANY_REQUIRED, DIMENSION_OPTIONAL, LAB_OPTIONAL];
+const GOP_INPUTS: [BuiltinParamDescriptor; 3] = [REDUCER_REQUIRED, ANY_REQUIRED, LAB_OPTIONAL];
 const SEND_RECEIVE_INPUTS: [BuiltinParamDescriptor; 4] =
     [LAB_REQUIRED, LAB_REQUIRED, ANY_REQUIRED, TAG_OPTIONAL];
 const RECEIVE_OUTPUTS: [BuiltinParamDescriptor; 3] = [
@@ -99,6 +115,18 @@ signature!(
     DISTRIBUTED_SIGNATURES,
     "D = distributed(value)",
     &DISTRIBUTED_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    SPMD_CAT_SIGNATURES,
+    "value = spmdCat(value, dimension, destination)",
+    &GCAT_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    SPMD_REDUCE_SIGNATURES,
+    "value = spmdReduce(reducer, value, destination)",
+    &GOP_INPUTS,
     &ANY_OUTPUT
 );
 signature!(SPMD_BARRIER_SIGNATURES, "spmdBarrier()", &[], &[]);
@@ -181,6 +209,18 @@ signature!(
     &GPLUS_INPUTS,
     &ANY_OUTPUT
 );
+signature!(
+    GCAT_SIGNATURES,
+    "value = gcat(value, dimension, destination)",
+    &GCAT_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    GOP_SIGNATURES,
+    "value = gop(reducer, value, destination)",
+    &GOP_INPUTS,
+    &ANY_OUTPUT
+);
 
 const LOWERING_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
     code: "RM.PARALLEL.LOWERING_REQUIRED",
@@ -221,6 +261,10 @@ pub const SPMD_RECEIVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 descriptor!(SPMD_PROBE_DESCRIPTOR, SPMD_PROBE_SIGNATURES);
 descriptor!(SPMD_SEND_RECEIVE_DESCRIPTOR, SPMD_SEND_RECEIVE_SIGNATURES);
 descriptor!(SPMD_PLUS_DESCRIPTOR, SPMD_PLUS_SIGNATURES);
+descriptor!(SPMD_CAT_DESCRIPTOR, SPMD_CAT_SIGNATURES);
+descriptor!(SPMD_REDUCE_DESCRIPTOR, SPMD_REDUCE_SIGNATURES);
+descriptor!(GCAT_DESCRIPTOR, GCAT_SIGNATURES);
+descriptor!(GOP_DESCRIPTOR, GOP_SIGNATURES);
 
 const PARALLEL_RUNTIME: [CapabilityRequirement; 1] = [CapabilityRequirement::ParallelRuntime];
 const PARALLEL_EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
@@ -229,6 +273,7 @@ const PARALLEL_PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
     accelerator: BuiltinAcceleratorPolicy::Forbidden,
     residency: BuiltinResidencyPolicy::Dynamic,
     fusion: BuiltinFusionPolicy::Boundary,
+    distributed: crate::BuiltinDistributedPolicy::Unsupported,
 };
 const PARALLEL_LINK: BuiltinLinkContract = BuiltinLinkContract {
     reachability: BuiltinReachability::Always,
@@ -337,6 +382,20 @@ parallel_data_entry!(
     GPLUS_DESCRIPTOR
 );
 parallel_data_entry!(
+    GCAT_CATALOG_ENTRY,
+    "gcat",
+    "parallel.cat",
+    "Concatenate values across labs in rank order.",
+    GCAT_DESCRIPTOR
+);
+parallel_data_entry!(
+    GOP_CATALOG_ENTRY,
+    "gop",
+    "parallel.functional-reduce",
+    "Reduce values across labs with an associative binary function.",
+    GOP_DESCRIPTOR
+);
+parallel_data_entry!(
     LAB_SEND_RECEIVE_CATALOG_ENTRY,
     "labSendReceive",
     "parallel.send-receive",
@@ -391,4 +450,18 @@ parallel_data_entry!(
     "parallel.gplus",
     "Sum values across labs.",
     SPMD_PLUS_DESCRIPTOR
+);
+parallel_data_entry!(
+    SPMD_CAT_CATALOG_ENTRY,
+    "spmdCat",
+    "parallel.cat",
+    "Concatenate values across SPMD workers in rank order.",
+    SPMD_CAT_DESCRIPTOR
+);
+parallel_data_entry!(
+    SPMD_REDUCE_CATALOG_ENTRY,
+    "spmdReduce",
+    "parallel.functional-reduce",
+    "Reduce values across SPMD workers with an associative binary function.",
+    SPMD_REDUCE_DESCRIPTOR
 );

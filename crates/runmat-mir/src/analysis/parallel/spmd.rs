@@ -247,6 +247,8 @@ fn collective_contract(
             source: None,
             destination: None,
             tag: None,
+            dimension: None,
+            reducer: None,
         },
         MirCollectiveOp::Gather { id, input, root } => CollectiveContract {
             id: *id,
@@ -257,6 +259,8 @@ fn collective_contract(
             source: None,
             destination: None,
             tag: None,
+            dimension: None,
+            reducer: None,
         },
         MirCollectiveOp::Scatter { id, input, root } => CollectiveContract {
             id: *id,
@@ -267,6 +271,8 @@ fn collective_contract(
             source: None,
             destination: None,
             tag: None,
+            dimension: None,
+            reducer: None,
         },
         MirCollectiveOp::AllGather { id, input } => CollectiveContract {
             id: *id,
@@ -277,6 +283,8 @@ fn collective_contract(
             source: None,
             destination: None,
             tag: None,
+            dimension: None,
+            reducer: None,
         },
         MirCollectiveOp::Reduce {
             id,
@@ -294,6 +302,8 @@ fn collective_contract(
             source: None,
             destination: None,
             tag: None,
+            dimension: None,
+            reducer: None,
         },
         MirCollectiveOp::AllReduce {
             id,
@@ -310,6 +320,46 @@ fn collective_contract(
             source: None,
             destination: None,
             tag: None,
+            dimension: None,
+            reducer: None,
+        },
+        MirCollectiveOp::Cat {
+            id,
+            input,
+            dimension,
+            root,
+        } => {
+            let mut output = fact(input);
+            output.shape = runmat_types::ShapeFact::Unknown;
+            CollectiveContract {
+                id: *id,
+                operation: CollectiveOperation::Cat,
+                input: Some(fact(input)),
+                output: Some(output),
+                root: root.as_ref().map(fact),
+                source: None,
+                destination: None,
+                tag: None,
+                dimension: Some(fact(dimension)),
+                reducer: None,
+            }
+        }
+        MirCollectiveOp::FunctionalReduce {
+            id,
+            reducer,
+            input,
+            root,
+        } => CollectiveContract {
+            id: *id,
+            operation: CollectiveOperation::FunctionalReduce,
+            input: Some(fact(input)),
+            output: Some(unknown()),
+            root: root.as_ref().map(fact),
+            source: None,
+            destination: None,
+            tag: None,
+            dimension: None,
+            reducer: Some(fact(reducer)),
         },
         MirCollectiveOp::Send {
             id,
@@ -325,6 +375,8 @@ fn collective_contract(
             source: None,
             destination: Some(fact(destination)),
             tag: tag.as_ref().map(fact),
+            dimension: None,
+            reducer: None,
         },
         MirCollectiveOp::Receive {
             id,
@@ -342,6 +394,8 @@ fn collective_contract(
             source: source.as_ref().map(fact),
             destination: None,
             tag: tag.as_ref().map(fact),
+            dimension: None,
+            reducer: None,
         },
         MirCollectiveOp::SendReceive {
             id,
@@ -358,6 +412,8 @@ fn collective_contract(
             source: Some(fact(source)),
             destination: Some(fact(destination)),
             tag: tag.as_ref().map(fact),
+            dimension: None,
+            reducer: None,
         },
         MirCollectiveOp::Probe { id, source, tag } => CollectiveContract {
             id: *id,
@@ -368,6 +424,8 @@ fn collective_contract(
             source: source.as_ref().map(fact),
             destination: None,
             tag: tag.as_ref().map(fact),
+            dimension: None,
+            reducer: None,
         },
     }
 }
@@ -382,6 +440,8 @@ fn contract(id: runmat_types::CollectiveId, operation: CollectiveOperation) -> C
         source: None,
         destination: None,
         tag: None,
+        dimension: None,
+        reducer: None,
     }
 }
 

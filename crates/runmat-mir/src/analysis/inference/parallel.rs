@@ -66,6 +66,12 @@ pub(crate) fn collective_fact(
         | MirCollectiveOp::Reduce { input, .. }
         | MirCollectiveOp::AllReduce { input, .. }
         | MirCollectiveOp::SendReceive { input, .. } => operand_fact(input, state),
+        MirCollectiveOp::Cat { input, .. } => {
+            let mut fact = operand_fact(input, state);
+            fact.shape = runmat_types::ShapeFact::Unknown;
+            fact
+        }
+        MirCollectiveOp::FunctionalReduce { .. } => ValueFact::unknown(DynamicReason::RuntimeValue),
         MirCollectiveOp::Receive { .. } => ValueFact::unknown(DynamicReason::RuntimeValue),
         MirCollectiveOp::Probe { .. } => ValueFact::scalar(ValueKindFact::Logical),
     }

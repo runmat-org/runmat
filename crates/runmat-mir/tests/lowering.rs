@@ -2850,7 +2850,7 @@ fn parallel_primitives_lower_to_typed_mir_and_manifest_contracts() {
 #[test]
 fn modern_spmd_primitives_keep_dynamic_operands_and_result_arity_in_mir() {
     let mir = lower_mir(
-        "spmd; spmdSend(uint64(9), 1, 7); [received, source, tag] = spmdReceive(\"any\", 7); exchanged = spmdSendReceive(1, 1, uint16(5)); total = spmdPlus(uint32(2)); spmdBarrier(); end;",
+        "spmd; spmdSend(uint64(9), 1, 7); [received, source, tag] = spmdReceive(\"any\", 7); exchanged = spmdSendReceive(1, 1, uint16(5)); total = spmdPlus(uint32(2)); joined = spmdCat(uint16([1, 2]), 2, 1); reduced = spmdReduce(@plus, uint32(3)); spmdBarrier(); end;",
     );
     let operations = mir
         .bodies
@@ -2872,13 +2872,31 @@ fn modern_spmd_primitives_keep_dynamic_operands_and_result_arity_in_mir() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(operations.len(), 5);
+    assert_eq!(operations.len(), 7);
     assert!(operations.iter().any(|operation| matches!(
         operation,
         runmat_mir::parallel::MirCollectiveOp::Receive {
             requested_outputs: 3,
             source: Some(_),
             tag: Some(_),
+            ..
+        }
+    )));
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        runmat_mir::parallel::MirCollectiveOp::Cat {
+            input: _,
+            dimension: _,
+            root: Some(_),
+            ..
+        }
+    )));
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        runmat_mir::parallel::MirCollectiveOp::FunctionalReduce {
+            reducer: runmat_mir::MirOperand::FunctionHandle(_),
+            input: _,
+            root: None,
             ..
         }
     )));
@@ -2894,7 +2912,7 @@ fn modern_spmd_primitives_keep_dynamic_operands_and_result_arity_in_mir() {
     )));
 
     let store = analyze_assembly(&mir);
-    assert_eq!(store.parallel.collectives.len(), 5);
+    assert_eq!(store.parallel.collectives.len(), 7);
     assert!(store.parallel.collectives.iter().any(|contract| matches!(
         contract.operation,
         runmat_types::CollectiveOperation::Receive {
@@ -2909,7 +2927,7 @@ fn every_mir_construct_has_one_explicit_native_lowering_class() {
     use runmat_mir::{MirConstructKind, NativeLoweringClass};
     use std::collections::HashSet;
 
-    assert_eq!(MirConstructKind::ALL.len(), 49);
+    assert_eq!(MirConstructKind::ALL.len(), 51);
     assert_eq!(
         MirConstructKind::ALL
             .into_iter()

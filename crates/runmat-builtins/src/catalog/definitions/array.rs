@@ -224,6 +224,7 @@ pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::PreserveInputs,
         fusion: BuiltinFusionPolicy::Boundary,
+        distributed: crate::BuiltinDistributedPolicy::Unsupported,
     },
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,
@@ -423,6 +424,7 @@ pub const ZEROS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,
         fusion: BuiltinFusionPolicy::Candidate,
+        distributed: crate::BuiltinDistributedPolicy::Unsupported,
     },
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,

@@ -33,6 +33,7 @@ const PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
     accelerator: BuiltinAcceleratorPolicy::Optional,
     residency: BuiltinResidencyPolicy::PreserveInputs,
     fusion: BuiltinFusionPolicy::Candidate,
+    distributed: crate::BuiltinDistributedPolicy::Unsupported,
 };
 const LINK: BuiltinLinkContract = BuiltinLinkContract {
     reachability: BuiltinReachability::Always,
@@ -122,6 +123,31 @@ fn migrated_registry_is_valid_and_case_insensitive() {
             .inference_rule
             .0,
         "array.full"
+    );
+}
+
+#[test]
+fn distributed_execution_policy_is_declared_by_the_canonical_catalog() {
+    assert_eq!(
+        builtin_catalog_entry_by_name("abs")
+            .expect("abs catalog entry")
+            .placement
+            .distributed,
+        BuiltinDistributedPolicy::MapUnary
+    );
+    assert_eq!(
+        builtin_catalog_entry_by_name("gather")
+            .expect("gather catalog entry")
+            .placement
+            .distributed,
+        BuiltinDistributedPolicy::MaterializeArguments
+    );
+    assert_eq!(
+        builtin_catalog_entry_by_name("full")
+            .expect("full catalog entry")
+            .placement
+            .distributed,
+        BuiltinDistributedPolicy::Unsupported
     );
 }
 

@@ -151,6 +151,8 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                     source: None,
                     destination: None,
                     tag: None,
+                    dimension: None,
+                    reducer: None,
                 }],
             },
             optional_sections: Vec::new(),

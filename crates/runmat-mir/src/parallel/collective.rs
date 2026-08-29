@@ -37,6 +37,18 @@ pub enum MirCollectiveOp {
         input: MirOperand,
         operator: OperatorKind,
     },
+    Cat {
+        id: CollectiveId,
+        input: MirOperand,
+        dimension: MirOperand,
+        root: Option<MirOperand>,
+    },
+    FunctionalReduce {
+        id: CollectiveId,
+        reducer: MirOperand,
+        input: MirOperand,
+        root: Option<MirOperand>,
+    },
     Send {
         id: CollectiveId,
         input: MirOperand,
@@ -73,6 +85,8 @@ impl MirCollectiveOp {
             | Self::AllGather { id, .. }
             | Self::Reduce { id, .. }
             | Self::AllReduce { id, .. }
+            | Self::Cat { id, .. }
+            | Self::FunctionalReduce { id, .. }
             | Self::Send { id, .. }
             | Self::Receive { id, .. }
             | Self::SendReceive { id, .. }
@@ -96,6 +110,30 @@ impl MirCollectiveOp {
                 operation(root);
             }
             Self::AllGather { input, .. } | Self::AllReduce { input, .. } => operation(input),
+            Self::Cat {
+                input,
+                dimension,
+                root,
+                ..
+            } => {
+                operation(input);
+                operation(dimension);
+                if let Some(root) = root {
+                    operation(root);
+                }
+            }
+            Self::FunctionalReduce {
+                reducer,
+                input,
+                root,
+                ..
+            } => {
+                operation(reducer);
+                operation(input);
+                if let Some(root) = root {
+                    operation(root);
+                }
+            }
             Self::Send {
                 input,
                 destination,
@@ -141,6 +179,8 @@ impl MirCollectiveOp {
             | Self::AllGather { input, .. }
             | Self::Reduce { input, .. }
             | Self::AllReduce { input, .. }
+            | Self::Cat { input, .. }
+            | Self::FunctionalReduce { input, .. }
             | Self::Send { input, .. }
             | Self::SendReceive { input, .. } => Some(input),
             Self::Barrier { .. } | Self::Receive { .. } | Self::Probe { .. } => None,
@@ -159,6 +199,24 @@ impl MirCollectiveOp {
             | Self::Scatter { input, root, .. }
             | Self::Reduce { input, root, .. } => vec![input, root],
             Self::AllGather { input, .. } | Self::AllReduce { input, .. } => vec![input],
+            Self::Cat {
+                input,
+                dimension,
+                root,
+                ..
+            } => std::iter::once(input)
+                .chain(std::iter::once(dimension))
+                .chain(root.iter())
+                .collect(),
+            Self::FunctionalReduce {
+                reducer,
+                input,
+                root,
+                ..
+            } => std::iter::once(reducer)
+                .chain(std::iter::once(input))
+                .chain(root.iter())
+                .collect(),
             Self::Send {
                 input,
                 destination,
