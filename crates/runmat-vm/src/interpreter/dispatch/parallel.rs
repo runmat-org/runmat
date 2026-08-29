@@ -939,16 +939,25 @@ async fn execute_spmd_in_process(
                 persistent_aliases: HashMap::new(),
                 side_effect_epoch: 0,
             };
-            let InterpreterOutcome::Completed(completion) =
-                crate::interpreter::runner::interpret_resume_in_context(
-                    &bytecode,
-                    resume,
-                    Some(&function_name),
-                    runtime,
-                )
-                .await?;
-            spmd.rank_finished(&gang, rank)?;
-            Ok::<_, RuntimeError>((rank, completion))
+            let result = crate::interpreter::runner::interpret_resume_in_context(
+                &bytecode,
+                resume,
+                Some(&function_name),
+                runtime,
+            )
+            .await;
+            match result {
+                Ok(InterpreterOutcome::Completed(completion)) => {
+                    spmd.rank_finished(&gang, rank)?;
+                    Ok((rank, completion))
+                }
+                Err(error) => {
+                    // Wake peers that may be waiting in a collective, but keep
+                    // the rank's source-mapped failure as the public result.
+                    let _ = spmd.rank_failed(&gang, rank);
+                    Err(error)
+                }
+            }
         });
     }
     futures::future::try_join_all(tasks)

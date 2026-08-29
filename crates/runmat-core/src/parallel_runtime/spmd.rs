@@ -88,6 +88,20 @@ impl RuntimeSpmdService for CoreSpmdService {
         Ok(())
     }
 
+    fn rank_failed(
+        &self,
+        gang: &GangHandle,
+        rank: runmat_types::LabRank,
+    ) -> Result<(), RuntimeError> {
+        if rank.0 == 0 || rank.0 > gang.labs.0 {
+            return Err(runtime_error(
+                "failed SPMD rank is outside the admitted gang",
+            ));
+        }
+        self.collectives.fail_gang(gang, "an SPMD peer failed");
+        Ok(())
+    }
+
     fn retain_outputs(
         &self,
         gang: GangHandle,

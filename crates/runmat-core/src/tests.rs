@@ -14817,6 +14817,33 @@ fn local_spmd_detects_a_collective_wait_after_its_peer_finishes() {
 }
 
 #[test]
+fn local_spmd_preserves_the_originating_rank_failure_while_releasing_waiting_peers() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; value = spmdReceive(2, 7); else; values = [1, 2]; value = values(3); end; end;",
+    )
+    .expect("a rank failure returns a structured diagnostic without stranding its peer");
+    assert!(
+        outcome.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RunMat:IndexOutOfBounds"
+                && diagnostic.message.contains("out of bounds")
+        }),
+        "originating failure was not retained: {:?}",
+        outcome.diagnostics
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "RunMat:parallel:Collective"),
+        "peer termination replaced the originating rank failure: {:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
 fn distributed_values_preserve_typed_local_storage_through_compiler_lowering() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
