@@ -179,10 +179,10 @@ async fn invoke_native(
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (operation, arguments, requested_outputs);
-        return Err(build_runtime_error(ERROR_UNAVAILABLE.message)
+        Err(build_runtime_error(ERROR_UNAVAILABLE.message)
             .with_builtin("native_ffi")
             .with_identifier("RunMat:Foreign:UnsupportedOnWasm")
-            .build());
+            .build())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
