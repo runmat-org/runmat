@@ -14860,6 +14860,41 @@ fn distributed_values_preserve_typed_local_storage_through_compiler_lowering() {
 }
 
 #[test]
+fn codistributor_factory_and_codistributed_inspection_use_canonical_runtime_values() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "defaultCodist = codistributor(); blockCodist = codistributor('2dbc', uint32([1, 1]), uint64(8)); completeCodist = codistributor1d(uint32(1), uint64(4), uint64([4, 1])); defaultComplete = isComplete(defaultCodist); complete = isComplete(completeCodist); plain = iscodistributed(uint16(7)); value = distributed(uint16([1, 2])); distributedFlag = iscodistributed(value);",
+    )
+    .expect("execute codistributor factory and handle inspection surface");
+    let variables = session.get_variables();
+    assert!(matches!(
+        variables.get("defaultCodist"),
+        Some(runmat_value::Value::Object(object)) if object.class_name == "codistributor1d"
+    ));
+    assert!(matches!(
+        variables.get("blockCodist"),
+        Some(runmat_value::Value::Object(object)) if object.class_name == "codistributor2dbc"
+    ));
+    assert_eq!(
+        variables.get("defaultComplete"),
+        Some(&runmat_value::Value::Bool(false))
+    );
+    assert_eq!(
+        variables.get("complete"),
+        Some(&runmat_value::Value::Bool(true))
+    );
+    assert_eq!(
+        variables.get("plain"),
+        Some(&runmat_value::Value::Bool(false))
+    );
+    assert_eq!(
+        variables.get("distributedFlag"),
+        Some(&runmat_value::Value::Bool(true))
+    );
+}
+
+#[test]
 fn distributed_builtin_policy_maps_admitted_operations_and_materializes_gather() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(

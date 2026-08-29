@@ -13,6 +13,44 @@ pub fn is_supported_class(class_name: &str) -> bool {
     matches!(class_name, ONE_DIMENSIONAL_CLASS | TWO_DIMENSIONAL_CLASS)
 }
 
+pub fn factory(arguments: &[Value]) -> Result<Value, RuntimeError> {
+    let Some((scheme, parameters)) = arguments.split_first() else {
+        return one_dimensional(&[]);
+    };
+    let scheme = string_scalar(scheme).ok_or_else(|| {
+        error("codistributor scheme must be the character vector or string scalar '1d' or '2dbc'")
+    })?;
+    match scheme.to_ascii_lowercase().as_str() {
+        "1d" => {
+            if parameters.len() > 2 {
+                return Err(error(
+                    "codistributor('1d', ...) accepts at most dimension and partition",
+                ));
+            }
+            one_dimensional(parameters)
+        }
+        "2dbc" => {
+            if parameters.len() > 2 {
+                return Err(error(
+                    "codistributor('2dbc', ...) accepts at most worker grid and block size",
+                ));
+            }
+            two_dimensional(parameters)
+        }
+        _ => Err(error(
+            "codistributor scheme must be the character vector or string scalar '1d' or '2dbc'",
+        )),
+    }
+}
+
+pub fn is_complete(value: &Value) -> Result<bool, RuntimeError> {
+    let Value::Object(object) = value else {
+        return Err(error("isComplete requires a codistributor object"));
+    };
+    validate_definition(object)?;
+    Ok(optional_vector_property(object, "GlobalSize")?.is_some())
+}
+
 pub fn validate_definition(object: &ObjectInstance) -> Result<(), RuntimeError> {
     const ONE_DIMENSIONAL_PROPERTIES: &[&str] = &["Dimension", "Partition", "GlobalSize"];
     const TWO_DIMENSIONAL_PROPERTIES: &[&str] =
@@ -295,6 +333,14 @@ fn exact_scalar(value: u64) -> Value {
     Value::Int(runmat_value::IntValue::U64(value))
 }
 
+fn string_scalar(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::CharArray(value) => value.row_string(),
+        _ => None,
+    }
+}
+
 fn positive_scalar(value: &Value, name: &str) -> Result<u64, RuntimeError> {
     let values = nonnegative_vector(value, name)?;
     match values.as_slice() {
@@ -487,6 +533,37 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
         );
         assert!(one_dimensional(&[Value::Int(IntValue::U32(1)), tensor]).is_ok());
+    }
+
+    #[test]
+    fn generic_factory_preserves_scheme_identity_and_completeness() {
+        let default = factory(&[]).expect("default codistributor");
+        assert!(matches!(
+            default,
+            Value::Object(ref object) if object.class_name == ONE_DIMENSIONAL_CLASS
+        ));
+        assert!(!is_complete(&default).unwrap());
+
+        let two_dimensional = factory(&[
+            Value::String("2dbc".into()),
+            vector_value(vec![1, 2]),
+            Value::Int(IntValue::U32(8)),
+        ])
+        .expect("generic 2dbc codistributor");
+        assert!(matches!(
+            two_dimensional,
+            Value::Object(ref object) if object.class_name == TWO_DIMENSIONAL_CLASS
+        ));
+        assert!(!is_complete(&two_dimensional).unwrap());
+
+        let complete = one_dimensional(&[
+            Value::Int(IntValue::U32(1)),
+            vector_value(vec![2, 2]),
+            vector_value(vec![4, 3]),
+        ])
+        .unwrap();
+        assert!(is_complete(&complete).unwrap());
+        assert!(factory(&[Value::String("cyclic".into())]).is_err());
     }
 
     #[test]

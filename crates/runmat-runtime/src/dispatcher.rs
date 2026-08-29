@@ -378,29 +378,15 @@ async fn try_distributed_builtin(
         .with_identifier("RunMat:parallel:DistributedBuiltinUnsupported")
         .build()
     })?;
-    let context = crate::context::legacy::active().ok_or_else(|| {
-        build_runtime_error(format!(
-            "{name}: distributed arguments require an active RunMat execution context"
-        ))
-        .with_identifier("RunMat:parallel:DistributedRuntimeUnavailable")
-        .build()
-    })?;
-    let service = context
-        .service_ports()
-        .require_distributed("distributed builtin")
-        .map_err(|error| {
-            build_runtime_error(error.to_string())
-                .with_identifier("RunMat:parallel:DistributedRuntimeUnavailable")
-                .build()
-        })?
-        .clone();
     match entry.placement.distributed {
         runmat_builtins::BuiltinDistributedPolicy::Unsupported => Err(build_runtime_error(
             format!("{name}: distributed inputs are not supported by this builtin"),
         )
         .with_identifier("RunMat:parallel:DistributedBuiltinUnsupported")
         .build()),
+        runmat_builtins::BuiltinDistributedPolicy::InspectHandles => Ok(None),
         runmat_builtins::BuiltinDistributedPolicy::MaterializeArguments => {
+            let (context, service) = distributed_service(name)?;
             let mut materialized = Vec::with_capacity(args.len());
             for argument in args {
                 if let Value::Distributed(handle) = argument {
@@ -415,6 +401,7 @@ async fn try_distributed_builtin(
                 .map(Some)
         }
         runmat_builtins::BuiltinDistributedPolicy::MapUnary => {
+            let (context, service) = distributed_service(name)?;
             for argument in args {
                 if let Value::Distributed(handle) = argument {
                     crate::parallel::lease::validate_distributed(&context, handle)?;
@@ -458,6 +445,34 @@ async fn try_distributed_builtin(
                 .map(Some)
         }
     }
+}
+
+fn distributed_service(
+    name: &str,
+) -> Result<
+    (
+        crate::context::RuntimeContext,
+        std::rc::Rc<dyn crate::context::RuntimeDistributedService>,
+    ),
+    RuntimeError,
+> {
+    let context = crate::context::legacy::active().ok_or_else(|| {
+        build_runtime_error(format!(
+            "{name}: distributed arguments require an active RunMat execution context"
+        ))
+        .with_identifier("RunMat:parallel:DistributedRuntimeUnavailable")
+        .build()
+    })?;
+    let service = context
+        .service_ports()
+        .require_distributed("distributed builtin")
+        .map_err(|error| {
+            build_runtime_error(error.to_string())
+                .with_identifier("RunMat:parallel:DistributedRuntimeUnavailable")
+                .build()
+        })?
+        .clone();
+    Ok((context, service))
 }
 
 fn compatibility_checked_builtin_result(

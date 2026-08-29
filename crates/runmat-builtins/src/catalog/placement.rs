@@ -38,6 +38,9 @@ pub enum BuiltinFusionPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinDistributedPolicy {
     Unsupported,
+    /// Pass execution-owned handles to a builtin whose declared purpose is
+    /// metadata or identity inspection. The builtin must not read partitions.
+    InspectHandles,
     MaterializeArguments,
     MapUnary,
 }
