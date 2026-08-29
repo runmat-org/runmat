@@ -5,6 +5,7 @@ use runmat_value::Value;
 pub async fn build_expanded_args_from_specs(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut arguments = Vec::with_capacity(specs.len());
     for spec in specs.iter().rev() {
@@ -31,12 +32,13 @@ pub async fn build_expanded_args_from_specs(
         }
     }
     arguments.reverse();
-    runmat_runtime::call::arguments::expand_arguments(arguments).await
+    runmat_runtime::call::arguments::expand_arguments(runtime, arguments).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::build_expanded_args_from_specs;
+    use crate::bytecode::program::ExecutionContext;
     use futures::executor::block_on;
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
     use runmat_hir::{QualifiedName, SymbolName};
@@ -745,16 +747,24 @@ mod tests {
             num_indices: 1,
             expand_all: false,
         }];
-        let expanded =
-            block_on(build_expanded_args_from_specs(&mut stack, &specs)).expect("expanded args");
+        let expanded = block_on(build_expanded_args_from_specs(
+            &mut stack,
+            &specs,
+            &ExecutionContext::default().runtime,
+        ))
+        .expect("expanded args");
         assert_eq!(expanded, vec![Value::Num(9.0)]);
 
         let mut stack = vec![
             Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
             Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         ];
-        let expanded =
-            block_on(build_expanded_args_from_specs(&mut stack, &specs)).expect("expanded args");
+        let expanded = block_on(build_expanded_args_from_specs(
+            &mut stack,
+            &specs,
+            &ExecutionContext::default().runtime,
+        ))
+        .expect("expanded args");
         assert_eq!(expanded, vec![Value::Num(9.0), Value::Num(2.0)]);
     }
 }

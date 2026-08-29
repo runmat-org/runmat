@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 
 pub use runmat_execution_artifact::{
     ProgramExecutionRequest as WorkerRequest, ProgramExecutionResponse as WorkerResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 
-pub const NATIVE_WORKER_MESSAGE_SCHEMA_V1: u16 = 1;
+pub const NATIVE_WORKER_MESSAGE_SCHEMA_V2: u16 = 2;
 const MAX_PROGRESS_PAYLOAD_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -20,7 +20,7 @@ pub struct ProgramProgress {
 
 impl ProgramProgress {
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema_version != NATIVE_WORKER_MESSAGE_SCHEMA_V1
+        if self.schema_version != NATIVE_WORKER_MESSAGE_SCHEMA_V2
             || self.sequence == 0
             || self.media_type.is_empty()
             || self.media_type.len() > 128
@@ -42,8 +42,37 @@ impl ProgramProgress {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "message", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkerProcessMessage {
-    Progress { progress: ProgramProgress },
-    Completed { response: WorkerResponse },
+    Progress {
+        progress: ProgramProgress,
+    },
+    CollectiveRequest {
+        request: runmat_execution::CollectiveRequest,
+    },
+    Completed {
+        response: WorkerResponse,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CollectiveProcessResult {
+    Completed {
+        response: runmat_execution::CollectiveResponse,
+    },
+    Failed {
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "message", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkerDriverMessage {
+    CollectiveCompletion {
+        context: runmat_execution::SpmdTaskContext,
+        id: runmat_types::CollectiveId,
+        sequence: runmat_execution::CollectiveSequence,
+        result: CollectiveProcessResult,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -60,7 +89,7 @@ mod tests {
     #[test]
     fn progress_envelope_is_bounded_and_strictly_shaped() {
         let progress = ProgramProgress {
-            schema_version: NATIVE_WORKER_MESSAGE_SCHEMA_V1,
+            schema_version: NATIVE_WORKER_MESSAGE_SCHEMA_V2,
             sequence: 1,
             media_type: "application/vnd.runmat.progress+cbor".into(),
             value_schema: "runmat.progress.v1".into(),

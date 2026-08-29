@@ -187,6 +187,9 @@ async fn print_terminal(
                 ProgramExecutionResponse::ExternalizedSuccess { .. } => {
                     bail!("remote result requires an artifact-aware consumer")
                 }
+                ProgramExecutionResponse::SpmdSuccess { .. } => {
+                    bail!("per-rank SPMD results require the gang execution consumer")
+                }
                 ProgramExecutionResponse::Failure { message } => bail!("{message}"),
                 ProgramExecutionResponse::RuntimeFailure { failure } => {
                     bail!(

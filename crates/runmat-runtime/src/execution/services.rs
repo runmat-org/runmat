@@ -56,6 +56,42 @@ pub struct DeferredCall {
     pub program: Option<Vec<u8>>,
 }
 
+/// Exact compiler-bound SPMD program submitted as one gang operation.
+/// Execution backends may place ranks in separate workers, but may not split
+/// admission, retry, or result identity into unrelated ordinary futures.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpmdGangCall {
+    pub gang: runmat_execution::GangHandle,
+    pub region: runmat_types::ParallelRegionId,
+    pub captures: Vec<Value>,
+    pub requested_outputs: usize,
+    pub program_revision: Option<runmat_execution::ProgramRevision>,
+    pub program: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpmdRankResult {
+    pub rank: runmat_types::LabRank,
+    pub outputs: Vec<Option<runmat_execution::value::ValuePayload>>,
+}
+
+impl SpmdGangCall {
+    pub fn validate(&self) -> Result<(), ExecutionServiceError> {
+        self.gang
+            .validate()
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        if self.requested_outputs > u16::MAX as usize
+            || self.captures.len() > 4096
+            || self.program.is_empty()
+        {
+            return Err(ExecutionServiceError::Failed(
+                "SPMD gang call is empty or exceeds its bounded execution contract".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DurableJobOptions {
     pub idempotency_key: Option<String>,
@@ -86,6 +122,17 @@ pub trait RuntimeExecutionServices {
     fn current_pool(&self) -> Result<Option<PoolSnapshot>, ExecutionServiceError>;
     fn ensure_pool(&self, request: PoolRequest) -> Result<PoolSnapshot, ExecutionServiceError>;
     fn close_pool(&self, pool: &PoolHandle) -> Result<(), ExecutionServiceError>;
+    fn execute_spmd_gang(
+        &self,
+        _call: SpmdGangCall,
+    ) -> crate::context::RuntimeServiceFuture<Result<Vec<SpmdRankResult>, ExecutionServiceError>>
+    {
+        Box::pin(async {
+            Err(ExecutionServiceError::Failed(
+                "this execution backend does not provide isolated SPMD gangs".into(),
+            ))
+        })
+    }
     fn inspect_pool(&self, pool: &PoolHandle) -> Result<PoolSnapshot, ExecutionServiceError> {
         let snapshot = self
             .current_pool()?

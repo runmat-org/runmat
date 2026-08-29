@@ -11,7 +11,7 @@ use runmat_execution::{
     PoolSnapshot, TaskHandle, TaskId, TaskResultClaim,
 };
 use runmat_execution_artifact::{
-    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -247,7 +247,7 @@ impl BrowserExecutionService {
                 let decoded = runmat_runtime::execution::value_codec::decode_inline_value(&value)
                     .map_err(|error| ExecutionServiceError::Failed(error.to_string()));
                 let report = AttemptReport::Succeeded {
-                    result: AttemptSuccess {
+                    result: AttemptSuccess::Values {
                         outputs: vec![value],
                         result_objects: Vec::new(),
                     },
@@ -257,6 +257,16 @@ impl BrowserExecutionService {
             Ok(ProgramExecutionResponse::ExternalizedSuccess { .. }) => {
                 let message =
                     "browser execution host cannot consume native externalized results".to_string();
+                let result = Err(ExecutionServiceError::Failed(message.clone()));
+                let report = AttemptReport::Failed {
+                    kind: AttemptFailureKind::Rejected,
+                    message,
+                };
+                (self.future_id(attempt.task_id), result, report)
+            }
+            Ok(ProgramExecutionResponse::SpmdSuccess { .. }) => {
+                let message =
+                    "SPMD worker response requires the typed browser gang driver".to_string();
                 let result = Err(ExecutionServiceError::Failed(message.clone()));
                 let report = AttemptReport::Failed {
                     kind: AttemptFailureKind::Rejected,
@@ -442,7 +452,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             })
             .map_err(driver_error)?;
         let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
             recipe: recipe.clone(),
             artifact: artifact.clone(),
             callable: callable.clone(),

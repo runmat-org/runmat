@@ -172,7 +172,7 @@ pub(super) fn materialize_arguments(
         .collect::<NativeExecutorResult<Vec<_>>>()?;
     super::sync::complete(
         &state.runtime,
-        runmat_runtime::call::arguments::expand_arguments(materialized),
+        runmat_runtime::call::arguments::expand_arguments(&state.runtime, materialized),
         "call argument expansion",
     )
 }

@@ -4,10 +4,11 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 use runmat_runtime::execution::{DeferredCall, DeferredInvocation, ExecutionServiceError};
 use runmat_value::Value;
+use std::collections::{HashMap, HashSet};
 
 pub fn materialize_deferred_call(
     call: &DeferredCall,
@@ -110,7 +111,7 @@ pub async fn execute_deferred_program_in_context(
         runmat_execution_artifact::ProgramTarget::portable("vm-parallel-region-v1"),
     )?;
     let request = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
         recipe,
         artifact,
         callable,
@@ -136,6 +137,9 @@ pub async fn execute_deferred_program_in_context(
         }
         ProgramExecutionResponse::ExternalizedSuccess { .. } => Err(ExecutionServiceError::Failed(
             "parallel region returned an externalized result to an inline executor".into(),
+        )),
+        ProgramExecutionResponse::SpmdSuccess { .. } => Err(ExecutionServiceError::Failed(
+            "SPMD task response requires the typed gang execution path".into(),
         )),
     }
 }
@@ -211,6 +215,9 @@ async fn execute_program_request_in_context(
     if matches!(request.callable, ProgramCallable::ParallelRegion { .. }) {
         return execute_parallel_region_request(request, runtime).await;
     }
+    if matches!(request.callable, ProgramCallable::SpmdRegion { .. }) {
+        return execute_spmd_region_request(request, runtime).await;
+    }
     let registry: crate::FunctionRegistry =
         match serde_json::from_slice(&request.artifact.executable_bytes) {
             Ok(registry) => registry,
@@ -221,6 +228,141 @@ async fn execute_program_request_in_context(
             }
         };
     execute_function_request(&request, &registry, &runtime).await
+}
+
+async fn execute_spmd_region_request(
+    request: ProgramExecutionRequest,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> ProgramExecutionResponse {
+    let ProgramCallable::SpmdRegion { region } = &request.callable else {
+        return ProgramExecutionResponse::Failure {
+            message: "worker received a non-SPMD callable on the SPMD execution path".into(),
+        };
+    };
+    let runmat_execution::ProgramInvocationContext::SpmdTask { task } = &request.context else {
+        return ProgramExecutionResponse::Failure {
+            message: "SPMD region task is missing its typed execution context".into(),
+        };
+    };
+    let collective = match runtime
+        .service_ports()
+        .require_collective("isolated SPMD execution")
+    {
+        Ok(collective) if collective.context() == task => collective.clone(),
+        Ok(_) => {
+            return ProgramExecutionResponse::Failure {
+                message: "worker collective context differs from its SPMD task identity".into(),
+            }
+        }
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: error.to_string(),
+            }
+        }
+    };
+    let bytecode: crate::Bytecode = match serde_json::from_slice(&request.artifact.executable_bytes)
+    {
+        Ok(bytecode) => bytecode,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected invalid SPMD bytecode: {error}"),
+            }
+        }
+    };
+    let Some(executable) = bytecode
+        .spmd_regions
+        .iter()
+        .find(|candidate| candidate.contract.id == *region)
+        .cloned()
+    else {
+        return ProgramExecutionResponse::Failure {
+            message: "worker could not find the requested SPMD region in its exact program".into(),
+        };
+    };
+    if usize::from(request.requested_outputs) != executable.outputs.len() {
+        return ProgramExecutionResponse::Failure {
+            message: "SPMD task output count differs from its compiler-bound region".into(),
+        };
+    }
+    let arguments = match request
+        .arguments
+        .iter()
+        .map(runmat_runtime::execution::value_codec::decode_inline_value)
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(arguments) => arguments,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected an invalid SPMD capture: {error}"),
+            }
+        }
+    };
+    if arguments.len() != executable.captures.len() {
+        return ProgramExecutionResponse::Failure {
+            message: format!(
+                "SPMD task received {} captures; its executable contract requires {}",
+                arguments.len(),
+                executable.captures.len()
+            ),
+        };
+    }
+    let mut frame = vec![None; bytecode.var_count];
+    for (capture, value) in executable.captures.iter().zip(arguments) {
+        let Some(slot) = frame.get_mut(capture.slot) else {
+            return ProgramExecutionResponse::Failure {
+                message: "SPMD capture lies outside its compiler-bound VM frame".into(),
+            };
+        };
+        *slot = Some(value);
+    }
+    let services = runtime.service_ports().clone().with_collective(collective);
+    let runtime = runtime.with_service_ports(services);
+    let callable_name = request.callable.display_name();
+    let result = crate::interpreter::runner::interpret_resume_in_context(
+        &bytecode,
+        crate::InterpreterResumeState {
+            pc: executable.body.pc,
+            completion_boundary: Some(
+                crate::interpreter::state::InterpreterCompletionBoundary::before(
+                    executable.exit.pc,
+                ),
+            ),
+            vars: frame,
+            supplied_inputs: 0,
+            requested_outputs: 0,
+            missing_input_slots: HashSet::new(),
+            global_aliases: HashMap::new(),
+            persistent_aliases: HashMap::new(),
+            side_effect_epoch: 0,
+        },
+        Some(&callable_name),
+        runtime,
+    )
+    .await;
+    match result {
+        Ok(crate::InterpreterOutcome::Completed(completion)) => {
+            let outputs = executable
+                .outputs
+                .iter()
+                .map(|output| {
+                    if !completion.assigned_slots.contains(&output.slot) {
+                        return Ok(None);
+                    }
+                    let value = completion.values.get(output.slot).ok_or_else(|| {
+                        "SPMD output lies outside its compiler-bound VM frame".to_string()
+                    })?;
+                    runmat_runtime::execution::value_codec::encode_inline_value(value)
+                        .map(Some)
+                        .map_err(|error| error.to_string())
+                })
+                .collect::<Result<Vec<_>, _>>();
+            match outputs {
+                Ok(outputs) => ProgramExecutionResponse::SpmdSuccess { outputs },
+                Err(message) => ProgramExecutionResponse::Failure { message },
+            }
+        }
+        Err(error) => runtime_failure_response(error),
+    }
 }
 
 async fn execute_parallel_region_request(
@@ -489,7 +631,7 @@ async fn execute_unit_script(
         crate::interpret_with_vars_in_context(&bytecode, &mut variables, Some("<main>"), runtime)
             .await
             .map(|outcome| match outcome {
-                crate::InterpreterOutcome::Completed(values) => values,
+                crate::InterpreterOutcome::Completed(completion) => completion.values,
             });
     match result {
         Ok(values) => {
@@ -544,7 +686,7 @@ mod tests {
     };
     use runmat_execution_artifact::{
         ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
     };
 
     use super::execute_program_request;
@@ -592,7 +734,7 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
@@ -642,7 +784,7 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(ProgramFunctionId(0), None),

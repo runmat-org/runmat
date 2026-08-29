@@ -147,7 +147,7 @@ pub fn submit(
 
 pub fn success() -> runmat_execution_runner::AttemptReport {
     runmat_execution_runner::AttemptReport::Succeeded {
-        result: runmat_execution_runner::AttemptSuccess {
+        result: runmat_execution_runner::AttemptSuccess::Values {
             outputs: vec![ValuePayload::Inline(Box::new(InlineValue::Null))],
             result_objects: Vec::new(),
         },

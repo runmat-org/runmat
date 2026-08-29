@@ -36,7 +36,10 @@ pub(super) async fn native_conformance() {
         )
         .unwrap();
     let partition = wait_for_native(partition).await;
-    assert_eq!(partition.outputs, fixture.expected_partition_outputs);
+    assert_eq!(
+        partition.values().expect("ordinary task result").0,
+        fixture.expected_partition_outputs
+    );
 
     let join = session
         .submit(
@@ -45,8 +48,9 @@ pub(super) async fn native_conformance() {
         )
         .unwrap();
     let join = wait_for_native(join).await;
-    assert_eq!(join.outputs, fixture.expected_join_outputs);
-    let [ValuePayload::Object(root)] = join.outputs.as_slice() else {
+    let (join_outputs, _) = join.values().expect("ordinary task result");
+    assert_eq!(join_outputs, fixture.expected_join_outputs);
+    let [ValuePayload::Object(root)] = join_outputs else {
         panic!("native curve join returned a non-object root")
     };
     let publication = import_result_publication(
@@ -203,7 +207,10 @@ pub(super) async fn remote_conformance(
         .await
         .expect("remote curve partition timeout")
         .unwrap();
-    assert_eq!(partition.outputs, fixture.expected_partition_outputs);
+    assert_eq!(
+        partition.values().expect("ordinary task result").0,
+        fixture.expected_partition_outputs
+    );
 
     let join = pool
         .submit(
@@ -215,12 +222,13 @@ pub(super) async fn remote_conformance(
         .await
         .expect("remote curve join timeout")
         .unwrap();
-    assert_eq!(join.outputs, fixture.expected_join_outputs);
-    let [ValuePayload::Object(root)] = join.outputs.as_slice() else {
+    let (join_outputs, join_result_objects) = join.values().expect("ordinary task result");
+    assert_eq!(join_outputs, fixture.expected_join_outputs);
+    let [ValuePayload::Object(root)] = join_outputs else {
         panic!("remote curve join returned a non-object root")
     };
     let mut store = TestStore::default();
-    for reference in &join.result_objects {
+    for reference in join_result_objects {
         store.0.insert(
             reference.logical_digest,
             pool.execution_object(reference)

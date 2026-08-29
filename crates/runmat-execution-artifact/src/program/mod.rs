@@ -11,7 +11,7 @@ pub use native_object::{NativeObjectPayload, NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSIO
 pub use recipe::{ProgramBuildRecipe, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION};
 pub use request::{
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionRequest,
-    ProgramExecutionResponse, MAX_PROGRAM_EXECUTION_ARGUMENTS, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+    ProgramExecutionResponse, MAX_PROGRAM_EXECUTION_ARGUMENTS, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 pub use target::{
     NativeTargetIdentity, ProgramTarget, ProgramTargetCohort, PROGRAM_TARGET_SCHEMA_VERSION,

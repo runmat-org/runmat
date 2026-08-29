@@ -1085,7 +1085,8 @@ impl RunMatSession {
             }
 
             match self.interpret_with_context(&execution_bytecode).await {
-                Ok(runmat_vm::InterpreterOutcome::Completed(results)) => {
+                Ok(runmat_vm::InterpreterOutcome::Completed(completion)) => {
+                    let results = completion.values;
                     self.stats.interpreter_fallback += 1;
                     if self.verbose {
                         debug!("Interpreter results: {results:?}");

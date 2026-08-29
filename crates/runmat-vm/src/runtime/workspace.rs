@@ -536,6 +536,25 @@ pub fn mark_workspace_assigned(index: usize) {
     });
 }
 
+/// Snapshot the slots currently assigned in the innermost VM workspace.
+/// Internal placeholder values are deliberately excluded.
+pub(crate) fn current_workspace_assigned_slots() -> HashSet<usize> {
+    WORKSPACE_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .map(|frame| {
+                frame
+                    .state
+                    .slot_lifecycle
+                    .iter()
+                    .filter_map(|(slot, lifecycle)| lifecycle.is_assigned().then_some(*slot))
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
 pub(crate) fn reset_thread_state_for_tests() {
     WORKSPACE_STACK.with(|stack| stack.borrow_mut().clear());
     PENDING_WORKSPACE.with(|slot| {

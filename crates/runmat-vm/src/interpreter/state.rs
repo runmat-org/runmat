@@ -10,13 +10,43 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub enum InterpreterOutcome {
-    Completed(Vec<Value>),
+    Completed(InterpreterCompletion),
+}
+
+/// Final VM frame together with the slots that are semantically assigned.
+///
+/// The value vector remains dense for efficient indexed execution. Consumers
+/// that cross a language boundary must consult `assigned_slots` instead of
+/// treating the internal placeholder in an unassigned slot as a program
+/// value.
+#[derive(Debug)]
+pub struct InterpreterCompletion {
+    pub values: Vec<Value>,
+    pub assigned_slots: HashSet<usize>,
+}
+
+/// Compiler-owned point at which a resumed region completes without executing
+/// instructions that belong to its caller.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InterpreterCompletionBoundary {
+    pc: usize,
+}
+
+impl InterpreterCompletionBoundary {
+    pub const fn before(pc: usize) -> Self {
+        Self { pc }
+    }
+
+    pub const fn pc(self) -> usize {
+        self.pc
+    }
 }
 
 /// Exact VM-owned state materialized from a native empty-stack MIR boundary.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InterpreterResumeState {
     pub pc: usize,
+    pub completion_boundary: Option<InterpreterCompletionBoundary>,
     pub vars: Vec<Option<Value>>,
     pub supplied_inputs: usize,
     pub requested_outputs: usize,
@@ -39,6 +69,8 @@ pub struct InterpreterState {
     pub stack: Vec<Value>,
     pub vars: Vec<Value>,
     pub pc: usize,
+    pub completion_boundary: Option<InterpreterCompletionBoundary>,
+    pub completion_assigned_slots: Option<HashSet<usize>>,
     pub context: ExecutionContext,
     pub try_stack: Vec<ActiveTryHandler>,
     pub last_exception: Option<runmat_value::MException>,
@@ -129,6 +161,8 @@ impl InterpreterState {
             missing_input_slots: HashSet::new(),
             vars,
             pc: 0,
+            completion_boundary: None,
+            completion_assigned_slots: None,
             call_counts,
             initial_assigned_var_count,
             current_function_name: current_function_name

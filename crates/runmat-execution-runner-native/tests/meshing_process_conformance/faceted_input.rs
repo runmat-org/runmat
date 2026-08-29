@@ -83,7 +83,8 @@ pub(super) async fn native_conformance() {
     })
     .await
     .unwrap();
-    let [ValuePayload::Object(root)] = success.outputs.as_slice() else {
+    let (outputs, _) = success.values().expect("ordinary task result");
+    let [ValuePayload::Object(root)] = outputs else {
         panic!("native faceted-input stage returned a non-object root")
     };
     import_result_publication(&store, root, host.artifact_access, limits().inventory).unwrap();

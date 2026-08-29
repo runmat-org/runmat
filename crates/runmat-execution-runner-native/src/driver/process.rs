@@ -11,8 +11,8 @@ use super::{
     LocalDriver, TaskCompletion, TransferFailure, TransferResult, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 use crate::protocol::{
-    StoredProgram, WorkerProcessMessage, WorkerRequest, WorkerResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+    CollectiveProcessResult, StoredProgram, WorkerDriverMessage, WorkerProcessMessage,
+    WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 
 pub(super) fn execute_attempt(
@@ -27,7 +27,7 @@ pub(super) fn execute_attempt(
     let stored: StoredProgram =
         serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
     let worker_request = WorkerRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
         recipe: stored.recipe,
         artifact: stored.artifact,
         callable: request.task.callable.program.clone(),
@@ -48,7 +48,19 @@ pub(super) fn execute_attempt(
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    runtime.block_on(run_process(driver, worker_request, completion))
+    let gang = match &worker_request.context {
+        runmat_execution::ProgramInvocationContext::SpmdTask { task } => Some(task.gang.clone()),
+        _ => None,
+    };
+    let result = runtime.block_on(run_process(driver, worker_request, completion));
+    if result.is_err() {
+        if let Some(gang) = gang {
+            driver
+                .collectives
+                .fail_gang(&gang, "native SPMD worker terminated before completion");
+        }
+    }
+    result
 }
 
 async fn run_process(
@@ -103,6 +115,25 @@ async fn run_process(
                     last_progress_sequence = progress.sequence;
                     completion.record_progress(progress);
                 }
+                WorkerProcessMessage::CollectiveRequest { request } => {
+                    let context = request.context.clone();
+                    let id = request.id;
+                    let sequence = request.sequence;
+                    let result = match driver.collectives.execute(request, completion) {
+                        Ok(response) => CollectiveProcessResult::Completed { response },
+                        Err(message) => CollectiveProcessResult::Failed { message },
+                    };
+                    let payload = serde_json::to_vec(&WorkerDriverMessage::CollectiveCompletion {
+                        context,
+                        id,
+                        sequence,
+                        result,
+                    })
+                    .map_err(|error| error.to_string())?;
+                    write_payload(&mut writer, &payload, limits)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
                 WorkerProcessMessage::Completed { response } => break response,
             }
         } else {
@@ -115,17 +146,18 @@ async fn run_process(
         .validate_against(&request)
         .map_err(|error| error.to_string())?;
     match response {
-        WorkerResponse::Success { value } => Ok(AttemptSuccess {
+        WorkerResponse::Success { value } => Ok(AttemptSuccess::Values {
             outputs: vec![value],
             result_objects: Vec::new(),
         }),
         WorkerResponse::ExternalizedSuccess {
             outputs,
             result_objects,
-        } => Ok(AttemptSuccess {
+        } => Ok(AttemptSuccess::Values {
             outputs,
             result_objects,
         }),
+        WorkerResponse::SpmdSuccess { outputs } => Ok(AttemptSuccess::Spmd { outputs }),
         WorkerResponse::Failure { message } => Err(TransferFailure::Message(message)),
         WorkerResponse::RuntimeFailure { failure } => {
             Err(TransferFailure::Runtime(Box::new(failure)))

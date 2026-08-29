@@ -497,6 +497,15 @@ async fn interpret_resume_inner(
             "interpreter resume PC is outside the immutable bytecode product",
         ));
     }
+    if resume
+        .completion_boundary
+        .is_some_and(|boundary| boundary.pc() > bytecode.instructions.len())
+    {
+        return Err(mex(
+            "NativeResumeBoundary",
+            "interpreter completion boundary is outside the immutable bytecode product",
+        ));
+    }
     if resume.vars.len() != bytecode.var_count {
         return Err(mex(
             "NativeResumeFrame",
@@ -506,9 +515,13 @@ async fn interpret_resume_inner(
     let mut resumed_bytecode = bytecode.clone();
     resumed_bytecode.initially_unassigned_slots.clear();
     let mut vars = Vec::with_capacity(resume.vars.len());
+    let mut assigned_slots = HashSet::new();
     for (slot, value) in resume.vars.into_iter().enumerate() {
         match value {
-            Some(value) => vars.push(value),
+            Some(value) => {
+                assigned_slots.insert(slot);
+                vars.push(value);
+            }
             None => {
                 vars.push(Value::Num(0.0));
                 resumed_bytecode.initially_unassigned_slots.insert(slot);
@@ -526,6 +539,8 @@ async fn interpret_resume_inner(
         runtime,
     );
     state.pc = resume.pc;
+    state.completion_boundary = resume.completion_boundary;
+    state.completion_assigned_slots = Some(assigned_slots);
     state.missing_input_slots = resume.missing_input_slots;
     state.global_aliases = resume.global_aliases;
     state.persistent_aliases = resume.persistent_aliases;
@@ -620,6 +635,8 @@ async fn run_interpreter_inner(
         mut stack,
         mut vars,
         mut pc,
+        completion_boundary,
+        mut completion_assigned_slots,
         mut context,
         mut try_stack,
         mut last_exception,
@@ -726,6 +743,9 @@ async fn run_interpreter_inner(
     let debug_stack = interp_engine::debug_stack_enabled();
     let mut interpreter_timing = InterpreterTiming::new();
     while pc < bytecode.instructions.len() {
+        if completion_boundary.is_some_and(|boundary| boundary.pc() == pc) {
+            break;
+        }
         if let Some(sites) = bytecode.coverage_sites.get(pc) {
             runmat_runtime::coverage::hit_sites(sites);
         }
@@ -862,6 +882,9 @@ async fn run_interpreter_inner(
         };
         let mut store_var_before_overwrite = |_current: &Value, _incoming: &Value| {};
         let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
+            if let Some(assigned_slots) = completion_assigned_slots.as_mut() {
+                assigned_slots.insert(stored_index);
+            }
             if let Some(ref aliases) = store_var_global_aliases {
                 runtime_globals::update_global_store(stored_index, stored_value, aliases);
             }
@@ -1146,13 +1169,19 @@ async fn run_interpreter_inner(
         }
     }
     sync_initial_vars(initial_vars, &vars);
-    Ok(InterpreterOutcome::Completed(vars))
+    Ok(InterpreterOutcome::Completed(
+        crate::interpreter::state::InterpreterCompletion {
+            assigned_slots: completion_assigned_slots
+                .unwrap_or_else(crate::runtime::workspace::current_workspace_assigned_slots),
+            values: vars,
+        },
+    ))
 }
 
 pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, RuntimeError> {
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
     match interpret_with_vars(bytecode, &mut vars, Some("<main>")).await {
-        Ok(InterpreterOutcome::Completed(values)) => Ok(values),
+        Ok(InterpreterOutcome::Completed(completion)) => Ok(completion.values),
         Err(e) => Err(e),
     }
 }
@@ -1246,18 +1275,6 @@ pub(crate) async fn interpret_parfor_task_in_context(
         .map(|slot| (slot, Vec::new()))
         .collect::<HashMap<_, _>>();
 
-    let mut region_bytecode = bytecode.clone();
-    let Some(header) = region_bytecode.instructions.get_mut(region.header.pc) else {
-        return Err(mex(
-            "ParallelBoundary",
-            "parallel region header is outside its immutable bytecode product",
-        ));
-    };
-    *header = Instr::Return;
-    if let Some(sites) = region_bytecode.coverage_sites.get_mut(region.header.pc) {
-        sites.clear();
-    }
-
     for (iteration_index, iteration) in iterations.into_iter().enumerate() {
         for variable in &region.variables {
             if matches!(
@@ -1291,6 +1308,9 @@ pub(crate) async fn interpret_parfor_task_in_context(
             .transpose()?;
         let resume = InterpreterResumeState {
             pc: region.body.pc,
+            completion_boundary: Some(
+                crate::interpreter::state::InterpreterCompletionBoundary::before(region.header.pc),
+            ),
             vars: frame,
             supplied_inputs: 0,
             requested_outputs: 0,
@@ -1300,14 +1320,16 @@ pub(crate) async fn interpret_parfor_task_in_context(
             side_effect_epoch: 0,
         };
         frame = match Box::pin(interpret_resume_in_context(
-            &region_bytecode,
+            bytecode,
             resume,
             Some(current_function_name),
             runtime.clone(),
         ))
         .await?
         {
-            InterpreterOutcome::Completed(values) => values.into_iter().map(Some).collect(),
+            InterpreterOutcome::Completed(completion) => {
+                completion.values.into_iter().map(Some).collect()
+            }
         };
         if mode == ParforTaskMode::IndependentIterations {
             for (slot, values) in &mut reduction_outputs {
@@ -1437,7 +1459,7 @@ async fn interpret_function_with_counts_in_context_inner(
         cc.borrow_mut().pop();
     });
     let res = match res {
-        Ok(InterpreterOutcome::Completed(values)) => Ok(values),
+        Ok(InterpreterOutcome::Completed(completion)) => Ok(completion.values),
         Err(e) => Err(e),
     }?;
     runtime_globals::persist_declared_for_bytecode(bytecode, name, &vars);
@@ -1510,11 +1532,12 @@ mod tests {
                 Instr::StoreVar(1),
                 Instr::Return,
             ],
-            2,
+            3,
         );
         let resume = InterpreterResumeState {
             pc: 2,
-            vars: vec![Some(Value::Num(41.0)), None],
+            completion_boundary: None,
+            vars: vec![Some(Value::Num(41.0)), None, None],
             supplied_inputs: 1,
             requested_outputs: 1,
             missing_input_slots: Default::default(),
@@ -1525,15 +1548,58 @@ mod tests {
         let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let super::InterpreterOutcome::Completed(values) = block_on(interpret_resume_in_context(
-            &bytecode,
-            resume,
-            Some("resume_test"),
-            runtime,
-        ))
+        let super::InterpreterOutcome::Completed(completion) = block_on(
+            interpret_resume_in_context(&bytecode, resume, Some("resume_test"), runtime),
+        )
         .unwrap();
-        assert_eq!(values[0], Value::Num(41.0));
-        assert_eq!(values[1], Value::Num(2.0));
+        assert_eq!(completion.values[0], Value::Num(41.0));
+        assert_eq!(completion.values[1], Value::Num(2.0));
+        assert_eq!(completion.values[2], Value::Num(0.0));
+        assert_eq!(
+            completion.assigned_slots,
+            std::collections::HashSet::from([0, 1])
+        );
+        super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
+    }
+
+    #[test]
+    fn interpreter_resume_stops_before_the_declared_completion_boundary() {
+        super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
+        let bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(7.0),
+                Instr::StoreVar(0),
+                Instr::LoadConst(99.0),
+                Instr::StoreVar(1),
+                Instr::Return,
+            ],
+            2,
+        );
+        let resume = InterpreterResumeState {
+            pc: 0,
+            completion_boundary: Some(
+                crate::interpreter::state::InterpreterCompletionBoundary::before(2),
+            ),
+            vars: vec![None, None],
+            supplied_inputs: 0,
+            requested_outputs: 0,
+            missing_input_slots: Default::default(),
+            global_aliases: Default::default(),
+            persistent_aliases: Default::default(),
+            side_effect_epoch: 0,
+        };
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let super::InterpreterOutcome::Completed(completion) = block_on(
+            interpret_resume_in_context(&bytecode, resume, Some("bounded_resume_test"), runtime),
+        )
+        .unwrap();
+        assert_eq!(completion.values, vec![Value::Num(7.0), Value::Num(0.0)]);
+        assert_eq!(
+            completion.assigned_slots,
+            std::collections::HashSet::from([0])
+        );
         super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
     }
 

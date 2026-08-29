@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use crate::{ArtifactError, ArtifactResult};
 
-pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V4: u16 = 4;
+pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V5: u16 = 5;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
 pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_538;
 
@@ -27,7 +27,7 @@ pub struct ProgramExecutionDescriptor {
 impl ProgramExecutionDescriptor {
     pub fn validate(&self) -> ArtifactResult<()> {
         self.artifact.validate_against(&self.recipe)?;
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V4
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V5
             || self.callable.validate().is_err()
             || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
@@ -55,7 +55,7 @@ pub struct ProgramExecutionInputs {
 
 impl ProgramExecutionInputs {
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V4
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V5
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
         {
             return Err(ArtifactError::Invalid(
@@ -97,7 +97,7 @@ impl ProgramExecutionRequest {
         descriptor.validate()?;
         inputs.validate()?;
         let request = Self {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
             recipe: descriptor.recipe,
             artifact: descriptor.artifact,
             callable: descriptor.callable,
@@ -112,7 +112,7 @@ impl ProgramExecutionRequest {
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V4 {
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V5 {
             return Err(ArtifactError::Invalid(
                 "unsupported program execution request schema".into(),
             ));
@@ -199,6 +199,12 @@ pub enum ProgramExecutionResponse {
         outputs: Vec<ValuePayload>,
         result_objects: Vec<ValueRef>,
     },
+    /// Per-rank outputs from one compiler-bound SPMD region invocation.
+    /// `None` means the corresponding output was not assigned on this rank;
+    /// it is distinct from every representable language value.
+    SpmdSuccess {
+        outputs: Vec<Option<ValuePayload>>,
+    },
     Failure {
         message: String,
     },
@@ -225,6 +231,21 @@ impl ProgramExecutionResponse {
                 outputs,
                 result_objects,
             } => validate_externalized_success(request, outputs, result_objects),
+            Self::SpmdSuccess { outputs } => {
+                if !matches!(request.callable, ProgramCallable::SpmdRegion { .. })
+                    || outputs.len() != usize::from(request.requested_outputs)
+                {
+                    return Err(ArtifactError::Invalid(
+                        "SPMD response differs from its callable or output contract".into(),
+                    ));
+                }
+                for output in outputs.iter().flatten() {
+                    output
+                        .validate(ValueLimits::default())
+                        .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                }
+                Ok(())
+            }
             Self::Failure { message } => {
                 if message.is_empty() || message.len() > 1024 * 1024 {
                     return Err(ArtifactError::Limit(
@@ -334,7 +355,7 @@ mod tests {
         )
         .unwrap();
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
             recipe,
             artifact,
             callable: ProgramCallable::semantic(ProgramFunctionId(7), Some("test_function".into())),
@@ -450,5 +471,63 @@ mod tests {
             result_objects: vec![root.clone(), root],
         };
         assert!(duplicate.validate_against(&request).is_err());
+    }
+
+    #[test]
+    fn spmd_response_preserves_unassigned_outputs_as_protocol_state() {
+        let ordinary_request = request();
+        let mut spmd_request = ordinary_request.clone();
+        let region = runmat_types::ParallelRegionId(runmat_types::RegionId {
+            function: runmat_types::ProgramFunctionId(7),
+            ordinal: 3,
+        });
+        let scope_id = ExecutionScopeId::derive(&[b"spmd-response-scope"]);
+        let pool = runmat_execution::PoolHandle {
+            id: PoolId::derive(&[b"spmd-response-pool"]),
+            scope_id,
+            generation: 1,
+        };
+        let gang = runmat_execution::GangHandle {
+            id: runmat_execution::GangId::derive(&[b"spmd-response-gang"]),
+            scope_id,
+            generation: 1,
+            pool,
+            labs: runmat_types::LabCount(2),
+        };
+        spmd_request.callable = ProgramCallable::spmd_region(region);
+        spmd_request.context = ProgramInvocationContext::SpmdTask {
+            task: runmat_execution::SpmdTaskContext {
+                gang,
+                region,
+                rank: runmat_types::LabRank(1),
+            },
+        };
+        spmd_request.recipe.entrypoint = spmd_request.callable.recipe_entrypoint();
+        spmd_request.recipe.outputs.requested_outputs = 2;
+        spmd_request.requested_outputs = 2;
+        spmd_request.artifact = ProgramArtifact::materialize(
+            &spmd_request.recipe,
+            ExecutableForm::InterpreterBytecodeV1,
+            b"spmd-program".to_vec(),
+        )
+        .unwrap();
+
+        let response = ProgramExecutionResponse::SpmdSuccess {
+            outputs: vec![
+                Some(ValuePayload::Inline(Box::new(
+                    runmat_execution::value::InlineValue::U64(9_007_199_254_740_993),
+                ))),
+                None,
+            ],
+        };
+        response.validate_against(&spmd_request).unwrap();
+        let encoded = serde_json::to_vec(&response).unwrap();
+        let decoded: ProgramExecutionResponse = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, response);
+
+        let wrong_callable = ProgramExecutionResponse::SpmdSuccess {
+            outputs: vec![None],
+        };
+        assert!(wrong_callable.validate_against(&ordinary_request).is_err());
     }
 }

@@ -197,6 +197,172 @@ impl RuntimeExecutionServices for NativeExecutionService {
         Ok(())
     }
 
+    fn execute_spmd_gang(
+        &self,
+        call: runmat_runtime::execution::SpmdGangCall,
+    ) -> runmat_runtime::context::RuntimeServiceFuture<
+        Result<Vec<runmat_runtime::execution::SpmdRankResult>, ExecutionServiceError>,
+    > {
+        if let Err(error) = call.validate() {
+            return Box::pin(async move { Err(error) });
+        }
+        if let Err(error) = self.validate_scope(call.gang.scope_id) {
+            return Box::pin(async move { Err(error) });
+        }
+        let pool = match self.current_pool() {
+            Ok(Some(pool)) if pool.handle == call.gang.pool => pool,
+            Ok(_) => {
+                return Box::pin(async {
+                    Err(ExecutionServiceError::Failed(
+                        "SPMD gang does not belong to the active native process pool".into(),
+                    ))
+                })
+            }
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        if call.gang.labs.0 > pool.workers {
+            return Box::pin(async {
+                Err(ExecutionServiceError::Failed(
+                    "SPMD gang exceeds the active native process pool".into(),
+                ))
+            });
+        }
+        let requested_outputs = match u16::try_from(call.requested_outputs) {
+            Ok(outputs) => outputs,
+            Err(_) => return Box::pin(async { Err(ExecutionServiceError::InvalidOutputContract) }),
+        };
+        let mut pending: Vec<(runmat_types::LabRank, Arc<TaskCompletion>)> =
+            Vec::with_capacity(call.gang.labs.0 as usize);
+        for rank_number in 1..=call.gang.labs.0 {
+            let rank = runmat_types::LabRank(rank_number);
+            let invocation = runmat_runtime::execution::DeferredCall {
+                invocation: runmat_runtime::execution::DeferredInvocation::Program {
+                    callable: runmat_execution::ProgramCallable::spmd_region(call.region),
+                    context: runmat_execution::ProgramInvocationContext::SpmdTask {
+                        task: runmat_execution::SpmdTaskContext {
+                            gang: call.gang.clone(),
+                            region: call.region,
+                            rank,
+                        },
+                    },
+                    arguments: call.captures.clone(),
+                    requested_outputs: call.requested_outputs,
+                },
+                retry: runmat_execution::RetryPolicy::Never,
+                program_revision: call.program_revision.clone(),
+                program: Some(call.program.clone()),
+            };
+            let (callable, invocation_context, recipe, artifact, inputs) =
+                match materialize_call(&invocation, OutputContract { requested_outputs }) {
+                    Ok(parts) => parts,
+                    Err(error) => return Box::pin(async move { Err(error) }),
+                };
+            let task_id = {
+                let mut state = self.state.lock().expect("native service poisoned");
+                let sequence = state.next_task;
+                state.next_task = sequence.wrapping_add(1);
+                TaskId::derive(&[self.scope_id.bytes(), b"spmd", &sequence.to_be_bytes()])
+            };
+            let completion = match self.driver.submit(crate::driver::LocalProgramSubmission {
+                task_id,
+                callable,
+                invocation_context,
+                recipe,
+                artifact,
+                inputs,
+                outputs: OutputContract { requested_outputs },
+                retry: runmat_execution::RetryPolicy::Never,
+            }) {
+                Ok(completion) => completion,
+                Err(error) => {
+                    self.driver
+                        .fail_collective_gang(&call.gang, error.to_string());
+                    for (_, completion) in pending {
+                        completion.cancel();
+                    }
+                    return Box::pin(async move {
+                        Err(ExecutionServiceError::Failed(error.to_string()))
+                    });
+                }
+            };
+            pending.push((rank, completion));
+        }
+        let gang = call.gang;
+        let driver = Arc::clone(&self.driver);
+        Box::pin(async move {
+            let mut results = vec![None; pending.len()];
+            loop {
+                for (index, (rank, completion)) in pending.iter().enumerate() {
+                    if results[index].is_some() {
+                        continue;
+                    }
+                    if completion.is_cancelled() {
+                        driver.fail_collective_gang(&gang, "SPMD execution was cancelled");
+                        for (_, pending) in &pending {
+                            pending.cancel();
+                        }
+                        return Err(ExecutionServiceError::Failed(
+                            "SPMD execution was cancelled".into(),
+                        ));
+                    }
+                    let Some(result) = completion.try_value() else {
+                        continue;
+                    };
+                    match result {
+                        Ok(runmat_execution_runner::AttemptSuccess::Spmd { outputs })
+                            if outputs.len() == usize::from(requested_outputs) =>
+                        {
+                            results[index] = Some(runmat_runtime::execution::SpmdRankResult {
+                                rank: *rank,
+                                outputs,
+                            });
+                        }
+                        Ok(runmat_execution_runner::AttemptSuccess::Spmd { .. }) => {
+                            driver.fail_collective_gang(
+                                &gang,
+                                "SPMD worker output count differed from its task contract",
+                            );
+                            for (_, pending) in &pending {
+                                pending.cancel();
+                            }
+                            return Err(ExecutionServiceError::InvalidOutputContract);
+                        }
+                        Ok(runmat_execution_runner::AttemptSuccess::Values { .. }) => {
+                            driver.fail_collective_gang(
+                                &gang,
+                                "SPMD worker returned an ordinary task result",
+                            );
+                            for (_, pending) in &pending {
+                                pending.cancel();
+                            }
+                            return Err(ExecutionServiceError::Failed(
+                                "SPMD worker returned an ordinary task result".into(),
+                            ));
+                        }
+                        Err(crate::driver::TransferFailure::Message(message)) => {
+                            driver.fail_collective_gang(&gang, message.clone());
+                            for (_, pending) in &pending {
+                                pending.cancel();
+                            }
+                            return Err(ExecutionServiceError::Failed(message));
+                        }
+                        Err(crate::driver::TransferFailure::Runtime(failure)) => {
+                            driver.fail_collective_gang(&gang, failure.message.clone());
+                            for (_, pending) in &pending {
+                                pending.cancel();
+                            }
+                            return Err(ExecutionServiceError::RuntimeFailure(failure));
+                        }
+                    }
+                }
+                if results.iter().all(Option::is_some) {
+                    return Ok(results.into_iter().flatten().collect());
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+    }
+
     fn requires_program_capture(&self) -> bool {
         true
     }
@@ -452,12 +618,17 @@ impl RuntimeExecutionServices for NativeExecutionService {
         };
         let result = completion
             .and_then(|success| {
-                let [payload] = success.outputs.as_slice() else {
+                let Some((outputs, result_objects)) = success.values() else {
+                    return Err(
+                        "SPMD task result requires the typed gang execution path".into(),
+                    );
+                };
+                let [payload] = outputs else {
                     return Err(
                         "native runtime call did not return exactly one output value".into(),
                     );
                 };
-                if !success.result_objects.is_empty() {
+                if !result_objects.is_empty() {
                     return Err(
                         "native runtime call returned externalized objects without an artifact consumer"
                             .into(),

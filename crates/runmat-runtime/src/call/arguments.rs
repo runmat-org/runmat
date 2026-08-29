@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use crate::context::RuntimeContext;
 use crate::object::dispatch::call_object_index_descriptor_method_with_outputs;
 use crate::object::indexing::{ObjectIndexDescriptor, ObjectIndexSelector};
 use crate::{runtime_error::semantic_error, RuntimeError};
-use runmat_value::Value;
+use runmat_value::{CellArray, IntValue, Value};
 
 /// Describes one source-level call argument after lowering.
 ///
@@ -32,6 +33,7 @@ pub enum MaterializedArgument {
 }
 
 pub async fn expand_arguments(
+    runtime: &RuntimeContext,
     arguments: Vec<MaterializedArgument>,
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut expanded_arguments = Vec::new();
@@ -47,6 +49,9 @@ pub async fn expand_arguments(
                     match base {
                         Value::OutputList(outputs) => outputs,
                         Value::Cell(cell) => crate::object::cell::expand_all_cell_values(&cell)?,
+                        Value::Composite(handle) => {
+                            expand_composite_values(runtime, *handle, &[], true).await?
+                        }
                         base @ (Value::Object(_) | Value::HandleObject(_)) => {
                             expand_brace_values(base, &[], None).await?
                         }
@@ -74,6 +79,9 @@ pub async fn expand_arguments(
                             )?;
                             crate::object::cell::expand_cell_indices(&cell, &indices)?
                         }
+                        (Value::Composite(handle), _) => {
+                            expand_composite_values(runtime, *handle, &indices, false).await?
+                        }
                         (base @ (Value::Object(_) | Value::HandleObject(_)), _) => {
                             expand_brace_values(base, &indices, None).await?
                         }
@@ -90,6 +98,61 @@ pub async fn expand_arguments(
         }
     }
     Ok(expanded_arguments)
+}
+
+async fn expand_composite_values(
+    runtime: &RuntimeContext,
+    handle: runmat_execution::CompositeHandle,
+    indices: &[Value],
+    expand_all: bool,
+) -> Result<Vec<Value>, RuntimeError> {
+    if !expand_all && indices.len() != 1 {
+        return Err(semantic_error(
+            "CompositeIndexArity",
+            "Composite brace indexing requires one lab index",
+        ));
+    }
+
+    let lab_count = handle.gang.labs.0;
+    let rank_values = (1..=lab_count)
+        .map(|rank| Value::Int(IntValue::U32(rank)))
+        .collect::<Vec<_>>();
+    let rank_cell = CellArray::new(rank_values, 1, lab_count as usize).map_err(|error| {
+        semantic_error(
+            "ShapeMismatch",
+            format!("Composite lab selector construction failed: {error}"),
+        )
+    })?;
+    let selected_ranks = if expand_all {
+        crate::object::cell::expand_all_cell_values(&rank_cell)?
+    } else {
+        crate::object::cell::expand_cell_indices(&rank_cell, indices)?
+    };
+
+    let distributed = runtime
+        .service_ports()
+        .require_distributed("Composite comma-separated-list expansion")
+        .map_err(|error| semantic_error("RuntimeCapabilityUnavailable", error.to_string()))?;
+    let mut values = Vec::with_capacity(selected_ranks.len());
+    for selected_rank in selected_ranks {
+        let Value::Int(IntValue::U32(rank)) = selected_rank else {
+            return Err(semantic_error(
+                "CompositeIndexType",
+                "Composite lab selector did not resolve to an exact lab rank",
+            ));
+        };
+        let value = distributed
+            .composite_entry(handle.clone(), runmat_types::LabRank(rank))
+            .await?
+            .ok_or_else(|| {
+                semantic_error(
+                    "CompositeEntryUnavailable",
+                    "the selected lab did not assign this Composite value",
+                )
+            })?;
+        values.push(value);
+    }
+    Ok(values)
 }
 
 pub async fn expand_brace_values(
@@ -149,18 +212,27 @@ mod tests {
 
     use super::{expand_arguments, MaterializedArgument};
 
+    fn runtime() -> crate::context::RuntimeContext {
+        crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+    }
+
     #[test]
     fn expansion_preserves_source_and_comma_list_order() {
         let cell = CellArray::new(vec![Value::Num(2.0), Value::Num(3.0)], 1, 2).unwrap();
-        let values = block_on(expand_arguments(vec![
-            MaterializedArgument::Single(Value::Num(1.0)),
-            MaterializedArgument::Expansion {
-                base: Value::Cell(cell),
-                indices: Vec::new(),
-                expand_all: true,
-            },
-            MaterializedArgument::Single(Value::Num(4.0)),
-        ]))
+        let values = block_on(expand_arguments(
+            &runtime(),
+            vec![
+                MaterializedArgument::Single(Value::Num(1.0)),
+                MaterializedArgument::Expansion {
+                    base: Value::Cell(cell),
+                    indices: Vec::new(),
+                    expand_all: true,
+                },
+                MaterializedArgument::Single(Value::Num(4.0)),
+            ],
+        ))
         .expect("expand arguments");
         assert_eq!(
             values,
@@ -175,24 +247,30 @@ mod tests {
 
     #[test]
     fn output_list_index_expansion_uses_cell_index_semantics() {
-        let values = block_on(expand_arguments(vec![MaterializedArgument::Expansion {
-            base: Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
-            indices: vec![Value::Tensor(
-                Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
-            )],
-            expand_all: false,
-        }]))
+        let values = block_on(expand_arguments(
+            &runtime(),
+            vec![MaterializedArgument::Expansion {
+                base: Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
+                indices: vec![Value::Tensor(
+                    Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+                )],
+                expand_all: false,
+            }],
+        ))
         .expect("expand output list");
         assert_eq!(values, vec![Value::Num(9.0), Value::Num(2.0)]);
     }
 
     #[test]
     fn invalid_expansion_retains_stable_identifier() {
-        let error = block_on(expand_arguments(vec![MaterializedArgument::Expansion {
-            base: Value::Num(1.0),
-            indices: Vec::new(),
-            expand_all: true,
-        }]))
+        let error = block_on(expand_arguments(
+            &runtime(),
+            vec![MaterializedArgument::Expansion {
+                base: Value::Num(1.0),
+                indices: Vec::new(),
+                expand_all: true,
+            }],
+        ))
         .expect_err("numeric expansion must fail");
         assert_eq!(error.identifier(), Some("RunMat:InvalidExpandAllTarget"));
     }

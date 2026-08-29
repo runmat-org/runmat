@@ -17,7 +17,7 @@ use runmat_execution::{
 use runmat_execution_artifact::{
     archive::{write_bundle, ArchiveLimits},
     ExecutableForm, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
-    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 use runmat_execution_runner::{
     AttemptReport, AttemptSuccess, PoolSpec, TaskSubmission, WorkerSpec,
@@ -167,7 +167,7 @@ impl RemoteWorkerChannel for ResultObjectWorker {
 
     async fn execute(&self, _attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
         Ok(AttemptReport::Succeeded {
-            result: AttemptSuccess {
+            result: AttemptSuccess::Values {
                 outputs: vec![ValuePayload::Object(Box::new(self.reference.clone()))],
                 result_objects: vec![self.reference.clone()],
             },
@@ -227,7 +227,7 @@ impl RemoteWorkerChannel for FakeWorker {
         tokio::time::sleep(self.delay).await;
         self.active.fetch_sub(1, Ordering::SeqCst);
         Ok(AttemptReport::Succeeded {
-            result: AttemptSuccess {
+            result: AttemptSuccess::Values {
                 outputs: vec![ValuePayload::Inline(Box::new(InlineValue::String(
                     attempt.scheduling.worker_id.to_string(),
                 )))],
@@ -342,7 +342,9 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
         );
     }
     for completion in completions {
-        assert_eq!(completion.wait().await.unwrap().outputs.len(), 1);
+        let success = completion.wait().await.unwrap();
+        let (outputs, _) = success.values().expect("ordinary remote task result");
+        assert_eq!(outputs.len(), 1);
     }
     assert!(maximum_active.load(Ordering::SeqCst) >= 2);
     assert!(pool
@@ -417,7 +419,8 @@ async fn remote_pool_executes_the_compiler_bound_parallel_region() {
         .await
         .unwrap();
 
-    let value = runmat_runtime::execution::value_codec::decode_inline_value(&result.outputs[0])
+    let (outputs, _) = result.values().expect("parallel region value result");
+    let value = runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0])
         .expect("remote parallel result decodes");
     let runmat_value::Value::Cell(outputs) = value else {
         panic!("parallel region returned a non-cell result envelope");
@@ -512,7 +515,7 @@ async fn remote_pool_downloads_and_verifies_externalized_objects_before_success(
         .wait()
         .await
         .unwrap();
-    assert_eq!(success.result_objects, vec![reference.clone()]);
+    assert_eq!(success.result_objects(), std::slice::from_ref(&reference));
     assert_eq!(
         pool.execution_object(&reference).unwrap().unwrap().as_ref(),
         bytes.as_slice()
@@ -1056,7 +1059,7 @@ end
         .unwrap();
     let callable = ProgramCallable::parallel_region(region.contract.id);
     let program = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
         recipe,
         artifact,
         callable,
@@ -1158,7 +1161,7 @@ async fn build_executable_bundle(
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
     let program = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
         recipe,
         artifact,
         callable: ProgramCallable::semantic(

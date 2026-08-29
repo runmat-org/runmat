@@ -44,6 +44,11 @@ pub fn complete_batch_driver_with_response(
         WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. } => {
             (true, Some(0), None)
         }
+        WorkerResponse::SpmdSuccess { .. } => (
+            false,
+            None,
+            Some("SPMD responses require an interactive gang driver".into()),
+        ),
         WorkerResponse::Failure { message } => (false, None, Some(message.clone())),
         WorkerResponse::RuntimeFailure { failure } => (false, None, Some(failure.message.clone())),
     };

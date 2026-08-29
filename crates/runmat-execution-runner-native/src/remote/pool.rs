@@ -363,7 +363,7 @@ impl RemotePoolDriver {
                                     .execution_objects
                                     .receive_results(
                                         channel.as_ref(),
-                                        &result.result_objects,
+                                        result.result_objects(),
                                         &this.value_scope,
                                     )
                                     .await

@@ -51,7 +51,8 @@ pub(super) async fn dispatch(
             )?));
         }
         Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
-            let arguments = build_user_function_expand_multi_args(stack, specs).await?;
+            let arguments =
+                build_user_function_expand_multi_args(stack, specs, &execution.runtime).await?;
             stack.push(Value::Future(create_future(
                 execution,
                 semantic_descriptor(*function, *out_count, arguments),
@@ -754,20 +755,6 @@ async fn execute_spmd(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let mut region_bytecode = bytecode.clone();
-    let header_instruction = region_bytecode
-        .instructions
-        .get_mut(executable.header.pc)
-        .ok_or_else(|| {
-            crate::interpreter::errors::mex(
-                "SpmdExecutableInvalid",
-                "SPMD header lies outside its compiler-bound instruction stream",
-            )
-        })?;
-    *header_instruction = Instr::Return;
-    if let Some(coverage) = region_bytecode.coverage_sites.get_mut(executable.header.pc) {
-        coverage.clear();
-    }
     let spmd = execution
         .runtime
         .service_ports()
@@ -782,63 +769,52 @@ async fn execute_spmd(
         )
         .await?;
     admission.validate()?;
-
-    let mut tasks = Vec::with_capacity(admission.labs.len());
-    for collective in admission.labs {
-        let mut frame = vec![None; bytecode.var_count];
-        for (capture, value) in executable.captures.iter().zip(&captures) {
-            frame[capture.slot] = Some(value.clone());
-        }
-        let services = execution
-            .runtime
-            .service_ports()
-            .clone()
-            .with_collective(collective);
-        let runtime = execution.runtime.fork_parallel_lab(services);
-        let bytecode = region_bytecode.clone();
-        let function_name = current_function_name.to_string();
-        let body_pc = executable.body.pc;
-        tasks.push(async move {
-            let resume = InterpreterResumeState {
-                pc: body_pc,
-                vars: frame,
-                supplied_inputs: 0,
-                requested_outputs: 0,
-                missing_input_slots: HashSet::new(),
-                global_aliases: HashMap::new(),
-                persistent_aliases: HashMap::new(),
-                side_effect_epoch: 0,
-            };
-            match crate::interpreter::runner::interpret_resume_in_context(
-                &bytecode,
-                resume,
-                Some(&function_name),
-                runtime,
+    let gang = admission.gang.handle.clone();
+    let execution_result = async {
+        let rank_results = if execution.runtime.execution().requires_program_capture() {
+            runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
+                captures.clone(),
+            ))?;
+            let program = serde_json::to_vec(bytecode).map_err(|error| {
+                crate::interpreter::errors::mex(
+                    "ExecutionProgram",
+                    &format!("failed to encode the exact SPMD program: {error}"),
+                )
+            })?;
+            execution
+                .runtime
+                .execution()
+                .execute_spmd_gang(runmat_runtime::execution::SpmdGangCall {
+                    gang: gang.clone(),
+                    region: executable.contract.id,
+                    captures: captures.clone(),
+                    requested_outputs: executable.outputs.len(),
+                    program_revision: execution.runtime.program_revision().cloned(),
+                    program,
+                })
+                .await
+                .map_err(execution_error)?
+        } else {
+            execute_spmd_in_process(
+                bytecode,
+                executable,
+                captures,
+                admission.labs,
+                execution,
+                current_function_name,
             )
             .await?
-            {
-                InterpreterOutcome::Completed(values) => Ok::<Vec<Value>, RuntimeError>(values),
-            }
-        });
-    }
-
-    let gang = admission.gang.handle;
-    let execution_result = async {
-        let lab_frames = futures::future::try_join_all(tasks).await?;
+        };
+        validate_spmd_rank_results(&gang, executable.outputs.len(), &rank_results)?;
         let outputs = executable
             .outputs
             .iter()
-            .map(|output| {
-                let entries = lab_frames
+            .enumerate()
+            .map(|(output_index, output)| {
+                let entries = rank_results
                     .iter()
-                    .map(|frame| {
-                        frame
-                            .get(output.slot)
-                            .map(encode_inline_value)
-                            .transpose()
-                            .map_err(value_codec_error)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .map(|rank| rank.outputs[output_index].clone())
+                    .collect();
                 Ok(runmat_runtime::context::RuntimeSpmdOutput {
                     value: output.contract.value,
                     fact: output.contract.fact.clone(),
@@ -873,6 +849,112 @@ async fn execute_spmd(
         Err(error) => Err(error),
         Ok(()) => retirement,
     }
+}
+
+async fn execute_spmd_in_process(
+    bytecode: &crate::Bytecode,
+    executable: &crate::BytecodeSpmdRegion,
+    captures: Vec<Value>,
+    labs: Vec<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+    execution: &ExecutionContext,
+    current_function_name: &str,
+) -> Result<Vec<runmat_runtime::execution::SpmdRankResult>, RuntimeError> {
+    let mut tasks = Vec::with_capacity(labs.len());
+    for collective in labs {
+        let rank = collective.context().rank;
+        let mut frame = vec![None; bytecode.var_count];
+        for (capture, value) in executable.captures.iter().zip(&captures) {
+            frame[capture.slot] = Some(value.clone());
+        }
+        let services = execution
+            .runtime
+            .service_ports()
+            .clone()
+            .with_collective(collective);
+        let runtime = execution.runtime.fork_parallel_lab(services);
+        let bytecode = bytecode.clone();
+        let function_name = current_function_name.to_string();
+        let body_pc = executable.body.pc;
+        tasks.push(async move {
+            let resume = InterpreterResumeState {
+                pc: body_pc,
+                completion_boundary: Some(
+                    crate::interpreter::state::InterpreterCompletionBoundary::before(
+                        executable.exit.pc,
+                    ),
+                ),
+                vars: frame,
+                supplied_inputs: 0,
+                requested_outputs: 0,
+                missing_input_slots: HashSet::new(),
+                global_aliases: HashMap::new(),
+                persistent_aliases: HashMap::new(),
+                side_effect_epoch: 0,
+            };
+            let InterpreterOutcome::Completed(completion) =
+                crate::interpreter::runner::interpret_resume_in_context(
+                    &bytecode,
+                    resume,
+                    Some(&function_name),
+                    runtime,
+                )
+                .await?;
+            Ok::<_, RuntimeError>((rank, completion))
+        });
+    }
+    futures::future::try_join_all(tasks)
+        .await?
+        .into_iter()
+        .map(|(rank, completion)| {
+            let outputs = executable
+                .outputs
+                .iter()
+                .map(|output| {
+                    if !completion.assigned_slots.contains(&output.slot) {
+                        return Ok(None);
+                    }
+                    let value = completion.values.get(output.slot).ok_or_else(|| {
+                        crate::interpreter::errors::mex(
+                            "SpmdFrame",
+                            "an assigned SPMD output is outside its completed VM frame",
+                        )
+                    })?;
+                    encode_inline_value(value)
+                        .map(Some)
+                        .map_err(value_codec_error)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(runmat_runtime::execution::SpmdRankResult { rank, outputs })
+        })
+        .collect()
+}
+
+fn validate_spmd_rank_results(
+    gang: &runmat_execution::GangHandle,
+    output_count: usize,
+    ranks: &[runmat_runtime::execution::SpmdRankResult],
+) -> Result<(), RuntimeError> {
+    if ranks.len() != gang.labs.0 as usize {
+        return Err(crate::interpreter::errors::mex(
+            "SpmdOutputContract",
+            "SPMD execution returned a different number of ranks than the admitted gang",
+        ));
+    }
+    for (index, result) in ranks.iter().enumerate() {
+        let expected_rank = runmat_types::LabRank(u32::try_from(index + 1).map_err(|_| {
+            crate::interpreter::errors::mex(
+                "SpmdOutputContract",
+                "SPMD rank index exceeds the supported range",
+            )
+        })?);
+        if result.rank != expected_rank || result.outputs.len() != output_count {
+            return Err(crate::interpreter::errors::mex(
+                "SpmdOutputContract",
+                "SPMD rank results differ from the admitted rank or compiler output contract",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn spmd_request(

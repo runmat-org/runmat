@@ -20,7 +20,7 @@ impl RemotePoolDriver {
                 task.committed
                     .as_ref()
                     .filter(|commit| commit.attempt_id == report.attempt_id)
-                    .map(|commit| commit.result_objects.clone())
+                    .map(|commit| commit.result.result_objects().to_vec())
             });
             let terminal = snapshot.tasks.get(&task_id).and_then(|task| {
                 matches!(

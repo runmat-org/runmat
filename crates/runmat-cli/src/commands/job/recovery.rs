@@ -287,6 +287,9 @@ async fn recover(
                 ProgramExecutionResponse::ExternalizedSuccess { .. } => {
                     bail!("recovered result requires an artifact-aware consumer")
                 }
+                ProgramExecutionResponse::SpmdSuccess { .. } => {
+                    bail!("recovered per-rank SPMD results require the gang execution consumer")
+                }
                 ProgramExecutionResponse::Failure { message } => bail!("{message}"),
                 ProgramExecutionResponse::RuntimeFailure { failure } => {
                     bail!(

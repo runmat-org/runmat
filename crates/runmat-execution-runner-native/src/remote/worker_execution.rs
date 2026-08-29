@@ -86,7 +86,7 @@ pub(super) async fn execute(
 pub(super) fn report(response: ProgramExecutionResponse) -> AttemptReport {
     match response {
         ProgramExecutionResponse::Success { value } => AttemptReport::Succeeded {
-            result: AttemptSuccess {
+            result: AttemptSuccess::Values {
                 outputs: vec![value],
                 result_objects: Vec::new(),
             },
@@ -95,10 +95,13 @@ pub(super) fn report(response: ProgramExecutionResponse) -> AttemptReport {
             outputs,
             result_objects,
         } => AttemptReport::Succeeded {
-            result: AttemptSuccess {
+            result: AttemptSuccess::Values {
                 outputs,
                 result_objects,
             },
+        },
+        ProgramExecutionResponse::SpmdSuccess { outputs } => AttemptReport::Succeeded {
+            result: AttemptSuccess::Spmd { outputs },
         },
         ProgramExecutionResponse::Failure { message } => AttemptReport::Failed {
             kind: AttemptFailureKind::Execution,
