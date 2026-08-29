@@ -67,6 +67,24 @@ impl RemoteWorkerChannel for RelayRemoteWorkerChannel {
         self.protocol.drain_progress(attempt_id)
     }
 
+    fn drain_collective_requests(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<runmat_execution::CollectiveRequest> {
+        self.protocol.drain_collective_requests(attempt_id)
+    }
+
+    async fn complete_collective(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+        request: &runmat_execution::CollectiveRequest,
+        result: crate::protocol::CollectiveProcessResult,
+    ) -> NativeExecutionResult<()> {
+        self.protocol
+            .complete_collective(attempt_id, request, result)
+            .await
+    }
+
     async fn activate_bundle(
         &self,
         bundle_digest: Digest,

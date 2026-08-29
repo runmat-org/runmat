@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V3,
+    REMOTE_WORKER_PROTOCOL_V4,
 };
 use super::route::{QuicFrameRoute, RemoteFrameRoute};
 use super::{
@@ -43,6 +43,14 @@ pub struct QuicRemoteWorkerChannel {
     pending: Arc<Mutex<HashMap<String, PendingReply>>>,
     progress: Arc<
         Mutex<HashMap<runmat_execution::identity::AttemptId, VecDeque<crate::ProgramProgress>>>,
+    >,
+    collectives: Arc<
+        Mutex<
+            HashMap<
+                runmat_execution::identity::AttemptId,
+                VecDeque<runmat_execution::CollectiveRequest>,
+            >,
+        >,
     >,
 }
 
@@ -85,6 +93,7 @@ impl QuicRemoteWorkerChannel {
         } = config;
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let progress = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
+        let collectives = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
         let channel = Arc::new(Self {
             node_identity,
             worker,
@@ -103,6 +112,7 @@ impl QuicRemoteWorkerChannel {
             ),
             pending: Arc::clone(&pending),
             progress: Arc::clone(&progress),
+            collectives: Arc::clone(&collectives),
         });
         let mut receiver =
             EncryptedFrameSession::new(run_identity, session_id, "worker-to-driver", 1, run_key)
@@ -120,7 +130,7 @@ impl QuicRemoteWorkerChannel {
                 };
                 let reply: RemoteWorkerReply =
                     match serde_json::from_slice::<RemoteWorkerReply>(&plaintext) {
-                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_V3 => reply,
+                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_V4 => reply,
                         _ => break,
                     };
                 if let RemoteWorkerOutcome::Progress {
@@ -143,6 +153,22 @@ impl QuicRemoteWorkerChannel {
                     queue.push_back(event.clone());
                     continue;
                 }
+                if let RemoteWorkerOutcome::CollectiveRequest {
+                    attempt_id,
+                    request,
+                } = &reply.outcome
+                {
+                    if request.validate().is_err() {
+                        break;
+                    }
+                    collectives
+                        .lock()
+                        .expect("remote collective registry poisoned")
+                        .entry(*attempt_id)
+                        .or_default()
+                        .push_back(request.clone());
+                    continue;
+                }
                 if let Some(pending) = pending
                     .lock()
                     .expect("remote reply registry poisoned")
@@ -153,6 +179,10 @@ impl QuicRemoteWorkerChannel {
                     }
                     if let Some(attempt_id) = pending.attempt_id {
                         progress_sequences.remove(&attempt_id);
+                        collectives
+                            .lock()
+                            .expect("remote collective registry poisoned")
+                            .remove(&attempt_id);
                     }
                     let _ = pending.sender.send(reply);
                 }
@@ -160,6 +190,10 @@ impl QuicRemoteWorkerChannel {
             pending
                 .lock()
                 .expect("remote reply registry poisoned")
+                .clear();
+            collectives
+                .lock()
+                .expect("remote collective registry poisoned")
                 .clear();
         });
         Ok(channel)
@@ -176,7 +210,7 @@ impl QuicRemoteWorkerChannel {
             _ => None,
         };
         let request = RemoteWorkerRequest {
-            schema_version: REMOTE_WORKER_PROTOCOL_V3,
+            schema_version: REMOTE_WORKER_PROTOCOL_V4,
             correlation_id: correlation_id.clone(),
             driver_fence: self.driver_fence,
             command,
@@ -276,6 +310,35 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
             .map(VecDeque::into_iter)
             .map(Iterator::collect)
             .unwrap_or_default()
+    }
+
+    fn drain_collective_requests(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<runmat_execution::CollectiveRequest> {
+        self.collectives
+            .lock()
+            .expect("remote collective registry poisoned")
+            .remove(&attempt_id)
+            .map(VecDeque::into_iter)
+            .map(Iterator::collect)
+            .unwrap_or_default()
+    }
+
+    async fn complete_collective(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+        request: &runmat_execution::CollectiveRequest,
+        result: crate::protocol::CollectiveProcessResult,
+    ) -> NativeExecutionResult<()> {
+        self.ack(RemoteWorkerCommand::CompleteCollective {
+            attempt_id,
+            context: request.context.clone(),
+            id: request.id,
+            sequence: request.sequence,
+            result,
+        })
+        .await
     }
 
     async fn activate_bundle(

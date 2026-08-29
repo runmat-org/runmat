@@ -114,6 +114,7 @@ impl Driver {
                 self.worker_lost(worker_id, &mut actions)?;
             }
             DriverCommand::Submit(submission) => self.submit(*submission)?,
+            DriverCommand::SubmitBatch(submissions) => self.submit_batch(submissions)?,
             DriverCommand::BackendReport(report) => {
                 self.apply_backend_report(report, &mut actions)?;
             }
@@ -134,6 +135,41 @@ impl Driver {
                     .filter(|(_, task)| scopes.contains(&task.submission.request.scope_id))
                     .map(|(task_id, _)| *task_id)
                     .collect::<Vec<_>>();
+                for task_id in tasks {
+                    self.cancel_task(task_id, now_millis, &mut actions)?;
+                }
+            }
+            DriverCommand::CancelGang {
+                gang,
+                reason,
+                now_millis,
+            } => {
+                gang.validate()
+                    .map_err(|error| RunnerError::Invalid(error.to_string()))?;
+                let tasks = self
+                    .snapshot
+                    .tasks
+                    .iter()
+                    .filter_map(|(task_id, task)| {
+                        match &task.submission.request.invocation_context {
+                            runmat_execution::ProgramInvocationContext::SpmdTask { task }
+                                if task.gang == gang =>
+                            {
+                                Some(*task_id)
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if tasks.is_empty() {
+                    return Err(RunnerError::Invalid(
+                        "SPMD gang has no tasks in this driver".into(),
+                    ));
+                }
+                self.emit(DriverEventKind::GangCancelled {
+                    gang_id: gang.id,
+                    reason,
+                });
                 for task_id in tasks {
                     self.cancel_task(task_id, now_millis, &mut actions)?;
                 }

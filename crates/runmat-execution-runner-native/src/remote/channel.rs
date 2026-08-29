@@ -87,6 +87,24 @@ pub trait RemoteWorkerChannel: Send + Sync {
         Vec::new()
     }
 
+    fn drain_collective_requests(
+        &self,
+        _attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<runmat_execution::CollectiveRequest> {
+        Vec::new()
+    }
+
+    async fn complete_collective(
+        &self,
+        _attempt_id: runmat_execution::identity::AttemptId,
+        _request: &runmat_execution::CollectiveRequest,
+        _result: crate::protocol::CollectiveProcessResult,
+    ) -> NativeExecutionResult<()> {
+        Err(crate::NativeExecutionError::Protocol(
+            "remote worker channel does not support collectives".into(),
+        ))
+    }
+
     async fn cancel(&self, request: &AttemptRequest) -> NativeExecutionResult<()>;
 
     async fn drain(&self) -> NativeExecutionResult<()>;

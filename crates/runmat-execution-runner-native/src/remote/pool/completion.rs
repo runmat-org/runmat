@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use runmat_execution::state::TaskState;
@@ -9,6 +10,7 @@ use super::RemotePoolDriver;
 impl RemotePoolDriver {
     pub(super) fn apply_report(self: &Arc<Self>, report: BackendReport) {
         let task_id = report.task_id;
+        let spmd_task = self.spmd_task_context(task_id);
         let (actions, terminal, committed_results) = {
             let mut driver = self.driver.lock().expect("remote driver poisoned");
             let actions = match driver.handle(DriverCommand::BackendReport(report.clone())) {
@@ -72,35 +74,71 @@ impl RemotePoolDriver {
                 }
             };
             self.resolve_task(task_id, outcome);
+            if let Some(task) = spmd_task {
+                match state {
+                    TaskState::Succeeded => {
+                        self.collectives.rank_finished(&task.gang, task.rank);
+                    }
+                    TaskState::Failed | TaskState::Cancelled | TaskState::Indeterminate => {
+                        // Publish the originating result before releasing peers
+                        // blocked in this gang's collective rounds.
+                        self.collectives
+                            .fail_gang(&task.gang, "an SPMD peer terminated");
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
     pub(super) fn resolve_non_success_terminals(&self) {
-        let terminal = self
-            .driver
-            .lock()
-            .expect("remote driver poisoned")
-            .snapshot()
-            .tasks
-            .iter()
-            .filter_map(|(task_id, task)| {
-                let message = match task.state {
-                    TaskState::Failed => "remote task failed",
-                    TaskState::Cancelled => "remote task was cancelled",
-                    TaskState::Indeterminate => "remote worker was lost",
-                    _ => return None,
-                };
-                Some((*task_id, task.state, message.to_string()))
-            })
-            .collect::<Vec<_>>();
+        let terminal = {
+            let snapshot = self
+                .driver
+                .lock()
+                .expect("remote driver poisoned")
+                .snapshot();
+            snapshot
+                .tasks
+                .iter()
+                .filter_map(|(task_id, task)| {
+                    let message = match task.state {
+                        TaskState::Failed => "remote task failed",
+                        TaskState::Cancelled => "remote task was cancelled",
+                        TaskState::Indeterminate => "remote worker was lost",
+                        _ => return None,
+                    };
+                    Some((*task_id, task.state, message.to_string()))
+                })
+                .collect::<Vec<_>>()
+        };
         for (task_id, state, message) in terminal {
+            let spmd_task = self.spmd_task_context(task_id);
             let failure = match state {
                 TaskState::Cancelled => crate::NativeProgramFailure::Cancelled,
                 TaskState::Indeterminate => crate::NativeProgramFailure::WorkerLost(message),
                 _ => crate::NativeProgramFailure::Execution(message),
             };
             self.resolve_task(task_id, Err(failure));
+            if let Some(task) = spmd_task {
+                self.collectives
+                    .fail_gang(&task.gang, "an SPMD peer terminated");
+            }
         }
+    }
+
+    fn spmd_task_context(
+        &self,
+        task_id: runmat_execution::TaskId,
+    ) -> Option<runmat_execution::SpmdTaskContext> {
+        self.programs
+            .lock()
+            .expect("remote program catalog poisoned")
+            .get(&task_id)
+            .and_then(|program| match &program.context {
+                runmat_execution::ProgramInvocationContext::SpmdTask { task } => Some(task.clone()),
+                _ => None,
+            })
     }
 
     fn resolve_task(&self, task_id: runmat_execution::TaskId, outcome: super::CompletionResult) {
@@ -110,7 +148,8 @@ impl RemotePoolDriver {
             .expect("remote completion registry poisoned")
             .remove(&task_id)
         {
-            let _ = sender.send(outcome);
+            let order = self.completion_sequence.fetch_add(1, Ordering::AcqRel);
+            let _ = sender.send((order, outcome));
         }
         self.programs
             .lock()

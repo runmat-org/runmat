@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V3,
+    REMOTE_WORKER_PROTOCOL_V4,
 };
 use super::route::RemoteFrameRoute;
 use super::worker_protocol::{
@@ -33,6 +33,7 @@ struct WorkerState {
 struct ActiveAttempt {
     task: tokio::task::JoinHandle<()>,
     cancellation: Arc<super::worker_execution::AttemptCancellation>,
+    collective: Option<Arc<super::collective::RemoteCollectiveChannel>>,
     cooperative: bool,
 }
 
@@ -115,7 +116,7 @@ pub(super) async fn run_worker_loop(
                 "remote worker command used the wrong encrypted frame kind",
             ));
         }
-        if request.schema_version != REMOTE_WORKER_PROTOCOL_V3
+        if request.schema_version != REMOTE_WORKER_PROTOCOL_V4
             || request.driver_fence != driver_fence
         {
             reply_kind(
@@ -154,7 +155,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V4,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -183,7 +184,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V4,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -222,7 +223,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V4,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -246,6 +247,20 @@ pub(super) async fn run_worker_loop(
                 let correlation_id = request.correlation_id;
                 let connection = Arc::clone(&connection);
                 let sender = Arc::clone(&sender);
+                let collective = match &attempt.program.context {
+                    runmat_execution::ProgramInvocationContext::SpmdTask { task } => {
+                        Some(super::collective::RemoteCollectiveChannel::new(
+                            attempt_id,
+                            correlation_id.clone(),
+                            task.clone(),
+                            Arc::clone(&connection),
+                            Arc::clone(&sender),
+                            limits,
+                        ))
+                    }
+                    _ => None,
+                };
+                let collective_for_task = collective.as_ref().map(Arc::clone);
                 let state_for_task = Arc::clone(&state);
                 let (materialized_project, objects) = {
                     let state = state.lock().await;
@@ -281,9 +296,18 @@ pub(super) async fn run_worker_loop(
                         match materialized {
                             Ok(arguments) => {
                                 program.arguments = arguments;
+                                let collective = collective_for_task.map(|channel| {
+                                    std::rc::Rc::new(
+                                        super::collective::RemoteCollectiveService::new(channel),
+                                    )
+                                        as std::rc::Rc<
+                                            dyn runmat_runtime::context::RuntimeCollectiveService,
+                                        >
+                                });
                                 super::worker_execution::execute(
                                     program,
                                     materialized_project,
+                                    collective,
                                     meshing_host,
                                     objects,
                                     cancellation_for_task,
@@ -330,7 +354,7 @@ pub(super) async fn run_worker_loop(
                         &sender,
                         limits,
                         RemoteWorkerReply {
-                            schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                            schema_version: REMOTE_WORKER_PROTOCOL_V4,
                             correlation_id,
                             outcome: RemoteWorkerOutcome::Attempt { report },
                         },
@@ -347,10 +371,36 @@ pub(super) async fn run_worker_loop(
                     ActiveAttempt {
                         task,
                         cancellation,
+                        collective,
                         cooperative,
                     },
                 );
                 let _ = start_sender.send(());
+            }
+            RemoteWorkerCommand::CompleteCollective {
+                attempt_id,
+                context,
+                id,
+                sequence,
+                result,
+            } => {
+                let collective = state
+                    .lock()
+                    .await
+                    .attempts
+                    .get(&attempt_id)
+                    .and_then(|active| active.collective.as_ref().map(Arc::clone));
+                let completion = collective
+                    .ok_or_else(|| {
+                        "remote collective completion targets an unknown or non-SPMD attempt"
+                            .to_string()
+                    })
+                    .and_then(|collective| collective.complete(&context, id, sequence, result));
+                let response = match completion {
+                    Ok(()) => acknowledged(request.correlation_id),
+                    Err(message) => rejected(request.correlation_id, message),
+                };
+                reply(connection.as_ref(), &sender, limits, response).await?;
             }
             RemoteWorkerCommand::Cancel { attempt_id } => {
                 let mut state = state.lock().await;
@@ -401,7 +451,7 @@ pub(super) async fn run_worker_loop(
                     limits,
                     FrameKind::Artifact,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                        schema_version: REMOTE_WORKER_PROTOCOL_V4,
                         correlation_id: request.correlation_id,
                         outcome,
                     },

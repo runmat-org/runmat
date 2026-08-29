@@ -43,6 +43,7 @@ impl RemoteMeshingHost {
 pub(super) async fn execute(
     program: ProgramExecutionRequest,
     project: Option<Arc<crate::materialized_project::MaterializedProject>>,
+    collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
     meshing_host: Option<RemoteMeshingHost>,
     mut objects: RemoteObjectStore,
     cancellation: Arc<AttemptCancellation>,
@@ -79,8 +80,23 @@ pub(super) async fn execute(
         .unwrap_or_else(|error| failure(&error.to_string()));
     }
     drop(progress_sender);
-    crate::test_workload::execute_host_program_request_with_project(program, project.as_deref())
-        .await
+    match collective {
+        Some(collective) => {
+            crate::test_workload::execute_host_program_request_with_project_and_collective(
+                program,
+                project.as_deref(),
+                Some(collective),
+            )
+            .await
+        }
+        None => {
+            crate::test_workload::execute_host_program_request_with_project(
+                program,
+                project.as_deref(),
+            )
+            .await
+        }
+    }
 }
 
 pub(super) fn report(response: ProgramExecutionResponse) -> AttemptReport {

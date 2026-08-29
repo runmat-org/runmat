@@ -20,7 +20,7 @@ use runmat_execution_runner::{
     DriverCommand, DriverConfig, PoolSpec, TaskSubmission, WorkerSpec,
 };
 
-mod collective;
+pub(crate) mod collective;
 mod process;
 
 use crate::local_store::{prepare_session_root, ArtifactStore, CheckpointStore};

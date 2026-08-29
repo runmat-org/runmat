@@ -3,6 +3,18 @@ use runmat_value::Value;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum WorkspaceOwner {
+    Runtime(runmat_runtime::context::RuntimeContextLocalId),
+    Ambient,
+}
+
+fn current_owner() -> WorkspaceOwner {
+    runmat_runtime::context::legacy::active()
+        .map(|runtime| WorkspaceOwner::Runtime(runtime.local_identity()))
+        .unwrap_or(WorkspaceOwner::Ambient)
+}
+
 #[derive(Debug, Clone)]
 enum SlotLifecycle {
     Assigned(String),
@@ -71,10 +83,28 @@ pub struct WorkspaceAssignedReport {
 }
 
 runmat_thread_local! {
-    static WORKSPACE_STACK: RefCell<Vec<WorkspaceFrame>> = const { RefCell::new(Vec::new()) };
-    static PENDING_WORKSPACE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
-    static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceValueSnapshot>> = const { RefCell::new(None) };
-    static LAST_WORKSPACE_ASSIGNED_REPORT: RefCell<Option<WorkspaceAssignedReport>> = const { RefCell::new(None) };
+    static WORKSPACE_STACKS: RefCell<HashMap<WorkspaceOwner, Vec<WorkspaceFrame>>> = RefCell::new(HashMap::new());
+    static PENDING_WORKSPACES: RefCell<HashMap<WorkspaceOwner, WorkspaceSnapshot>> = RefCell::new(HashMap::new());
+    static LAST_WORKSPACE_STATES: RefCell<HashMap<WorkspaceOwner, WorkspaceValueSnapshot>> = RefCell::new(HashMap::new());
+    static LAST_WORKSPACE_ASSIGNED_REPORTS: RefCell<HashMap<WorkspaceOwner, WorkspaceAssignedReport>> = RefCell::new(HashMap::new());
+}
+
+fn with_stack<R>(owner: WorkspaceOwner, f: impl FnOnce(&[WorkspaceFrame]) -> R) -> R {
+    WORKSPACE_STACKS.with(|stacks| {
+        let stacks = stacks.borrow();
+        f(stacks.get(&owner).map(Vec::as_slice).unwrap_or_default())
+    })
+}
+
+fn with_stack_mut<R>(owner: WorkspaceOwner, f: impl FnOnce(&mut Vec<WorkspaceFrame>) -> R) -> R {
+    WORKSPACE_STACKS.with(|stacks| {
+        let mut stacks = stacks.borrow_mut();
+        let result = f(stacks.entry(owner).or_default());
+        if stacks.get(&owner).is_some_and(Vec::is_empty) {
+            stacks.remove(&owner);
+        }
+        result
+    })
 }
 
 fn mark_slot_unassigned(ws: &mut WorkspaceState, index: usize, name: String) {
@@ -154,12 +184,13 @@ fn lifecycle_from_names(
         .collect()
 }
 
-pub struct WorkspaceStateGuard;
+pub struct WorkspaceStateGuard {
+    owner: WorkspaceOwner,
+}
 
 impl Drop for WorkspaceStateGuard {
     fn drop(&mut self) {
-        WORKSPACE_STACK.with(|stack| {
-            let mut stack = stack.borrow_mut();
+        with_stack_mut(self.owner, |stack| {
             if let Some(frame) = stack.pop() {
                 if !frame.publish_on_drop {
                     return;
@@ -167,32 +198,40 @@ impl Drop for WorkspaceStateGuard {
                 let ws = frame.state;
                 let removed_ids = ws.removed_slots_this_execution.keys().copied().collect();
                 let removed_names = ws.removed_slots_this_execution.values().cloned().collect();
-                LAST_WORKSPACE_ASSIGNED_REPORT.with(|slot| {
-                    *slot.borrow_mut() = Some(WorkspaceAssignedReport {
-                        ids: ws.assigned_ids_this_execution,
-                        names: ws.assigned_names_this_execution,
-                        removed_ids,
-                        removed_names,
-                    });
+                LAST_WORKSPACE_ASSIGNED_REPORTS.with(|reports| {
+                    reports.borrow_mut().insert(
+                        self.owner,
+                        WorkspaceAssignedReport {
+                            ids: ws.assigned_ids_this_execution,
+                            names: ws.assigned_names_this_execution,
+                            removed_ids,
+                            removed_names,
+                        },
+                    );
                 });
-                LAST_WORKSPACE_STATE.with(|slot| {
-                    *slot.borrow_mut() = Some(WorkspaceValueSnapshot {
-                        vars: frame.vars_snapshot,
-                        names: ws.names,
-                        assigned: ws.assigned,
-                    });
+                LAST_WORKSPACE_STATES.with(|states| {
+                    states.borrow_mut().insert(
+                        self.owner,
+                        WorkspaceValueSnapshot {
+                            vars: frame.vars_snapshot,
+                            names: ws.names,
+                            assigned: ws.assigned,
+                        },
+                    );
                 });
             }
         });
     }
 }
 
-pub struct PendingWorkspaceGuard;
+pub struct PendingWorkspaceGuard {
+    owner: WorkspaceOwner,
+}
 
 impl Drop for PendingWorkspaceGuard {
     fn drop(&mut self) {
-        PENDING_WORKSPACE.with(|slot| {
-            slot.borrow_mut().take();
+        PENDING_WORKSPACES.with(|workspaces| {
+            workspaces.borrow_mut().remove(&self.owner);
         });
     }
 }
@@ -201,22 +240,26 @@ pub fn push_pending_workspace(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
 ) -> PendingWorkspaceGuard {
-    PENDING_WORKSPACE.with(|slot| {
-        *slot.borrow_mut() = Some((names, assigned));
+    let owner = current_owner();
+    PENDING_WORKSPACES.with(|workspaces| {
+        workspaces.borrow_mut().insert(owner, (names, assigned));
     });
-    PendingWorkspaceGuard
+    PendingWorkspaceGuard { owner }
 }
 
 pub fn take_pending_workspace_state() -> Option<WorkspaceSnapshot> {
-    PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take())
+    let owner = current_owner();
+    PENDING_WORKSPACES.with(|workspaces| workspaces.borrow_mut().remove(&owner))
 }
 
 pub fn take_updated_workspace_state() -> Option<WorkspaceValueSnapshot> {
-    LAST_WORKSPACE_STATE.with(|slot| slot.borrow_mut().take())
+    let owner = current_owner();
+    LAST_WORKSPACE_STATES.with(|states| states.borrow_mut().remove(&owner))
 }
 
 pub fn take_updated_workspace_assigned_report() -> Option<WorkspaceAssignedReport> {
-    LAST_WORKSPACE_ASSIGNED_REPORT.with(|slot| slot.borrow_mut().take())
+    let owner = current_owner();
+    LAST_WORKSPACE_ASSIGNED_REPORTS.with(|reports| reports.borrow_mut().remove(&owner))
 }
 
 pub fn set_workspace_state(
@@ -251,8 +294,9 @@ fn set_workspace_state_with_publish(
         slot_lifecycle.insert(*idx, lifecycle);
     }
     let vars_ptr = vars as *mut Vec<Value>;
-    WORKSPACE_STACK.with(|stack| {
-        stack.borrow_mut().push(WorkspaceFrame {
+    let owner = current_owner();
+    with_stack_mut(owner, |stack| {
+        stack.push(WorkspaceFrame {
             state: WorkspaceState {
                 names,
                 assigned,
@@ -268,12 +312,12 @@ fn set_workspace_state_with_publish(
             publish_on_drop,
         });
     });
-    WorkspaceStateGuard
+    WorkspaceStateGuard { owner }
 }
 
 pub fn refresh_workspace_state(vars: &[Value]) {
-    WORKSPACE_STACK.with(|stack| {
-        if let Some(frame) = stack.borrow_mut().last_mut() {
+    with_stack_mut(current_owner(), |stack| {
+        if let Some(frame) = stack.last_mut() {
             frame.state.data_ptr = vars.as_ptr();
             frame.state.len = vars.len();
             frame.vars_snapshot = vars.to_vec();
@@ -282,8 +326,7 @@ pub fn refresh_workspace_state(vars: &[Value]) {
 }
 
 pub fn workspace_lookup(name: &str) -> Option<Value> {
-    WORKSPACE_STACK.with(|stack| {
-        let stack = stack.borrow();
+    with_stack(current_owner(), |stack| {
         let frame = stack.last()?;
         let ws = &frame.state;
         let idx = ws.names.get(name)?;
@@ -301,8 +344,7 @@ pub fn workspace_lookup(name: &str) -> Option<Value> {
 }
 
 pub fn workspace_slot_assigned(index: usize) -> Option<bool> {
-    WORKSPACE_STACK.with(|stack| {
-        let stack = stack.borrow();
+    with_stack(current_owner(), |stack| {
         let frame = stack.last()?;
         let ws = &frame.state;
         ws.slot_lifecycle
@@ -312,8 +354,7 @@ pub fn workspace_slot_assigned(index: usize) -> Option<bool> {
 }
 
 pub fn workspace_slot_name(index: usize) -> Option<String> {
-    WORKSPACE_STACK.with(|stack| {
-        let stack = stack.borrow();
+    with_stack(current_owner(), |stack| {
         let frame = stack.last()?;
         let ws = &frame.state;
         ws.slot_lifecycle
@@ -331,8 +372,7 @@ pub fn workspace_assign_target(
     name: &str,
     value: Value,
 ) -> Result<(), String> {
-    WORKSPACE_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
+    with_stack_mut(current_owner(), |stack| {
         let index = target_frame_index(stack.len(), target)
             .ok_or_else(|| "load: workspace state unavailable".to_string())?;
         let frame = stack
@@ -343,8 +383,7 @@ pub fn workspace_assign_target(
 }
 
 pub fn workspace_clear() -> Result<(), String> {
-    WORKSPACE_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
+    with_stack_mut(current_owner(), |stack| {
         let frame = stack
             .last_mut()
             .ok_or_else(|| "clear: workspace state unavailable".to_string())?;
@@ -366,8 +405,7 @@ pub fn workspace_clear() -> Result<(), String> {
 }
 
 pub fn workspace_remove(name: &str) -> Result<(), String> {
-    WORKSPACE_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
+    with_stack_mut(current_owner(), |stack| {
         let frame = stack
             .last_mut()
             .ok_or_else(|| "clear: workspace state unavailable".to_string())?;
@@ -388,8 +426,7 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
 }
 
 pub fn workspace_snapshot() -> Vec<(String, Value)> {
-    WORKSPACE_STACK.with(|stack| {
-        let stack = stack.borrow();
+    with_stack(current_owner(), |stack| {
         if let Some(frame) = stack.last() {
             let ws = &frame.state;
             let mut entries: Vec<(String, Value)> = ws
@@ -419,8 +456,7 @@ pub fn workspace_snapshot() -> Vec<(String, Value)> {
 pub fn workspace_target_snapshot(
     target: WorkspaceTarget,
 ) -> Result<WorkspaceTargetSnapshot, String> {
-    WORKSPACE_STACK.with(|stack| {
-        let stack = stack.borrow();
+    with_stack(current_owner(), |stack| {
         let index = target_frame_index(stack.len(), target)
             .ok_or_else(|| "workspace state unavailable".to_string())?;
         let frame = stack
@@ -440,8 +476,7 @@ pub fn replace_workspace_target_vars_and_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
 ) -> Result<(), String> {
-    WORKSPACE_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
+    with_stack_mut(current_owner(), |stack| {
         let index = target_frame_index(stack.len(), target)
             .ok_or_else(|| "workspace state unavailable".to_string())?;
         let frame = stack
@@ -466,12 +501,9 @@ pub fn set_workspace_variable(
     value: Value,
     vars: &mut Vec<Value>,
 ) -> Result<(), String> {
-    WORKSPACE_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
-        match stack.last_mut() {
-            Some(frame) => set_workspace_variable_in_frame(frame, name, value),
-            None => Err("load: workspace state unavailable".to_string()),
-        }
+    with_stack_mut(current_owner(), |stack| match stack.last_mut() {
+        Some(frame) => set_workspace_variable_in_frame(frame, name, value),
+        None => Err("load: workspace state unavailable".to_string()),
     })?;
     let _ = vars;
     Ok(())
@@ -509,16 +541,16 @@ fn set_workspace_variable_in_frame(
 }
 
 pub fn ensure_workspace_slot_name(index: usize, name: &str) {
-    WORKSPACE_STACK.with(|stack| {
-        if let Some(frame) = stack.borrow_mut().last_mut() {
+    with_stack_mut(current_owner(), |stack| {
+        if let Some(frame) = stack.last_mut() {
             upsert_slot_lifecycle_name(&mut frame.state, index, name);
         }
     });
 }
 
 pub fn mark_workspace_assigned(index: usize) {
-    WORKSPACE_STACK.with(|stack| {
-        if let Some(frame) = stack.borrow_mut().last_mut() {
+    with_stack_mut(current_owner(), |stack| {
+        if let Some(frame) = stack.last_mut() {
             let ws = &mut frame.state;
             if let Some(name) = ws
                 .slot_lifecycle
@@ -539,9 +571,8 @@ pub fn mark_workspace_assigned(index: usize) {
 /// Snapshot the slots currently assigned in the innermost VM workspace.
 /// Internal placeholder values are deliberately excluded.
 pub(crate) fn current_workspace_assigned_slots() -> HashSet<usize> {
-    WORKSPACE_STACK.with(|stack| {
+    with_stack(current_owner(), |stack| {
         stack
-            .borrow()
             .last()
             .map(|frame| {
                 frame
@@ -556,21 +587,26 @@ pub(crate) fn current_workspace_assigned_slots() -> HashSet<usize> {
 }
 
 pub(crate) fn reset_thread_state_for_tests() {
-    WORKSPACE_STACK.with(|stack| stack.borrow_mut().clear());
-    PENDING_WORKSPACE.with(|slot| {
-        slot.borrow_mut().take();
-    });
-    LAST_WORKSPACE_STATE.with(|slot| {
-        slot.borrow_mut().take();
-    });
-    LAST_WORKSPACE_ASSIGNED_REPORT.with(|slot| {
-        slot.borrow_mut().take();
-    });
+    WORKSPACE_STACKS.with(|stacks| stacks.borrow_mut().clear());
+    PENDING_WORKSPACES.with(|workspaces| workspaces.borrow_mut().clear());
+    LAST_WORKSPACE_STATES.with(|states| states.borrow_mut().clear());
+    LAST_WORKSPACE_ASSIGNED_REPORTS.with(|reports| reports.borrow_mut().clear());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake};
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
 
     fn take_report_after(f: impl FnOnce(&mut Vec<Value>)) -> WorkspaceAssignedReport {
         let _ = take_updated_workspace_assigned_report();
@@ -583,6 +619,46 @@ mod tests {
         }
 
         take_updated_workspace_assigned_report().expect("workspace report should be recorded")
+    }
+
+    #[test]
+    fn interleaved_runtime_contexts_keep_workspace_frames_isolated() {
+        async fn session(label: &'static str) {
+            let mut vars = vec![Value::String(label.into())];
+            let names = HashMap::from([(String::from("value"), 0)]);
+            let assigned = HashSet::from([String::from("value")]);
+            let _guard = set_transient_workspace_state(names, assigned, &mut vars);
+            let mut yielded = false;
+            std::future::poll_fn(move |_| {
+                if yielded {
+                    Poll::Ready(())
+                } else {
+                    yielded = true;
+                    Poll::Pending
+                }
+            })
+            .await;
+            assert_eq!(workspace_lookup("value"), Some(Value::String(label.into())));
+        }
+
+        fn poll(future: Pin<&mut impl Future<Output = ()>>) -> Poll<()> {
+            let waker = std::task::Waker::from(Arc::new(NoopWake));
+            future.poll(&mut Context::from_waker(&waker))
+        }
+
+        let first = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let second = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        assert_ne!(first.local_identity(), second.local_identity());
+        let mut first = Box::pin(first.scope(session("first")));
+        let mut second = Box::pin(second.scope(session("second")));
+        assert!(poll(first.as_mut()).is_pending());
+        assert!(poll(second.as_mut()).is_pending());
+        assert!(poll(first.as_mut()).is_ready());
+        assert!(poll(second.as_mut()).is_ready());
     }
 
     #[test]

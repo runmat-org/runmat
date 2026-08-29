@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use runmat_execution::identity::AttemptId;
+use runmat_execution::SpmdTaskContext;
 use runmat_execution_runner::{AttemptReport, AttemptSuccess};
 use tokio::sync::oneshot;
 
@@ -21,24 +22,47 @@ struct State {
 #[derive(Default)]
 pub(super) struct RemoteProgressBuffer(Mutex<State>);
 
+pub(super) struct RemoteCollectiveAssignment {
+    broker: std::sync::Arc<crate::driver::collective::ProcessCollectiveBroker>,
+    context: SpmdTaskContext,
+}
+
+impl RemoteCollectiveAssignment {
+    pub(super) fn new(
+        broker: std::sync::Arc<crate::driver::collective::ProcessCollectiveBroker>,
+        context: SpmdTaskContext,
+    ) -> Self {
+        Self { broker, context }
+    }
+}
+
 pub struct RemoteTaskCompletion {
-    receiver: oneshot::Receiver<Result<AttemptSuccess, crate::NativeProgramFailure>>,
+    receiver: oneshot::Receiver<(u64, Result<AttemptSuccess, crate::NativeProgramFailure>)>,
     progress: std::sync::Arc<RemoteProgressBuffer>,
 }
 
 impl RemoteTaskCompletion {
     pub(super) fn new(
-        receiver: oneshot::Receiver<Result<AttemptSuccess, crate::NativeProgramFailure>>,
+        receiver: oneshot::Receiver<(u64, Result<AttemptSuccess, crate::NativeProgramFailure>)>,
         progress: std::sync::Arc<RemoteProgressBuffer>,
     ) -> Self {
         Self { receiver, progress }
     }
 
     pub async fn wait(self) -> Result<AttemptSuccess, crate::NativeProgramFailure> {
+        self.wait_ordered().await.1
+    }
+
+    pub(super) async fn wait_ordered(
+        self,
+    ) -> (u64, Result<AttemptSuccess, crate::NativeProgramFailure>) {
         self.receiver.await.unwrap_or_else(|_| {
-            Err(crate::NativeProgramFailure::Infrastructure(
-                "remote task completion channel closed".into(),
-            ))
+            (
+                u64::MAX,
+                Err(crate::NativeProgramFailure::Infrastructure(
+                    "remote task completion channel closed".into(),
+                )),
+            )
         })
     }
 
@@ -95,6 +119,7 @@ pub(super) async fn execute(
     channel: &dyn RemoteWorkerChannel,
     attempt: RemoteAttempt,
     progress: Option<&RemoteProgressBuffer>,
+    collectives: Option<RemoteCollectiveAssignment>,
 ) -> NativeExecutionResult<AttemptReport> {
     let attempt_id = attempt.scheduling.id;
     let execution = channel.execute(attempt);
@@ -105,13 +130,55 @@ pub(super) async fn execute(
                 if let Some(progress) = progress {
                     progress.append(channel, attempt_id)?;
                 }
+                forward_collectives(channel, attempt_id, collectives.as_ref()).await?;
                 return result;
             }
             _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
                 if let Some(progress) = progress {
                     progress.append(channel, attempt_id)?;
                 }
+                forward_collectives(channel, attempt_id, collectives.as_ref()).await?;
             }
         }
     }
+}
+
+async fn forward_collectives(
+    channel: &dyn RemoteWorkerChannel,
+    attempt_id: AttemptId,
+    collectives: Option<&RemoteCollectiveAssignment>,
+) -> NativeExecutionResult<()> {
+    let requests = channel.drain_collective_requests(attempt_id);
+    if requests.is_empty() {
+        return Ok(());
+    }
+    let assignment = collectives.ok_or_else(|| {
+        NativeExecutionError::Protocol(
+            "non-SPMD remote attempt emitted a collective request".into(),
+        )
+    })?;
+    for request in requests {
+        if request.context != assignment.context {
+            return Err(NativeExecutionError::Protocol(
+                "remote collective request differs from its scheduled rank assignment".into(),
+            ));
+        }
+        let broker = std::sync::Arc::clone(&assignment.broker);
+        let submitted = request.clone();
+        let result = tokio::task::spawn_blocking(move || broker.execute_remote(submitted))
+            .await
+            .map_err(|error| {
+                NativeExecutionError::Protocol(format!(
+                    "remote collective coordinator stopped: {error}"
+                ))
+            })?;
+        let result = match result {
+            Ok(response) => crate::protocol::CollectiveProcessResult::Completed { response },
+            Err(message) => crate::protocol::CollectiveProcessResult::Failed { message },
+        };
+        channel
+            .complete_collective(attempt_id, &request, result)
+            .await?;
+    }
+    Ok(())
 }

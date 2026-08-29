@@ -224,4 +224,18 @@ impl Driver {
         self.emit(DriverEventKind::TaskSubmitted { task_id, state });
         Ok(())
     }
+
+    pub(super) fn submit_batch(&mut self, submissions: Vec<TaskSubmission>) -> RunnerResult<()> {
+        if submissions.is_empty() {
+            return Err(RunnerError::Invalid(
+                "task submission batch must not be empty".into(),
+            ));
+        }
+        let mut staged = Driver::from_snapshot(self.snapshot.clone())?;
+        for submission in submissions {
+            staged.submit(submission)?;
+        }
+        self.snapshot = staged.snapshot;
+        Ok(())
+    }
 }
