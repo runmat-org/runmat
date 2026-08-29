@@ -2434,11 +2434,17 @@ impl Compiler {
                         self.compile_mir_operand(value)?;
                         crate::BytecodeDistributedOp::Materialize
                     }
-                    MirDistributedOp::Redistribute { value, scheme } => {
+                    MirDistributedOp::Codistributor { value } => {
                         self.compile_mir_operand(value)?;
-                        crate::BytecodeDistributedOp::Redistribute {
-                            scheme: scheme.clone(),
-                        }
+                        crate::BytecodeDistributedOp::Codistributor
+                    }
+                    MirDistributedOp::Redistribute {
+                        value,
+                        codistributor,
+                    } => {
+                        self.compile_mir_operand(value)?;
+                        self.compile_mir_operand(codistributor)?;
+                        crate::BytecodeDistributedOp::Redistribute
                     }
                 };
                 self.emit(Instr::Distributed(instruction));

@@ -54,8 +54,24 @@ pub async fn partition_value(
     let shape = assembly::value_shape(input).ok_or_else(|| {
         error("this value does not support class-preserving distributed partitioning")
     })?;
+    if let DistributionScheme::TwoDimensionalBlockCyclic {
+        worker_grid,
+        block_size,
+        orientation,
+    } = scheme
+    {
+        return partition_two_dimensional(
+            input,
+            shape,
+            count,
+            *worker_grid,
+            *block_size,
+            *orientation,
+        )
+        .await;
+    }
     let dimension = scheme_dimension(scheme, &shape)?;
-    let index_sets = partition_indices(shape[dimension], count, scheme);
+    let index_sets = partition_indices(shape[dimension], count, scheme)?;
     let mut partitions = Vec::with_capacity(index_sets.len());
     for (offset, indices) in index_sets.into_iter().enumerate() {
         let selectors = selectors_for_dimension(&shape, dimension, &indices);
@@ -110,10 +126,12 @@ async fn runtime_shape(value: &Value) -> Result<Vec<usize>, RuntimeError> {
 
 fn scheme_dimension(scheme: &DistributionScheme, shape: &[usize]) -> Result<usize, RuntimeError> {
     let dimension = match scheme {
-        DistributionScheme::Block { dimension } | DistributionScheme::Cyclic { dimension } => {
-            *dimension
-        }
-        DistributionScheme::Replicated | DistributionScheme::Custom { .. } => unreachable!(),
+        DistributionScheme::Block { dimension }
+        | DistributionScheme::Cyclic { dimension }
+        | DistributionScheme::OneDimensional { dimension, .. } => *dimension,
+        DistributionScheme::Replicated
+        | DistributionScheme::TwoDimensionalBlockCyclic { .. }
+        | DistributionScheme::Custom { .. } => unreachable!(),
     };
     usize::try_from(dimension)
         .ok()
@@ -126,26 +144,51 @@ fn partition_indices(
     extent: usize,
     count: LabCount,
     scheme: &DistributionScheme,
-) -> Vec<Vec<usize>> {
+) -> Result<Vec<Vec<usize>>, RuntimeError> {
     match scheme {
         DistributionScheme::Block { .. } => {
             let count = count.0 as usize;
             let base = extent / count;
             let remainder = extent % count;
             let mut start = 0usize;
-            (0..count)
+            Ok((0..count)
                 .map(|partition| {
                     let length = base + usize::from(partition < remainder);
                     let indices = (start..start + length).collect();
                     start += length;
                     indices
                 })
-                .collect()
+                .collect())
         }
-        DistributionScheme::Cyclic { .. } => (0..count.0 as usize)
+        DistributionScheme::OneDimensional { partition, .. } => {
+            let mut start = 0usize;
+            let partitions = partition
+                .iter()
+                .map(|length| {
+                    let length = usize::try_from(*length)
+                        .map_err(|_| error("1-D partition length exceeds this host"))?;
+                    let end = start
+                        .checked_add(length)
+                        .filter(|end| *end <= extent)
+                        .ok_or_else(|| error("1-D partition lengths exceed the value extent"))?;
+                    let indices = (start..end).collect();
+                    start = end;
+                    Ok(indices)
+                })
+                .collect::<Result<Vec<_>, RuntimeError>>()?;
+            if start != extent || partitions.len() != count.0 as usize {
+                return Err(error(
+                    "1-D partition lengths must match the value extent and partition count",
+                ));
+            }
+            Ok(partitions)
+        }
+        DistributionScheme::Cyclic { .. } => Ok((0..count.0 as usize)
             .map(|partition| (partition..extent).step_by(count.0 as usize).collect())
-            .collect(),
-        DistributionScheme::Replicated | DistributionScheme::Custom { .. } => unreachable!(),
+            .collect()),
+        DistributionScheme::Replicated
+        | DistributionScheme::TwoDimensionalBlockCyclic { .. }
+        | DistributionScheme::Custom { .. } => unreachable!(),
     }
 }
 
@@ -202,7 +245,7 @@ fn layout_selections(
                 }));
             }
             match scheme {
-                DistributionScheme::Block { .. } => {
+                DistributionScheme::Block { .. } | DistributionScheme::OneDimensional { .. } => {
                     let start = indices.first().copied().unwrap_or(*extent);
                     Ok(PartitionSelection::Range(PartitionRange {
                         dimension: dimension_id,
@@ -218,11 +261,105 @@ fn layout_selections(
                     step: u64::from(partition_count.0),
                     count: indices.len() as u64,
                 }),
-                DistributionScheme::Replicated | DistributionScheme::Custom { .. } => {
+                DistributionScheme::Replicated
+                | DistributionScheme::TwoDimensionalBlockCyclic { .. }
+                | DistributionScheme::Custom { .. } => {
                     unreachable!()
                 }
             }
         })
+        .collect()
+}
+
+async fn partition_two_dimensional(
+    input: &Value,
+    shape: Vec<usize>,
+    count: LabCount,
+    worker_grid: [u32; 2],
+    block_size: u64,
+    orientation: runmat_types::WorkerGridOrientation,
+) -> Result<(Vec<usize>, Vec<DistributedPartitionValue>), RuntimeError> {
+    if shape.len() != 2 || worker_grid.contains(&0) || block_size == 0 {
+        return Err(error(
+            "2-D block-cyclic distribution requires a matrix, positive worker grid, and positive block size",
+        ));
+    }
+    let grid_count = worker_grid[0]
+        .checked_mul(worker_grid[1])
+        .ok_or_else(|| error("2-D worker grid overflowed"))?;
+    if grid_count != count.0 {
+        return Err(error(
+            "2-D worker grid must contain exactly one position per partition",
+        ));
+    }
+    let block_size =
+        usize::try_from(block_size).map_err(|_| error("2-D block size exceeds this host"))?;
+    let mut partitions = Vec::with_capacity(count.0 as usize);
+    for rank in 1..=count.0 {
+        let (grid_row, grid_column) = worker_position(rank, worker_grid, orientation);
+        let rows = block_cyclic_indices(shape[0], block_size, worker_grid[0], grid_row);
+        let columns = block_cyclic_indices(shape[1], block_size, worker_grid[1], grid_column);
+        let selectors = vec![
+            SliceSelector::Indices(rows.iter().map(|index| index + 1).collect()),
+            SliceSelector::Indices(columns.iter().map(|index| index + 1).collect()),
+        ];
+        let plan = build_index_plan(&selectors, 2, &shape)?;
+        let value = assembly::read_with_plan(input, &plan)?;
+        partitions.push(DistributedPartitionValue {
+            layout: DistributedPartitionLayout {
+                rank: LabRank(rank),
+                selections: vec![
+                    PartitionSelection::Indices {
+                        dimension: 1,
+                        indices: rows
+                            .into_iter()
+                            .map(|index| {
+                                u64::try_from(index).map_err(|_| error("row index exceeds u64"))
+                            })
+                            .collect::<Result<_, _>>()?,
+                    },
+                    PartitionSelection::Indices {
+                        dimension: 2,
+                        indices: columns
+                            .into_iter()
+                            .map(|index| {
+                                u64::try_from(index).map_err(|_| error("column index exceeds u64"))
+                            })
+                            .collect::<Result<_, _>>()?,
+                    },
+                ],
+                local_shape: usize_shape_to_u64(&plan.output_shape)?,
+            },
+            value,
+        });
+    }
+    Ok((shape, partitions))
+}
+
+fn worker_position(
+    rank: u32,
+    worker_grid: [u32; 2],
+    orientation: runmat_types::WorkerGridOrientation,
+) -> (u32, u32) {
+    let zero_based = rank - 1;
+    match orientation {
+        runmat_types::WorkerGridOrientation::Row => {
+            (zero_based / worker_grid[1], zero_based % worker_grid[1])
+        }
+        runmat_types::WorkerGridOrientation::Column => {
+            (zero_based % worker_grid[0], zero_based / worker_grid[0])
+        }
+    }
+}
+
+fn block_cyclic_indices(
+    extent: usize,
+    block_size: usize,
+    grid_extent: u32,
+    grid_position: u32,
+) -> Vec<usize> {
+    (0..extent)
+        .filter(|index| ((*index / block_size) % grid_extent as usize) == grid_position as usize)
         .collect()
 }
 
@@ -376,6 +513,56 @@ mod tests {
         ] {
             let (shape, parts) = block_on(partition_value(&input, &scheme, LabCount(2))).unwrap();
             assert_eq!(parts.len(), 2);
+            let output = block_on(materialize_partitions(&shape, &scheme, &parts)).unwrap();
+            assert_eq!(output, input);
+        }
+    }
+
+    #[test]
+    fn public_codistributor_schemes_round_trip_exact_integer_storage() {
+        let input = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    u64::MAX,
+                ]),
+                vec![4, 4],
+            )
+            .unwrap(),
+        );
+        let schemes = [
+            DistributionScheme::OneDimensional {
+                dimension: 2,
+                partition: vec![1, 1, 1, 1],
+            },
+            DistributionScheme::TwoDimensionalBlockCyclic {
+                worker_grid: [2, 2],
+                block_size: 1,
+                orientation: runmat_types::WorkerGridOrientation::Row,
+            },
+            DistributionScheme::TwoDimensionalBlockCyclic {
+                worker_grid: [2, 2],
+                block_size: 2,
+                orientation: runmat_types::WorkerGridOrientation::Column,
+            },
+        ];
+        for scheme in schemes {
+            let (shape, parts) = block_on(partition_value(&input, &scheme, LabCount(4))).unwrap();
+            assert_eq!(parts.len(), 4);
             let output = block_on(materialize_partitions(&shape, &scheme, &parts)).unwrap();
             assert_eq!(output, input);
         }

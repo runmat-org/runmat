@@ -197,7 +197,9 @@ impl Walker<'_> {
                 }
             }
             MirRvalue::Distributed(operation) => {
-                self.operand(from, operation.input(), Reason::FunctionHandle);
+                for operand in operation.operands() {
+                    self.operand(from, operand, Reason::FunctionHandle);
+                }
             }
             MirRvalue::Collective(operation) => {
                 for operand in operation.operands() {

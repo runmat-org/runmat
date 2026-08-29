@@ -69,6 +69,60 @@ const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 
 const DISTRIBUTED_INPUTS: [BuiltinParamDescriptor; 1] = [ANY_REQUIRED];
 const LOCAL_PART_INPUTS: [BuiltinParamDescriptor; 1] = [ANY_REQUIRED];
+const REDISTRIBUTE_INPUTS: [BuiltinParamDescriptor; 2] = [ANY_REQUIRED, ANY_REQUIRED];
+const CODISTRIBUTOR_1D_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dimension",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional one-based distribution dimension.",
+    },
+    BuiltinParamDescriptor {
+        name: "partition",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional vector of per-lab partition lengths.",
+    },
+    BuiltinParamDescriptor {
+        name: "global_size",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional complete global array size.",
+    },
+];
+const CODISTRIBUTOR_2DBC_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "worker_grid",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional two-element worker grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "block_size",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional positive block size.",
+    },
+    BuiltinParamDescriptor {
+        name: "orientation",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("row"),
+        description: "Worker-grid rank orientation, row or col.",
+    },
+    BuiltinParamDescriptor {
+        name: "global_size",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional complete matrix size.",
+    },
+];
 const BROADCAST_INPUTS: [BuiltinParamDescriptor; 2] = [LAB_REQUIRED, ANY_OPTIONAL];
 const SEND_INPUTS: [BuiltinParamDescriptor; 3] = [ANY_REQUIRED, LAB_REQUIRED, TAG_OPTIONAL];
 const RECEIVE_INPUTS: [BuiltinParamDescriptor; 2] = [LAB_OPTIONAL, TAG_OPTIONAL];
@@ -115,6 +169,30 @@ signature!(
     DISTRIBUTED_SIGNATURES,
     "D = distributed(value)",
     &DISTRIBUTED_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    REDISTRIBUTE_SIGNATURES,
+    "D2 = redistribute(D1, codist)",
+    &REDISTRIBUTE_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    GET_CODISTRIBUTOR_SIGNATURES,
+    "codist = getCodistributor(D)",
+    &LOCAL_PART_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    CODISTRIBUTOR_1D_SIGNATURES,
+    "codist = codistributor1d(dimension, partition, global_size)",
+    &CODISTRIBUTOR_1D_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    CODISTRIBUTOR_2DBC_SIGNATURES,
+    "codist = codistributor2dbc(worker_grid, block_size, orientation, global_size)",
+    &CODISTRIBUTOR_2DBC_INPUTS,
     &ANY_OUTPUT
 );
 signature!(
@@ -242,6 +320,10 @@ macro_rules! descriptor {
 
 descriptor!(DISTRIBUTED_DESCRIPTOR, DISTRIBUTED_SIGNATURES);
 descriptor!(GET_LOCAL_PART_DESCRIPTOR, LOCAL_PART_SIGNATURES);
+descriptor!(REDISTRIBUTE_DESCRIPTOR, REDISTRIBUTE_SIGNATURES);
+descriptor!(GET_CODISTRIBUTOR_DESCRIPTOR, GET_CODISTRIBUTOR_SIGNATURES);
+descriptor!(CODISTRIBUTOR_1D_DESCRIPTOR, CODISTRIBUTOR_1D_SIGNATURES);
+descriptor!(CODISTRIBUTOR_2DBC_DESCRIPTOR, CODISTRIBUTOR_2DBC_SIGNATURES);
 descriptor!(LAB_BARRIER_DESCRIPTOR, BARRIER_SIGNATURES);
 descriptor!(LAB_BROADCAST_DESCRIPTOR, BROADCAST_SIGNATURES);
 descriptor!(LAB_SEND_DESCRIPTOR, SEND_SIGNATURES);
@@ -331,6 +413,78 @@ parallel_data_entry!(
     "parallel.distributed",
     "Create a distributed array.",
     DISTRIBUTED_DESCRIPTOR
+);
+parallel_data_entry!(
+    REDISTRIBUTE_CATALOG_ENTRY,
+    "redistribute",
+    "parallel.redistribute",
+    "Redistribute an array with another codistributor.",
+    REDISTRIBUTE_DESCRIPTOR
+);
+parallel_data_entry!(
+    GET_CODISTRIBUTOR_CATALOG_ENTRY,
+    "getCodistributor",
+    "parallel.get-codistributor",
+    "Return the codistributor for a distributed array.",
+    GET_CODISTRIBUTOR_DESCRIPTOR
+);
+
+macro_rules! codistributor_entry {
+    ($constant:ident, $name:literal, $rule:literal, $summary:literal, $descriptor:ident) => {
+        pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            identity: BuiltinCatalogIdentity { name: $name },
+            category: "parallel",
+            documentation: BuiltinDocumentation {
+                summary: $summary,
+                keywords: &["parallel", "distributed", "codistributor"],
+                related: &["redistribute"],
+                introduced: None,
+                status: None,
+                examples: &[],
+            },
+            descriptor: &$descriptor,
+            contract: BuiltinContractDeclaration {
+                maturity: BuiltinContractMaturity::Complete,
+                inference_rule: BuiltinInferenceRuleId($rule),
+                compatibility: BuiltinCompatibility::Matlab,
+                async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+                purity: BuiltinPurity::Pure,
+                semantic_kind: BuiltinSemanticKind::General,
+                workspace_effect: None,
+                environment_effect: None,
+                effects: &[],
+                capabilities: &[],
+            },
+            placement: PARALLEL_PLACEMENT,
+            link: PARALLEL_LINK,
+            bindings: &[BuiltinBindingDeclaration {
+                identity: BuiltinBindingIdentity {
+                    builtin: BuiltinCatalogIdentity { name: $name },
+                    variant: "default",
+                },
+                availability: BuiltinBindingAvailability::Required,
+            }],
+            extensions: &[],
+            integer_capabilities: &[],
+            integer_audit: None,
+            suppress_auto_output: false,
+        };
+    };
+}
+
+codistributor_entry!(
+    CODISTRIBUTOR_1D_CATALOG_ENTRY,
+    "codistributor1d",
+    "parallel.codistributor1d",
+    "Create a one-dimensional codistributor.",
+    CODISTRIBUTOR_1D_DESCRIPTOR
+);
+codistributor_entry!(
+    CODISTRIBUTOR_2DBC_CATALOG_ENTRY,
+    "codistributor2dbc",
+    "parallel.codistributor2dbc",
+    "Create a two-dimensional block-cyclic codistributor.",
+    CODISTRIBUTOR_2DBC_DESCRIPTOR
 );
 parallel_data_entry!(
     GET_LOCAL_PART_CATALOG_ENTRY,

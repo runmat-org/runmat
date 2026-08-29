@@ -289,7 +289,11 @@ fn rvalue_uses(value: &MirRvalue, uses: &mut Locals, defs: &mut Locals) {
                 }
             }
         }
-        MirRvalue::Distributed(operation) => operand_uses(operation.input(), uses),
+        MirRvalue::Distributed(operation) => {
+            for operand in operation.operands() {
+                operand_uses(operand, uses);
+            }
+        }
         MirRvalue::Collective(operation) => {
             for operand in operation.operands() {
                 operand_uses(operand, uses);

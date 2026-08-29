@@ -291,8 +291,15 @@ fn remap_distributed(
         }
         MirDistributedOp::LocalPart { value }
         | MirDistributedOp::Materialize { value }
-        | MirDistributedOp::Redistribute { value, .. } => {
+        | MirDistributedOp::Codistributor { value } => {
             remap_operand(value, remap);
+        }
+        MirDistributedOp::Redistribute {
+            value,
+            codistributor,
+        } => {
+            remap_operand(value, remap);
+            remap_operand(codistributor, remap);
         }
     }
     Ok(())

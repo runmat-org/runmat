@@ -34,6 +34,7 @@ pub enum MirConstructKind {
     DistributedCreate,
     DistributedLocalPart,
     DistributedMaterialize,
+    DistributedCodistributor,
     DistributedRedistribute,
     CollectiveBarrier,
     CollectiveBroadcast,
@@ -94,6 +95,7 @@ pub fn rvalue_construct_kind(value: &crate::MirRvalue) -> MirConstructKind {
             D::Create { .. } => K::DistributedCreate,
             D::LocalPart { .. } => K::DistributedLocalPart,
             D::Materialize { .. } => K::DistributedMaterialize,
+            D::Codistributor { .. } => K::DistributedCodistributor,
             D::Redistribute { .. } => K::DistributedRedistribute,
         },
         R::Collective(operation) => match operation {
@@ -261,7 +263,7 @@ pub fn statement_declared_effects(statement: &crate::MirStmtKind) -> runmat_type
 }
 
 impl MirConstructKind {
-    pub const ALL: [Self; 51] = [
+    pub const ALL: [Self; 52] = [
         Self::Use,
         Self::Unary,
         Self::Binary,
@@ -283,6 +285,7 @@ impl MirConstructKind {
         Self::DistributedCreate,
         Self::DistributedLocalPart,
         Self::DistributedMaterialize,
+        Self::DistributedCodistributor,
         Self::DistributedRedistribute,
         Self::CollectiveBarrier,
         Self::CollectiveBroadcast,
@@ -351,6 +354,7 @@ impl MirConstructKind {
             K::DistributedCreate
             | K::DistributedLocalPart
             | K::DistributedMaterialize
+            | K::DistributedCodistributor
             | K::DistributedRedistribute
             | K::CollectiveBarrier
             | K::CollectiveBroadcast

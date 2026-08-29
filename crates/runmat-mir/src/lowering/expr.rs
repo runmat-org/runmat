@@ -261,6 +261,21 @@ fn lower_parallel_intrinsic(
                 value: values[0].clone(),
             }))
         }
+        ParallelIntrinsic::GetCodistributor => {
+            let values = operands()?;
+            arity(&values, &[1])?;
+            Some(MirRvalue::Distributed(Distributed::Codistributor {
+                value: values[0].clone(),
+            }))
+        }
+        ParallelIntrinsic::Redistribute => {
+            let values = operands()?;
+            arity(&values, &[2])?;
+            Some(MirRvalue::Distributed(Distributed::Redistribute {
+                value: values[0].clone(),
+                codistributor: values[1].clone(),
+            }))
+        }
         _ if !ctx.in_spmd_region() => None,
         ParallelIntrinsic::LabBarrier => {
             let values = operands()?;

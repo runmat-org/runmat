@@ -14909,6 +14909,34 @@ fn closing_a_pool_retires_distributed_and_composite_leases() {
     }));
 }
 
+#[test]
+fn typed_codistributors_redistribute_exact_arrays_through_mir_and_bytecode() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(4)));
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+pool = parpool(4);
+input = uint64([1, 2, 3, 0x0020000000000001u64; 5, 6, 7, 8; 9, 10, 11, 12; 13, 14, 15, 16]);
+original = distributed(input);
+columnDistributor = codistributor1d(uint32(2), uint64([1, 1, 1, 1]), uint64([4, 4]));
+byColumn = redistribute(original, columnDistributor);
+resolved = getCodistributor(byColumn);
+assert(resolved.Dimension == uint64(2));
+assert(all(resolved.Partition == uint64([1, 1, 1, 1])));
+assert(all(gather(byColumn) == input, "all"));
+gridDistributor = codistributor2dbc(uint32([2, 2]), uint64(1), "col", uint64([4, 4]));
+onGrid = redistribute(byColumn, gridDistributor);
+grid = getCodistributor(onGrid);
+assert(grid.BlockSize == uint64(1));
+assert(grid.Orientation == "col");
+assert(all(gather(onGrid) == input, "all"));
+"#,
+    )
+    .expect("typed redistribution executes");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn generic_native_deoptimizes_at_the_exact_parfor_boundary() {

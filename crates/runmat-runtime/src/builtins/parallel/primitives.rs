@@ -25,6 +25,8 @@ macro_rules! lowering_builtin {
 
 lowering_builtin!(distributed_builtin, "distributed");
 lowering_builtin!(get_local_part_builtin, "getLocalPart");
+lowering_builtin!(get_codistributor_builtin, "getCodistributor");
+lowering_builtin!(redistribute_builtin, "redistribute");
 lowering_builtin!(lab_barrier_builtin, "labBarrier");
 lowering_builtin!(lab_broadcast_builtin, "labBroadcast");
 lowering_builtin!(lab_send_builtin, "labSend");

@@ -222,7 +222,9 @@ fn rvalue_preserves_slice_pattern(
         MirRvalue::Future { args, .. } => args
             .iter()
             .all(|argument| !call_argument_mentions_local(argument, local)),
-        MirRvalue::Distributed(operation) => !operand_is_local(operation.input(), local),
+        MirRvalue::Distributed(operation) => operation
+            .operands()
+            .all(|operand| !operand_is_local(operand, local)),
         MirRvalue::Collective(operation) => {
             collective_input(operation).is_none_or(|input| !operand_is_local(input, local))
         }

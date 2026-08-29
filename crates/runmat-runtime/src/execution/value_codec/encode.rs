@@ -1,7 +1,7 @@
 use super::ValueCodecError;
 use runmat_execution::value::{
-    CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, SparseValue, StructField,
-    ValuePayload,
+    CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, RegisteredData,
+    RegisteredField, SparseValue, StructField, ValuePayload,
 };
 use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 
@@ -77,10 +77,32 @@ fn encode(value: &Value, path: &str) -> Result<ValuePayload, ValueCodecError> {
                 "GPU buffers require an object reference fenced to a worker and device",
             ))
         }
+        Value::Object(value)
+            if crate::parallel::codistributor::is_supported_class(&value.class_name) =>
+        {
+            crate::parallel::codistributor::validate_definition(value)
+                .map_err(|error| ValueCodecError::invalid(path, error.to_string()))?;
+            let mut fields = value
+                .properties
+                .iter()
+                .map(|(name, value)| {
+                    Ok(RegisteredField {
+                        name: name.clone(),
+                        value: encode(value, &field_path(path, name))?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ValueCodecError>>()?;
+            fields.sort_by(|left, right| left.name.cmp(&right.name));
+            InlineValue::ImmutableValueClass(RegisteredData {
+                type_identity: value.class_name.clone(),
+                schema_version: 1,
+                fields,
+            })
+        }
         Value::Object(_) | Value::ObjectArray(_) => {
             return Err(ValueCodecError::unsupported(
                 path,
-                "value classes require an explicitly registered immutable class codec",
+                "value classes and object arrays require an explicitly registered codec",
             ))
         }
         Value::HandleObject(_) => {

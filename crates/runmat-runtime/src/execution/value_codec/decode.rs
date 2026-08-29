@@ -4,7 +4,8 @@ use runmat_execution::value::{
 };
 use runmat_value::{
     CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, MException, SparseTensor, StringArray, StructValue, Tensor, Value,
+    LogicalArray, MException, ObjectInstance, SparseTensor, StringArray, StructValue, Tensor,
+    Value,
 };
 
 use super::ValueCodecError;
@@ -112,10 +113,39 @@ fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> 
         )),
         InlineValue::Exception(value) => decode_exception(value, path),
         InlineValue::Callable(value) => decode_callable(value, path),
-        InlineValue::ImmutableValueClass(_) => Err(ValueCodecError::unsupported(
-            path,
-            "the registered immutable value-class codec is unavailable in this runtime",
-        )),
+        InlineValue::ImmutableValueClass(value) => {
+            if value.schema_version != 1 {
+                return Err(ValueCodecError::unsupported(
+                    path,
+                    "the immutable value-class schema version is unavailable in this runtime",
+                ));
+            }
+            if !crate::parallel::codistributor::is_supported_class(&value.type_identity) {
+                return Err(ValueCodecError::unsupported(
+                    path,
+                    "the immutable value-class codec is not registered in this runtime",
+                ));
+            }
+            let mut object = ObjectInstance::new(value.type_identity.clone());
+            for field in &value.fields {
+                if object
+                    .properties
+                    .insert(
+                        field.name.clone(),
+                        decode(&field.value, &format!("{path}.{}", field.name))?,
+                    )
+                    .is_some()
+                {
+                    return Err(ValueCodecError::invalid(
+                        path,
+                        "immutable value-class fields must be unique",
+                    ));
+                }
+            }
+            crate::parallel::codistributor::validate_definition(&object)
+                .map_err(|error| ValueCodecError::invalid(path, error.to_string()))?;
+            Ok(Value::Object(object))
+        }
     }
 }
 

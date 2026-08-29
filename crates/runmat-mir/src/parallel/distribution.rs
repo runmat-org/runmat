@@ -16,20 +16,35 @@ pub enum MirDistributedOp {
     Materialize {
         value: MirOperand,
     },
+    Codistributor {
+        value: MirOperand,
+    },
     Redistribute {
         value: MirOperand,
-        scheme: DistributionScheme,
+        codistributor: MirOperand,
     },
 }
 
 impl MirDistributedOp {
-    pub fn input(&self) -> &MirOperand {
+    pub fn primary_input(&self) -> &MirOperand {
         match self {
             Self::Create { input, .. }
             | Self::LocalPart { value: input }
             | Self::Materialize { value: input }
+            | Self::Codistributor { value: input }
             | Self::Redistribute { value: input, .. } => input,
         }
+    }
+
+    pub fn operands(&self) -> impl Iterator<Item = &MirOperand> {
+        let (primary, secondary) = match self {
+            Self::Redistribute {
+                value,
+                codistributor,
+            } => (value, Some(codistributor)),
+            _ => (self.primary_input(), None),
+        };
+        [Some(primary), secondary].into_iter().flatten()
     }
 
     pub fn input_mut(&mut self) -> &mut MirOperand {
@@ -37,6 +52,7 @@ impl MirDistributedOp {
             Self::Create { input, .. }
             | Self::LocalPart { value: input }
             | Self::Materialize { value: input }
+            | Self::Codistributor { value: input }
             | Self::Redistribute { value: input, .. } => input,
         }
     }

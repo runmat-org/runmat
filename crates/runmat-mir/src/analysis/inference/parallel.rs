@@ -1,4 +1,6 @@
-use runmat_types::{DynamicReason, ValueFact, ValueKindFact};
+use runmat_types::{
+    codistributor_fact, CodistributorClass, DynamicReason, ValueFact, ValueKindFact,
+};
 
 use crate::analysis::engine::FlowState;
 
@@ -32,14 +34,24 @@ pub(crate) fn distributed_fact(
                 _ => dynamic_value(),
             }
         }
-        MirDistributedOp::Redistribute { value, scheme } => {
+        MirDistributedOp::Codistributor { value } => {
+            let class = match operand_fact(value, state).kind {
+                ValueKindFact::Distributed(distributed) => distributed
+                    .scheme
+                    .as_ref()
+                    .and_then(CodistributorClass::from_scheme),
+                _ => None,
+            };
+            codistributor_fact(class)
+        }
+        MirDistributedOp::Redistribute { value, .. } => {
             let ValueKindFact::Distributed(distributed) = operand_fact(value, state).kind else {
                 return dynamic_value();
             };
             ValueFact::scalar(ValueKindFact::Distributed(runmat_types::DistributedFact {
                 id: distributed.id,
                 owner: distributed.owner,
-                scheme: Some(scheme.clone()),
+                scheme: None,
                 value: distributed.value,
                 materializable: distributed.materializable,
             }))
