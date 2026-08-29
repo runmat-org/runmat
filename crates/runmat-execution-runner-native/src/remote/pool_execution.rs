@@ -194,6 +194,15 @@ pub(super) async fn execute(
                                 crate::NativeProgramFailure::Execution(message) => {
                                     ProgramExecutionResponse::Failure { message }
                                 }
+                                crate::NativeProgramFailure::Infrastructure(message) => {
+                                    ProgramExecutionResponse::Failure { message }
+                                }
+                                crate::NativeProgramFailure::WorkerLost(message) => {
+                                    return Ok(RemotePoolExecutionOutcome::Indeterminate(message));
+                                }
+                                crate::NativeProgramFailure::Cancelled => {
+                                    return Ok(RemotePoolExecutionOutcome::Cancelled);
+                                }
                                 crate::NativeProgramFailure::Runtime(failure) => {
                                     ProgramExecutionResponse::RuntimeFailure { failure }
                                 }

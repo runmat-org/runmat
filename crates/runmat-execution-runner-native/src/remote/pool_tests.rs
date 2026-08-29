@@ -629,12 +629,13 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
     .unwrap();
     pool.cancel(runmat_execution::CancellationReason::User)
         .unwrap();
-    assert!(
-        tokio::time::timeout(Duration::from_secs(1), completion.wait())
-            .await
-            .unwrap()
-            .is_err()
-    );
+    let cancelled = tokio::time::timeout(Duration::from_secs(1), completion.wait())
+        .await
+        .unwrap();
+    assert!(matches!(
+        cancelled,
+        Err(crate::NativeProgramFailure::Cancelled)
+    ));
     assert_eq!(
         pool.snapshot().tasks.get(&task_id).unwrap().state,
         runmat_execution::state::TaskState::Cancelled
@@ -693,12 +694,13 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
     .await
     .unwrap();
     pool.remove_worker(worker_id, true).await.unwrap();
-    assert!(
-        tokio::time::timeout(Duration::from_secs(1), completion.wait())
-            .await
-            .unwrap()
-            .is_err()
-    );
+    let lost = tokio::time::timeout(Duration::from_secs(1), completion.wait())
+        .await
+        .unwrap();
+    assert!(matches!(
+        lost,
+        Err(crate::NativeProgramFailure::WorkerLost(_))
+    ));
     assert_eq!(
         pool.snapshot().tasks.get(&lost_task_id).unwrap().state,
         runmat_execution::state::TaskState::Indeterminate

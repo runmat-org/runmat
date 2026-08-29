@@ -370,8 +370,7 @@ async fn parent() {
     .unwrap();
     assert!(matches!(
         cancelled,
-        Err(runmat_execution_runner_native::NativeProgramFailure::Execution(message))
-            if message.contains("cancelled")
+        Err(runmat_execution_runner_native::NativeProgramFailure::Cancelled)
     ));
     drop(cancel_task);
     drop(cancel_session);

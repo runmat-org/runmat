@@ -38,7 +38,9 @@ impl RemotePoolDriver {
             if let Err(error) = self.execution_objects.commit_results(&results) {
                 self.resolve_task(
                     task_id,
-                    Err(crate::NativeProgramFailure::Execution(error.to_string())),
+                    Err(crate::NativeProgramFailure::Infrastructure(
+                        error.to_string(),
+                    )),
                 );
                 return;
             }
@@ -47,18 +49,27 @@ impl RemotePoolDriver {
         if let Some(state) = terminal {
             let outcome = match report.report {
                 AttemptReport::Succeeded { result } => Ok(result),
-                AttemptReport::Failed { message, .. } | AttemptReport::Lost { message } => {
-                    Err(crate::NativeProgramFailure::Execution(message))
+                AttemptReport::Failed { kind, message } => match kind {
+                    runmat_execution_runner::AttemptFailureKind::Execution
+                    | runmat_execution_runner::AttemptFailureKind::Rejected => {
+                        Err(crate::NativeProgramFailure::Execution(message))
+                    }
+                    runmat_execution_runner::AttemptFailureKind::Infrastructure => {
+                        Err(crate::NativeProgramFailure::Infrastructure(message))
+                    }
+                },
+                AttemptReport::Lost { message } => {
+                    Err(crate::NativeProgramFailure::WorkerLost(message))
                 }
                 AttemptReport::RuntimeFailed { failure } => {
                     Err(crate::NativeProgramFailure::Runtime(failure))
                 }
-                AttemptReport::Cancelled => Err(crate::NativeProgramFailure::Execution(
-                    "remote task was cancelled".into(),
-                )),
-                AttemptReport::Started => Err(crate::NativeProgramFailure::Execution(format!(
-                    "remote task reached terminal state {state:?} without a terminal report"
-                ))),
+                AttemptReport::Cancelled => Err(crate::NativeProgramFailure::Cancelled),
+                AttemptReport::Started => {
+                    Err(crate::NativeProgramFailure::Infrastructure(format!(
+                        "remote task reached terminal state {state:?} without a terminal report"
+                    )))
+                }
             };
             self.resolve_task(task_id, outcome);
         }
@@ -79,14 +90,16 @@ impl RemotePoolDriver {
                     TaskState::Indeterminate => "remote worker was lost",
                     _ => return None,
                 };
-                Some((*task_id, message.to_string()))
+                Some((*task_id, task.state, message.to_string()))
             })
             .collect::<Vec<_>>();
-        for (task_id, message) in terminal {
-            self.resolve_task(
-                task_id,
-                Err(crate::NativeProgramFailure::Execution(message)),
-            );
+        for (task_id, state, message) in terminal {
+            let failure = match state {
+                TaskState::Cancelled => crate::NativeProgramFailure::Cancelled,
+                TaskState::Indeterminate => crate::NativeProgramFailure::WorkerLost(message),
+                _ => crate::NativeProgramFailure::Execution(message),
+            };
+            self.resolve_task(task_id, Err(failure));
         }
     }
 

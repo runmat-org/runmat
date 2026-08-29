@@ -40,28 +40,22 @@ pub(crate) fn next_task_completion_order() -> u64 {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TransferFailure {
-    Message(String),
+    Execution(String),
+    Infrastructure(String),
+    WorkerLost(String),
+    Cancelled,
     Runtime(Box<runmat_execution::ProgramRuntimeFailure>),
 }
 
 impl std::fmt::Display for TransferFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Message(message) => formatter.write_str(message),
+            Self::Execution(message)
+            | Self::Infrastructure(message)
+            | Self::WorkerLost(message) => formatter.write_str(message),
+            Self::Cancelled => formatter.write_str("execution was cancelled"),
             Self::Runtime(failure) => formatter.write_str(&failure.message),
         }
-    }
-}
-
-impl From<String> for TransferFailure {
-    fn from(message: String) -> Self {
-        Self::Message(message)
-    }
-}
-
-impl From<&str> for TransferFailure {
-    fn from(message: &str) -> Self {
-        Self::Message(message.to_string())
     }
 }
 
@@ -461,11 +455,18 @@ impl LocalDriver {
                 Ok(success) => AttemptReport::Succeeded {
                     result: success.clone(),
                 },
-                Err(_) if completion.cancelled.load(Ordering::Acquire) => AttemptReport::Cancelled,
-                Err(TransferFailure::Message(message)) => AttemptReport::Failed {
+                Err(TransferFailure::Execution(message)) => AttemptReport::Failed {
                     kind: AttemptFailureKind::Execution,
                     message: message.clone(),
                 },
+                Err(TransferFailure::Infrastructure(message)) => AttemptReport::Failed {
+                    kind: AttemptFailureKind::Infrastructure,
+                    message: message.clone(),
+                },
+                Err(TransferFailure::WorkerLost(message)) => AttemptReport::Lost {
+                    message: message.clone(),
+                },
+                Err(TransferFailure::Cancelled) => AttemptReport::Cancelled,
                 Err(TransferFailure::Runtime(failure)) => AttemptReport::RuntimeFailed {
                     failure: *failure.clone(),
                 },
@@ -478,20 +479,15 @@ impl LocalDriver {
                     &request, report,
                 )))
                 .unwrap_or_default();
-            let accepted = this
+            let terminal_state = this
                 .driver
                 .lock()
                 .expect("local driver poisoned")
                 .snapshot()
                 .tasks
                 .get(&request.task_id)
-                .is_some_and(|task| {
-                    matches!(
-                        task.state,
-                        TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
-                    )
-                });
-            if accepted {
+                .map(|task| task.state);
+            if let Some(result) = terminal_completion(terminal_state, result) {
                 completion.complete(result);
                 if let Some(gang) = spmd_gang {
                     if completion.try_value().is_some_and(|result| result.is_err()) {
@@ -517,6 +513,18 @@ impl LocalDriver {
     }
 }
 
+fn terminal_completion(state: Option<TaskState>, result: TransferResult) -> Option<TransferResult> {
+    match state? {
+        TaskState::Succeeded | TaskState::Failed | TaskState::Indeterminate => Some(result),
+        TaskState::Cancelled => Some(Err(TransferFailure::Cancelled)),
+        TaskState::Deferred
+        | TaskState::Ready
+        | TaskState::Assigned
+        | TaskState::Running
+        | TaskState::Committing => None,
+    }
+}
+
 impl Drop for LocalDriver {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.store_root);
@@ -536,16 +544,49 @@ mod task_completion_tests {
 
     use runmat_execution::resource::Capability;
 
-    use super::{LocalDriver, TaskCompletion, TransferResult};
+    use super::{
+        terminal_completion, LocalDriver, TaskCompletion, TransferFailure, TransferResult,
+    };
 
     #[test]
     fn completion_is_pollable_without_blocking_the_await_caller() {
         let completion = TaskCompletion::new();
         assert_eq!(completion.try_value(), None);
 
-        let result: TransferResult = Err("completed".into());
+        let result: TransferResult = Err(TransferFailure::Execution("completed".into()));
         completion.complete(result.clone());
         assert_eq!(completion.try_value(), Some(result));
+    }
+
+    #[test]
+    fn scheduler_terminal_state_is_authoritative_for_cancellation_and_loss() {
+        let late_success = Ok(runmat_execution_runner::AttemptSuccess::Values {
+            outputs: Vec::new(),
+            result_objects: Vec::new(),
+        });
+        assert_eq!(
+            terminal_completion(
+                Some(runmat_execution::state::TaskState::Cancelled),
+                late_success
+            ),
+            Some(Err(TransferFailure::Cancelled))
+        );
+
+        let worker_loss = Err(TransferFailure::WorkerLost("worker exited".into()));
+        assert_eq!(
+            terminal_completion(
+                Some(runmat_execution::state::TaskState::Indeterminate),
+                worker_loss.clone(),
+            ),
+            Some(worker_loss)
+        );
+        assert_eq!(
+            terminal_completion(
+                Some(runmat_execution::state::TaskState::Running),
+                Err(TransferFailure::Execution("not terminal".into())),
+            ),
+            None
+        );
     }
 
     #[test]

@@ -2058,12 +2058,5 @@ fn pop(stack: &mut Vec<Value>, message: &str) -> Result<Value, RuntimeError> {
 }
 
 fn execution_error(error: runmat_runtime::execution::ExecutionServiceError) -> RuntimeError {
-    match error {
-        runmat_runtime::execution::ExecutionServiceError::RuntimeFailure(failure) => {
-            runmat_runtime::execution::decode_runtime_failure(*failure).unwrap_or_else(|error| {
-                crate::interpreter::errors::mex("ExecutionProtocol", &error)
-            })
-        }
-        error => crate::interpreter::errors::mex("ExecutionService", &error.to_string()),
-    }
+    error.into_runtime_error()
 }

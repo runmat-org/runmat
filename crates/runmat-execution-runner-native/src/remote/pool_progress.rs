@@ -36,7 +36,7 @@ impl RemoteTaskCompletion {
 
     pub async fn wait(self) -> Result<AttemptSuccess, crate::NativeProgramFailure> {
         self.receiver.await.unwrap_or_else(|_| {
-            Err(crate::NativeProgramFailure::Execution(
+            Err(crate::NativeProgramFailure::Infrastructure(
                 "remote task completion channel closed".into(),
             ))
         })

@@ -79,6 +79,12 @@ pub struct NativeProgramTask {
 pub enum NativeProgramFailure {
     #[error("execution failed: {0}")]
     Execution(String),
+    #[error("execution infrastructure failed: {0}")]
+    Infrastructure(String),
+    #[error("execution worker was lost: {0}")]
+    WorkerLost(String),
+    #[error("execution was cancelled")]
+    Cancelled,
     #[error("execution failed: {}", .0.message)]
     Runtime(runmat_execution::ProgramRuntimeFailure),
 }
@@ -87,9 +93,16 @@ impl NativeProgramTask {
     pub fn try_result(&self) -> Option<Result<AttemptSuccess, NativeProgramFailure>> {
         self.completion.try_value().map(|result| {
             result.map_err(|failure| match failure {
-                crate::driver::TransferFailure::Message(message) => {
+                crate::driver::TransferFailure::Execution(message) => {
                     NativeProgramFailure::Execution(message)
                 }
+                crate::driver::TransferFailure::Infrastructure(message) => {
+                    NativeProgramFailure::Infrastructure(message)
+                }
+                crate::driver::TransferFailure::WorkerLost(message) => {
+                    NativeProgramFailure::WorkerLost(message)
+                }
+                crate::driver::TransferFailure::Cancelled => NativeProgramFailure::Cancelled,
                 crate::driver::TransferFailure::Runtime(failure) => {
                     NativeProgramFailure::Runtime(*failure)
                 }
