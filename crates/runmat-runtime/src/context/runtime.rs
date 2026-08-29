@@ -2,7 +2,29 @@ use super::{ContextFuture, RuntimeContextGuard, RuntimeContextState, RuntimeServ
 use crate::execution::RuntimeExecutionServices;
 use std::future::Future;
 use std::rc::Rc;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
+};
+
+static NEXT_RUNTIME_CONTEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Process-local identity for one runtime context state allocation.
+///
+/// This identity lets compatibility adapters partition ambient state while
+/// independently polled async sessions share an OS thread. It is not a
+/// durable, serialized, or cross-process execution identity.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RuntimeContextLocalId(u64);
+
+impl RuntimeContextLocalId {
+    fn next() -> Self {
+        let id = NEXT_RUNTIME_CONTEXT_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("runtime context identity space exhausted");
+        Self(id)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeLanguageMode {
@@ -88,7 +110,10 @@ impl RuntimeContext {
         execution: Rc<dyn RuntimeExecutionServices>,
         cancellation: Arc<AtomicBool>,
     ) -> Self {
-        let state = Rc::new(RuntimeContextState::new(cancellation));
+        let state = Rc::new(RuntimeContextState::new(
+            RuntimeContextLocalId::next(),
+            cancellation,
+        ));
         crate::class_registry::register_context_state(&state);
         Self {
             execution,
@@ -113,6 +138,10 @@ impl RuntimeContext {
 
     pub(super) fn state_identity(&self) -> *const RuntimeContextState {
         Rc::as_ptr(&self.state)
+    }
+
+    pub fn local_identity(&self) -> RuntimeContextLocalId {
+        self.state.local_identity
     }
 
     pub fn cancellation(&self) -> Arc<AtomicBool> {

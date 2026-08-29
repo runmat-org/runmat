@@ -11,8 +11,9 @@ use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest}
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::{InlineValue, ValuePayload};
 use runmat_execution::{
-    Digest, ExecutionScopeId, OutputContract, ParallelChunk, ParallelRandomnessContext, PoolId,
-    ProgramCallable, ProgramFunctionId, ProgramInvocationContext, ProgramRevision, TaskId,
+    Digest, ExecutionScopeId, GangHandle, GangId, OutputContract, ParallelChunk,
+    ParallelRandomnessContext, PoolHandle, PoolId, ProgramCallable, ProgramFunctionId,
+    ProgramInvocationContext, ProgramRevision, TaskId,
 };
 use runmat_execution_artifact::{
     archive::{write_bundle, ArchiveLimits},
@@ -26,8 +27,11 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 
 use super::{run_remote_worker_quic, QuicRemoteWorkerChannel};
-use super::{RemoteAttempt, RemoteBundleReceipt, RemotePoolDriver, RemoteWorkerChannel};
-use crate::NativeExecutionResult;
+use super::{
+    RemoteAttempt, RemoteBundleReceipt, RemotePoolDriver, RemoteSpmdGangProgram,
+    RemoteWorkerChannel,
+};
+use crate::{NativeExecutionResult, NativeProgramFailure};
 
 struct FakeWorker {
     node: String,
@@ -53,6 +57,14 @@ struct ExecutingWorker {
     spec: WorkerSpec,
     bundle: Arc<Vec<u8>>,
     assignments: Arc<std::sync::Mutex<Vec<runmat_execution::ProgramExecutionAssignment>>>,
+}
+
+struct CompiledSpmdProgram {
+    recipe: ProgramBuildRecipe,
+    artifact: ProgramArtifact,
+    region: runmat_types::ParallelRegionId,
+    bundle: Vec<u8>,
+    requested_outputs: u16,
 }
 
 #[async_trait]
@@ -852,6 +864,234 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
     server.unwrap();
 }
 
+#[tokio::test]
+async fn encrypted_remote_pool_executes_one_compiler_bound_rank_per_worker() {
+    let results = execute_encrypted_spmd_program(spmd_region_bundle().await)
+        .await
+        .unwrap();
+    assert_eq!(
+        results.iter().map(|result| result.rank).collect::<Vec<_>>(),
+        vec![runmat_types::LabRank(1), runmat_types::LabRank(2)]
+    );
+    let mut distributed_handle = None;
+    for result in results {
+        let mut saw_reduction = false;
+        let mut saw_distributed = false;
+        for output in result.outputs.into_iter().flatten() {
+            match output {
+                runmat_execution::SpmdOutputValue::Value(value) => {
+                    assert_eq!(
+                        runmat_runtime::execution::value_codec::decode_inline_value(&value)
+                            .unwrap(),
+                        runmat_value::Value::Int(runmat_value::IntValue::U32(3))
+                    );
+                    saw_reduction = true;
+                }
+                runmat_execution::SpmdOutputValue::Distributed(snapshot) => {
+                    snapshot.validate().unwrap();
+                    assert_eq!(snapshot.owned.layout.rank, result.rank);
+                    if let Some(handle) = &distributed_handle {
+                        assert_eq!(handle, &snapshot.handle);
+                    } else {
+                        distributed_handle = Some(snapshot.handle.clone());
+                    }
+                    let local = runmat_runtime::execution::value_codec::decode_inline_value(
+                        &snapshot.owned.value,
+                    )
+                    .unwrap();
+                    let expected = match result.rank.0 {
+                        1 => vec![1_u64, 2],
+                        2 => vec![3_u64, 4],
+                        _ => unreachable!(),
+                    };
+                    let runmat_value::Value::Tensor(local) = local else {
+                        panic!("remote distributed shard must retain its typed local tensor");
+                    };
+                    let Some(runmat_value::IntegerStorage::U64(values)) = local.integer_storage()
+                    else {
+                        panic!("remote distributed shard must retain uint64 storage");
+                    };
+                    assert_eq!(values, expected.as_slice());
+                    saw_distributed = true;
+                }
+            }
+        }
+        assert!(saw_reduction && saw_distributed);
+    }
+}
+
+#[tokio::test]
+async fn remote_rank_failure_releases_a_peer_blocked_in_a_collective() {
+    let program = compile_spmd_region_bundle(
+        r#"
+spmd
+  if spmdIndex() == 1
+    error("RunMat:test:RemoteSpmdPrimary", "primary rank failed");
+  end
+  spmdBarrier();
+  reached = spmdIndex();
+end
+"#,
+        1,
+    )
+    .await;
+    let failure = tokio::time::timeout(
+        Duration::from_secs(5),
+        execute_encrypted_spmd_program(program),
+    )
+    .await
+    .expect("a peer blocked in a remote collective must be released")
+    .unwrap_err();
+    let NativeProgramFailure::Runtime(failure) = failure else {
+        panic!("primary rank failure lost its structured runtime identity: {failure:?}");
+    };
+    assert_eq!(
+        failure.identifier.as_deref(),
+        Some("RunMat:test:RemoteSpmdPrimary")
+    );
+    assert_eq!(failure.message, "primary rank failed");
+}
+
+async fn execute_encrypted_spmd_program(
+    program: CompiledSpmdProgram,
+) -> Result<Vec<runmat_runtime::execution::SpmdRankResult>, NativeProgramFailure> {
+    let CertifiedKey {
+        cert: first_cert,
+        signing_key: first_key,
+    } = generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
+    let first_certificate = first_cert.der().to_vec();
+    let first_listener = QuicOverlayListener::bind(
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+        vec![first_certificate.clone()],
+        first_key.serialize_der(),
+        FrameLimits::default(),
+    )
+    .unwrap();
+    let first_authority = first_listener.local_addr().unwrap();
+    let CertifiedKey {
+        cert: second_cert,
+        signing_key: second_key,
+    } = generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
+    let second_certificate = second_cert.der().to_vec();
+    let second_listener = QuicOverlayListener::bind(
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+        vec![second_certificate.clone()],
+        second_key.serialize_der(),
+        FrameLimits::default(),
+    )
+    .unwrap();
+    let second_authority = second_listener.local_addr().unwrap();
+
+    let scope_id = ExecutionScopeId::derive(&[b"remote-spmd-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-spmd-pool"]);
+    let workers = [
+        WorkerSpec {
+            id: WorkerId::derive(&[b"remote-spmd-worker-1"]),
+            pool_id,
+            resources: inventory(1_000),
+        },
+        WorkerSpec {
+            id: WorkerId::derive(&[b"remote-spmd-worker-2"]),
+            pool_id,
+            resources: inventory(1_000),
+        },
+    ];
+    let run_key =
+        runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([19; 32]).unwrap();
+    let first_server = run_remote_worker_quic(
+        first_listener,
+        "run-remote-spmd",
+        workers[0].clone(),
+        17,
+        [21; 16],
+        run_key.clone(),
+        FrameLimits::default(),
+    );
+    let second_server = run_remote_worker_quic(
+        second_listener,
+        "run-remote-spmd",
+        workers[1].clone(),
+        17,
+        [22; 16],
+        run_key.clone(),
+        FrameLimits::default(),
+    );
+    let client = async {
+        let pool = RemotePoolDriver::new(
+            scope_id,
+            PoolSpec {
+                id: pool_id,
+                min_workers: 2,
+                max_workers: 2,
+                max_in_flight: 2,
+                resource_limit: inventory(2_000),
+            },
+            17,
+            program.bundle,
+        )
+        .unwrap();
+        for (ordinal, (worker, authority, certificate)) in [
+            (workers[0].clone(), first_authority, first_certificate),
+            (workers[1].clone(), second_authority, second_certificate),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let session_id = [u8::try_from(ordinal + 21).unwrap(); 16];
+            let channel = QuicRemoteWorkerChannel::connect(
+                super::RemoteWorkerChannelConfig {
+                    run_identity: "run-remote-spmd".into(),
+                    node_identity: format!("remote-spmd-node-{ordinal}"),
+                    worker,
+                    driver_fence: 17,
+                    session_id,
+                    run_key: run_key.clone(),
+                    limits: FrameLimits::default(),
+                },
+                &PinnedQuicEndpoint {
+                    authority,
+                    server_name: "runmat.execution".into(),
+                    certificate_der: certificate,
+                },
+            )
+            .await
+            .unwrap();
+            pool.add_worker(channel).await.unwrap();
+        }
+        let gang = GangHandle {
+            id: GangId::derive(&[b"remote-spmd-gang"]),
+            scope_id,
+            generation: 1,
+            pool: PoolHandle {
+                id: pool_id,
+                scope_id,
+                generation: 1,
+            },
+            labs: runmat_types::LabCount(2),
+        };
+        let completion = pool
+            .submit_spmd_gang(RemoteSpmdGangProgram {
+                gang,
+                region: program.region,
+                recipe: program.recipe,
+                artifact: program.artifact,
+                captures: Vec::new(),
+                requested_outputs: program.requested_outputs,
+                resources: request(),
+            })
+            .unwrap();
+        let result = completion.wait().await;
+        for worker in workers {
+            pool.remove_worker(worker.id, false).await.unwrap();
+        }
+        result
+    };
+    let (first, second, result) = tokio::join!(first_server, second_server, client);
+    first.unwrap();
+    second.unwrap();
+    result
+}
+
 fn inventory(cpu_millicores: u32) -> ResourceInventory {
     ResourceInventory {
         cpu_millicores,
@@ -1083,6 +1323,113 @@ end
     };
     program.validate_for_portable_host().unwrap();
     (program, artifact_id, bundle_bytes, bytecode)
+}
+
+async fn spmd_region_bundle() -> CompiledSpmdProgram {
+    compile_spmd_region_bundle(
+        r#"
+spmd
+  built = codistributed.build(uint64([2 * spmdIndex() - 1, 2 * spmdIndex()]), codistributor1d(uint32(2), uint64([2, 2]), uint64([1, 4])), "noCommunication");
+  total = spmdPlus(uint32(spmdIndex()));
+end
+"#,
+        2,
+    )
+    .await
+}
+
+async fn compile_spmd_region_bundle(
+    source_text: &str,
+    expected_outputs: usize,
+) -> CompiledSpmdProgram {
+    let project_root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project_root.path().join("src")).unwrap();
+    std::fs::write(
+        project_root.path().join("runmat.toml"),
+        "[package]\nname = \"remote-spmd\"\n[sources]\nroots = [\"src\"]\n",
+    )
+    .unwrap();
+    std::fs::write(project_root.path().join("src/remote_spmd.m"), source_text).unwrap();
+    let project = runmat_package::build_frozen_project(
+        &project_root.path().join("runmat.toml"),
+        BTreeSet::new(),
+    )
+    .unwrap();
+    let project_revision = project.revision();
+    let revision = ProgramRevision::new(
+        Digest::from_bytes(*project_revision.graph_digest.bytes()),
+        Digest::from_bytes(*project_revision.source_revision.bytes()),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+    )
+    .unwrap();
+    let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    session
+        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .unwrap();
+    let unit = session
+        .compile_executable_unit(
+            runmat_core::ExecutableSource::new("remote-spmd", "src/remote_spmd.m", source_text),
+            Some(revision.clone()),
+        )
+        .await
+        .unwrap();
+    let envelope = unit.portable_envelope().unwrap();
+    let bytecode_payload = envelope
+        .component(runmat_execution::ExecutableComponentKind::Bytecode)
+        .expect("portable SPMD product contains bytecode");
+    let bytecode: runmat_vm::Bytecode = serde_json::from_slice(&bytecode_payload.bytes).unwrap();
+    let region = bytecode.spmd_regions.first().unwrap();
+    assert!(
+        region.captures.is_empty(),
+        "unexpected SPMD captures: {:?}",
+        region
+            .captures
+            .iter()
+            .map(|capture| (bytecode.var_names.get(&capture.slot), capture.slot))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(region.outputs.len(), expected_outputs);
+    let region_id = region.contract.id;
+    let recipe = ProgramBuildRecipe {
+        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        program_revision: revision,
+        entrypoint: ProgramCallable::spmd_region(region_id).recipe_entrypoint(),
+        outputs: OutputContract {
+            requested_outputs: u16::try_from(expected_outputs).unwrap(),
+        },
+        execution_mode: "interpreter".into(),
+        target: runmat_execution_artifact::ProgramTarget::portable("remote-spmd-test"),
+        features: BTreeSet::new(),
+        compile_options: BTreeSet::new(),
+        source_objects: Vec::new(),
+        expected_artifact_id: None,
+    };
+    let artifact = ProgramArtifact::materialize(
+        &recipe,
+        ExecutableForm::InterpreterBytecodeV1,
+        serde_json::to_vec(&bytecode).unwrap(),
+    )
+    .unwrap();
+    let bundle = ExecutionBundleBuilder::native(&project, recipe.program_revision.clone())
+        .unwrap()
+        .with_materialized_program(
+            recipe.clone(),
+            ExecutableForm::InterpreterBytecodeV1,
+            artifact.executable_bytes.clone(),
+        )
+        .build()
+        .unwrap();
+    let recipe = bundle.manifest.recipes.first().cloned().unwrap();
+    let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
+    let mut bytes = Vec::new();
+    write_bundle(&bundle, &mut bytes, ArchiveLimits::default()).unwrap();
+    CompiledSpmdProgram {
+        recipe,
+        artifact,
+        region: region_id,
+        bundle: bytes,
+        requested_outputs: u16::try_from(expected_outputs).unwrap(),
+    }
 }
 
 async fn build_executable_bundle(

@@ -180,11 +180,9 @@ pub(super) async fn execute(
                             result_objects,
                         },
                     )),
-                    Ok(runmat_execution_runner::AttemptSuccess::Spmd { outputs }) => {
-                        Ok(RemotePoolExecutionOutcome::Completed(
-                            ProgramExecutionResponse::SpmdSuccess { outputs },
-                        ))
-                    }
+                    Ok(runmat_execution_runner::AttemptSuccess::Spmd { .. }) => Err(protocol(
+                        "remote root execution returned an SPMD rank result outside the typed gang path",
+                    )),
                     Err(failure) => {
                         let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
                         if state == Some(TaskState::Indeterminate) {

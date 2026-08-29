@@ -27,7 +27,7 @@ pub(crate) async fn execute_host_program_request_with_collective(
     execute_host_program_request_with_project_and_collective(request, None, Some(collective)).await
 }
 
-async fn execute_host_program_request_with_project_and_collective(
+pub(crate) async fn execute_host_program_request_with_project_and_collective(
     request: ProgramExecutionRequest,
     materialized: Option<&crate::materialized_project::MaterializedProject>,
     collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,

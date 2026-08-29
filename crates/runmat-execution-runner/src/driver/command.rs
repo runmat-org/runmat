@@ -1,7 +1,7 @@
 use runmat_execution::identity::WorkerId;
 use runmat_execution::state::PoolState;
 use runmat_execution::value::ValueRef;
-use runmat_execution::{CancellationReason, ExecutionScopeId, PoolId, TaskId};
+use runmat_execution::{CancellationReason, ExecutionScopeId, GangHandle, PoolId, TaskId};
 use serde::{Deserialize, Serialize};
 
 use crate::cancellation::EscalationPolicy;
@@ -47,9 +47,18 @@ pub enum DriverCommand {
     DrainWorker(WorkerId),
     WorkerLost(WorkerId),
     Submit(Box<TaskSubmission>),
+    /// Atomically admit a related set of tasks before scheduling any member.
+    /// This is used by gang execution so no rank can launch against a
+    /// partially registered task set.
+    SubmitBatch(Vec<TaskSubmission>),
     BackendReport(BackendReport),
     CancelScope {
         scope_id: ExecutionScopeId,
+        reason: CancellationReason,
+        now_millis: u64,
+    },
+    CancelGang {
+        gang: GangHandle,
         reason: CancellationReason,
         now_millis: u64,
     },

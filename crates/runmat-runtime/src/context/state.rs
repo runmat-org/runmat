@@ -19,6 +19,7 @@ use crate::source_context::SourceInfo;
 /// complete state; new code uses the focused accessors on [`RuntimeContext`].
 #[derive(Debug)]
 pub struct RuntimeContextState {
+    pub(crate) local_identity: super::RuntimeContextLocalId,
     pub(crate) source: RefCell<SourceState>,
     pub(crate) call: RefCell<CallState>,
     pub(crate) output: RefCell<OutputState>,
@@ -47,8 +48,12 @@ pub struct RuntimeContextState {
 }
 
 impl RuntimeContextState {
-    pub fn new(cancellation: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        local_identity: super::RuntimeContextLocalId,
+        cancellation: Arc<AtomicBool>,
+    ) -> Self {
         Self {
+            local_identity,
             source: RefCell::new(SourceState::default()),
             call: RefCell::new(CallState::default()),
             output: RefCell::new(OutputState::default()),

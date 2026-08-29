@@ -15,7 +15,7 @@ pub mod legacy;
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use runtime::{
     ProgramExecutionAssignmentGuard, ProgramExecutionJobGuard, RuntimeContext,
-    RuntimeExecutionStack, RuntimeExecutionStackGuard, RuntimeLanguageMode,
+    RuntimeContextLocalId, RuntimeExecutionStack, RuntimeExecutionStackGuard, RuntimeLanguageMode,
     DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
 pub use scope::{ContextFuture, RuntimeContextGuard};
