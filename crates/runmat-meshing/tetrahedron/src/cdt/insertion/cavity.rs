@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use runmat_meshing_core::{
-    quality::predicate::{insphere3d, orient3d, PredicateSign},
+    quality::predicate::{insphere3d, orient2d, orient3d, PredicateSign},
     StableDigest,
 };
 
@@ -47,14 +47,9 @@ pub(super) fn connected_cavity(
                 }
                 // A symbolic in-sphere tie must never leave a physical zero-volume
                 // replacement across a face containing the inserted node.
-                let coplanar = node_coplanar_with_face(
-                    topology,
-                    tetrahedron.vertex_indices,
-                    opposite,
-                    node,
-                    work,
-                )?;
-                queue.push_back((*neighbor as usize, coplanar));
+                let lies_on_face =
+                    node_lies_on_face(topology, tetrahedron.vertex_indices, opposite, node, work)?;
+                queue.push_back((*neighbor as usize, lies_on_face));
             }
         }
     }
@@ -65,6 +60,67 @@ pub(super) fn connected_cavity(
         ));
     }
     Ok(cavity)
+}
+
+fn node_lies_on_face(
+    topology: &DelaunayVolumeTopology,
+    vertices: [u32; 4],
+    opposite: usize,
+    node: DelaunayVolumeNode,
+    work: &mut InsertionWork<'_>,
+) -> Result<bool, DelaunayInsertionError> {
+    if !node_coplanar_with_face(topology, vertices, opposite, node, work)? {
+        return Ok(false);
+    }
+    let mut triangle = [[0.0; 3]; 3];
+    let mut cursor = 0;
+    for (vertex_index, vertex) in vertices.iter().enumerate() {
+        if vertex_index != opposite {
+            triangle[cursor] = topology.nodes[*vertex as usize].coordinates_m;
+            cursor += 1;
+        }
+    }
+    let axes = projection_axes(triangle, work)?;
+    let project = |point: [f64; 3]| [point[axes[0]], point[axes[1]]];
+    let query = project(node.coordinates_m);
+    let signs = [
+        planar_orientation([project(triangle[0]), project(triangle[1]), query], work)?,
+        planar_orientation([project(triangle[1]), project(triangle[2]), query], work)?,
+        planar_orientation([project(triangle[2]), project(triangle[0]), query], work)?,
+    ];
+    let has_positive = signs.contains(&PredicateSign::Positive);
+    let has_negative = signs.contains(&PredicateSign::Negative);
+    Ok(!(has_positive && has_negative))
+}
+
+fn projection_axes(
+    triangle: [[f64; 3]; 3],
+    work: &mut InsertionWork<'_>,
+) -> Result<[usize; 2], DelaunayInsertionError> {
+    for axes in [[0, 1], [0, 2], [1, 2]] {
+        if planar_orientation(triangle.map(|point| [point[axes[0]], point[axes[1]]]), work)?
+            != PredicateSign::Zero
+        {
+            return Ok(axes);
+        }
+    }
+    Err(error(
+        DelaunayInsertionErrorKind::InvalidTopology,
+        "tetrahedron face is exactly collinear",
+    ))
+}
+
+fn planar_orientation(
+    points: [[f64; 2]; 3],
+    work: &mut InsertionWork<'_>,
+) -> Result<PredicateSign, DelaunayInsertionError> {
+    work.predicate()?;
+    orient2d(points).map_err(|failure| {
+        error(
+            DelaunayInsertionErrorKind::InvalidNode,
+            format!("planar predicate rejected coordinates: {failure:?}"),
+        )
+    })
 }
 
 pub(super) fn stable_face(
@@ -112,6 +168,18 @@ fn in_circumsphere(
     node: DelaunayVolumeNode,
     work: &mut InsertionWork<'_>,
 ) -> Result<bool, DelaunayInsertionError> {
+    // Taking the closed circumsphere keeps the cavity coherent when several
+    // tetrahedra are exactly cospherical.
+    circumsphere_relation(topology, vertices, node, work)
+        .map(|sign| matches!(sign, PredicateSign::Positive | PredicateSign::Zero))
+}
+
+pub(super) fn circumsphere_relation(
+    topology: &DelaunayVolumeTopology,
+    vertices: [u32; 4],
+    node: DelaunayVolumeNode,
+    work: &mut InsertionWork<'_>,
+) -> Result<PredicateSign, DelaunayInsertionError> {
     work.predicate()?;
     let points = vertices.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
     insphere3d([
@@ -121,10 +189,61 @@ fn in_circumsphere(
         points[3],
         node.coordinates_m,
     ])
-    // The canonical insertion order supplies deterministic tie resolution.
-    // Taking the closed circumsphere keeps the cavity coherent when several
-    // tetrahedra are exactly cospherical; independently breaking each zero
-    // predicate can otherwise produce a non-manifold cavity boundary.
-    .map(|sign| matches!(sign, PredicateSign::Positive | PredicateSign::Zero))
     .map_err(predicate_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_meshing_core::NeverCancelled;
+
+    use super::*;
+    use crate::cdt::{
+        build_delaunay_volume_topology, DelaunayInsertionOptions, DelaunayTopologyOptions,
+    };
+
+    fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
+        DelaunayVolumeNode {
+            identity: StableDigest::from_bytes([identity; 32]),
+            coordinates_m,
+        }
+    }
+
+    #[test]
+    fn coplanarity_does_not_force_cavity_traversal_outside_the_face() {
+        let topology = build_delaunay_volume_topology(
+            vec![
+                node(10, [-2.0, -2.0, -2.0]),
+                node(20, [2.0, -2.0, -2.0]),
+                node(30, [0.0, 2.0, -2.0]),
+                node(40, [0.0, 0.0, 2.0]),
+            ],
+            vec![[0, 1, 2, 3]],
+            DelaunayTopologyOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap();
+        let vertices = topology.tetrahedra[0].vertex_indices;
+        let opposite = vertices
+            .iter()
+            .position(|vertex| topology.nodes[*vertex as usize].coordinates_m[2] == 2.0)
+            .unwrap();
+        let mut work = InsertionWork::new(DelaunayInsertionOptions::default(), &NeverCancelled);
+
+        assert!(node_lies_on_face(
+            &topology,
+            vertices,
+            opposite,
+            node(50, [0.0, -2.0 / 3.0, -2.0]),
+            &mut work,
+        )
+        .unwrap());
+        assert!(!node_lies_on_face(
+            &topology,
+            vertices,
+            opposite,
+            node(60, [10.0, 10.0, -2.0]),
+            &mut work,
+        )
+        .unwrap());
+    }
 }

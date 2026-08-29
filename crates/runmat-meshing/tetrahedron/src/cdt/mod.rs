@@ -7,6 +7,7 @@ mod constraints;
 mod facet_recovery;
 mod incidence;
 mod insertion;
+mod mutation;
 mod point_set;
 mod segment_recovery;
 mod solver_topology;
@@ -109,6 +110,7 @@ pub use volume_refinement::{
 };
 pub use volume_sliver::{
     treat_delaunay_volume_slivers, validate_delaunay_volume_sliver_treatment,
-    DelaunayVolumeSliverError, DelaunayVolumeSliverErrorKind, DelaunayVolumeSliverOptions,
-    DelaunayVolumeSliverRelocation, DelaunayVolumeSliverTreatment,
+    DelaunayVolumeSliverDeletion, DelaunayVolumeSliverError, DelaunayVolumeSliverErrorKind,
+    DelaunayVolumeSliverMutation, DelaunayVolumeSliverOptions, DelaunayVolumeSliverRelocation,
+    DelaunayVolumeSliverTreatment,
 };

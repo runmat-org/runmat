@@ -146,6 +146,38 @@ fn insertion_retriangulates_an_exact_hull_edge_without_zero_volume_cells() {
 }
 
 #[test]
+fn insertion_regularizes_a_nonmanifold_conflict_cavity_without_crossing_its_boundary() {
+    let topology = build_delaunay_volume_topology(
+        vec![
+            node(10, [0.0, 0.0, -1.0]),
+            node(20, [0.0, 0.0, 1.0]),
+            node(30, [1.0, 0.0, 0.0]),
+            node(40, [0.0, 1.0, 0.0]),
+            node(50, [-1.0, 0.0, 0.0]),
+            node(60, [0.0, -1.0, 0.0]),
+        ],
+        vec![[0, 1, 2, 3], [0, 1, 3, 4], [0, 1, 4, 5], [0, 1, 5, 2]],
+        DelaunayTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let mut cavity = BTreeSet::from([0, 3]);
+    let mut work = InsertionWork::new(DelaunayInsertionOptions::default(), &NeverCancelled);
+
+    regularize_cavity_boundary(
+        &topology,
+        &mut cavity,
+        node(70, [0.2, 0.1, 0.1]),
+        &BTreeSet::new(),
+        false,
+        &mut work,
+    )
+    .unwrap();
+
+    assert_eq!(cavity, BTreeSet::from([0, 1, 3]));
+}
+
+#[test]
 fn insertion_rejects_outside_repeated_and_tampered_inputs() {
     let topology = enclosing_tetrahedron();
     assert_eq!(

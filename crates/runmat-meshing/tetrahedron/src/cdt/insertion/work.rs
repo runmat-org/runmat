@@ -43,4 +43,8 @@ impl<'a> InsertionWork<'a> {
         }
         Ok(())
     }
+
+    pub(super) fn cancellation(&self) -> &'a dyn MeshingCancellationSignal {
+        self.cancellation
+    }
 }

@@ -4,9 +4,10 @@ use runmat_meshing_core::{
 };
 
 use super::{
-    cavity::stable_face, error, predicate_error, topology_error, validate_options,
-    DelaunayInsertionError, DelaunayInsertionErrorKind, DelaunayInsertionOptions,
-    DelaunayVolumeNode, DelaunayVolumeTopology, InsertionWork,
+    cavity::stable_face, error, predicate_error, topology_error,
+    two_to_three_topology_is_admissible, validate_options, DelaunayInsertionError,
+    DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunayVolumeNode,
+    DelaunayVolumeTopology, InsertionWork,
 };
 use crate::cdt::topology::build_delaunay_volume_topology_with_regions;
 use crate::reconnect::two_to_three_geometry_is_admissible;
@@ -121,12 +122,29 @@ fn validate_topology(
                         "neighbors do not share exactly one triangular face",
                     )
                 })?;
+            let local_opposite = tetrahedron
+                .vertex_indices
+                .iter()
+                .copied()
+                .find(|vertex| !neighbor.vertex_indices.contains(vertex))
+                .ok_or_else(|| {
+                    error(
+                        DelaunayInsertionErrorKind::InvalidTopology,
+                        "neighbors do not have distinct opposite vertices",
+                    )
+                })?;
             if in_circumsphere_exact(
                 topology,
                 tetrahedron.vertex_indices,
                 topology.nodes[opposite as usize],
                 &mut work,
-            )? && two_to_three_geometry_is_admissible(
+            )? && two_to_three_topology_is_admissible(
+                topology,
+                tetrahedron_index,
+                neighbor_index as usize,
+                local_opposite,
+                opposite,
+            ) && two_to_three_geometry_is_admissible(
                 tetrahedron.vertex_indices,
                 neighbor.vertex_indices,
                 |node| topology.nodes[node as usize].coordinates_m,
