@@ -6,8 +6,8 @@ use runmat_meshing_core::{
 };
 
 use super::{
-    point_in_tetrahedron, predicate_error, DelaunayInsertionError, DelaunayVolumeNode,
-    DelaunayVolumeTopology, InsertionWork,
+    point_in_tetrahedron, predicate_error, topology_access::TetrahedralTopology,
+    DelaunayInsertionError, DelaunayVolumeNode, InsertionWork,
 };
 
 /// Deterministic point location for one immutable topology.
@@ -15,12 +15,12 @@ use super::{
 /// Adjacency walking is the primary path. Exact orientation predicates decide
 /// every crossing and containment result. An optional grid is only used when a
 /// walk reaches a disconnected component or cycles on a degenerate complex.
-pub(super) struct TetrahedronPointLocator<'topology> {
-    topology: &'topology DelaunayVolumeTopology,
+pub(super) struct TetrahedronPointLocator<'topology, T> {
+    topology: &'topology T,
 }
 
-impl<'topology> TetrahedronPointLocator<'topology> {
-    pub(super) fn walking(topology: &'topology DelaunayVolumeTopology) -> Self {
+impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
+    pub(super) fn walking(topology: &'topology T) -> Self {
         Self { topology }
     }
 
@@ -29,20 +29,26 @@ impl<'topology> TetrahedronPointLocator<'topology> {
         node: DelaunayVolumeNode,
         hint: Option<usize>,
         work: &mut InsertionWork<'_>,
-    ) -> Result<Option<usize>, DelaunayInsertionError> {
-        if let Some(start) = hint.or_else(|| (!self.topology.tetrahedra.is_empty()).then_some(0)) {
+    ) -> Result<Option<u32>, DelaunayInsertionError> {
+        if let Some(start) = hint.or_else(|| {
+            (0..self.topology.tetrahedron_slot_count())
+                .find(|index| self.topology.tetrahedron(*index as u32).is_some())
+        }) {
             if let Some(containing) = self.walk_containing(start, node, work)? {
                 return Ok(Some(containing));
             }
         }
 
-        for (tetrahedron_index, tetrahedron) in self.topology.tetrahedra.iter().enumerate() {
+        for tetrahedron_index in 0..self.topology.tetrahedron_slot_count() {
+            let Some(tetrahedron) = self.topology.tetrahedron(tetrahedron_index as u32) else {
+                continue;
+            };
             work.checkpoint()?;
             if expanded_tetrahedron_bounds(self.topology, tetrahedron.vertex_indices)
                 .contains_point(node.coordinates_m)
                 && point_in_tetrahedron(self.topology, tetrahedron.vertex_indices, node, work)?
             {
-                return Ok(Some(tetrahedron_index));
+                return Ok(Some(tetrahedron_index as u32));
             }
         }
         Ok(None)
@@ -52,15 +58,18 @@ impl<'topology> TetrahedronPointLocator<'topology> {
         &self,
         node: DelaunayVolumeNode,
         work: &mut InsertionWork<'_>,
-    ) -> Result<BTreeSet<usize>, DelaunayInsertionError> {
+    ) -> Result<BTreeSet<u32>, DelaunayInsertionError> {
         let mut containing = BTreeSet::new();
-        for (tetrahedron_index, tetrahedron) in self.topology.tetrahedra.iter().enumerate() {
+        for tetrahedron_index in 0..self.topology.tetrahedron_slot_count() {
+            let Some(tetrahedron) = self.topology.tetrahedron(tetrahedron_index as u32) else {
+                continue;
+            };
             work.checkpoint()?;
             if expanded_tetrahedron_bounds(self.topology, tetrahedron.vertex_indices)
                 .contains_point(node.coordinates_m)
                 && point_in_tetrahedron(self.topology, tetrahedron.vertex_indices, node, work)?
             {
-                containing.insert(tetrahedron_index);
+                containing.insert(tetrahedron_index as u32);
             }
         }
         Ok(containing)
@@ -71,21 +80,28 @@ impl<'topology> TetrahedronPointLocator<'topology> {
         start: usize,
         node: DelaunayVolumeNode,
         work: &mut InsertionWork<'_>,
-    ) -> Result<Option<usize>, DelaunayInsertionError> {
-        if start >= self.topology.tetrahedra.len() {
+    ) -> Result<Option<u32>, DelaunayInsertionError> {
+        if start >= self.topology.tetrahedron_slot_count()
+            || self.topology.tetrahedron(start as u32).is_none()
+        {
             return Ok(None);
         }
         let mut visited = BTreeSet::new();
         let mut current = start;
         while visited.insert(current) {
             work.checkpoint()?;
-            let tetrahedron = &self.topology.tetrahedra[current];
+            let tetrahedron = self.topology.tetrahedron(current as u32).ok_or_else(|| {
+                super::error(
+                    super::DelaunayInsertionErrorKind::InvalidTopology,
+                    "point-location walk reached an inactive tetrahedron",
+                )
+            })?;
             let mut crossing = None;
             for opposite in 0..4 {
                 work.predicate()?;
                 let mut points = tetrahedron
                     .vertex_indices
-                    .map(|vertex| self.topology.nodes[vertex as usize].coordinates_m);
+                    .map(|vertex| self.topology.nodes()[vertex as usize].coordinates_m);
                 points[opposite] = node.coordinates_m;
                 if orient3d(points).map_err(predicate_error)? == PredicateSign::Negative {
                     crossing = Some(opposite);
@@ -93,7 +109,7 @@ impl<'topology> TetrahedronPointLocator<'topology> {
                 }
             }
             let Some(opposite) = crossing else {
-                return Ok(Some(current));
+                return Ok(Some(current as u32));
             };
             let Some(neighbor) = tetrahedron.neighbors[opposite] else {
                 return Ok(None);
@@ -104,11 +120,11 @@ impl<'topology> TetrahedronPointLocator<'topology> {
     }
 }
 
-fn expanded_tetrahedron_bounds(topology: &DelaunayVolumeTopology, vertices: [u32; 4]) -> Aabb3 {
+fn expanded_tetrahedron_bounds(topology: &impl TetrahedralTopology, vertices: [u32; 4]) -> Aabb3 {
     let mut minimum = [f64::INFINITY; 3];
     let mut maximum = [f64::NEG_INFINITY; 3];
     for vertex in vertices {
-        let coordinates = topology.nodes[vertex as usize].coordinates_m;
+        let coordinates = topology.nodes()[vertex as usize].coordinates_m;
         for axis in 0..3 {
             minimum[axis] = minimum[axis].min(coordinates[axis]);
             maximum[axis] = maximum[axis].max(coordinates[axis]);

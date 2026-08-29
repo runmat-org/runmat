@@ -6,18 +6,18 @@ use runmat_meshing_core::{
 };
 
 use super::{
-    error, predicate_error, resource, DelaunayInsertionError, DelaunayInsertionErrorKind,
-    DelaunayVolumeNode, DelaunayVolumeTopology, InsertionWork,
+    error, predicate_error, resource, topology_access::TetrahedralTopology, DelaunayInsertionError,
+    DelaunayInsertionErrorKind, DelaunayVolumeNode, InsertionWork,
 };
 
-pub(super) fn connected_cavity(
-    topology: &DelaunayVolumeTopology,
+pub(super) fn connected_cavity<T: TetrahedralTopology>(
+    topology: &T,
     node: DelaunayVolumeNode,
-    seed: usize,
+    seed: u32,
     protected_faces: &BTreeSet<[StableDigest; 3]>,
     protect_region_boundaries: bool,
     work: &mut InsertionWork<'_>,
-) -> Result<BTreeSet<usize>, DelaunayInsertionError> {
+) -> Result<BTreeSet<u32>, DelaunayInsertionError> {
     let mut cavity = BTreeSet::new();
     let mut examined = BTreeSet::new();
     let mut queue = VecDeque::from([(seed, false)]);
@@ -26,7 +26,12 @@ pub(super) fn connected_cavity(
         if cavity.contains(&index) || !forced && !examined.insert(index) {
             continue;
         }
-        let tetrahedron = &topology.tetrahedra[index];
+        let tetrahedron = topology.tetrahedron(index).ok_or_else(|| {
+            error(
+                DelaunayInsertionErrorKind::InvalidTopology,
+                "insertion cavity reached an inactive tetrahedron",
+            )
+        })?;
         if !forced && !in_circumsphere(topology, tetrahedron.vertex_indices, node, work)? {
             continue;
         }
@@ -41,7 +46,9 @@ pub(super) fn connected_cavity(
                     tetrahedron.vertex_indices,
                     opposite,
                 )) || protect_region_boundaries
-                    && topology.tetrahedra[*neighbor as usize].region_id != tetrahedron.region_id
+                    && topology
+                        .tetrahedron(*neighbor)
+                        .is_none_or(|adjacent| adjacent.region_id != tetrahedron.region_id)
                 {
                     continue;
                 }
@@ -49,7 +56,7 @@ pub(super) fn connected_cavity(
                 // replacement across a face containing the inserted node.
                 let lies_on_face =
                     node_lies_on_face(topology, tetrahedron.vertex_indices, opposite, node, work)?;
-                queue.push_back((*neighbor as usize, lies_on_face));
+                queue.push_back((*neighbor, lies_on_face));
             }
         }
     }
@@ -63,7 +70,7 @@ pub(super) fn connected_cavity(
 }
 
 fn node_lies_on_face(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     vertices: [u32; 4],
     opposite: usize,
     node: DelaunayVolumeNode,
@@ -76,7 +83,7 @@ fn node_lies_on_face(
     let mut cursor = 0;
     for (vertex_index, vertex) in vertices.iter().enumerate() {
         if vertex_index != opposite {
-            triangle[cursor] = topology.nodes[*vertex as usize].coordinates_m;
+            triangle[cursor] = topology.nodes()[*vertex as usize].coordinates_m;
             cursor += 1;
         }
     }
@@ -124,7 +131,7 @@ fn planar_orientation(
 }
 
 pub(super) fn stable_face(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     vertices: [u32; 4],
     opposite: usize,
 ) -> [StableDigest; 3] {
@@ -132,7 +139,7 @@ pub(super) fn stable_face(
     let mut cursor = 0;
     for (vertex_index, vertex) in vertices.iter().enumerate() {
         if vertex_index != opposite {
-            face[cursor] = topology.nodes[*vertex as usize].identity;
+            face[cursor] = topology.nodes()[*vertex as usize].identity;
             cursor += 1;
         }
     }
@@ -141,7 +148,7 @@ pub(super) fn stable_face(
 }
 
 pub(super) fn node_coplanar_with_face(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     vertices: [u32; 4],
     opposite: usize,
     node: DelaunayVolumeNode,
@@ -152,7 +159,7 @@ pub(super) fn node_coplanar_with_face(
     let mut cursor = 0;
     for (vertex_index, vertex) in vertices.iter().enumerate() {
         if vertex_index != opposite {
-            points[cursor] = topology.nodes[*vertex as usize].coordinates_m;
+            points[cursor] = topology.nodes()[*vertex as usize].coordinates_m;
             cursor += 1;
         }
     }
@@ -163,7 +170,7 @@ pub(super) fn node_coplanar_with_face(
 }
 
 fn in_circumsphere(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     vertices: [u32; 4],
     node: DelaunayVolumeNode,
     work: &mut InsertionWork<'_>,
@@ -175,13 +182,13 @@ fn in_circumsphere(
 }
 
 pub(super) fn circumsphere_relation(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     vertices: [u32; 4],
     node: DelaunayVolumeNode,
     work: &mut InsertionWork<'_>,
 ) -> Result<PredicateSign, DelaunayInsertionError> {
     work.predicate()?;
-    let points = vertices.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+    let points = vertices.map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
     insphere3d([
         points[0],
         points[1],

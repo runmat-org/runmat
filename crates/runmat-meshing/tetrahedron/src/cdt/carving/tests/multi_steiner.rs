@@ -81,7 +81,7 @@ fn carving_preserves_two_constructively_recovered_steiner_facets() {
         DelaunayFacetRecoveryErrorKind::InvalidTopology
     );
 
-    let bounded = recover_delaunay_facets(
+    let cavity_bounded = recover_delaunay_facets(
         segments,
         &constraints,
         DelaunayFacetRecoveryOptions {
@@ -90,8 +90,8 @@ fn carving_preserves_two_constructively_recovered_steiner_facets() {
         },
         &NeverCancelled,
     )
-    .unwrap_err();
-    assert_eq!(bounded.kind, DelaunayFacetRecoveryErrorKind::ResourceLimit);
+    .unwrap();
+    assert_eq!(cavity_bounded, recovery);
 
     let carving = carve_delaunay_volume(
         &recovery,

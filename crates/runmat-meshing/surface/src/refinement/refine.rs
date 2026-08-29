@@ -5,12 +5,12 @@ use crate::{
 };
 
 use super::{
-    classify_exact_face_refinement_candidate_in_parameterization,
-    derive_exact_face_feature_collars, insert_exact_face_refinement_candidate,
-    insert_validated_face_refinement_candidate, select_exact_face_refinement_candidate,
-    split_exact_face_chart_cut, ExactFaceCandidateDisposition, ExactFaceRefinedMesh,
-    ExactFaceRefinedTopology, ExactFaceRefinementContext, ExactFaceRefinementError,
-    ExactFaceRefinementErrorKind, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
+    classify_exact_face_refinement_candidates_in_parameterization,
+    derive_exact_face_feature_collars, insert_exact_face_refinement_candidates,
+    insert_validated_face_refinement_candidates, select_exact_face_refinement_candidates,
+    split_exact_face_chart_cut, ExactFaceRefinedMesh, ExactFaceRefinedTopology,
+    ExactFaceRefinementContext, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
+    ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
 };
 
 #[derive(Clone, Copy)]
@@ -88,27 +88,32 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
             ),
         )
         .map_err(map_geometry)?;
-        validate_exact_face_geometry_in_parameterization(
-            &geometry,
-            &current.trimmed,
-            &current.pslg,
-            domain.parameterization(),
-            ExactFaceGeometryContext::new(
-                context.topology,
-                context.metric_request,
-                context.evaluator,
-                context.geometry_control,
-            ),
-        )
-        .map_err(map_geometry)?;
         let collars = derive_exact_face_feature_collars(&current.pslg, &geometry, policy.quality)?;
-        let Some(candidate) = select_exact_face_refinement_candidate(
+        let candidates = select_exact_face_refinement_candidates(
             &geometry,
             &current.pslg,
             &collars,
             policy.quality,
-        )?
-        else {
+        )?;
+        if candidates.is_empty() {
+            // Independent validation deliberately belongs at the artifact
+            // boundary. Re-evaluating every node and deviation sample after
+            // every interior insertion turns refinement into a quadratic
+            // sequence of full-prefix audits without protecting any additional
+            // externally observable state.
+            validate_exact_face_geometry_in_parameterization(
+                &geometry,
+                &current.trimmed,
+                &current.pslg,
+                domain.parameterization(),
+                ExactFaceGeometryContext::new(
+                    context.topology,
+                    context.metric_request,
+                    context.evaluator,
+                    context.geometry_control,
+                ),
+            )
+            .map_err(map_geometry)?;
             return Ok((
                 ExactFaceRefinementOutcome::Converged(Box::new(ExactFaceRefinedMesh {
                     topology: current,
@@ -118,30 +123,32 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                 })),
                 chart_cut_split_count,
             ));
-        };
-        match classify_exact_face_refinement_candidate_in_parameterization(
-            &candidate,
+        }
+
+        let classifications = classify_exact_face_refinement_candidates_in_parameterization(
+            &candidates,
             &current.pslg,
             context.topology,
             context.metric_request,
             domain.parameterization(),
             context.evaluator,
             context.geometry_control,
-        )? {
-            ExactFaceCandidateDisposition::SplitProtectedSegment(split) => {
-                return Ok((
-                    ExactFaceRefinementOutcome::RequiresCurveSplit {
-                        split,
-                        completed_interior_insertions: insertion_count,
-                    },
-                    chart_cut_split_count,
-                ));
-            }
-            ExactFaceCandidateDisposition::SplitChartCut(split) => match domain {
+        )?;
+        if !classifications.protected_splits.is_empty() {
+            return Ok((
+                ExactFaceRefinementOutcome::RequiresCurveSplits {
+                    splits: classifications.protected_splits,
+                    completed_interior_insertions: insertion_count,
+                },
+                chart_cut_split_count,
+            ));
+        }
+        if let Some(split) = classifications.chart_cut_splits.into_iter().next() {
+            match domain {
                 ExactFaceRefinementDomain::ExactBoundary(_) => {
                     return Ok((
                         ExactFaceRefinementOutcome::RequiresChartCutSplit {
-                            split,
+                            split: Box::new(split),
                             completed_interior_insertions: insertion_count,
                         },
                         chart_cut_split_count,
@@ -163,36 +170,43 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                     )?;
                     chart_cut_split_count += 1;
                 }
-            },
-            ExactFaceCandidateDisposition::Insert => {
-                if insertion_count >= policy.refinement.maximum_interior_insertions {
-                    return Err(ExactFaceRefinementError::new(
-                        ExactFaceRefinementErrorKind::ResourceLimit,
-                        &current.pslg.source_face_id,
-                        "exact face refinement exceeded its interior insertion hard limit",
-                    ));
-                }
-                current = match domain {
-                    ExactFaceRefinementDomain::ExactBoundary(boundary) => {
-                        insert_exact_face_refinement_candidate(
-                            boundary,
-                            &current,
-                            &candidate,
-                            context.cancellation,
-                            policy.delaunay,
-                        )?
-                    }
-                    ExactFaceRefinementDomain::Chart(_) => {
-                        insert_validated_face_refinement_candidate(
-                            &current,
-                            &candidate,
-                            context.cancellation,
-                            policy.delaunay,
-                        )?
-                    }
-                };
-                insertion_count += 1;
             }
+        } else if !classifications.insertions.is_empty() {
+            if insertion_count >= policy.refinement.maximum_interior_insertions {
+                return Err(ExactFaceRefinementError::new(
+                    ExactFaceRefinementErrorKind::ResourceLimit,
+                    &current.pslg.source_face_id,
+                    "exact face refinement exceeded its interior insertion hard limit",
+                ));
+            }
+            let remaining = policy.refinement.maximum_interior_insertions - insertion_count;
+            let mut candidates = classifications.insertions;
+            candidates.truncate(remaining as usize);
+            let (refined, inserted) = match domain {
+                ExactFaceRefinementDomain::ExactBoundary(boundary) => {
+                    insert_exact_face_refinement_candidates(
+                        boundary,
+                        &current,
+                        &candidates,
+                        context.cancellation,
+                        policy.delaunay,
+                    )?
+                }
+                ExactFaceRefinementDomain::Chart(_) => insert_validated_face_refinement_candidates(
+                    &current,
+                    &candidates,
+                    context.cancellation,
+                    policy.delaunay,
+                )?,
+            };
+            current = refined;
+            insertion_count += inserted;
+        } else {
+            return Err(ExactFaceRefinementError::new(
+                ExactFaceRefinementErrorKind::InvalidGeometry,
+                &current.pslg.source_face_id,
+                "refinement candidates produced no actionable disposition",
+            ));
         }
     }
 }

@@ -1,3 +1,4 @@
+mod adaptive_metric;
 mod adaptive_planar;
 mod adaptive_spatial;
 mod circumsphere;
@@ -9,6 +10,7 @@ mod surface;
 mod types;
 mod vector;
 
+pub use adaptive_metric::diametral_sphere_position;
 pub use adaptive_planar::{
     incircle2d, incircle2d_symbolic, orient2d, orient2d_symbolic, PlanarPredicateError,
     PlanarPredicatePoint, PredicateSign,

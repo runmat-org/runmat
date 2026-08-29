@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::quality::predicate::{orient3d, PredicateSign};
+use runmat_meshing_core::StableDigest;
 
 use crate::cdt::{DelaunayVolumeNode, DelaunayVolumeTopology};
 
@@ -27,18 +28,21 @@ impl std::fmt::Display for TopologyMutationError {
 impl std::error::Error for TopologyMutationError {}
 
 #[derive(Clone, Debug)]
-pub(super) struct MutableTetrahedron {
-    pub(super) vertex_indices: [u32; 4],
-    pub(super) neighbors: [Option<u32>; 4],
-    pub(super) region_id: Option<PersistentEntityId>,
+pub(in crate::cdt) struct MutableTetrahedron {
+    pub(in crate::cdt) vertex_indices: [u32; 4],
+    pub(in crate::cdt) neighbors: [Option<u32>; 4],
+    pub(in crate::cdt) region_id: Option<PersistentEntityId>,
 }
 
 #[derive(Clone, Debug)]
 pub(in crate::cdt) struct TopologyMutation {
-    pub(super) nodes: Vec<DelaunayVolumeNode>,
-    pub(super) tetrahedra: Vec<Option<MutableTetrahedron>>,
+    pub(in crate::cdt) nodes: Vec<DelaunayVolumeNode>,
+    pub(in crate::cdt) node_indices: BTreeMap<StableDigest, u32>,
+    positions: BTreeSet<[u64; 3]>,
+    pub(in crate::cdt) tetrahedra: Vec<Option<MutableTetrahedron>>,
+    pub(super) tetrahedron_indices: BTreeMap<[u32; 4], u32>,
     pub(super) free_tetrahedra: BTreeSet<u32>,
-    pub(super) vertex_stars: Vec<BTreeSet<u32>>,
+    pub(in crate::cdt) vertex_stars: Vec<BTreeSet<u32>>,
     pub(super) face_uses: BTreeMap<[u32; 3], Vec<(u32, usize)>>,
 }
 
@@ -61,9 +65,33 @@ impl TopologyMutation {
                 })
             })
             .collect::<Vec<_>>();
+        let tetrahedron_indices = tetrahedra
+            .iter()
+            .enumerate()
+            .filter_map(|(index, tetrahedron)| {
+                tetrahedron.as_ref().map(|tetrahedron| {
+                    let mut key = tetrahedron.vertex_indices;
+                    key.sort_unstable();
+                    (key, index as u32)
+                })
+            })
+            .collect();
+        let nodes = topology.nodes;
+        let node_indices = nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (node.identity, index as u32))
+            .collect();
+        let positions = nodes
+            .iter()
+            .map(|node| node.coordinates_m.map(coordinate_bits))
+            .collect();
         let mut result = Self {
-            nodes: topology.nodes,
+            nodes,
+            node_indices,
+            positions,
             tetrahedra,
+            tetrahedron_indices,
             free_tetrahedra: BTreeSet::new(),
             vertex_stars,
             face_uses: BTreeMap::new(),
@@ -81,9 +109,10 @@ impl TopologyMutation {
                 .coordinates_m
                 .iter()
                 .any(|coordinate| !coordinate.is_finite())
-            || self.nodes.iter().any(|existing| {
-                existing.identity == node.identity || existing.coordinates_m == node.coordinates_m
-            })
+            || self.node_indices.contains_key(&node.identity)
+            || self
+                .positions
+                .contains(&node.coordinates_m.map(coordinate_bits))
         {
             return Err(error(
                 "mutable topology rejected an invalid or duplicate node",
@@ -92,11 +121,14 @@ impl TopologyMutation {
         let index = u32::try_from(self.nodes.len())
             .map_err(|_| error("mutable topology exhausted its node index space"))?;
         self.nodes.push(node);
+        self.node_indices.insert(node.identity, index);
+        self.positions
+            .insert(node.coordinates_m.map(coordinate_bits));
         self.vertex_stars.push(BTreeSet::new());
         Ok(index)
     }
 
-    pub(super) fn tetrahedron(&self, index: u32) -> Option<&MutableTetrahedron> {
+    pub(in crate::cdt) fn tetrahedron(&self, index: u32) -> Option<&MutableTetrahedron> {
         self.tetrahedra.get(index as usize)?.as_ref()
     }
 
@@ -179,6 +211,14 @@ impl TopologyMutation {
             uses.push((tetrahedron_index, opposite));
             uses.sort_unstable();
         }
+    }
+}
+
+fn coordinate_bits(value: f64) -> u64 {
+    if value == 0.0 {
+        0
+    } else {
+        value.to_bits()
     }
 }
 

@@ -6530,6 +6530,7 @@ dependencies = [
  "runmat-execution-artifact",
  "runmat-execution-runner",
  "runmat-execution-transport-native",
+ "runmat-filesystem",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-geometry-io",
@@ -6807,6 +6808,7 @@ name = "runmat-meshing-core"
 version = "0.6.2"
 dependencies = [
  "minicbor",
+ "num-bigint",
  "robust",
  "runmat-canonical-codec",
  "runmat-geometry-core",

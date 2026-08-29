@@ -118,8 +118,10 @@ fn recovery_constructs_a_missing_interior_segment_with_dyadic_steiner_nodes() {
     assert_eq!(recovered.recovery_passes, 1);
     assert_eq!(recovered.steiner_node_identities.len(), 1);
     assert_eq!(recovered.segments[0].nodes.len(), 3);
-    assert_eq!(recovered.segments[0].nodes[1].parameter_numerator, 1);
-    assert_eq!(recovered.segments[0].nodes[1].parameter_exponent, 1);
+    let split = recovered.segments[0].nodes[1];
+    assert_eq!(split.parameter_numerator, 11_863_283);
+    assert_eq!(split.parameter_exponent, 24);
+    assert!((split.parameter().unwrap() - 2.0_f64.sqrt() * 0.5).abs() < 1.0e-7);
     validate_delaunay_segment_recovery(
         &recovered,
         &constraints,
@@ -127,6 +129,17 @@ fn recovery_constructs_a_missing_interior_segment_with_dyadic_steiner_nodes() {
         &NeverCancelled,
     )
     .unwrap();
+}
+
+#[test]
+fn recovery_coalesces_only_at_coordinate_resolution() {
+    let point: [f64; 3] = [-0.2591172135939178, -2.365808596882859, -0.309347234130807];
+    let adjacent = [f64::from_bits(point[0].to_bits() + 1), point[1], point[2]];
+    assert!(coordinates_share_representable_location(point, adjacent));
+    assert!(!coordinates_share_representable_location(
+        point,
+        [point[0] + 1.0e-12, point[1], point[2]],
+    ));
 }
 
 #[test]

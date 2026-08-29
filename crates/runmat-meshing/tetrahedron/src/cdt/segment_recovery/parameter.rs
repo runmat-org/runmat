@@ -58,6 +58,34 @@ impl DyadicNode {
         })
     }
 
+    pub(super) fn near_parameter(
+        self,
+        right: Self,
+        parameter: f64,
+        context: SegmentContext,
+    ) -> Result<Self, DelaunaySegmentRecoveryError> {
+        let minimum_exponent = self.exponent.max(right.exponent).saturating_add(24).min(60);
+        for exponent in minimum_exponent..=60 {
+            let denominator = 1_u64 << exponent;
+            let numerator = (parameter * denominator as f64).round() as u64;
+            let left = self.numerator << (exponent - self.exponent);
+            let right = right.numerator << (exponent - right.exponent);
+            if numerator > left && numerator < right {
+                let mut result = Self {
+                    identity: StableDigest::ZERO,
+                    numerator,
+                    exponent,
+                };
+                while result.exponent > 0 && result.numerator.is_multiple_of(2) {
+                    result.numerator /= 2;
+                    result.exponent -= 1;
+                }
+                return Ok(result);
+            }
+        }
+        self.midpoint(right, context)
+    }
+
     pub(super) fn with_identity(mut self, identity: StableDigest) -> Self {
         self.identity = identity;
         self

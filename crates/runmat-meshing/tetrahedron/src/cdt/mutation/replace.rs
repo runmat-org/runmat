@@ -115,18 +115,14 @@ impl TopologyMutation {
         removed: &BTreeSet<u32>,
         created: &[([u32; 4], Option<PersistentEntityId>)],
     ) -> Result<(), TopologyMutationError> {
-        let mut keys = self
-            .tetrahedra
-            .iter()
-            .enumerate()
-            .filter_map(|(index, tetrahedron)| {
-                (!removed.contains(&(index as u32))).then_some(tetrahedron.as_ref())
-            })
-            .flatten()
-            .map(|tetrahedron| sorted_tetrahedron(tetrahedron.vertex_indices))
-            .collect::<BTreeSet<_>>();
+        let mut created_keys = BTreeSet::new();
         for (vertices, _) in created {
-            if !keys.insert(sorted_tetrahedron(*vertices)) {
+            let key = sorted_tetrahedron(*vertices);
+            let duplicates_retained = self
+                .tetrahedron_indices
+                .get(&key)
+                .is_some_and(|index| !removed.contains(index));
+            if duplicates_retained || !created_keys.insert(key) {
                 return Err(error(
                     "cavity replacement would create a duplicate tetrahedron",
                 ));
@@ -177,6 +173,8 @@ impl TopologyMutation {
             let tetrahedron = self.tetrahedra[*tetrahedron_index as usize]
                 .take()
                 .expect("prepared cavity tetrahedron must remain active");
+            self.tetrahedron_indices
+                .remove(&sorted_tetrahedron(tetrahedron.vertex_indices));
             self.remove_face_uses(*tetrahedron_index, tetrahedron.vertex_indices);
             for vertex in tetrahedron.vertex_indices {
                 self.vertex_stars[vertex as usize].remove(tetrahedron_index);
@@ -185,6 +183,8 @@ impl TopologyMutation {
         }
         self.tetrahedra.resize(plan.final_len, None);
         for (index, tetrahedron) in plan.tetrahedra {
+            self.tetrahedron_indices
+                .insert(sorted_tetrahedron(tetrahedron.vertex_indices), index);
             for vertex in tetrahedron.vertex_indices {
                 self.vertex_stars[vertex as usize].insert(index);
             }
