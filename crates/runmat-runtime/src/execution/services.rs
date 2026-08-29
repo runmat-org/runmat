@@ -75,6 +75,18 @@ pub struct SpmdRankResult {
     pub outputs: Vec<Option<runmat_execution::value::ValuePayload>>,
 }
 
+/// How an execution backend runs one compiler-owned SPMD gang.
+///
+/// Program capture and SPMD placement are independent capabilities: a browser
+/// host may require captured programs for ordinary tasks while retaining SPMD
+/// ranks in one cooperative runtime, whereas a native process pool executes
+/// each rank through an isolated program worker.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SpmdExecutionMode {
+    Cooperative,
+    IsolatedWorkers,
+}
+
 impl SpmdGangCall {
     pub fn validate(&self) -> Result<(), ExecutionServiceError> {
         self.gang
@@ -118,6 +130,9 @@ pub trait RuntimeExecutionServices {
     fn scope_id(&self) -> ExecutionScopeId;
     fn requires_program_capture(&self) -> bool {
         false
+    }
+    fn spmd_execution_mode(&self) -> SpmdExecutionMode {
+        SpmdExecutionMode::Cooperative
     }
     fn current_pool(&self) -> Result<Option<PoolSnapshot>, ExecutionServiceError>;
     fn ensure_pool(&self, request: PoolRequest) -> Result<PoolSnapshot, ExecutionServiceError>;

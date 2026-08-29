@@ -680,6 +680,7 @@ async fn read_composite_entry(
     handle: runmat_execution::CompositeHandle,
     raw_indices: &[Value],
 ) -> Result<Value, RuntimeError> {
+    runmat_runtime::parallel::lease::validate_composite(runtime, &handle)?;
     if raw_indices.len() != 1 {
         return Err(crate::interpreter::errors::mex(
             "CompositeIndexArity",

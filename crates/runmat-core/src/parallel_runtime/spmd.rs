@@ -74,6 +74,20 @@ impl RuntimeSpmdService for CoreSpmdService {
         Box::pin(async move { retired })
     }
 
+    fn rank_finished(
+        &self,
+        gang: &GangHandle,
+        rank: runmat_types::LabRank,
+    ) -> Result<(), RuntimeError> {
+        if rank.0 == 0 || rank.0 > gang.labs.0 {
+            return Err(runtime_error(
+                "completed SPMD rank is outside the admitted gang",
+            ));
+        }
+        self.collectives.rank_finished(gang, rank);
+        Ok(())
+    }
+
     fn retain_outputs(
         &self,
         gang: GangHandle,

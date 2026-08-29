@@ -276,3 +276,42 @@ missing = assigned_on_second{1};
         "unassigned Composite entry lost its typed diagnostic. stdout: {missing_stdout} stderr: {missing_stderr}"
     );
 }
+
+#[test]
+fn resizing_a_native_pool_retires_existing_distributed_values() {
+    let workspace = TempDir::new().expect("temporary workspace");
+    let config = workspace.path().join("runmat.toml");
+    fs::write(
+        &config,
+        r#"
+[runtime.accelerate]
+enabled = false
+provider = "inprocess"
+"#,
+    )
+    .expect("write test configuration");
+    let script = workspace.path().join("stale_distributed_lease.m");
+    fs::write(
+        &script,
+        r#"
+pool = parpool(2);
+values = distributed(uint64([1, 0x0020000000000001u64]));
+parpool(1);
+local = getLocalPart(values);
+"#,
+    )
+    .expect("write stale lease script");
+
+    let output = run_script(&script, &config);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "retired distributed lease unexpectedly remained readable. stdout: {stdout} stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("RunMat:parallel:StaleDistributedLease")
+            && stderr.contains("pool generation has been retired"),
+        "retired distributed lease lost its typed diagnostic. stdout: {stdout} stderr: {stderr}"
+    );
+}

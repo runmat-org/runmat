@@ -374,10 +374,18 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             )));
         }
         let mut state = self.state.borrow_mut();
+        let previous_workers = if state.pool_open {
+            Some(Self::active_workers(&state, self.pool_id)?)
+        } else {
+            None
+        };
         let actions = state
             .driver
             .resize_registered_pool(self.pool_id, workers)
             .map_err(driver_error)?;
+        if previous_workers.is_some_and(|previous| previous != workers) {
+            state.pool_generation = state.pool_generation.wrapping_add(1);
+        }
         state.pool_open = true;
         let generation = state.pool_generation;
         drop(state);

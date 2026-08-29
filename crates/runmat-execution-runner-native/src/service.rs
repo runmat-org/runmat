@@ -9,6 +9,7 @@ use runmat_execution::{
 };
 use runmat_runtime::execution::{
     AwaitAction, DeferredCall, DurableJobOptions, ExecutionServiceError, RuntimeExecutionServices,
+    SpmdExecutionMode,
 };
 use runmat_value::Value;
 
@@ -112,6 +113,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
         self.scope_id
     }
 
+    fn spmd_execution_mode(&self) -> SpmdExecutionMode {
+        SpmdExecutionMode::IsolatedWorkers
+    }
+
     fn current_pool(&self) -> Result<Option<PoolSnapshot>, ExecutionServiceError> {
         let state = self.state.lock().expect("native service poisoned");
         if !state.pool_open {
@@ -164,10 +169,25 @@ impl RuntimeExecutionServices for NativeExecutionService {
             }
         }
         let workers = request.workers.unwrap_or_else(|| self.driver.max_workers());
+        let previous_workers = {
+            let state = self.state.lock().expect("native service poisoned");
+            if state.pool_open {
+                Some(
+                    self.driver
+                        .active_workers()
+                        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?,
+                )
+            } else {
+                None
+            }
+        };
         self.driver
             .resize_pool(workers)
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         let mut state = self.state.lock().expect("native service poisoned");
+        if previous_workers.is_some_and(|previous| previous != workers) {
+            state.pool_generation = state.pool_generation.wrapping_add(1);
+        }
         state.pool_open = true;
         Ok(PoolSnapshot {
             handle: PoolHandle {

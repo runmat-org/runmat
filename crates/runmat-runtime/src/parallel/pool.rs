@@ -9,11 +9,18 @@ const IDENT_GCP_INVALID_INPUT: &str = "RunMat:gcp:InvalidInput";
 
 pub fn ensure(context: &RuntimeContext, arguments: &[Value]) -> Result<Value, RuntimeError> {
     let request = parse_pool_request(arguments)?;
-    context
+    let previous = context
+        .execution()
+        .current_pool()
+        .map_err(|error| execution_error("parpool", error))?;
+    let snapshot = context
         .execution()
         .ensure_pool(request)
-        .map(|snapshot| Value::Pool(snapshot.handle))
-        .map_err(|error| execution_error("parpool", error))
+        .map_err(|error| execution_error("parpool", error))?;
+    if let Some(previous) = previous.filter(|previous| previous.handle != snapshot.handle) {
+        crate::parallel::lease::retire_pool(context, &previous.handle)?;
+    }
+    Ok(Value::Pool(snapshot.handle))
 }
 
 pub fn current(context: &RuntimeContext, arguments: &[Value]) -> Result<Value, RuntimeError> {
@@ -52,7 +59,8 @@ pub fn close(
     context
         .execution()
         .close_pool(pool)
-        .map_err(|error| execution_error("delete", error))
+        .map_err(|error| execution_error("delete", error))?;
+    crate::parallel::lease::retire_pool(context, pool)
 }
 
 fn parse_pool_request(arguments: &[Value]) -> Result<PoolRequest, RuntimeError> {

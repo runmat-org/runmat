@@ -230,6 +230,7 @@ async fn execute_distributed(
                     "getLocalPart requires a distributed value",
                 ));
             };
+            runmat_runtime::parallel::lease::validate_distributed(&execution.runtime, &handle)?;
             let rank = if let Some(collective) = execution.runtime.service_ports().collective() {
                 collective.context().rank
             } else if handle.partition_count.0 == 1 {
@@ -249,6 +250,7 @@ async fn execute_distributed(
                     "gather requires a distributed value on this execution path",
                 ));
             };
+            runmat_runtime::parallel::lease::validate_distributed(&execution.runtime, &handle)?;
             service.materialize(*handle).await
         }
         Op::Redistribute { scheme } => {
@@ -258,6 +260,7 @@ async fn execute_distributed(
                     "redistribute requires a distributed value",
                 ));
             };
+            runmat_runtime::parallel::lease::validate_distributed(&execution.runtime, &handle)?;
             service
                 .redistribute(*handle, scheme.clone())
                 .await
@@ -771,39 +774,42 @@ async fn execute_spmd(
     admission.validate()?;
     let gang = admission.gang.handle.clone();
     let execution_result = async {
-        let rank_results = if execution.runtime.execution().requires_program_capture() {
-            runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
-                captures.clone(),
-            ))?;
-            let program = serde_json::to_vec(bytecode).map_err(|error| {
-                crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    &format!("failed to encode the exact SPMD program: {error}"),
+        let rank_results = match execution.runtime.execution().spmd_execution_mode() {
+            runmat_runtime::execution::SpmdExecutionMode::IsolatedWorkers => {
+                runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
+                    captures.clone(),
+                ))?;
+                let program = serde_json::to_vec(bytecode).map_err(|error| {
+                    crate::interpreter::errors::mex(
+                        "ExecutionProgram",
+                        &format!("failed to encode the exact SPMD program: {error}"),
+                    )
+                })?;
+                execution
+                    .runtime
+                    .execution()
+                    .execute_spmd_gang(runmat_runtime::execution::SpmdGangCall {
+                        gang: gang.clone(),
+                        region: executable.contract.id,
+                        captures: captures.clone(),
+                        requested_outputs: executable.outputs.len(),
+                        program_revision: execution.runtime.program_revision().cloned(),
+                        program,
+                    })
+                    .await
+                    .map_err(execution_error)?
+            }
+            runmat_runtime::execution::SpmdExecutionMode::Cooperative => {
+                execute_spmd_in_process(
+                    bytecode,
+                    executable,
+                    captures,
+                    admission.labs,
+                    execution,
+                    current_function_name,
                 )
-            })?;
-            execution
-                .runtime
-                .execution()
-                .execute_spmd_gang(runmat_runtime::execution::SpmdGangCall {
-                    gang: gang.clone(),
-                    region: executable.contract.id,
-                    captures: captures.clone(),
-                    requested_outputs: executable.outputs.len(),
-                    program_revision: execution.runtime.program_revision().cloned(),
-                    program,
-                })
-                .await
-                .map_err(execution_error)?
-        } else {
-            execute_spmd_in_process(
-                bytecode,
-                executable,
-                captures,
-                admission.labs,
-                execution,
-                current_function_name,
-            )
-            .await?
+                .await?
+            }
         };
         validate_spmd_rank_results(&gang, executable.outputs.len(), &rank_results)?;
         let outputs = executable
@@ -862,6 +868,7 @@ async fn execute_spmd_in_process(
     let mut tasks = Vec::with_capacity(labs.len());
     for collective in labs {
         let rank = collective.context().rank;
+        let gang = collective.context().gang.clone();
         let mut frame = vec![None; bytecode.var_count];
         for (capture, value) in executable.captures.iter().zip(&captures) {
             frame[capture.slot] = Some(value.clone());
@@ -872,6 +879,12 @@ async fn execute_spmd_in_process(
             .clone()
             .with_collective(collective);
         let runtime = execution.runtime.fork_parallel_lab(services);
+        let spmd = execution
+            .runtime
+            .service_ports()
+            .require_spmd("SPMD execution")
+            .map_err(capability_error)?
+            .clone();
         let bytecode = bytecode.clone();
         let function_name = current_function_name.to_string();
         let body_pc = executable.body.pc;
@@ -899,6 +912,7 @@ async fn execute_spmd_in_process(
                     runtime,
                 )
                 .await?;
+            spmd.rank_finished(&gang, rank)?;
             Ok::<_, RuntimeError>((rank, completion))
         });
     }

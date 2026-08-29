@@ -15,6 +15,12 @@ pub struct OwnedPartition {
     pub value: ValuePayload,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RetiredDistributedObjects {
+    pub distributed: usize,
+    pub composites: usize,
+}
+
 #[derive(Clone, Debug)]
 struct DistributedRecord {
     handle: DistributedValueHandle,
@@ -181,8 +187,9 @@ impl DistributedStore {
         Ok(record.entries[(rank.0 - 1) as usize].as_ref())
     }
 
-    pub fn retire_pool(&mut self, pool: &PoolHandle) -> usize {
-        let before = self.distributed.len();
+    pub fn retire_pool(&mut self, pool: &PoolHandle) -> RetiredDistributedObjects {
+        let distributed_before = self.distributed.len();
+        let composites_before = self.composites.len();
         self.distributed.retain(|_, record| {
             record.handle.pool.id != pool.id
                 || record.handle.pool.generation != pool.generation
@@ -193,7 +200,10 @@ impl DistributedStore {
                 || record.handle.gang.pool.generation != pool.generation
                 || record.handle.gang.pool.scope_id != pool.scope_id
         });
-        before - self.distributed.len()
+        RetiredDistributedObjects {
+            distributed: distributed_before - self.distributed.len(),
+            composites: composites_before - self.composites.len(),
+        }
     }
 
     fn record(&self, handle: &DistributedValueHandle) -> RunnerResult<&DistributedRecord> {
@@ -335,5 +345,42 @@ mod tests {
             .composite_entry(&handle, LabRank(2))
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn retiring_a_pool_fences_distributed_and_composite_generations() {
+        let (distributed, partitions) = fixture();
+        let gang = GangHandle {
+            id: GangId::derive(&[b"retired-gang"]),
+            scope_id: distributed.scope_id,
+            generation: 1,
+            pool: distributed.pool.clone(),
+            labs: LabCount(2),
+        };
+        let composite = CompositeHandle {
+            id: CompositeId::derive(&[b"retired-composite"]),
+            owner_region: match distributed.owner {
+                runmat_types::DistributedOwner::Region(region) => region,
+                runmat_types::DistributedOwner::Client(_) => unreachable!(),
+            },
+            scope_id: distributed.scope_id,
+            generation: 1,
+            gang,
+            value: distributed.value.clone(),
+        };
+        let mut store = DistributedStore::default();
+        store.insert(distributed.clone(), partitions).unwrap();
+        store
+            .insert_composite(composite.clone(), vec![None, None])
+            .unwrap();
+        assert_eq!(
+            store.retire_pool(&distributed.pool),
+            RetiredDistributedObjects {
+                distributed: 1,
+                composites: 1,
+            }
+        );
+        assert!(store.local_part(&distributed, LabRank(1)).is_err());
+        assert!(store.composite_entry(&composite, LabRank(1)).is_err());
     }
 }
