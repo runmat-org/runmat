@@ -62,10 +62,10 @@ async fn invoke_python(operation: &str, arguments: Vec<Value>) -> BuiltinResult<
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (operation, arguments);
-        return Err(build_runtime_error(ERROR_UNAVAILABLE.message)
+        Err(build_runtime_error(ERROR_UNAVAILABLE.message)
             .with_builtin("python")
             .with_identifier("RunMat:Foreign:UnsupportedOnWasm")
-            .build());
+            .build())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
