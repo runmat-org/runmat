@@ -277,6 +277,15 @@ pub trait RuntimeSpmdService {
         rank: runmat_types::LabRank,
     ) -> Result<(), RuntimeError>;
 
+    /// Records that one admitted lab failed while executing its region body.
+    /// Implementations use this typed lifecycle event to release peers blocked
+    /// in collectives; the caller retains and reports the originating error.
+    fn rank_failed(
+        &self,
+        gang: &runmat_execution::GangHandle,
+        rank: runmat_types::LabRank,
+    ) -> Result<(), RuntimeError>;
+
     fn retain_outputs(
         &self,
         gang: runmat_execution::GangHandle,

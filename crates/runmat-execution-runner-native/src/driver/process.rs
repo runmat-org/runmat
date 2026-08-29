@@ -56,11 +56,7 @@ pub(super) fn execute_attempt(
     };
     let result = runtime.block_on(run_process(driver, worker_request, completion));
     if let Some((gang, rank)) = spmd_rank {
-        if result.is_err() {
-            driver
-                .collectives
-                .fail_gang(&gang, "native SPMD worker terminated before completion");
-        } else {
+        if result.is_ok() {
             driver.finish_collective_rank(&gang, rank);
         }
     }

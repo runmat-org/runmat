@@ -443,6 +443,12 @@ impl LocalDriver {
             .unwrap_or_default();
         Self::dispatch(Arc::clone(&this), actions);
         std::thread::spawn(move || {
+            let spmd_gang = match &request.task.invocation_context {
+                runmat_execution::ProgramInvocationContext::SpmdTask { task } => {
+                    Some(task.gang.clone())
+                }
+                _ => None,
+            };
             let completion = this
                 .completions
                 .lock()
@@ -487,6 +493,13 @@ impl LocalDriver {
                 });
             if accepted {
                 completion.complete(result);
+                if let Some(gang) = spmd_gang {
+                    if completion.try_value().is_some_and(|result| result.is_err()) {
+                        // Publish the originating task result before releasing
+                        // peers blocked in this gang's collectives.
+                        this.collectives.fail_gang(&gang, "an SPMD peer failed");
+                    }
+                }
             }
             let _ = this.checkpoint();
             Self::dispatch(Arc::clone(&this), actions);

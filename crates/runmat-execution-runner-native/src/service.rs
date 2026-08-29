@@ -312,18 +312,18 @@ impl RuntimeExecutionServices for NativeExecutionService {
         Box::pin(async move {
             let mut results = vec![None; pending.len()];
             loop {
+                let mut first_failure = None;
                 for (index, (rank, completion)) in pending.iter().enumerate() {
                     if results[index].is_some() {
                         continue;
                     }
                     if completion.is_cancelled() {
-                        driver.fail_collective_gang(&gang, "SPMD execution was cancelled");
-                        for (_, pending) in &pending {
-                            pending.cancel();
-                        }
-                        return Err(ExecutionServiceError::Failed(
-                            "SPMD execution was cancelled".into(),
-                        ));
+                        retain_first_spmd_failure(
+                            &mut first_failure,
+                            completion.completion_order(),
+                            ExecutionServiceError::Cancelled,
+                        );
+                        continue;
                     }
                     let Some(result) = completion.try_value() else {
                         continue;
@@ -338,42 +338,43 @@ impl RuntimeExecutionServices for NativeExecutionService {
                             });
                         }
                         Ok(runmat_execution_runner::AttemptSuccess::Spmd { .. }) => {
-                            driver.fail_collective_gang(
-                                &gang,
-                                "SPMD worker output count differed from its task contract",
+                            retain_first_spmd_failure(
+                                &mut first_failure,
+                                completion.completion_order(),
+                                ExecutionServiceError::InvalidOutputContract,
                             );
-                            for (_, pending) in &pending {
-                                pending.cancel();
-                            }
-                            return Err(ExecutionServiceError::InvalidOutputContract);
                         }
                         Ok(runmat_execution_runner::AttemptSuccess::Values { .. }) => {
-                            driver.fail_collective_gang(
-                                &gang,
-                                "SPMD worker returned an ordinary task result",
+                            retain_first_spmd_failure(
+                                &mut first_failure,
+                                completion.completion_order(),
+                                ExecutionServiceError::Failed(
+                                    "SPMD worker returned an ordinary task result".into(),
+                                ),
                             );
-                            for (_, pending) in &pending {
-                                pending.cancel();
-                            }
-                            return Err(ExecutionServiceError::Failed(
-                                "SPMD worker returned an ordinary task result".into(),
-                            ));
                         }
                         Err(crate::driver::TransferFailure::Message(message)) => {
-                            driver.fail_collective_gang(&gang, message.clone());
-                            for (_, pending) in &pending {
-                                pending.cancel();
-                            }
-                            return Err(ExecutionServiceError::Failed(message));
+                            retain_first_spmd_failure(
+                                &mut first_failure,
+                                completion.completion_order(),
+                                ExecutionServiceError::Failed(message),
+                            );
                         }
                         Err(crate::driver::TransferFailure::Runtime(failure)) => {
-                            driver.fail_collective_gang(&gang, failure.message.clone());
-                            for (_, pending) in &pending {
-                                pending.cancel();
-                            }
-                            return Err(ExecutionServiceError::RuntimeFailure(failure));
+                            retain_first_spmd_failure(
+                                &mut first_failure,
+                                completion.completion_order(),
+                                ExecutionServiceError::RuntimeFailure(failure),
+                            );
                         }
                     }
+                }
+                if let Some((_, failure)) = first_failure {
+                    driver.fail_collective_gang(&gang, "SPMD execution failed");
+                    for (_, completion) in &pending {
+                        completion.cancel();
+                    }
+                    return Err(failure);
                 }
                 if results.iter().all(Option::is_some) {
                     return Ok(results.into_iter().flatten().collect());
@@ -776,6 +777,20 @@ fn native_future_state(state: &FutureState) -> ExecutionHandleState {
     }
 }
 
+fn retain_first_spmd_failure(
+    first: &mut Option<(u64, ExecutionServiceError)>,
+    completion_order: Option<u64>,
+    failure: ExecutionServiceError,
+) {
+    let order = completion_order.unwrap_or(u64::MAX);
+    if first
+        .as_ref()
+        .is_none_or(|(current_order, _)| order < *current_order)
+    {
+        *first = Some((order, failure));
+    }
+}
+
 fn materialize_call(
     call: &DeferredCall,
     outputs: OutputContract,
@@ -798,4 +813,43 @@ fn materialize_call(
             std::env::consts::OS
         )),
     )
+}
+
+#[cfg(test)]
+mod spmd_failure_tests {
+    use super::{retain_first_spmd_failure, ExecutionServiceError};
+
+    #[test]
+    fn originating_completion_wins_over_rank_iteration_order() {
+        let mut first = None;
+        retain_first_spmd_failure(
+            &mut first,
+            Some(12),
+            ExecutionServiceError::Failed("peer termination".into()),
+        );
+        retain_first_spmd_failure(
+            &mut first,
+            Some(11),
+            ExecutionServiceError::RuntimeFailure(Box::new(
+                runmat_execution::ProgramRuntimeFailure {
+                    message: "source failure".into(),
+                    identifier: Some("RunMat:IndexOutOfBounds".into()),
+                    span: None,
+                    builtin: None,
+                    task_id: None,
+                    call_frames: Vec::new(),
+                    call_frames_elided: 0,
+                    call_stack: Vec::new(),
+                    phase: None,
+                },
+            )),
+        );
+        let Some((11, ExecutionServiceError::RuntimeFailure(failure))) = first else {
+            panic!("earliest structured runtime failure was not retained");
+        };
+        assert_eq!(
+            failure.identifier.as_deref(),
+            Some("RunMat:IndexOutOfBounds")
+        );
+    }
 }
