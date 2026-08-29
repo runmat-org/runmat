@@ -166,7 +166,7 @@ A worker error retains its identifier, message, call stack, and source location 
 
 Compiler-approved `parfor` chunks use infrastructure-only retry. A worker or transport failure may be retried when the scheduler can prove that no successful result was committed. Program errors are not retried. Lost work that cannot be classified safely becomes indeterminate rather than being reported as success.
 
-Cancellation is scoped. Cancelling a future, closing a pool, interrupting the parent execution, or cancelling a remote job propagates through the scheduler to its active worker attempts. Native calls and provider work remain cooperative and stop when they reach a cancellation boundary.
+Cancellation is scoped. Cancelling a future, closing a pool, interrupting the parent execution, or cancelling a remote job propagates through the scheduler to its active worker attempts. Native calls and provider work remain cooperative and stop when they reach a cancellation boundary. RunMat reports a requested cancellation separately from worker loss, execution-infrastructure failure, and an error raised by the program.
 
 ## Host Boundaries
 

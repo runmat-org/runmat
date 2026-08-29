@@ -12,12 +12,61 @@ pub enum ExecutionServiceError {
     UnknownHandle,
     #[error("execution was cancelled")]
     Cancelled,
+    #[error("execution worker was lost: {0}")]
+    WorkerLost(String),
+    #[error("execution infrastructure failed: {0}")]
+    Infrastructure(String),
     #[error("execution failed: {0}")]
     Failed(String),
     #[error("execution failed: {}", .0.message)]
     RuntimeFailure(Box<runmat_execution::ProgramRuntimeFailure>),
     #[error("requested output count exceeds the execution contract")]
     InvalidOutputContract,
+}
+
+impl ExecutionServiceError {
+    /// Convert an execution-domain failure into its stable language-level
+    /// diagnostic. This is the sole boundary between scheduler/service
+    /// outcomes and user-visible runtime errors.
+    pub fn into_runtime_error(self) -> RuntimeError {
+        match self {
+            Self::RuntimeFailure(failure) => {
+                decode_runtime_failure(*failure).unwrap_or_else(|message| {
+                    crate::runtime_error::semantic_error(
+                        "RunMat:parallel:ExecutionProtocol",
+                        message,
+                    )
+                })
+            }
+            Self::ForeignScope => crate::runtime_error::semantic_error(
+                "RunMat:parallel:ForeignScope",
+                self.to_string(),
+            ),
+            Self::UnknownHandle => crate::runtime_error::semantic_error(
+                "RunMat:parallel:UnknownHandle",
+                self.to_string(),
+            ),
+            Self::Cancelled => {
+                crate::runtime_error::semantic_error("RunMat:parallel:Cancelled", self.to_string())
+            }
+            Self::WorkerLost(message) => crate::runtime_error::semantic_error(
+                "RunMat:parallel:WorkerLost",
+                format!("execution worker was lost: {message}"),
+            ),
+            Self::Infrastructure(message) => crate::runtime_error::semantic_error(
+                "RunMat:parallel:InfrastructureFailure",
+                format!("execution infrastructure failed: {message}"),
+            ),
+            Self::Failed(message) => crate::runtime_error::semantic_error(
+                "RunMat:parallel:ExecutionFailed",
+                format!("execution failed: {message}"),
+            ),
+            Self::InvalidOutputContract => crate::runtime_error::semantic_error(
+                "RunMat:parallel:InvalidOutputContract",
+                self.to_string(),
+            ),
+        }
+    }
 }
 
 pub fn encode_runtime_failure(error: &RuntimeError) -> Result<ProgramRuntimeFailure, String> {
@@ -126,6 +175,35 @@ fn decode_span_pair(span: ProgramSourceSpan) -> Result<(usize, usize), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_outcomes_have_distinct_stable_runtime_identifiers() {
+        let cases = [
+            (
+                ExecutionServiceError::Cancelled,
+                "RunMat:parallel:Cancelled",
+            ),
+            (
+                ExecutionServiceError::WorkerLost("rank 2 disconnected".into()),
+                "RunMat:parallel:WorkerLost",
+            ),
+            (
+                ExecutionServiceError::Infrastructure("host spawn failed".into()),
+                "RunMat:parallel:InfrastructureFailure",
+            ),
+            (
+                ExecutionServiceError::Failed("program rejected input".into()),
+                "RunMat:parallel:ExecutionFailed",
+            ),
+            (
+                ExecutionServiceError::InvalidOutputContract,
+                "RunMat:parallel:InvalidOutputContract",
+            ),
+        ];
+        for (failure, identifier) in cases {
+            assert_eq!(failure.into_runtime_error().identifier(), Some(identifier),);
+        }
+    }
 
     #[test]
     fn runtime_failure_round_trip_preserves_semantic_diagnostics() {

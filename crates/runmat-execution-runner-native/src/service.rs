@@ -353,11 +353,32 @@ impl RuntimeExecutionServices for NativeExecutionService {
                                 ),
                             );
                         }
-                        Err(crate::driver::TransferFailure::Message(message)) => {
+                        Err(crate::driver::TransferFailure::Execution(message)) => {
                             retain_first_spmd_failure(
                                 &mut first_failure,
                                 completion.completion_order(),
                                 ExecutionServiceError::Failed(message),
+                            );
+                        }
+                        Err(crate::driver::TransferFailure::Infrastructure(message)) => {
+                            retain_first_spmd_failure(
+                                &mut first_failure,
+                                completion.completion_order(),
+                                ExecutionServiceError::Infrastructure(message),
+                            );
+                        }
+                        Err(crate::driver::TransferFailure::WorkerLost(message)) => {
+                            retain_first_spmd_failure(
+                                &mut first_failure,
+                                completion.completion_order(),
+                                ExecutionServiceError::WorkerLost(message),
+                            );
+                        }
+                        Err(crate::driver::TransferFailure::Cancelled) => {
+                            retain_first_spmd_failure(
+                                &mut first_failure,
+                                completion.completion_order(),
+                                ExecutionServiceError::Cancelled,
                             );
                         }
                         Err(crate::driver::TransferFailure::Runtime(failure)) => {
@@ -640,28 +661,37 @@ impl RuntimeExecutionServices for NativeExecutionService {
         let result = completion
             .and_then(|success| {
                 let Some((outputs, result_objects)) = success.values() else {
-                    return Err(
+                    return Err(crate::driver::TransferFailure::Infrastructure(
                         "SPMD task result requires the typed gang execution path".into(),
-                    );
+                    ));
                 };
                 let [payload] = outputs else {
-                    return Err(
+                    return Err(crate::driver::TransferFailure::Infrastructure(
                         "native runtime call did not return exactly one output value".into(),
-                    );
+                    ));
                 };
                 if !result_objects.is_empty() {
-                    return Err(
+                    return Err(crate::driver::TransferFailure::Infrastructure(
                         "native runtime call returned externalized objects without an artifact consumer"
                             .into(),
-                    );
+                    ));
                 }
                 runmat_runtime::execution::value_codec::decode_inline_value(payload)
-                    .map_err(|error| crate::driver::TransferFailure::Message(error.to_string()))
+                    .map_err(|error| {
+                        crate::driver::TransferFailure::Infrastructure(error.to_string())
+                    })
             })
             .map_err(|failure| match failure {
-                crate::driver::TransferFailure::Message(message) => {
+                crate::driver::TransferFailure::Execution(message) => {
                     ExecutionServiceError::Failed(message)
                 }
+                crate::driver::TransferFailure::Infrastructure(message) => {
+                    ExecutionServiceError::Infrastructure(message)
+                }
+                crate::driver::TransferFailure::WorkerLost(message) => {
+                    ExecutionServiceError::WorkerLost(message)
+                }
+                crate::driver::TransferFailure::Cancelled => ExecutionServiceError::Cancelled,
                 crate::driver::TransferFailure::Runtime(failure) => {
                     ExecutionServiceError::RuntimeFailure(failure)
                 }
