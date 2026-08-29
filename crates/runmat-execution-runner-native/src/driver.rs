@@ -12,7 +12,7 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionDescriptor,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -20,6 +20,7 @@ use runmat_execution_runner::{
     DriverCommand, DriverConfig, PoolSpec, TaskSubmission, WorkerSpec,
 };
 
+mod collective;
 mod process;
 
 use crate::local_store::{prepare_session_root, ArtifactStore, CheckpointStore};
@@ -103,6 +104,10 @@ impl TaskCompletion {
         self.mark_completed();
     }
 
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
     pub(crate) fn completion_order(&self) -> Option<u64> {
         let order = self.completion_order.load(Ordering::Acquire);
         (order != NO_COMPLETION_ORDER).then_some(order)
@@ -152,6 +157,7 @@ pub(crate) struct LocalDriver {
     objects: NativeObjectStore,
     checkpoints: CheckpointStore,
     completions: Mutex<HashMap<TaskId, Arc<TaskCompletion>>>,
+    collectives: collective::ProcessCollectiveBroker,
 }
 
 impl LocalDriver {
@@ -219,6 +225,7 @@ impl LocalDriver {
             objects,
             checkpoints,
             completions: Mutex::new(HashMap::new()),
+            collectives: collective::ProcessCollectiveBroker::default(),
         });
         local.checkpoint()?;
         Ok(local)
@@ -325,7 +332,7 @@ impl LocalDriver {
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
         let callable = &submission.request.callable.program;
         ProgramExecutionDescriptor {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
             recipe: recipe.clone(),
             artifact: artifact.clone(),
             callable: callable.clone(),
@@ -386,6 +393,14 @@ impl LocalDriver {
             .unwrap_or_default();
         Self::dispatch(Arc::clone(self), actions);
         let _ = self.checkpoint();
+    }
+
+    pub(crate) fn fail_collective_gang(
+        &self,
+        gang: &runmat_execution::GangHandle,
+        reason: impl Into<String>,
+    ) {
+        self.collectives.fail_gang(gang, reason);
     }
 
     fn dispatch(this: Arc<Self>, actions: Vec<DriverAction>) {

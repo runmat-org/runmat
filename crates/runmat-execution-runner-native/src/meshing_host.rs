@@ -15,7 +15,7 @@ use runmat_meshing_execution::{
 };
 use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
 
-use crate::protocol::{ProgramProgress, WorkerProcessMessage, NATIVE_WORKER_MESSAGE_SCHEMA_V1};
+use crate::protocol::{ProgramProgress, WorkerProcessMessage, NATIVE_WORKER_MESSAGE_SCHEMA_V2};
 use crate::{NativeExecutionError, NativeExecutionResult, NativeObjectStore};
 
 const MESHING_PROGRESS_MEDIA_TYPE: &str = "application/vnd.runmat.meshing-progress+cbor";
@@ -200,7 +200,7 @@ pub(crate) fn encode_meshing_progress(
     progress: &MeshingProgress,
 ) -> Result<ProgramProgress, String> {
     let encoded = ProgramProgress {
-        schema_version: NATIVE_WORKER_MESSAGE_SCHEMA_V1,
+        schema_version: NATIVE_WORKER_MESSAGE_SCHEMA_V2,
         sequence: progress.sequence,
         media_type: MESHING_PROGRESS_MEDIA_TYPE.into(),
         value_schema: MESHING_PROGRESS_VALUE_SCHEMA.into(),

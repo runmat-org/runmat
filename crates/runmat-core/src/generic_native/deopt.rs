@@ -226,6 +226,7 @@ async fn resume_interpreter(
         .collect::<Result<std::collections::HashSet<_>, _>>()?;
     let resume = runmat_vm::InterpreterResumeState {
         pc,
+        completion_boundary: None,
         vars,
         supplied_inputs: frame.supplied_inputs,
         requested_outputs: frame.requested_outputs,
@@ -234,9 +235,10 @@ async fn resume_interpreter(
         persistent_aliases: aliases(frame.persistent_bindings)?,
         side_effect_epoch: frame.site.side_effect_epoch,
     };
-    let runmat_vm::InterpreterOutcome::Completed(values) =
+    let runmat_vm::InterpreterOutcome::Completed(completion) =
         runmat_vm::interpret_resume_in_context(&bytecode, resume, Some(&function_name), runtime)
             .await?;
+    let values = completion.values;
     let body = unit.mir().bodies.get(&function_id).ok_or_else(|| {
         super::error::stage("NativeDeoptimization", "MIR function body is unavailable")
     })?;

@@ -71,7 +71,7 @@ impl PreparedMeshingResultPublication {
     }
 
     pub fn attempt_success(&self) -> AttemptSuccess {
-        AttemptSuccess {
+        AttemptSuccess::Values {
             outputs: vec![self.root_output.clone()],
             result_objects: self.result_objects.clone(),
         }

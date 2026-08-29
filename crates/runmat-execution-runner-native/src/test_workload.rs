@@ -10,15 +10,30 @@ use runmat_test_runner_execution::TestAttemptWorkload;
 pub async fn execute_host_program_request(
     request: ProgramExecutionRequest,
 ) -> ProgramExecutionResponse {
-    execute_host_program_request_with_project(request, None).await
+    execute_host_program_request_with_project_and_collective(request, None, None).await
 }
 
 pub(crate) async fn execute_host_program_request_with_project(
     request: ProgramExecutionRequest,
     materialized: Option<&crate::materialized_project::MaterializedProject>,
 ) -> ProgramExecutionResponse {
+    execute_host_program_request_with_project_and_collective(request, materialized, None).await
+}
+
+pub(crate) async fn execute_host_program_request_with_collective(
+    request: ProgramExecutionRequest,
+    collective: std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>,
+) -> ProgramExecutionResponse {
+    execute_host_program_request_with_project_and_collective(request, None, Some(collective)).await
+}
+
+async fn execute_host_program_request_with_project_and_collective(
+    request: ProgramExecutionRequest,
+    materialized: Option<&crate::materialized_project::MaterializedProject>,
+    collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+) -> ProgramExecutionResponse {
     if request.artifact.form != ExecutableForm::TestAttemptV1 {
-        return execute_portable_request(request, materialized).await;
+        return execute_portable_request(request, materialized, collective).await;
     }
     match execute_test_attempt(&request, materialized).await {
         Ok(execution) => match runmat_test_runner_execution::encode_execution(&execution) {
@@ -32,6 +47,7 @@ pub(crate) async fn execute_host_program_request_with_project(
 async fn execute_portable_request(
     request: ProgramExecutionRequest,
     materialized: Option<&crate::materialized_project::MaterializedProject>,
+    collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
 ) -> ProgramExecutionResponse {
     let interop = match request.artifact.executable_unit() {
         Ok(Some(envelope)) => envelope.manifest.interop.clone(),
@@ -42,7 +58,7 @@ async fn execute_portable_request(
             }
         }
     };
-    if interop.adapters.is_empty() && interop.foreign_types.is_empty() {
+    if interop.adapters.is_empty() && interop.foreign_types.is_empty() && collective.is_none() {
         return runmat_vm::execute_program_request(request).await;
     }
 
@@ -183,6 +199,12 @@ async fn execute_portable_request(
         };
     }
     let runtime = session.execution_runtime_context(request.recipe.program_revision.clone());
+    let runtime = if let Some(collective) = collective {
+        let ports = runtime.service_ports().clone().with_collective(collective);
+        runtime.with_service_ports(ports)
+    } else {
+        runtime
+    };
     let response = runmat_vm::execute_program_request_with_context(request, runtime).await;
     if let Err(error) = session.shutdown_foreign_runtime().await {
         return ProgramExecutionResponse::Failure {
@@ -277,7 +299,7 @@ mod tests {
     use runmat_execution_artifact::{
         ExecutableForm, ExecutionBundleBuilder, LogicalObject, ObjectNamespace, ProgramArtifact,
         ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse, ProgramTarget,
-        PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
     };
     use runmat_test::descriptor::TestSelector;
     use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
@@ -380,7 +402,7 @@ mod tests {
         )
         .unwrap();
         let response = execute_host_program_request(ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
             recipe,
             artifact,
             callable: ProgramCallable::semantic(
@@ -522,7 +544,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
         let response = execute_host_program_request_with_project(
             ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(
@@ -680,7 +702,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
         let response = execute_host_program_request_with_project(
             ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(

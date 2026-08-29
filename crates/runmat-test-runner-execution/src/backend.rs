@@ -140,7 +140,7 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
             let execution = self.inner.execute(&session.inner, request).await;
             let report = match &execution {
                 Ok(_) => AttemptReport::Succeeded {
-                    result: AttemptSuccess {
+                    result: AttemptSuccess::Values {
                         outputs: vec![runmat_execution::value::ValuePayload::Inline(Box::new(
                             runmat_execution::value::InlineValue::Null,
                         ))],
@@ -200,7 +200,7 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
             {
                 let report = if execution.is_some() {
                     AttemptReport::Succeeded {
-                        result: AttemptSuccess {
+                        result: AttemptSuccess::Values {
                             outputs: vec![runmat_execution::value::ValuePayload::Inline(Box::new(
                                 runmat_execution::value::InlineValue::Null,
                             ))],

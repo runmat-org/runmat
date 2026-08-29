@@ -156,8 +156,11 @@ pub(super) async fn execute(
         tokio::select! {
             result = &mut completion => {
                 return match result {
-                    Ok(success) if success.result_objects.is_empty() => {
-                        match success.outputs.as_slice() {
+                    Ok(runmat_execution_runner::AttemptSuccess::Values {
+                        outputs,
+                        result_objects,
+                    }) if result_objects.is_empty() => {
+                        match outputs.as_slice() {
                             [value] => Ok(RemotePoolExecutionOutcome::Completed(
                                 ProgramExecutionResponse::Success {
                                     value: value.clone(),
@@ -168,12 +171,20 @@ pub(super) async fn execute(
                             )),
                         }
                     }
-                    Ok(success) => Ok(RemotePoolExecutionOutcome::Completed(
+                    Ok(runmat_execution_runner::AttemptSuccess::Values {
+                        outputs,
+                        result_objects,
+                    }) => Ok(RemotePoolExecutionOutcome::Completed(
                         ProgramExecutionResponse::ExternalizedSuccess {
-                            outputs: success.outputs,
-                            result_objects: success.result_objects,
+                            outputs,
+                            result_objects,
                         },
                     )),
+                    Ok(runmat_execution_runner::AttemptSuccess::Spmd { outputs }) => {
+                        Ok(RemotePoolExecutionOutcome::Completed(
+                            ProgramExecutionResponse::SpmdSuccess { outputs },
+                        ))
+                    }
                     Err(failure) => {
                         let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
                         if state == Some(TaskState::Indeterminate) {

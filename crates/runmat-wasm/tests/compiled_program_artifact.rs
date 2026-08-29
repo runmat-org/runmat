@@ -7,7 +7,7 @@ use runmat_execution::{OutputContract, ProgramCallable, ProgramFunctionId};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
     ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -49,7 +49,7 @@ async fn request_with_contract(
     )
     .unwrap();
     ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
         recipe,
         artifact,
         callable: ProgramCallable::semantic(

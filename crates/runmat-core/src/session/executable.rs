@@ -561,7 +561,8 @@ impl RunMatSession {
         )
         .await?
         {
-            runmat_vm::InterpreterOutcome::Completed(values) => Ok(values
+            runmat_vm::InterpreterOutcome::Completed(completion) => Ok(completion
+                .values
                 .into_iter()
                 .last()
                 .unwrap_or(Value::OutputList(Vec::new()))),

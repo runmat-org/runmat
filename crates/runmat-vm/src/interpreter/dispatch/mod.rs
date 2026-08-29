@@ -924,7 +924,7 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallFevalExpandMultiOutput(specs, out_count) => {
-            let args = build_feval_expand_multi_args(stack, specs).await?;
+            let args = build_feval_expand_multi_args(stack, specs, &context.runtime).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
@@ -944,7 +944,7 @@ pub async fn dispatch_instruction(
         }
         Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, out_count_slot) => {
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
-            let args = build_feval_expand_multi_args(stack, specs).await?;
+            let args = build_feval_expand_multi_args(stack, specs, &context.runtime).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
@@ -1293,7 +1293,7 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallBuiltinExpandMultiOutput(name, specs, out_count) => {
-            let args = build_builtin_expand_multi_args(stack, specs).await?;
+            let args = build_builtin_expand_multi_args(stack, specs, &context.runtime).await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result =
                 runmat_runtime::call_builtin_async_with_outputs(name, &args, *out_count).await?;
@@ -1308,7 +1308,8 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let args =
+                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result = runmat_runtime::call_super_constructor(
                 current_class.clone(),
@@ -1328,7 +1329,8 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let args =
+                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result = runmat_runtime::call_super_method(
                 current_class.clone(),
@@ -1348,7 +1350,8 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let args =
+                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
             match handle_prepared_user_function_call(
                 calls::UserCallContext {
                     stack,
@@ -1391,7 +1394,8 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let args =
+                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
             match handle_workspace_first_prepared_call(
                 calls::WorkspaceFirstCallContext {
                     stack,
@@ -1438,7 +1442,8 @@ pub async fn dispatch_instruction(
             out_count_slot,
         } => {
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
-            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let args =
+                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
             match handle_workspace_first_prepared_call(
                 calls::WorkspaceFirstCallContext {
                     stack,
@@ -1477,7 +1482,8 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
-            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let args =
+                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
             match handle_prepared_user_function_call(
                 calls::UserCallContext {
                     stack,
@@ -1518,7 +1524,8 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let args =
+                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
             let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
             for slot in capture_slots {
                 call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
@@ -1581,6 +1588,7 @@ pub async fn dispatch_instruction(
                 specs,
                 *out_count,
                 current_function_name,
+                &context.runtime,
             )
             .await?;
             Ok(Some(DispatchHandled::Generic(

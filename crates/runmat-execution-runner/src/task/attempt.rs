@@ -19,9 +19,51 @@ pub struct AttemptRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct AttemptSuccess {
-    pub outputs: Vec<ValuePayload>,
-    pub result_objects: Vec<ValueRef>,
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AttemptSuccess {
+    Values {
+        outputs: Vec<ValuePayload>,
+        result_objects: Vec<ValueRef>,
+    },
+    Spmd {
+        outputs: Vec<Option<ValuePayload>>,
+    },
+}
+
+impl AttemptSuccess {
+    pub fn values(&self) -> Option<(&[ValuePayload], &[ValueRef])> {
+        match self {
+            Self::Values {
+                outputs,
+                result_objects,
+            } => Some((outputs, result_objects)),
+            Self::Spmd { .. } => None,
+        }
+    }
+
+    pub fn into_values(self) -> Option<(Vec<ValuePayload>, Vec<ValueRef>)> {
+        match self {
+            Self::Values {
+                outputs,
+                result_objects,
+            } => Some((outputs, result_objects)),
+            Self::Spmd { .. } => None,
+        }
+    }
+
+    pub fn spmd_outputs(&self) -> Option<&[Option<ValuePayload>]> {
+        match self {
+            Self::Spmd { outputs } => Some(outputs),
+            Self::Values { .. } => None,
+        }
+    }
+
+    pub fn result_objects(&self) -> &[ValueRef] {
+        match self {
+            Self::Values { result_objects, .. } => result_objects,
+            Self::Spmd { .. } => &[],
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

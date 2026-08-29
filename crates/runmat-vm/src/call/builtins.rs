@@ -687,7 +687,8 @@ async fn eval_workspace_source(
     )
     .await?;
     let vars = match outcome {
-        Ok(crate::interpreter::api::InterpreterOutcome::Completed(vars)) => {
+        Ok(crate::interpreter::api::InterpreterOutcome::Completed(completion)) => {
+            let vars = completion.values;
             if let Some(snapshot) = updated_workspace {
                 let result_vars = snapshot.vars.clone();
                 replace_workspace_target_vars_and_state(

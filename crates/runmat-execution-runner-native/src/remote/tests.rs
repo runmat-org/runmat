@@ -17,7 +17,7 @@ use runmat_execution_artifact::encryption::{
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 use runmat_execution_transport_native::control::{
     DriverArtifactDownload, DriverArtifactKind, DriverAuthority, DriverBootstrap,
@@ -452,7 +452,7 @@ async fn run_encrypted_remote_request(
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
         recipe,
         artifact,
         callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
@@ -460,7 +460,7 @@ async fn run_encrypted_remote_request(
     })
     .unwrap();
     let inputs = serde_json::to_vec(&ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V4,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
         context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: Vec::new(),
     })

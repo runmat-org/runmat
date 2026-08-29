@@ -41,7 +41,7 @@ impl Driver {
         match report.report {
             AttemptReport::Started => self.start_attempt(&report)?,
             AttemptReport::Succeeded { result } => {
-                let uncommitted_objects = result.result_objects.clone();
+                let uncommitted_objects = result.result_objects().to_vec();
                 self.finish_attempt(&attempt, AttemptState::Completed)?;
                 let decision = self.commit_result(&attempt, result)?;
                 if let CommitDecision::Accepted(commit) = decision {
@@ -221,7 +221,7 @@ impl Driver {
         if let AttemptReport::Succeeded { result } = report.report {
             actions.push(DriverAction::GarbageCollectResults {
                 task_id: report.task_id,
-                objects: result.result_objects,
+                objects: result.result_objects().to_vec(),
             });
         }
         self.emit(DriverEventKind::ReportDiscarded {

@@ -33,7 +33,9 @@ pub use interpreter::runner::{
     invoke_semantic_function_value_in_context,
 };
 pub use interpreter::runner::{interpret_resume_in_context, prepare_native_execution_metadata};
-pub use interpreter::state::{InterpreterOutcome, InterpreterResumeState, InterpreterState};
+pub use interpreter::state::{
+    InterpreterCompletionBoundary, InterpreterOutcome, InterpreterResumeState, InterpreterState,
+};
 pub use layout::{
     derive_layout, remap_layout_function_ids, LayoutError, VmAssemblyLayout, VmEntrypointLayout,
     VmFunctionLayout, VmSlotId, VM_LAYOUT_SCHEMA_VERSION,

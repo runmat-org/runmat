@@ -47,7 +47,16 @@ impl MeshingHostResponse {
             ));
         };
         let attempt = completed.attempt_success();
-        let [ValuePayload::Object(root)] = attempt.outputs.as_slice() else {
+        let runmat_execution_runner::AttemptSuccess::Values {
+            outputs,
+            result_objects,
+        } = attempt
+        else {
+            return Err(MeshingExecutionError::Invalid(
+                "completed meshing stage returned an SPMD result".into(),
+            ));
+        };
+        let [ValuePayload::Object(root)] = outputs.as_slice() else {
             return Err(MeshingExecutionError::Invalid(
                 "completed meshing stage must have one externalized root output".into(),
             ));
@@ -56,7 +65,7 @@ impl MeshingHostResponse {
             schema_version: MESHING_HOST_RESPONSE_SCHEMA_VERSION,
             stage_manifest_digest: *stage_manifest_digest,
             root: (**root).clone(),
-            result_objects: attempt.result_objects,
+            result_objects,
         };
         response.validate_against(host)?;
         Ok(response)
@@ -109,7 +118,7 @@ impl MeshingHostResponse {
                 root,
                 result_objects,
                 ..
-            } => Some(runmat_execution_runner::AttemptSuccess {
+            } => Some(runmat_execution_runner::AttemptSuccess::Values {
                 outputs: vec![ValuePayload::Object(Box::new(root.clone()))],
                 result_objects: result_objects.clone(),
             }),

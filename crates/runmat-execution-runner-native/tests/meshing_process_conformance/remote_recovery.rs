@@ -208,11 +208,12 @@ async fn run_inner() {
         .windows(2)
         .all(|pair| pair[0].sequence < pair[1].sequence));
     let success = completion.wait().await.unwrap();
-    let [ValuePayload::Object(remote_root)] = success.outputs.as_slice() else {
+    let (outputs, result_objects) = success.values().expect("ordinary task result");
+    let [ValuePayload::Object(remote_root)] = outputs else {
         panic!("retried remote meshing returned a non-object root")
     };
     let mut retry_store = TestStore::default();
-    for reference in &success.result_objects {
+    for reference in result_objects {
         retry_store.0.insert(
             reference.logical_digest,
             pool.execution_object(reference)

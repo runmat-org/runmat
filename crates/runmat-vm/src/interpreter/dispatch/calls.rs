@@ -139,22 +139,25 @@ fn imported_static_method_owner(
 pub async fn build_builtin_expand_multi_args(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(stack, specs).await
+    build_expanded_args_from_specs(stack, specs, runtime).await
 }
 
 pub async fn build_feval_expand_multi_args(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(stack, specs).await
+    build_expanded_args_from_specs(stack, specs, runtime).await
 }
 
 pub async fn build_user_function_expand_multi_args(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(stack, specs).await
+    build_expanded_args_from_specs(stack, specs, runtime).await
 }
 
 pub fn handle_builtin_outcome(
@@ -735,8 +738,9 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     specs: &[ArgumentSpec],
     requested_outputs: usize,
     current_function_name: &str,
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<MethodHandling, RuntimeError> {
-    let mut args = build_user_function_expand_multi_args(stack, specs).await?;
+    let mut args = build_user_function_expand_multi_args(stack, specs, runtime).await?;
     if args.is_empty() {
         return Err(crate::interpreter::errors::mex(
             "MethodCallMissingReceiver",

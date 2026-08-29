@@ -287,8 +287,7 @@ async fn parent() {
         .windows(2)
         .all(|pair| pair[0].sequence < pair[1].sequence));
     assert_eq!(decoded_progress.last().unwrap().completed_work, 1);
-    let outputs = success.outputs;
-    let result_objects = success.result_objects;
+    let (outputs, result_objects) = success.into_values().expect("ordinary task result");
     assert!(serde_json::to_vec(&outputs).unwrap().len() < 4096);
     assert!(result_objects.len() >= 3);
     let [ValuePayload::Object(root)] = outputs.as_slice() else {
@@ -480,11 +479,13 @@ async fn remote_conformance() {
             .await
             .expect("remote meshing completion timeout")
             .unwrap();
-        let [ValuePayload::Object(remote_root)] = success.outputs.as_slice() else {
+        let (success_outputs, success_result_objects) =
+            success.values().expect("ordinary task result");
+        let [ValuePayload::Object(remote_root)] = success_outputs else {
             panic!("remote meshing returned a non-object root")
         };
         let mut remote_store = TestStore::default();
-        for reference in &success.result_objects {
+        for reference in success_result_objects {
             remote_store.0.insert(
                 reference.logical_digest,
                 pool.execution_object(reference)
@@ -500,7 +501,7 @@ async fn remote_conformance() {
             limits().inventory,
         )
         .unwrap();
-        assert_eq!(imported.result_objects(), success.result_objects);
+        assert_eq!(imported.result_objects(), success_result_objects);
 
         for (object, reference) in exact
             .input
@@ -522,11 +523,13 @@ async fn remote_conformance() {
             .await
             .expect("remote exact-input meshing timeout")
             .unwrap();
-        let [ValuePayload::Object(exact_root)] = exact_success.outputs.as_slice() else {
+        let (exact_outputs, exact_result_objects) =
+            exact_success.values().expect("ordinary task result");
+        let [ValuePayload::Object(exact_root)] = exact_outputs else {
             panic!("remote exact-input stage returned a non-object root")
         };
         let mut exact_result_store = TestStore::default();
-        for reference in &exact_success.result_objects {
+        for reference in exact_result_objects {
             exact_result_store.0.insert(
                 reference.logical_digest,
                 pool.execution_object(reference)
@@ -562,7 +565,7 @@ async fn remote_conformance() {
         let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = exact_serial else {
             panic!("serial exact-input reference did not externalize its result")
         };
-        assert_eq!(outputs, exact_success.outputs);
+        assert_eq!(outputs, exact_outputs);
 
         let mut serial_store = TestStore::default();
         let serial = execute_meshing_program_request(
@@ -576,7 +579,7 @@ async fn remote_conformance() {
         let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = serial else {
             panic!("serial meshing reference did not externalize its result")
         };
-        assert_eq!(outputs, success.outputs);
+        assert_eq!(outputs, success_outputs);
 
         let cancel_scope =
             runmat_execution::ExecutionScopeId::derive(&[b"remote-meshing-cancel-scope"]);
@@ -759,6 +762,9 @@ fn submission_for(
         .map(|value| match value {
             ValuePayload::Object(root) => Ok((**root).clone()),
             ValuePayload::Inline(_) => Err("meshing conformance inputs must be objects"),
+            ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {
+                Err("meshing conformance inputs cannot be distributed handles")
+            }
         })
         .collect::<Result<Vec<_>, _>>()
         .unwrap();

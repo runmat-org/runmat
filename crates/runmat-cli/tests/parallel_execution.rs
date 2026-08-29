@@ -182,3 +182,97 @@ end
         "parallel failure lost its worker source location. stdout: {stdout} stderr: {stderr}"
     );
 }
+
+#[test]
+fn spmd_executes_as_one_typed_multi_process_gang() {
+    let workspace = TempDir::new().expect("temporary workspace");
+    let config = workspace.path().join("runmat.toml");
+    fs::write(
+        &config,
+        r#"
+[runtime.accelerate]
+enabled = false
+provider = "inprocess"
+"#,
+    )
+    .expect("write test configuration");
+    let script = workspace.path().join("spmd_results.m");
+    fs::write(
+        &script,
+        r#"
+pool = parpool(3);
+wide_input = 0x0020000000000001u64;
+spmd
+  rank = spmdIndex();
+  count = spmdSize();
+  destination = mod(rank, count) + 1;
+  source = mod(rank + count - 2, count) + 1;
+  exchanged = spmdSendReceive(destination, source, uint16(rank));
+  joined = spmdCat(uint16(rank), 2);
+  total = spmdReduce(@plus, uint32(rank));
+  wide_output = wide_input;
+  if rank == 2
+    assigned_on_second = uint16(22);
+  end
+end
+assert(wide_output{3} == wide_input);
+fprintf("SPMD_RANKS %.0f %.0f %.0f\n", rank{:});
+fprintf("SPMD_COUNT %.0f %.0f %.0f\n", count{[1, 2, 3]});
+fprintf("SPMD_EXCHANGE %.0f %.0f %.0f\n", exchanged{1}, exchanged{2}, exchanged{3});
+fprintf("SPMD_JOINED %.0f %.0f %.0f\n", joined{1});
+fprintf("SPMD_TOTAL %.0f\n", total{1});
+fprintf("SPMD_OPTIONAL %.0f\n", assigned_on_second{2});
+fprintf("SPMD_WIDE_OK\n");
+"#,
+    )
+    .expect("write SPMD script");
+
+    let output = run_script(&script, &config);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "SPMD script failed. stdout: {stdout} stderr: {stderr}"
+    );
+    for expected in [
+        "SPMD_RANKS 1 2 3",
+        "SPMD_COUNT 3 3 3",
+        "SPMD_EXCHANGE 3 1 2",
+        "SPMD_JOINED 1 2 3",
+        "SPMD_TOTAL 6",
+        "SPMD_OPTIONAL 22",
+        "SPMD_WIDE_OK",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?}. stdout: {stdout} stderr: {stderr}"
+        );
+    }
+
+    let missing_script = workspace.path().join("spmd_unassigned.m");
+    fs::write(
+        &missing_script,
+        r#"
+pool = parpool(3);
+spmd
+  rank = spmdIndex();
+  if rank == 2
+    assigned_on_second = uint16(22);
+  end
+end
+missing = assigned_on_second{1};
+"#,
+    )
+    .expect("write unassigned-output script");
+    let missing = run_script(&missing_script, &config);
+    let missing_stdout = String::from_utf8_lossy(&missing.stdout);
+    let missing_stderr = String::from_utf8_lossy(&missing.stderr);
+    assert!(
+        !missing.status.success(),
+        "unassigned Composite entry unexpectedly became a value. stdout: {missing_stdout} stderr: {missing_stderr}"
+    );
+    assert!(
+        missing_stderr.contains("RunMat:CompositeEntryUnavailable"),
+        "unassigned Composite entry lost its typed diagnostic. stdout: {missing_stdout} stderr: {missing_stderr}"
+    );
+}

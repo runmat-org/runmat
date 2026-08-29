@@ -351,6 +351,28 @@ async fn commit_response(
             )
             .await
         }
+        ProgramExecutionResponse::SpmdSuccess { .. } => {
+            let message = "SPMD worker response requires the typed remote gang driver";
+            let diagnostic = store_encrypted(
+                control,
+                config,
+                run_key,
+                DriverArtifactKind::Diagnostic,
+                EncryptionPurpose::DetailedEvent,
+                message.as_bytes(),
+                None,
+            )
+            .await?;
+            transition(
+                control,
+                config,
+                DriverRunTarget::Failed,
+                Some("spmd-gang-driver-required"),
+                None,
+                Some(diagnostic),
+            )
+            .await
+        }
         ProgramExecutionResponse::Failure { message } => {
             let diagnostic = store_encrypted(
                 control,
