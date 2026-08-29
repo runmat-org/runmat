@@ -48,16 +48,20 @@ pub(super) fn execute_attempt(
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    let gang = match &worker_request.context {
-        runmat_execution::ProgramInvocationContext::SpmdTask { task } => Some(task.gang.clone()),
+    let spmd_rank = match &worker_request.context {
+        runmat_execution::ProgramInvocationContext::SpmdTask { task } => {
+            Some((task.gang.clone(), task.rank))
+        }
         _ => None,
     };
     let result = runtime.block_on(run_process(driver, worker_request, completion));
-    if result.is_err() {
-        if let Some(gang) = gang {
+    if let Some((gang, rank)) = spmd_rank {
+        if result.is_err() {
             driver
                 .collectives
                 .fail_gang(&gang, "native SPMD worker terminated before completion");
+        } else {
+            driver.finish_collective_rank(&gang, rank);
         }
     }
     result

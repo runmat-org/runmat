@@ -49,3 +49,32 @@ answer = pool.NumWorkers;
         .await
         .expect("browser parfor executes through the worker host boundary");
 }
+
+#[wasm_bindgen_test]
+async fn browser_runtime_executes_typed_spmd_cooperatively() {
+    let (host, _closures) = execution_host();
+    let options = Object::new();
+    Reflect::set(&options, &JsValue::from_str("executionHost"), &host).unwrap();
+    Reflect::set(&options, &JsValue::from_str("enableGpu"), &JsValue::FALSE).unwrap();
+    let runtime = runmat_wasm::init_runmat(options.into()).await.unwrap();
+    let source = r#"
+pool = parpool(2);
+spmd(2)
+  exact = uint64(0x0020000000000001u64) + uint64(spmdIndex);
+  total = spmdPlus(uint16(spmdIndex));
+end
+values = exact{:};
+sums = total{[1, 2]};
+if values(1) ~= uint64(0x0020000000000002u64) || values(2) ~= uint64(0x0020000000000003u64)
+  error("RunMat:parallel:BrowserSpmdValue", "browser SPMD lost an exact rank value");
+end
+if sums(1) ~= uint16(3) || sums(2) ~= uint16(3)
+  error("RunMat:parallel:BrowserSpmdCollective", "browser SPMD collective result mismatch");
+end
+answer = pool.NumWorkers;
+"#;
+    runtime
+        .execute_request_js(source_request("browser-spmd.m", source, 1))
+        .await
+        .expect("browser SPMD executes through the cooperative typed runtime");
+}

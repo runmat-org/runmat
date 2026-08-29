@@ -26,6 +26,39 @@ pub struct BlockedCollective {
     pub waiting_ranks: Vec<LabRank>,
 }
 
+/// A deterministic SPMD wait cycle. Every lab is either blocked in a
+/// collective or has completed its region, so no later submission can make
+/// progress.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectiveDeadlock {
+    pub gang: GangHandle,
+    pub blocked: Vec<BlockedCollective>,
+    pub completed_ranks: Vec<LabRank>,
+}
+
+impl std::fmt::Display for CollectiveDeadlock {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "SPMD collective deadlock")?;
+        if !self.completed_ranks.is_empty() {
+            write!(formatter, "; completed labs")?;
+            for rank in &self.completed_ranks {
+                write!(formatter, " {}", rank.0)?;
+            }
+        }
+        for blocked in &self.blocked {
+            write!(
+                formatter,
+                "; region {} collective {} sequence {} waits for labs",
+                blocked.region.0.ordinal, blocked.id.ordinal, blocked.sequence.0
+            )?;
+            for rank in &blocked.waiting_ranks {
+                write!(formatter, " {}", rank.0)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct RoundKey {
     gang: GangId,
@@ -123,6 +156,35 @@ impl CollectiveCoordinator {
         }
         blocked.sort_by_key(|item| (item.region, item.id, item.sequence));
         blocked
+    }
+
+    pub fn deadlock(
+        &self,
+        gang: &GangHandle,
+        completed_ranks: &[LabRank],
+    ) -> Option<CollectiveDeadlock> {
+        let blocked = self.blocked(gang);
+        if blocked.is_empty() {
+            return None;
+        }
+        let mut accounted = completed_ranks.iter().copied().collect::<BTreeSet<_>>();
+        accounted.extend(
+            blocked
+                .iter()
+                .flat_map(|collective| collective.waiting_ranks.iter().copied()),
+        );
+        let expected = (1..=gang.labs.0).map(LabRank).collect::<BTreeSet<_>>();
+        if accounted != expected {
+            return None;
+        }
+        let mut completed_ranks = completed_ranks.to_vec();
+        completed_ranks.sort_unstable();
+        completed_ranks.dedup();
+        Some(CollectiveDeadlock {
+            gang: gang.clone(),
+            blocked,
+            completed_ranks,
+        })
     }
 
     pub fn fail_gang(
@@ -771,5 +833,30 @@ mod tests {
         assert_eq!(completions.len(), 1);
         assert!(completions[0].result.is_err());
         assert!(coordinator.blocked(&gang).is_empty());
+    }
+
+    #[test]
+    fn deadlock_requires_every_lab_to_be_blocked_or_completed() {
+        let gang = context(1).gang;
+        let mut coordinator = CollectiveCoordinator::default();
+        assert!(coordinator
+            .submit(request(
+                1,
+                CollectiveInvocation::Receive {
+                    selection: ReceiveSelection {
+                        source: Some(LabRank(2)),
+                        tag: Some(CollectiveMessageTag(7)),
+                    },
+                },
+            ))
+            .unwrap()
+            .is_empty());
+        assert!(coordinator.deadlock(&gang, &[]).is_none());
+        let deadlock = coordinator
+            .deadlock(&gang, &[LabRank(2), LabRank(3)])
+            .expect("completed peers cannot satisfy the blocked receive");
+        assert_eq!(deadlock.completed_ranks, vec![LabRank(2), LabRank(3)]);
+        assert_eq!(deadlock.blocked[0].waiting_ranks, vec![LabRank(1)]);
+        assert!(deadlock.to_string().contains("waits for labs 1"));
     }
 }

@@ -1,8 +1,8 @@
 use runmat_execution::{DistributedObjectId, DistributedValueHandle, PoolSnapshot};
 use runmat_execution_runner::{DistributedStore, OwnedPartition};
 use runmat_runtime::context::{
-    RuntimeDistributedCallRequest, RuntimeDistributedService, RuntimeDistributedSnapshot,
-    RuntimeServiceFuture,
+    RuntimeDistributedCallRequest, RuntimeDistributedRetirement, RuntimeDistributedService,
+    RuntimeDistributedSnapshot, RuntimeServiceFuture,
 };
 use runmat_runtime::parallel::distribution::DistributedPartitionValue;
 use runmat_runtime::RuntimeError;
@@ -36,6 +36,17 @@ impl CoreDistributedService {
 }
 
 impl RuntimeDistributedService for CoreDistributedService {
+    fn retire_pool(
+        &self,
+        pool: runmat_execution::PoolHandle,
+    ) -> Result<RuntimeDistributedRetirement, RuntimeError> {
+        let retired = self.store.borrow_mut().retire_pool(&pool);
+        Ok(RuntimeDistributedRetirement {
+            distributed: retired.distributed,
+            composites: retired.composites,
+        })
+    }
+
     fn create(
         &self,
         contract: DistributedValueContract,

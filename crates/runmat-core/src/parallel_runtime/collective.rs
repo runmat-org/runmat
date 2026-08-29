@@ -50,6 +50,7 @@ type PendingSender = oneshot::Sender<Result<CollectiveResponse, RuntimeError>>;
 pub(super) struct SharedCollectives {
     coordinator: RefCell<CollectiveCoordinator>,
     pending: RefCell<BTreeMap<PendingKey, PendingSender>>,
+    completed_ranks: RefCell<BTreeMap<(GangId, u64), std::collections::BTreeSet<LabRank>>>,
 }
 
 impl SharedCollectives {
@@ -58,6 +59,7 @@ impl SharedCollectives {
         request: CollectiveRequest,
     ) -> Result<oneshot::Receiver<Result<CollectiveResponse, RuntimeError>>, RuntimeError> {
         let key = PendingKey::from_request(&request);
+        let gang = request.context.gang.clone();
         let (sender, receiver) = oneshot::channel();
         if self.pending.borrow_mut().insert(key, sender).is_some() {
             return Err(runtime_error(
@@ -72,12 +74,50 @@ impl SharedCollectives {
             }
         };
         self.complete(completions);
+        self.fail_deadlock(&gang);
         Ok(receiver)
+    }
+
+    pub(super) fn rank_finished(&self, gang: &runmat_execution::GangHandle, rank: LabRank) {
+        let key = (gang.id, gang.generation);
+        let completed_count = {
+            let mut ranks = self.completed_ranks.borrow_mut();
+            let completed = ranks.entry(key).or_default();
+            completed.insert(rank);
+            completed.len()
+        };
+        self.fail_deadlock(gang);
+        if completed_count == gang.labs.0 as usize {
+            self.completed_ranks.borrow_mut().remove(&key);
+        }
     }
 
     pub(super) fn fail_gang(&self, gang: &runmat_execution::GangHandle, reason: &str) {
         let completions = self.coordinator.borrow_mut().fail_gang(gang, reason);
+        self.completed_ranks
+            .borrow_mut()
+            .remove(&(gang.id, gang.generation));
         self.complete(completions);
+    }
+
+    fn fail_deadlock(&self, gang: &runmat_execution::GangHandle) {
+        let completed = self
+            .completed_ranks
+            .borrow()
+            .get(&(gang.id, gang.generation))
+            .map(|ranks| ranks.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let deadlock = self.coordinator.borrow().deadlock(gang, &completed);
+        if let Some(deadlock) = deadlock {
+            let completions = self
+                .coordinator
+                .borrow_mut()
+                .fail_gang(&deadlock.gang, deadlock.to_string());
+            self.completed_ranks
+                .borrow_mut()
+                .remove(&(gang.id, gang.generation));
+            self.complete(completions);
+        }
     }
 
     fn complete(&self, completions: Vec<CollectiveCompletion>) {

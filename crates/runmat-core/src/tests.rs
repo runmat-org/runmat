@@ -14777,6 +14777,46 @@ fn local_multi_rank_spmd_preserves_rank_order_and_collective_results() {
 }
 
 #[test]
+fn local_spmd_reports_a_typed_collective_deadlock_without_a_timeout() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; value = spmdReceive(2, 7); else; spmdBarrier(); end; end;",
+    )
+    .expect("deadlocked SPMD execution returns a structured diagnostic");
+    assert!(
+        outcome.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RunMat:parallel:Collective"
+                && diagnostic.message.contains("SPMD collective deadlock")
+                && diagnostic.message.contains("waits for labs")
+        }),
+        "{:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn local_spmd_detects_a_collective_wait_after_its_peer_finishes() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; value = spmdReceive(2, 7); else; value = uint16(2); end; end;",
+    )
+    .expect("completed-peer deadlock returns a structured diagnostic");
+    assert!(
+        outcome.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RunMat:parallel:Collective"
+                && diagnostic.message.contains("SPMD collective deadlock")
+                && diagnostic.message.contains("completed labs 2")
+        }),
+        "{:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
 fn distributed_values_preserve_typed_local_storage_through_compiler_lowering() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
@@ -14842,6 +14882,31 @@ fn distributed_builtin_policy_rejects_unclassified_operations() {
         .diagnostics
         .iter()
         .any(|diagnostic| { diagnostic.code == "RunMat:parallel:DistributedBuiltinUnsupported" }));
+}
+
+#[test]
+fn closing_a_pool_retires_distributed_and_composite_leases() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    execute_text_request(
+        &mut session,
+        "pool = parpool(2); distributedValue = distributed(uint16([1, 2])); spmd(2); rankValue = uint32(spmdIndex()); end; delete(pool);",
+    )
+    .expect("create and retire parallel values");
+
+    let distributed = execute_text_request(&mut session, "local = getLocalPart(distributedValue);")
+        .expect("stale distributed use returns a diagnostic");
+    assert!(distributed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:parallel:StaleDistributedLease"
+            && diagnostic.message.contains("pool is closed")
+    }));
+
+    let composite = execute_text_request(&mut session, "rank = rankValue{1};")
+        .expect("stale Composite use returns a diagnostic");
+    assert!(composite.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:parallel:StaleDistributedLease"
+            && diagnostic.message.contains("pool is closed")
+    }));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

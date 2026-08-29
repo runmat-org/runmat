@@ -268,6 +268,15 @@ pub trait RuntimeSpmdService {
         gang: runmat_execution::GangHandle,
     ) -> RuntimeServiceFuture<Result<(), RuntimeError>>;
 
+    /// Records that one admitted lab completed its region body. The gang
+    /// authority uses this typed lifecycle transition to distinguish a live
+    /// collective wait from a wait whose remaining peers have already exited.
+    fn rank_finished(
+        &self,
+        gang: &runmat_execution::GangHandle,
+        rank: runmat_types::LabRank,
+    ) -> Result<(), RuntimeError>;
+
     fn retain_outputs(
         &self,
         gang: runmat_execution::GangHandle,
@@ -293,10 +302,21 @@ pub struct RuntimeDistributedSnapshot {
     pub partitions: Vec<runmat_execution::DistributedPartitionLayout>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RuntimeDistributedRetirement {
+    pub distributed: usize,
+    pub composites: usize,
+}
+
 /// Runtime operations over execution-service-owned distributed values.
 /// Implementations preserve partition ownership and decide locality; callers
 /// never obtain raw partition storage through this port.
 pub trait RuntimeDistributedService {
+    fn retire_pool(
+        &self,
+        pool: runmat_execution::PoolHandle,
+    ) -> Result<RuntimeDistributedRetirement, RuntimeError>;
+
     fn create(
         &self,
         contract: DistributedValueContract,

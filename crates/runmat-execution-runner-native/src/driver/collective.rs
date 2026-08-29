@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
@@ -48,6 +48,7 @@ impl CompletionKey {
 struct BrokerState {
     coordinator: CollectiveCoordinator,
     completions: BTreeMap<CompletionKey, Result<CollectiveResponse, String>>,
+    completed_ranks: BTreeMap<(GangId, u64), BTreeSet<LabRank>>,
 }
 
 #[derive(Default)]
@@ -74,6 +75,7 @@ impl ProcessCollectiveBroker {
                 return Err(error.to_string());
             }
         }
+        Self::fail_deadlock(&mut state, &gang);
         self.ready.notify_all();
         loop {
             if let Some(result) = state.completions.remove(&key) {
@@ -102,7 +104,24 @@ impl ProcessCollectiveBroker {
         let mut state = self.state.lock().expect("collective broker poisoned");
         let completions = state.coordinator.fail_gang(gang, reason);
         Self::record(&mut state, completions);
+        state.completed_ranks.remove(&(gang.id, gang.generation));
         self.ready.notify_all();
+    }
+
+    pub(super) fn rank_finished(&self, gang: &GangHandle, rank: LabRank) {
+        let mut state = self.state.lock().expect("collective broker poisoned");
+        let key = (gang.id, gang.generation);
+        let completed = state.completed_ranks.entry(key).or_default();
+        completed.insert(rank);
+        let completed_ranks = completed.iter().copied().collect::<Vec<_>>();
+        if let Some(deadlock) = state.coordinator.deadlock(gang, &completed_ranks) {
+            let completions = state.coordinator.fail_gang(gang, deadlock.to_string());
+            Self::record(&mut state, completions);
+            state.completed_ranks.remove(&key);
+            self.ready.notify_all();
+        } else if completed_ranks.len() == gang.labs.0 as usize {
+            state.completed_ranks.remove(&key);
+        }
     }
 
     fn record(state: &mut BrokerState, completions: Vec<CollectiveCompletion>) {
@@ -112,5 +131,132 @@ impl ProcessCollectiveBroker {
                 completion.result.map_err(|error| error.to_string()),
             );
         }
+    }
+
+    fn fail_deadlock(state: &mut BrokerState, gang: &GangHandle) {
+        let completed_ranks = state
+            .completed_ranks
+            .get(&(gang.id, gang.generation))
+            .map(|ranks| ranks.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        if let Some(deadlock) = state.coordinator.deadlock(gang, &completed_ranks) {
+            let completions = state.coordinator.fail_gang(gang, deadlock.to_string());
+            Self::record(state, completions);
+            state.completed_ranks.remove(&(gang.id, gang.generation));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use runmat_execution::{
+        CollectiveInvocation, CollectiveMessageTag, CollectiveRequest, ExecutionScopeId,
+        GangHandle, PoolHandle, PoolId, ReceiveSelection, SpmdTaskContext,
+    };
+    use runmat_types::{CollectiveId, LabCount, ProgramFunctionId, RegionId};
+
+    use super::*;
+
+    fn gang() -> GangHandle {
+        let scope_id = ExecutionScopeId::derive(&[b"native-collective-deadlock"]);
+        GangHandle {
+            id: GangId::derive(&[b"gang"]),
+            scope_id,
+            generation: 1,
+            pool: PoolHandle {
+                id: PoolId::derive(&[b"pool"]),
+                scope_id,
+                generation: 1,
+            },
+            labs: LabCount(2),
+        }
+    }
+
+    fn request(
+        gang: &GangHandle,
+        rank: u32,
+        ordinal: u32,
+        invocation: CollectiveInvocation,
+    ) -> CollectiveRequest {
+        let region = ParallelRegionId(RegionId {
+            function: ProgramFunctionId(1),
+            ordinal: 1,
+        });
+        CollectiveRequest {
+            context: SpmdTaskContext {
+                gang: gang.clone(),
+                region,
+                rank: LabRank(rank),
+            },
+            id: CollectiveId { region, ordinal },
+            sequence: CollectiveSequence(1),
+            invocation,
+        }
+    }
+
+    #[test]
+    fn mismatched_rounds_fail_without_a_wall_clock_timeout() {
+        let broker = Arc::new(ProcessCollectiveBroker::default());
+        let gang = gang();
+        let first_broker = Arc::clone(&broker);
+        let first_gang = gang.clone();
+        let first = std::thread::spawn(move || {
+            first_broker.execute(
+                request(
+                    &first_gang,
+                    1,
+                    1,
+                    CollectiveInvocation::Receive {
+                        selection: ReceiveSelection {
+                            source: Some(LabRank(2)),
+                            tag: Some(CollectiveMessageTag(7)),
+                        },
+                    },
+                ),
+                &TaskCompletion::new(),
+            )
+        });
+        let second = broker.execute(
+            request(&gang, 2, 2, CollectiveInvocation::Barrier),
+            &TaskCompletion::new(),
+        );
+        assert!(second.unwrap_err().contains("SPMD collective deadlock"));
+        assert!(first
+            .join()
+            .expect("blocked rank thread completes")
+            .unwrap_err()
+            .contains("SPMD collective deadlock"));
+    }
+
+    #[test]
+    fn completed_peer_fences_a_receive_that_can_no_longer_progress() {
+        let broker = Arc::new(ProcessCollectiveBroker::default());
+        let gang = gang();
+        let waiting_broker = Arc::clone(&broker);
+        let waiting_gang = gang.clone();
+        let waiting = std::thread::spawn(move || {
+            waiting_broker.execute(
+                request(
+                    &waiting_gang,
+                    1,
+                    1,
+                    CollectiveInvocation::Receive {
+                        selection: ReceiveSelection {
+                            source: Some(LabRank(2)),
+                            tag: None,
+                        },
+                    },
+                ),
+                &TaskCompletion::new(),
+            )
+        });
+        broker.rank_finished(&gang, LabRank(2));
+        assert!(waiting
+            .join()
+            .expect("blocked rank thread completes")
+            .unwrap_err()
+            .contains("SPMD collective deadlock"));
     }
 }

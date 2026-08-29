@@ -404,6 +404,7 @@ async fn try_distributed_builtin(
             let mut materialized = Vec::with_capacity(args.len());
             for argument in args {
                 if let Value::Distributed(handle) = argument {
+                    crate::parallel::lease::validate_distributed(&context, handle)?;
                     materialized.push(service.materialize((**handle).clone()).await?);
                 } else {
                     materialized.push(argument.clone());
@@ -414,6 +415,11 @@ async fn try_distributed_builtin(
                 .map(Some)
         }
         runmat_builtins::BuiltinDistributedPolicy::MapUnary => {
+            for argument in args {
+                if let Value::Distributed(handle) = argument {
+                    crate::parallel::lease::validate_distributed(&context, handle)?;
+                }
+            }
             let requested_outputs = output_count.unwrap_or(1);
             let inference = runmat_builtins::infer_partition_local_call(
                 entry,

@@ -5,5 +5,6 @@ pub mod current;
 pub mod distribution;
 pub mod future;
 pub mod introspection;
+pub mod lease;
 pub mod pool;
 pub mod reduction;

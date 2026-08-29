@@ -22,10 +22,11 @@ pub use scope::{ContextFuture, RuntimeContextGuard};
 pub use services::{
     ForeignCall, HostInteraction, NativeCapability, ParallelCapability, RuntimeAccelerationService,
     RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService,
-    RuntimeCollectiveService, RuntimeDistributedCallRequest, RuntimeDistributedService,
-    RuntimeDistributedSnapshot, RuntimeErrorService, RuntimeForeignService, RuntimeHostService,
-    RuntimeNativeService, RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
-    RuntimePlacementService, RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission,
-    RuntimeSpmdOutput, RuntimeSpmdService, RuntimeWorkspaceService,
+    RuntimeCollectiveService, RuntimeDistributedCallRequest, RuntimeDistributedRetirement,
+    RuntimeDistributedService, RuntimeDistributedSnapshot, RuntimeErrorService,
+    RuntimeForeignService, RuntimeHostService, RuntimeNativeService, RuntimeObjectService,
+    RuntimeParallelResources, RuntimeParallelService, RuntimePlacementService,
+    RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdOutput,
+    RuntimeSpmdService, RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;

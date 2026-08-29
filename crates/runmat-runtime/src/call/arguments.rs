@@ -106,6 +106,7 @@ async fn expand_composite_values(
     indices: &[Value],
     expand_all: bool,
 ) -> Result<Vec<Value>, RuntimeError> {
+    crate::parallel::lease::validate_composite(runtime, &handle)?;
     if !expand_all && indices.len() != 1 {
         return Err(semantic_error(
             "CompositeIndexArity",
