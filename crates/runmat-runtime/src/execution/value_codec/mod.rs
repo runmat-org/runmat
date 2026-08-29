@@ -308,6 +308,43 @@ mod tests {
     }
 
     #[test]
+    fn immutable_codistributor_value_classes_round_trip_with_exact_properties() {
+        let value = crate::parallel::codistributor::one_dimensional(&[
+            Value::Int(runmat_value::IntValue::U64(2)),
+            Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(vec![1, 2, 3]),
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+            Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(vec![4, 6]),
+                    vec![1, 2],
+                )
+                .unwrap(),
+            ),
+        ])
+        .unwrap();
+        let payload = encode_inline_value(&value).unwrap();
+        assert_eq!(decode_inline_value(&payload).unwrap(), value);
+    }
+
+    #[test]
+    fn unregistered_value_classes_do_not_cross_execution_boundaries() {
+        let object = Value::Object(runmat_value::ObjectInstance::new(
+            "project.LocalClass".to_owned(),
+        ));
+        let error = encode_inline_value(&object).unwrap_err();
+        assert!(matches!(
+            error,
+            ValueCodecError::Unsupported { ref path, rule }
+                if path == "$" && rule.contains("registered codec")
+        ));
+    }
+
+    #[test]
     fn live_foreign_references_require_a_manifest_adapter() {
         let reference = ForeignRef::detached(
             ForeignResourceKey {

@@ -1,8 +1,9 @@
 use super::{BuiltinCatalogEntry, BuiltinContractMaturity};
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, DynamicReason, ExecutionFact,
-    FutureStateFact, InferenceDiagnostic, LiteralValue, NumericClass, NumericDomain, NumericFact,
-    OutputListFact, ResidencyFact, ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact,
+    codistributor_fact, infer_call, CallContract, CallInference, CallRequest, CodistributorClass,
+    DynamicReason, ExecutionFact, FutureStateFact, InferenceDiagnostic, LiteralValue, NumericClass,
+    NumericDomain, NumericFact, OutputListFact, ResidencyFact, ShapeFact, StorageFact, StructFact,
+    ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -20,6 +21,10 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
         "parallel.fetch-outputs" => infer_parallel_fetch(request, entry, false),
         "parallel.fetch-next" => infer_parallel_fetch(request, entry, true),
         "parallel.distributed"
+        | "parallel.redistribute"
+        | "parallel.get-codistributor"
+        | "parallel.codistributor1d"
+        | "parallel.codistributor2dbc"
         | "parallel.local-part"
         | "parallel.barrier"
         | "parallel.broadcast"
@@ -74,6 +79,25 @@ fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
             Some(ValueKindFact::Distributed(distributed)) => distributed.value.as_ref().clone(),
             _ => ValueFact::unknown(DynamicReason::RuntimeValue),
         },
+        "parallel.redistribute" => request
+            .arguments
+            .first()
+            .cloned()
+            .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
+        "parallel.get-codistributor" => {
+            let class = request.arguments.first().and_then(|fact| match &fact.kind {
+                ValueKindFact::Distributed(distributed) => distributed
+                    .scheme
+                    .as_ref()
+                    .and_then(CodistributorClass::from_scheme),
+                _ => None,
+            });
+            codistributor_fact(class)
+        }
+        "parallel.codistributor1d" => codistributor_fact(Some(CodistributorClass::OneDimensional)),
+        "parallel.codistributor2dbc" => {
+            codistributor_fact(Some(CodistributorClass::TwoDimensionalBlockCyclic))
+        }
         "parallel.broadcast" => request
             .arguments
             .get(1)

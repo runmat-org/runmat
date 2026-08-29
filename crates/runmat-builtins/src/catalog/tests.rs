@@ -263,6 +263,41 @@ fn parallel_surface_retains_pool_future_and_fetch_facts() {
 }
 
 #[test]
+fn codistributor_constructors_have_static_value_class_facts() {
+    use runmat_types::{
+        CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ValueKindFact,
+    };
+
+    let request = CallRequest {
+        arguments: Vec::new(),
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    for (builtin, expected_class) in [
+        ("codistributor1d", "codistributor1d"),
+        ("codistributor2dbc", "codistributor2dbc"),
+    ] {
+        let inference = infer_catalog_call(
+            builtin_catalog_entry_by_name(builtin).expect("codistributor catalog entry"),
+            &request,
+        );
+        assert!(inference.diagnostics.is_empty(), "{builtin}");
+        let ValueKindFact::Object(object) = &inference.outputs[0].kind else {
+            panic!("{builtin} must produce an object fact");
+        };
+        assert_eq!(
+            object
+                .runtime_class
+                .as_ref()
+                .and_then(|name| name.0.first())
+                .map(|name| name.0.as_str()),
+            Some(expected_class)
+        );
+        assert_eq!(object.handle_semantics, Some(false));
+    }
+}
+
+#[test]
 fn zeros_contract_uses_literal_dimensions_class_and_like_residency() {
     use runmat_types::{
         CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,

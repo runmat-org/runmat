@@ -40,9 +40,17 @@ pub enum BytecodeDistributedOp {
     },
     LocalPart,
     Materialize,
-    Redistribute {
-        scheme: runmat_types::DistributionScheme,
-    },
+    Codistributor,
+    Redistribute,
+}
+
+impl BytecodeDistributedOp {
+    pub const fn operand_count(&self) -> usize {
+        match self {
+            Self::Create { .. } | Self::LocalPart | Self::Materialize | Self::Codistributor => 1,
+            Self::Redistribute => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -719,7 +727,7 @@ impl Instr {
                 ..
             } => effect(1 + usize::from(*has_maximum_workers), 0),
             Instr::ExecuteSpmd { header, .. } => effect(header.operand_count(), 0),
-            Instr::Distributed(_) => effect(1, 1),
+            Instr::Distributed(operation) => effect(operation.operand_count(), 1),
             Instr::Collective { operation, .. } => effect(operation.operand_count(), 1),
             Instr::EmitStackTop { .. } => effect(1, 1),
             Instr::EmitVar { .. } => effect(0, 0),

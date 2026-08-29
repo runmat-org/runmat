@@ -346,9 +346,8 @@ fn collect_rvalue_inputs(
             }
         }
         R::Distributed(operation) => {
-            use runmat_mir::parallel::MirDistributedOp as D;
-            if let D::Create { input, .. } = operation {
-                collect_operand(input, locals, output)?;
+            for operand in operation.operands() {
+                collect_operand(operand, locals, output)?;
             }
         }
         R::Collective(operation) => {

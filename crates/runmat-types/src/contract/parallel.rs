@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 mod spmd;
 pub use spmd::SpmdLabRequirement;
 
-pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 7;
+pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
@@ -135,9 +135,31 @@ pub struct SpmdContract {
 )]
 pub enum DistributionScheme {
     Replicated,
-    Block { dimension: u32 },
-    Cyclic { dimension: u32 },
-    Custom { partitioner: String },
+    Block {
+        dimension: u32,
+    },
+    Cyclic {
+        dimension: u32,
+    },
+    OneDimensional {
+        dimension: u32,
+        partition: Vec<u64>,
+    },
+    TwoDimensionalBlockCyclic {
+        worker_grid: [u32; 2],
+        block_size: u64,
+        orientation: WorkerGridOrientation,
+    },
+    Custom {
+        partitioner: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerGridOrientation {
+    Row,
+    Column,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -320,11 +342,31 @@ impl ParallelManifest {
                 distributed.scheme,
                 DistributionScheme::Block { dimension: 0 }
                     | DistributionScheme::Cyclic { dimension: 0 }
+                    | DistributionScheme::OneDimensional { dimension: 0, .. }
             ) {
                 return Err(SchemaValidationError::new(
                     "parallel.distributed_values.scheme",
                     "distribution dimensions use one-based nonzero identities",
                 ));
+            }
+            match &distributed.scheme {
+                DistributionScheme::OneDimensional { partition, .. } if partition.is_empty() => {
+                    return Err(SchemaValidationError::new(
+                        "parallel.distributed_values.scheme",
+                        "one-dimensional distributions require partition lengths",
+                    ));
+                }
+                DistributionScheme::TwoDimensionalBlockCyclic {
+                    worker_grid,
+                    block_size,
+                    ..
+                } if worker_grid.contains(&0) || *block_size == 0 => {
+                    return Err(SchemaValidationError::new(
+                        "parallel.distributed_values.scheme",
+                        "two-dimensional block-cyclic distributions require a positive worker grid and block size",
+                    ));
+                }
+                _ => {}
             }
         }
         for collective in &self.collectives {

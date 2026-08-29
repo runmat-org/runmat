@@ -42,8 +42,27 @@ impl DistributedValueHandle {
             ));
         }
         match &self.scheme {
-            DistributionScheme::Block { dimension } | DistributionScheme::Cyclic { dimension } => {
+            DistributionScheme::Block { dimension }
+            | DistributionScheme::Cyclic { dimension }
+            | DistributionScheme::OneDimensional { dimension, .. } => {
                 dimension_extent(*dimension, &self.global_shape)?;
+            }
+            DistributionScheme::TwoDimensionalBlockCyclic {
+                worker_grid,
+                block_size,
+                ..
+            } => {
+                if self.global_shape.len() != 2
+                    || worker_grid.contains(&0)
+                    || u64::from(worker_grid[0]) * u64::from(worker_grid[1])
+                        != u64::from(self.partition_count.0)
+                    || *block_size == 0
+                {
+                    return Err(ContractError::invalid(
+                        "distributed value handle",
+                        "2-D block-cyclic distribution requires a matrix, a positive worker grid matching the partition count, and a positive block size",
+                    ));
+                }
             }
             DistributionScheme::Custom { partitioner }
                 if partitioner.trim().is_empty() || partitioner.contains('\0') =>
@@ -54,6 +73,29 @@ impl DistributedValueHandle {
                 ));
             }
             DistributionScheme::Replicated | DistributionScheme::Custom { .. } => {}
+        }
+        if let DistributionScheme::OneDimensional { partition, .. } = &self.scheme {
+            let extent = dimension_extent(
+                match &self.scheme {
+                    DistributionScheme::OneDimensional { dimension, .. } => *dimension,
+                    _ => unreachable!(),
+                },
+                &self.global_shape,
+            )?;
+            let partition_extent = partition.iter().try_fold(0_u64, |sum, length| {
+                sum.checked_add(*length).ok_or_else(|| {
+                    ContractError::invalid(
+                        "distributed value handle",
+                        "1-D partition lengths overflow the global extent",
+                    )
+                })
+            })?;
+            if partition.len() != self.partition_count.0 as usize || partition_extent != extent {
+                return Err(ContractError::invalid(
+                    "distributed value handle",
+                    "1-D partition lengths must match the worker count and distribution extent",
+                ));
+            }
         }
         Ok(())
     }
@@ -360,12 +402,24 @@ fn validate_scheme(
                 }
             }
         }
-        DistributionScheme::Block { dimension } => {
+        DistributionScheme::Block { dimension }
+        | DistributionScheme::OneDimensional { dimension, .. } => {
             let axis = partition_axis(*dimension, &handle.global_shape)?;
             let mut cursor = 0_u64;
-            for partition in partitions {
+            for (index, partition) in partitions.iter().enumerate() {
                 match &partition.selections[axis] {
                     PartitionSelection::Range(range) if range.start == cursor => {
+                        if let DistributionScheme::OneDimensional {
+                            partition: lengths, ..
+                        } = &handle.scheme
+                        {
+                            if range.end - range.start != lengths[index] {
+                                return Err(ContractError::invalid(
+                                    "1-D distributed value",
+                                    "partition selection lengths must match the codistributor",
+                                ));
+                            }
+                        }
                         cursor = range.end;
                     }
                     _ => {
@@ -395,6 +449,46 @@ fn validate_scheme(
                         return Err(ContractError::invalid(
                             "cyclic distributed value",
                             "cyclic selections must use rank-derived starts and the partition count as stride",
+                        ));
+                    }
+                }
+            }
+        }
+        DistributionScheme::TwoDimensionalBlockCyclic {
+            worker_grid,
+            block_size,
+            orientation,
+        } => {
+            for partition in partitions {
+                let zero_based = partition.rank.0 - 1;
+                let (grid_row, grid_column) = match orientation {
+                    runmat_types::WorkerGridOrientation::Row => {
+                        (zero_based / worker_grid[1], zero_based % worker_grid[1])
+                    }
+                    runmat_types::WorkerGridOrientation::Column => {
+                        (zero_based % worker_grid[0], zero_based / worker_grid[0])
+                    }
+                };
+                for (axis, (grid_extent, grid_position)) in
+                    [(worker_grid[0], grid_row), (worker_grid[1], grid_column)]
+                        .into_iter()
+                        .enumerate()
+                {
+                    let expected = (0..handle.global_shape[axis])
+                        .filter(|index| {
+                            ((*index / *block_size) % u64::from(grid_extent))
+                                == u64::from(grid_position)
+                        })
+                        .collect::<Vec<_>>();
+                    if partition.selections[axis]
+                        != (PartitionSelection::Indices {
+                            dimension: axis as u32 + 1,
+                            indices: expected,
+                        })
+                    {
+                        return Err(ContractError::invalid(
+                            "2-D block-cyclic distributed value",
+                            "partition selections do not match the worker grid and block size",
                         ));
                     }
                 }

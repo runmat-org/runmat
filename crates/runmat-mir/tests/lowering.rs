@@ -2927,7 +2927,7 @@ fn every_mir_construct_has_one_explicit_native_lowering_class() {
     use runmat_mir::{MirConstructKind, NativeLoweringClass};
     use std::collections::HashSet;
 
-    assert_eq!(MirConstructKind::ALL.len(), 51);
+    assert_eq!(MirConstructKind::ALL.len(), 52);
     assert_eq!(
         MirConstructKind::ALL
             .into_iter()

@@ -23,15 +23,14 @@ use runmat_native_codegen::{
 };
 use runmat_types::{
     BindingId, CapabilityRequirement, CapabilitySet, CollectiveId, DeoptimizationPointId,
-    DistributedValueId, DynamicReason, ForeignAffinity, ForeignCapability, ForeignLifetime,
-    ForeignOwnership, ForeignRequirement, ForeignTypeIdentity, FunctionArgDefaultValue,
-    FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidator, InteropManifest, LabCount,
-    ParallelAccess, ParallelManifest, ParallelRandomnessPolicy, ParallelRegionId,
-    ParallelVariableContract, ParallelVariableRole, ParforContract, ProgramFunctionId,
-    ProgramPointId, ProgramSourceId, ProgramSpan, RegionContract, RegionGuardCondition,
-    RegionGuardContract, RegionGuardId, RegionId, RegionProvenance, RegionValueId, Span,
-    SpmdContract, SpmdLabRequirement, ValueFact, WasmInteropPolicy,
-    INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
+    DynamicReason, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
+    ForeignRequirement, ForeignTypeIdentity, FunctionArgDefaultValue, FunctionArgDim,
+    FunctionArgSizeSpec, FunctionArgValidator, InteropManifest, LabCount, ParallelAccess,
+    ParallelManifest, ParallelRandomnessPolicy, ParallelRegionId, ParallelVariableContract,
+    ParallelVariableRole, ParforContract, ProgramFunctionId, ProgramPointId, ProgramSourceId,
+    ProgramSpan, RegionContract, RegionGuardCondition, RegionGuardContract, RegionGuardId,
+    RegionId, RegionProvenance, RegionValueId, Span, SpmdContract, SpmdLabRequirement, ValueFact,
+    WasmInteropPolicy, INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
     REGION_CONTRACT_SCHEMA_VERSION,
 };
 
@@ -959,10 +958,7 @@ fn region_contracts_become_exact_native_ir_boundaries() {
 #[test]
 fn distributed_and_collective_constructs_fail_with_the_stable_predeclared_rejection() {
     let distributed = MirRvalue::Distributed(runmat_mir::parallel::MirDistributedOp::LocalPart {
-        value: DistributedValueId {
-            function: ProgramFunctionId(0),
-            ordinal: 0,
-        },
+        value: MirOperand::Constant(MirConstant::Number("1".into())),
     });
     let region = ParallelRegionId(RegionId {
         function: ProgramFunctionId(0),
@@ -992,10 +988,7 @@ fn capability_rejection_cannot_hide_inside_short_circuit_payloads() {
     let nested = MirStmt {
         kind: MirStmtKind::Expr(MirRvalue::Distributed(
             runmat_mir::parallel::MirDistributedOp::LocalPart {
-                value: DistributedValueId {
-                    function: ProgramFunctionId(0),
-                    ordinal: 0,
-                },
+                value: MirOperand::Constant(MirConstant::Number("1".into())),
             },
         )),
         span: Span { start: 0, end: 1 },

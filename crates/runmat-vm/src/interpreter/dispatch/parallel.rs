@@ -175,8 +175,9 @@ pub(super) async fn dispatch(
             stack.push(execute_collective(bytecode, *id, *operation, arguments, execution).await?);
         }
         Instr::Distributed(operation) => {
-            let input = pop(stack, "distributed instruction expected one input value")?;
-            stack.push(execute_distributed(bytecode, operation, input, execution).await?);
+            let arguments =
+                crate::call::builtins::collect_call_args(stack, operation.operand_count())?;
+            stack.push(execute_distributed(bytecode, operation, arguments, execution).await?);
         }
         _ => return Ok(None),
     }
@@ -188,7 +189,7 @@ pub(super) async fn dispatch(
 async fn execute_distributed(
     bytecode: &crate::Bytecode,
     operation: &crate::BytecodeDistributedOp,
-    input: Value,
+    arguments: Vec<Value>,
     execution: &ExecutionContext,
 ) -> Result<Value, RuntimeError> {
     use crate::BytecodeDistributedOp as Op;
@@ -201,6 +202,7 @@ async fn execute_distributed(
         .clone();
     match operation {
         Op::Create { id, owner, scheme } => {
+            let [input] = distributed_arguments(arguments)?;
             let contract = bytecode
                 .distributed_values
                 .iter()
@@ -224,6 +226,7 @@ async fn execute_distributed(
                 .map(|handle| Value::Distributed(Box::new(handle)))
         }
         Op::LocalPart => {
+            let [input] = distributed_arguments(arguments)?;
             let Value::Distributed(handle) = input else {
                 return Err(crate::interpreter::errors::mex(
                     "DistributedValueRequired",
@@ -244,6 +247,7 @@ async fn execute_distributed(
             service.local_part(*handle, rank).await
         }
         Op::Materialize => {
+            let [input] = distributed_arguments(arguments)?;
             let Value::Distributed(handle) = input else {
                 return Err(crate::interpreter::errors::mex(
                     "DistributedValueRequired",
@@ -253,7 +257,22 @@ async fn execute_distributed(
             runmat_runtime::parallel::lease::validate_distributed(&execution.runtime, &handle)?;
             service.materialize(*handle).await
         }
-        Op::Redistribute { scheme } => {
+        Op::Codistributor => {
+            let [input] = distributed_arguments(arguments)?;
+            let Value::Distributed(handle) = input else {
+                return Err(crate::interpreter::errors::mex(
+                    "DistributedValueRequired",
+                    "getCodistributor requires a distributed value",
+                ));
+            };
+            runmat_runtime::parallel::lease::validate_distributed(&execution.runtime, &handle)?;
+            runmat_runtime::parallel::codistributor::from_scheme(
+                &handle.scheme,
+                &handle.global_shape,
+            )
+        }
+        Op::Redistribute => {
+            let [input, codistributor] = distributed_arguments(arguments)?;
             let Value::Distributed(handle) = input else {
                 return Err(crate::interpreter::errors::mex(
                     "DistributedValueRequired",
@@ -261,12 +280,28 @@ async fn execute_distributed(
                 ));
             };
             runmat_runtime::parallel::lease::validate_distributed(&execution.runtime, &handle)?;
+            let scheme = runmat_runtime::parallel::codistributor::resolve(
+                &codistributor,
+                &handle.global_shape,
+                handle.partition_count,
+            )?;
             service
-                .redistribute(*handle, scheme.clone())
+                .redistribute(*handle, scheme)
                 .await
                 .map(|handle| Value::Distributed(Box::new(handle)))
         }
     }
+}
+
+fn distributed_arguments<const N: usize>(
+    arguments: Vec<Value>,
+) -> Result<[Value; N], RuntimeError> {
+    arguments.try_into().map_err(|_| {
+        crate::interpreter::errors::mex(
+            "InvalidDistributedInstruction",
+            "distributed instruction operand count does not match its bytecode contract",
+        )
+    })
 }
 
 async fn execute_collective(

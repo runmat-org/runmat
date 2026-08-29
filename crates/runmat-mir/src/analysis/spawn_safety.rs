@@ -180,7 +180,9 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
             scan_operand(body, future, reads_captures);
         }
         MirRvalue::Distributed(operation) => {
-            scan_operand(body, operation.input(), reads_captures);
+            for operand in operation.operands() {
+                scan_operand(body, operand, reads_captures);
+            }
         }
         MirRvalue::Collective(operation) => {
             for operand in operation.operands() {
