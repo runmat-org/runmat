@@ -100,6 +100,17 @@ impl SharedCollectives {
         self.complete(completions);
     }
 
+    pub(super) fn retire_gang(&self, gang: &runmat_execution::GangHandle) {
+        let completions = self
+            .coordinator
+            .borrow_mut()
+            .retire_gang(gang, "gang retired");
+        self.completed_ranks
+            .borrow_mut()
+            .remove(&(gang.id, gang.generation));
+        self.complete(completions);
+    }
+
     fn fail_deadlock(&self, gang: &runmat_execution::GangHandle) {
         let completed = self
             .completed_ranks

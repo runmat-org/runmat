@@ -64,7 +64,7 @@ impl RuntimeSpmdService for CoreSpmdService {
     }
 
     fn retire(&self, gang: GangHandle) -> RuntimeServiceFuture<Result<(), RuntimeError>> {
-        self.collectives.fail_gang(&gang, "gang retired");
+        self.collectives.retire_gang(&gang);
         let retired = self
             .gangs
             .borrow_mut()

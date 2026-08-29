@@ -75,18 +75,16 @@ impl RemotePoolDriver {
             };
             self.resolve_task(task_id, outcome);
             if let Some(task) = spmd_task {
-                match state {
-                    TaskState::Succeeded => {
-                        self.collectives.rank_finished(&task.gang, task.rank);
-                    }
-                    TaskState::Failed | TaskState::Cancelled | TaskState::Indeterminate => {
-                        // Publish the originating result before releasing peers
-                        // blocked in this gang's collective rounds.
-                        self.collectives
-                            .fail_gang(&task.gang, "an SPMD peer terminated");
-                    }
-                    _ => {}
+                if matches!(
+                    state,
+                    TaskState::Failed | TaskState::Cancelled | TaskState::Indeterminate
+                ) {
+                    // Publish the originating result before releasing peers
+                    // blocked in this gang's collective rounds.
+                    self.collectives
+                        .fail_gang(&task.gang, "an SPMD peer terminated");
                 }
+                self.collectives.rank_terminated(&task.gang, task.rank);
             }
         }
     }
@@ -123,6 +121,7 @@ impl RemotePoolDriver {
             if let Some(task) = spmd_task {
                 self.collectives
                     .fail_gang(&task.gang, "an SPMD peer terminated");
+                self.collectives.rank_terminated(&task.gang, task.rank);
             }
         }
     }

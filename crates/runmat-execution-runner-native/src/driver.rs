@@ -397,12 +397,12 @@ impl LocalDriver {
         self.collectives.fail_gang(gang, reason);
     }
 
-    pub(crate) fn finish_collective_rank(
+    pub(crate) fn terminate_collective_rank(
         &self,
         gang: &runmat_execution::GangHandle,
         rank: runmat_types::LabRank,
     ) {
-        self.collectives.rank_finished(gang, rank);
+        self.collectives.rank_terminated(gang, rank);
     }
 
     fn dispatch(this: Arc<Self>, actions: Vec<DriverAction>) {

@@ -111,6 +111,7 @@ pub struct CollectiveCoordinator {
     messages: BTreeMap<(GangId, u64), VecDeque<Message>>,
     receivers: BTreeMap<(GangId, u64), VecDeque<WaitingReceive>>,
     submitted: BTreeSet<(RoundKey, LabRank)>,
+    failed_gangs: BTreeMap<(GangId, u64), String>,
 }
 
 impl CollectiveCoordinator {
@@ -119,6 +120,11 @@ impl CollectiveCoordinator {
         request: CollectiveRequest,
     ) -> RunnerResult<Vec<CollectiveCompletion>> {
         request.validate().map_err(invalid)?;
+        if let Some(reason) = self.failed_gangs.get(&gang_key(&request.context.gang)) {
+            return Err(RunnerError::Backend(format!(
+                "SPMD gang terminated: {reason}"
+            )));
+        }
         let key = round_key(&request);
         if !self.submitted.insert((key, request.context.rank)) {
             return Err(RunnerError::Invalid(
@@ -160,6 +166,10 @@ impl CollectiveCoordinator {
         blocked
     }
 
+    pub fn failed_reason(&self, gang: &GangHandle) -> Option<&str> {
+        self.failed_gangs.get(&gang_key(gang)).map(String::as_str)
+    }
+
     pub fn deadlock(
         &self,
         gang: &GangHandle,
@@ -195,6 +205,7 @@ impl CollectiveCoordinator {
         reason: impl Into<String>,
     ) -> Vec<CollectiveCompletion> {
         let reason = reason.into();
+        self.failed_gangs.insert(gang_key(gang), reason.clone());
         let keys = self
             .rounds
             .keys()
@@ -227,6 +238,18 @@ impl CollectiveCoordinator {
         self.messages.remove(&(gang.id, gang.generation));
         self.submitted
             .retain(|(key, _)| key.gang != gang.id || key.generation != gang.generation);
+        completions
+    }
+
+    /// Releases all coordination state after the owner has joined or
+    /// cancelled every rank in the exact gang generation.
+    pub fn retire_gang(
+        &mut self,
+        gang: &GangHandle,
+        reason: impl Into<String>,
+    ) -> Vec<CollectiveCompletion> {
+        let completions = self.fail_gang(gang, reason);
+        self.failed_gangs.remove(&gang_key(gang));
         completions
     }
 
@@ -899,6 +922,24 @@ mod tests {
         assert_eq!(completions.len(), 1);
         assert!(completions[0].result.is_err());
         assert!(coordinator.blocked(&gang).is_empty());
+    }
+
+    #[test]
+    fn failure_fences_late_requests_until_the_gang_is_retired() {
+        let mut coordinator = CollectiveCoordinator::default();
+        let late = request(2, CollectiveInvocation::Barrier);
+        let gang = late.context.gang.clone();
+        coordinator.fail_gang(&gang, "rank failed before collective submission");
+
+        assert!(coordinator
+            .submit(late.clone())
+            .unwrap_err()
+            .to_string()
+            .contains("rank failed before collective submission"));
+        assert!(coordinator
+            .retire_gang(&gang, "gang owner retired all ranks")
+            .is_empty());
+        assert!(coordinator.submit(late).unwrap().is_empty());
     }
 
     #[test]

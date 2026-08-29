@@ -516,4 +516,39 @@ mod tests {
         assert!(store.local_part(&distributed, LabRank(1)).is_err());
         assert!(store.composite_entry(&composite, LabRank(1)).is_err());
     }
+
+    #[test]
+    fn pool_retirement_is_exact_and_idempotent() {
+        let (retired, retired_parts) = fixture();
+        let mut current = retired.clone();
+        current.id = DistributedObjectId::derive(&[b"current-generation"]);
+        current.generation += 1;
+        current.pool.generation += 1;
+        let current_parts = retired_parts.clone();
+
+        let mut unrelated = retired.clone();
+        unrelated.id = DistributedObjectId::derive(&[b"unrelated-pool"]);
+        unrelated.pool.id = PoolId::derive(&[b"other-pool"]);
+        let unrelated_parts = retired_parts.clone();
+
+        let mut store = DistributedStore::default();
+        store.insert(retired.clone(), retired_parts).unwrap();
+        store.insert(current.clone(), current_parts).unwrap();
+        store.insert(unrelated.clone(), unrelated_parts).unwrap();
+
+        assert_eq!(
+            store.retire_pool(&retired.pool),
+            RetiredDistributedObjects {
+                distributed: 1,
+                composites: 0,
+            }
+        );
+        assert!(store.local_part(&retired, LabRank(1)).is_err());
+        assert!(store.local_part(&current, LabRank(1)).is_ok());
+        assert!(store.local_part(&unrelated, LabRank(1)).is_ok());
+        assert_eq!(
+            store.retire_pool(&retired.pool),
+            RetiredDistributedObjects::default()
+        );
+    }
 }
