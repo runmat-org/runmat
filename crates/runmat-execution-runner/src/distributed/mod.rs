@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::{
     validate_partition_layouts, CompositeHandle, CompositeId, DistributedObjectId,
-    DistributedPartitionLayout, DistributedValueHandle, PoolHandle,
+    DistributedOwnedPartition, DistributedPartitionLayout, DistributedShardSnapshot,
+    DistributedValueHandle, PoolHandle,
 };
 use runmat_types::LabRank;
 
@@ -24,7 +25,8 @@ pub struct RetiredDistributedObjects {
 #[derive(Clone, Debug)]
 struct DistributedRecord {
     handle: DistributedValueHandle,
-    partitions: Vec<OwnedPartition>,
+    layouts: Vec<DistributedPartitionLayout>,
+    partitions: BTreeMap<LabRank, OwnedPartition>,
 }
 
 #[derive(Clone, Debug)]
@@ -80,9 +82,73 @@ impl DistributedStore {
             }
             None => {}
         }
-        self.distributed
-            .insert(handle.id, DistributedRecord { handle, partitions });
+        let layouts = partitions
+            .iter()
+            .map(|partition| partition.layout.clone())
+            .collect();
+        let partitions = partitions
+            .into_iter()
+            .map(|partition| (partition.layout.rank, partition))
+            .collect();
+        self.distributed.insert(
+            handle.id,
+            DistributedRecord {
+                handle,
+                layouts,
+                partitions,
+            },
+        );
         Ok(())
+    }
+
+    pub fn insert_local_coordinated(
+        &mut self,
+        handle: DistributedValueHandle,
+        layouts: Vec<DistributedPartitionLayout>,
+        partition: OwnedPartition,
+    ) -> RunnerResult<()> {
+        handle.validate().map_err(invalid)?;
+        validate_partition_layouts(&handle, &layouts).map_err(invalid)?;
+        partition
+            .value
+            .validate(ValueLimits::default())
+            .map_err(invalid)?;
+        if matches!(
+            partition.value,
+            ValuePayload::Distributed(_) | ValuePayload::Composite(_)
+        ) || layouts
+            .iter()
+            .find(|layout| layout.rank == partition.layout.rank)
+            != Some(&partition.layout)
+        {
+            return Err(RunnerError::Invalid(
+                "owned distributed partition disagrees with its authoritative layout".into(),
+            ));
+        }
+        let record = self
+            .distributed
+            .entry(handle.id)
+            .or_insert_with(|| DistributedRecord {
+                handle: handle.clone(),
+                layouts: layouts.clone(),
+                partitions: BTreeMap::new(),
+            });
+        if record.handle != handle || record.layouts != layouts {
+            return Err(RunnerError::Invalid(
+                "coordinated distributed object identity disagrees with its installed layout directory"
+                    .into(),
+            ));
+        }
+        match record.partitions.get(&partition.layout.rank) {
+            Some(existing) if existing == &partition => Ok(()),
+            Some(_) => Err(RunnerError::Invalid(
+                "distributed partition rank is already bound to another payload".into(),
+            )),
+            None => {
+                record.partitions.insert(partition.layout.rank, partition);
+                Ok(())
+            }
+        }
     }
 
     pub fn handle(&self, handle: &DistributedValueHandle) -> RunnerResult<&DistributedValueHandle> {
@@ -102,34 +168,69 @@ impl DistributedStore {
         }
         record
             .partitions
-            .get((rank.0 - 1) as usize)
+            .get(&rank)
             .ok_or_else(|| RunnerError::Invalid("distributed partition is unavailable".into()))
-    }
-
-    pub fn ordered_parts(
-        &self,
-        handle: &DistributedValueHandle,
-    ) -> RunnerResult<&[OwnedPartition]> {
-        Ok(&self.record(handle)?.partitions)
     }
 
     pub fn layouts(
         &self,
         handle: &DistributedValueHandle,
     ) -> RunnerResult<Vec<DistributedPartitionLayout>> {
-        Ok(self
-            .record(handle)?
-            .partitions
-            .iter()
-            .map(|partition| partition.layout.clone())
-            .collect())
+        Ok(self.record(handle)?.layouts.clone())
     }
 
     pub fn cloned_parts(
         &self,
         handle: &DistributedValueHandle,
     ) -> RunnerResult<Vec<OwnedPartition>> {
-        Ok(self.record(handle)?.partitions.clone())
+        let record = self.record(handle)?;
+        (1..=handle.partition_count.0)
+            .map(|rank| {
+                record
+                    .partitions
+                    .get(&LabRank(rank))
+                    .cloned()
+                    .ok_or_else(|| {
+                        RunnerError::Invalid(
+                            "distributed operation requires a partition owned by another execution node"
+                                .into(),
+                        )
+                    })
+            })
+            .collect()
+    }
+
+    pub fn export_local(
+        &self,
+        handle: &DistributedValueHandle,
+        rank: LabRank,
+    ) -> RunnerResult<DistributedShardSnapshot> {
+        let record = self.record(handle)?;
+        let partition = record.partitions.get(&rank).ok_or_else(|| {
+            RunnerError::Invalid("distributed partition is not owned by this execution node".into())
+        })?;
+        let snapshot = DistributedShardSnapshot {
+            handle: handle.clone(),
+            layouts: record.layouts.clone(),
+            owned: DistributedOwnedPartition {
+                layout: partition.layout.clone(),
+                value: partition.value.clone(),
+            },
+        };
+        snapshot.validate().map_err(invalid)?;
+        Ok(snapshot)
+    }
+
+    pub fn import_shard(&mut self, snapshot: DistributedShardSnapshot) -> RunnerResult<()> {
+        snapshot.validate().map_err(invalid)?;
+        self.insert_local_coordinated(
+            snapshot.handle,
+            snapshot.layouts,
+            OwnedPartition {
+                layout: snapshot.owned.layout,
+                value: snapshot.owned.value,
+            },
+        )
     }
 
     pub fn retire(&mut self, handle: &DistributedValueHandle) -> RunnerResult<()> {
@@ -300,6 +401,38 @@ mod tests {
         let mut stale = handle.clone();
         stale.generation += 1;
         assert!(store.local_part(&stale, LabRank(1)).is_err());
+    }
+
+    #[test]
+    fn shard_export_and_import_preserve_local_ownership_until_every_rank_arrives() {
+        let (handle, partitions) = fixture();
+        let layouts = partitions
+            .iter()
+            .map(|partition| partition.layout.clone())
+            .collect::<Vec<_>>();
+        let mut worker_one = DistributedStore::default();
+        worker_one
+            .insert_local_coordinated(handle.clone(), layouts.clone(), partitions[0].clone())
+            .unwrap();
+        assert!(worker_one.cloned_parts(&handle).is_err());
+
+        let first = worker_one.export_local(&handle, LabRank(1)).unwrap();
+        let mut driver = DistributedStore::default();
+        driver.import_shard(first).unwrap();
+        assert_eq!(
+            driver.local_part(&handle, LabRank(1)).unwrap(),
+            &partitions[0]
+        );
+        assert!(driver.local_part(&handle, LabRank(2)).is_err());
+
+        let mut worker_two = DistributedStore::default();
+        worker_two
+            .insert_local_coordinated(handle.clone(), layouts, partitions[1].clone())
+            .unwrap();
+        driver
+            .import_shard(worker_two.export_local(&handle, LabRank(2)).unwrap())
+            .unwrap();
+        assert_eq!(driver.cloned_parts(&handle).unwrap(), partitions);
     }
 
     #[test]

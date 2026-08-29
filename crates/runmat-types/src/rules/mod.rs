@@ -1,5 +1,6 @@
 mod aggregate;
 mod call;
+mod conversion;
 mod indexing;
 mod join;
 mod literal;
@@ -12,6 +13,7 @@ mod widen;
 
 pub use aggregate::*;
 pub use call::infer_call;
+pub use conversion::infer_numeric_conversion;
 pub use indexing::infer_index;
 pub use join::FactJoin;
 pub use literal::{infer_literal, infer_struct_literal};

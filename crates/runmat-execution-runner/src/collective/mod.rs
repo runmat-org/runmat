@@ -75,6 +75,8 @@ enum RoundSignature {
     Gather(LabRank),
     Scatter(LabRank),
     AllGather,
+    AssertEqual,
+    DistributedBuild(bool),
     Reduce(Option<LabRank>, OperatorKind),
     Cat(Option<LabRank>, u32),
     FunctionalReduce(Option<LabRank>),
@@ -429,6 +431,21 @@ impl CollectiveCoordinator {
 
 fn complete_round(round: Round) -> RunnerResult<Vec<CollectiveCompletion>> {
     let submissions = round.submissions.into_values().collect::<Vec<_>>();
+    let agreement = if matches!(round.signature, RoundSignature::AssertEqual) {
+        let mut digests = submissions.iter().filter_map(|request| {
+            if let CollectiveInvocation::AssertEqual { digest } = &request.invocation {
+                Some(digest)
+            } else {
+                None
+            }
+        });
+        let first = digests.next().ok_or_else(|| {
+            RunnerError::Invalid("replicated agreement round had no submissions".into())
+        })?;
+        Some(digests.all(|digest| digest == first))
+    } else {
+        None
+    };
     let values = submissions
         .iter()
         .filter_map(|request| match &request.invocation {
@@ -437,6 +454,15 @@ fn complete_round(round: Round) -> RunnerResult<Vec<CollectiveCompletion>> {
             | CollectiveInvocation::Reduce { value, .. }
             | CollectiveInvocation::Cat { value, .. }
             | CollectiveInvocation::FunctionalReduce { value, .. } => Some(value.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let build_contributions = submissions
+        .iter()
+        .filter_map(|request| match &request.invocation {
+            CollectiveInvocation::DistributedBuild { contribution, .. } => {
+                Some((**contribution).clone())
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -512,6 +538,12 @@ fn complete_round(round: Round) -> RunnerResult<Vec<CollectiveCompletion>> {
                 RoundSignature::AllGather => CollectiveResponse::Values {
                     values: values.clone(),
                 },
+                RoundSignature::AssertEqual => CollectiveResponse::Agreement {
+                    equal: agreement.expect("agreement round computes equality"),
+                },
+                RoundSignature::DistributedBuild(_) => CollectiveResponse::DistributedBuild {
+                    contributions: build_contributions.clone(),
+                },
                 RoundSignature::Reduce(Some(root), operator) if request.context.rank == root => {
                     CollectiveResponse::ReductionInputs {
                         operator,
@@ -560,6 +592,11 @@ fn signature(invocation: &CollectiveInvocation) -> RunnerResult<RoundSignature> 
         CollectiveInvocation::Gather { root, .. } => Ok(RoundSignature::Gather(*root)),
         CollectiveInvocation::Scatter { root, .. } => Ok(RoundSignature::Scatter(*root)),
         CollectiveInvocation::AllGather { .. } => Ok(RoundSignature::AllGather),
+        CollectiveInvocation::AssertEqual { .. } => Ok(RoundSignature::AssertEqual),
+        CollectiveInvocation::DistributedBuild {
+            validate_across_workers,
+            ..
+        } => Ok(RoundSignature::DistributedBuild(*validate_across_workers)),
         CollectiveInvocation::Reduce { root, operator, .. } => {
             Ok(RoundSignature::Reduce(*root, *operator))
         }
@@ -703,6 +740,35 @@ mod tests {
             panic!("expected gathered values")
         };
         assert_eq!(values, &vec![number(1.0), number(2.0), number(3.0)]);
+    }
+
+    #[test]
+    fn replicated_agreement_transports_only_typed_logical_digests() {
+        let common = number(9_007_199_254_740_992.0)
+            .logical_digest()
+            .expect("logical digest");
+        let different = number(3.0).logical_digest().expect("logical digest");
+
+        for (digests, expected) in [
+            ([common, common, common], true),
+            ([common, different, common], false),
+        ] {
+            let mut coordinator = CollectiveCoordinator::default();
+            let mut completions = Vec::new();
+            for (offset, digest) in digests.into_iter().enumerate() {
+                completions = coordinator
+                    .submit(request(
+                        offset as u32 + 1,
+                        CollectiveInvocation::AssertEqual { digest },
+                    ))
+                    .unwrap();
+            }
+            assert_eq!(completions.len(), 3);
+            assert!(completions.iter().all(|completion| matches!(
+                completion.result,
+                Ok(CollectiveResponse::Agreement { equal }) if equal == expected
+            )));
+        }
     }
 
     #[test]

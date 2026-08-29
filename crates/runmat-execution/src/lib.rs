@@ -18,12 +18,12 @@ pub mod value;
 
 pub use collective::{
     CollectiveInvocation, CollectiveMessageTag, CollectiveRequest, CollectiveResponse,
-    CollectiveSequence, ReceiveSelection,
+    CollectiveSequence, DistributedBuildContribution, ReceiveSelection,
 };
 pub use distributed::{
-    validate_partition_layouts, CompositeHandle, CompositeSnapshot, DistributedPartition,
-    DistributedPartitionLayout, DistributedValueHandle, DistributedValueSnapshot, PartitionRange,
-    PartitionSelection,
+    validate_partition_layouts, CompositeHandle, CompositeSnapshot, DistributedOwnedPartition,
+    DistributedPartition, DistributedPartitionLayout, DistributedShardSnapshot,
+    DistributedValueHandle, DistributedValueSnapshot, PartitionRange, PartitionSelection,
 };
 pub use error::ContractError;
 pub use executable::{
@@ -33,7 +33,7 @@ pub use executable::{
     ExecutableUnitManifest, SectionRequirement, EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES,
     EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
-pub use gang::{GangHandle, GangRequest, GangSnapshot, SpmdTaskContext};
+pub use gang::{GangHandle, GangRequest, GangSnapshot, SpmdOutputValue, SpmdTaskContext};
 pub use handle::{
     ExecutionHandleSnapshot, ExecutionHandleState, FutureHandle, JobHandle, OutputContract,
     PoolBackend, PoolHandle, PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,

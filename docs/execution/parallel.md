@@ -107,6 +107,59 @@ job = getCurrentJob();
 
 `getCurrentTask` and `getCurrentWorker` return objects derived from the scheduler's typed assignment. `getCurrentJob` returns the durable job identity when the invocation belongs to a submitted job. Each function returns `[]` when its corresponding context is not active, including ordinary driver code.
 
+## Run SPMD Code
+
+An `spmd` region runs once on every admitted lab. `spmdIndex` returns the stable one-based lab rank, and `spmdSize` returns the number of labs in the gang:
+
+```matlab
+pool = parpool(4);
+
+spmd
+  rank = spmdIndex();
+  total = spmdPlus(uint32(rank));
+end
+
+disp(total{1});              % 10
+```
+
+Ordinary values assigned in the region return as `Composite` values with one entry per lab. Use braces with a scalar, vector, or colon selector to read those entries. A variable that was not assigned on a particular lab has no entry for that lab.
+
+The collective APIs include barriers, broadcast, gather, scatter, all-gather, reductions, concatenation, send, receive, send-receive, and probe operations. Every collective call site has a compiler-owned identity. All labs must reach compatible operations in a compatible order; otherwise RunMat reports the worker failure or a deterministic collective deadlock instead of waiting for a timeout.
+
+## Work with Distributed Arrays
+
+`distributed` and `codistributed` keep partition payloads in the execution service. The language value is a generation-fenced handle with the global shape, value class, distribution scheme, pool, and ownership identity.
+
+Create a distributed array from driver data and materialize it with `gather`:
+
+```matlab
+pool = parpool(4);
+codist = codistributor1d(uint32(2), uint64([25, 25, 25, 25]), uint64([20, 100]));
+values = codistributed(uint16(reshape(1:2000, 20, 100)), codist);
+result = gather(values);
+```
+
+`codistributor`, `codistributor1d`, and `codistributor2dbc` create immutable distribution descriptions. `getCodistributor` returns the resolved description for a live distributed value. `isComplete` reports whether a description includes its global size, and `iscodistributed` tests a value without reading its partitions.
+
+Inside `spmd`, `codistributed` supports replicated input and designated-lab input. `codistributed.build` constructs one distributed value from the local contribution on every lab:
+
+```matlab
+spmd
+  local = uint64([2 * spmdIndex() - 1, 2 * spmdIndex()]);
+  codist = codistributor1d(uint32(2), uint64([2, 2, 2, 2]), uint64([1, 8]));
+  values = codistributed.build(local, codist);
+  indices = globalIndices(values, uint32(2));
+end
+
+result = gather(values);
+```
+
+The default `codistributed.build` form validates the class, shape, layout, and codistributor contributions across the gang. The optional `"noCommunication"` argument skips those cross-lab consistency checks. Use it only when the caller already guarantees that every local contribution matches the declared distribution.
+
+`globalIndices(value, dimension)` returns the exact `uint64` indices owned by the current lab. Outside `spmd`, pass the lab as a third argument. With two outputs, it returns the first and last owned index. Empty partitions return an empty index vector and the endpoint pair `1, 0`.
+
+Distributed values and Composites belong to one pool generation. Closing or resizing the pool retires them. Local-part access, materialization, redistribution, builtin placement, and Composite indexing all reject a stale handle.
+
 ## Errors, Retry, and Cancellation
 
 A worker error retains its identifier, message, call stack, and source location when it returns to the coordinating process or browser. The coordinator cancels sibling chunks after a terminal loop failure and does not publish partially assembled loop outputs.
@@ -119,4 +172,4 @@ Cancellation is scoped. Cancelling a future, closing a pool, interrupting the pa
 
 Native, browser, and remote workers consume the same versioned program request, callable identity, parallel-region contract, value payload, assignment, and structured failure schemas. Platform-specific code owns process creation, browser worker launch, transport, and resource admission; it does not redefine the language or result assembly rules.
 
-Remote execution uses the frozen package graph and exact executable bundle described in [Remote Execution](/docs/runtime/execution/remote). General distributed arrays, SPMD regions, ranks, and collectives are separate language capabilities and are not implied by a `parfor` pool.
+Remote execution uses the frozen package graph and exact executable bundle described in [Remote Execution](/docs/runtime/execution/remote). A pool can support `parfor` without supporting SPMD gangs or distributed values; the selected host must advertise each capability it executes.

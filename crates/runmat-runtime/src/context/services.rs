@@ -224,7 +224,13 @@ pub struct RuntimeSpmdAdmission {
 pub struct RuntimeSpmdOutput {
     pub value: runmat_types::RegionValueId,
     pub fact: runmat_types::ValueFact,
-    pub entries: Vec<Option<runmat_execution::value::ValuePayload>>,
+    pub entries: Vec<Option<runmat_execution::SpmdOutputValue>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum RuntimeSpmdRetainedOutput {
+    Composite(runmat_execution::CompositeHandle),
+    Distributed(runmat_execution::DistributedValueHandle),
 }
 
 impl RuntimeSpmdAdmission {
@@ -291,7 +297,13 @@ pub trait RuntimeSpmdService {
         gang: runmat_execution::GangHandle,
         region: runmat_types::ParallelRegionId,
         outputs: Vec<RuntimeSpmdOutput>,
-    ) -> RuntimeServiceFuture<Result<Vec<runmat_execution::CompositeHandle>, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<Vec<RuntimeSpmdRetainedOutput>, RuntimeError>>;
+}
+
+#[derive(Debug, Clone)]
+pub enum RuntimeDistributedInvocation {
+    Client,
+    Worker(runmat_execution::SpmdTaskContext),
 }
 
 #[derive(Debug, Clone)]
@@ -300,6 +312,7 @@ pub struct RuntimeDistributedCallRequest {
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
     pub output: runmat_types::ValueFact,
+    pub invocation: RuntimeDistributedInvocation,
 }
 
 /// Live distributed metadata visible to language/runtime consumers. Payloads
@@ -330,13 +343,38 @@ pub trait RuntimeDistributedService {
         &self,
         contract: DistributedValueContract,
         input: Value,
+        scheme: DistributionScheme,
         pool: runmat_execution::PoolSnapshot,
+    ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueHandle, RuntimeError>>;
+
+    fn create_worker(
+        &self,
+        contract: DistributedValueContract,
+        input: Value,
+        scheme: DistributionScheme,
+        context: runmat_execution::SpmdTaskContext,
+    ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueHandle, RuntimeError>>;
+
+    fn build_worker(
+        &self,
+        contract: DistributedValueContract,
+        local_part: Value,
+        global_shape: Vec<u64>,
+        scheme: DistributionScheme,
+        layouts: Vec<runmat_execution::DistributedPartitionLayout>,
+        context: runmat_execution::SpmdTaskContext,
     ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueHandle, RuntimeError>>;
 
     fn inspect(
         &self,
         handle: runmat_execution::DistributedValueHandle,
     ) -> RuntimeServiceFuture<Result<RuntimeDistributedSnapshot, RuntimeError>>;
+
+    fn export_local(
+        &self,
+        handle: runmat_execution::DistributedValueHandle,
+        rank: LabRank,
+    ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedShardSnapshot, RuntimeError>>;
 
     fn local_part(
         &self,

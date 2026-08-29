@@ -152,6 +152,74 @@ fn distributed_execution_policy_is_declared_by_the_canonical_catalog() {
 }
 
 #[test]
+fn distributed_call_inference_preserves_the_execution_owned_value_contract() {
+    use runmat_types::{
+        CallRequest, DistributedFact, DistributedOwner, DistributedValueId, DistributionScheme,
+        LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        ProgramFunctionId, RequestedOutputCount, ValueFact, ValueKindFact,
+    };
+
+    let local = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Int16,
+        domain: NumericDomain::Complex,
+    }));
+    let distributed = DistributedFact {
+        id: DistributedValueId {
+            function: ProgramFunctionId(7),
+            ordinal: 3,
+        },
+        owner: DistributedOwner::Client(ProgramFunctionId(7)),
+        scheme: Some(DistributionScheme::Replicated),
+        value: Box::new(local),
+        materializable: true,
+    };
+    let request = CallRequest {
+        arguments: vec![ValueFact::scalar(ValueKindFact::Distributed(
+            distributed.clone(),
+        ))],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+
+    let mapped = infer_catalog_call(
+        builtin_catalog_entry_by_name("abs").expect("abs entry"),
+        &request,
+    );
+    assert!(mapped.diagnostics.is_empty(), "{:#?}", mapped.diagnostics);
+    let ValueKindFact::Distributed(mapped) = &mapped.outputs[0].kind else {
+        panic!("partition-local mapping must retain a distributed result fact");
+    };
+    assert_eq!(mapped.id, distributed.id);
+    assert_eq!(mapped.owner, distributed.owner);
+    assert_eq!(mapped.scheme, distributed.scheme);
+    assert_eq!(mapped.materializable, distributed.materializable);
+    assert_eq!(
+        mapped.value.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Int16,
+            domain: NumericDomain::Real,
+        })
+    );
+
+    let gathered = infer_catalog_call(
+        builtin_catalog_entry_by_name("gather").expect("gather entry"),
+        &request,
+    );
+    assert!(
+        gathered.diagnostics.is_empty(),
+        "{:#?}",
+        gathered.diagnostics
+    );
+    assert!(matches!(
+        gathered.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Int16,
+            domain: NumericDomain::Complex,
+        })
+    ));
+}
+
+#[test]
 fn current_parallel_context_contracts_are_typed_and_parallel_capable() {
     for name in ["getCurrentTask", "getCurrentWorker", "getCurrentJob"] {
         let entry = builtin_catalog_entry_by_name(name).expect("parallel context catalog entry");

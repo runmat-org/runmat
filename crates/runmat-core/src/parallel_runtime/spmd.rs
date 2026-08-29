@@ -3,7 +3,7 @@ use runmat_execution::{CompositeHandle, CompositeId, GangHandle, GangRequest, Sp
 use runmat_execution_runner::{DistributedStore, GangCoordinator};
 use runmat_runtime::context::{
     RuntimeCollectiveService, RuntimeServiceFuture, RuntimeSpmdAdmission, RuntimeSpmdOutput,
-    RuntimeSpmdService,
+    RuntimeSpmdRetainedOutput, RuntimeSpmdService,
 };
 use runmat_runtime::RuntimeError;
 use runmat_types::{LabCount, ParallelRegionId};
@@ -107,7 +107,7 @@ impl RuntimeSpmdService for CoreSpmdService {
         gang: GangHandle,
         region: ParallelRegionId,
         outputs: Vec<RuntimeSpmdOutput>,
-    ) -> RuntimeServiceFuture<Result<Vec<CompositeHandle>, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<Vec<RuntimeSpmdRetainedOutput>, RuntimeError>> {
         let result = outputs
             .into_iter()
             .map(|output| {
@@ -116,6 +116,50 @@ impl RuntimeSpmdService for CoreSpmdService {
                         "SPMD output identity does not belong to the executing function",
                     ));
                 }
+                let distributed = output
+                    .entries
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        Some(runmat_execution::SpmdOutputValue::Distributed(snapshot)) => {
+                            Some((**snapshot).clone())
+                        }
+                        Some(runmat_execution::SpmdOutputValue::Value(_)) | None => None,
+                    })
+                    .collect::<Vec<_>>();
+                if !distributed.is_empty() {
+                    if distributed.len() != output.entries.len()
+                        || distributed
+                            .iter()
+                            .any(|snapshot| snapshot.handle != distributed[0].handle)
+                        || distributed.iter().enumerate().any(|(index, snapshot)| {
+                            usize::try_from(snapshot.owned.layout.rank.0).ok() != Some(index + 1)
+                        })
+                    {
+                        return Err(runtime_error(
+                            "SPMD output must contain one ordered shard from every rank of one distributed value",
+                        ));
+                    }
+                    for snapshot in &distributed {
+                        self.values
+                            .borrow_mut()
+                            .import_shard(snapshot.clone())
+                            .map_err(runtime_error)?;
+                    }
+                    return Ok(RuntimeSpmdRetainedOutput::Distributed(
+                        distributed[0].handle.clone(),
+                    ));
+                }
+                let entries = output
+                    .entries
+                    .into_iter()
+                    .map(|entry| match entry {
+                        Some(runmat_execution::SpmdOutputValue::Value(value)) => Ok(Some(value)),
+                        Some(runmat_execution::SpmdOutputValue::Distributed(_)) => {
+                            unreachable!("distributed entries were handled above")
+                        }
+                        None => Ok(None),
+                    })
+                    .collect::<Result<Vec<_>, RuntimeError>>()?;
                 let handle = CompositeHandle {
                     id: CompositeId::derive(&[
                         gang.id.bytes(),
@@ -131,9 +175,9 @@ impl RuntimeSpmdService for CoreSpmdService {
                 };
                 self.values
                     .borrow_mut()
-                    .insert_composite(handle.clone(), output.entries)
+                    .insert_composite(handle.clone(), entries)
                     .map_err(runtime_error)?;
-                Ok(handle)
+                Ok(RuntimeSpmdRetainedOutput::Composite(handle))
             })
             .collect();
         Box::pin(async move { result })

@@ -29,67 +29,177 @@ pub async fn partition_value(
     if count.0 == 0 {
         return Err(error("distributed values require at least one partition"));
     }
-    if matches!(scheme, DistributionScheme::Replicated) {
-        let shape = runtime_shape(input).await?;
-        let selections = full_selections(&shape)?;
-        let local_shape = usize_shape_to_u64(&shape)?;
-        let partitions = (1..=count.0)
-            .map(|rank| DistributedPartitionValue {
-                layout: DistributedPartitionLayout {
-                    rank: LabRank(rank),
-                    selections: selections.clone(),
-                    local_shape: local_shape.clone(),
-                },
-                value: input.clone(),
-            })
-            .collect();
-        return Ok((shape, partitions));
+    let shape = distributable_shape(input).ok_or_else(|| {
+        error("this value does not support class-preserving distributed partitioning")
+    })?;
+    let layouts = partition_layouts_usize(&shape, scheme, count)?;
+    let mut partitions = Vec::with_capacity(layouts.len());
+    for layout in layouts {
+        let value = extract_partition(input, scheme, &shape, &layout)?;
+        partitions.push(DistributedPartitionValue { layout, value });
     }
+    Ok((shape, partitions))
+}
 
+/// Extracts exactly the partition owned by `rank` while retaining the complete
+/// immutable layout table. Worker-scoped construction uses this path so a
+/// worker never stores remote payloads merely to construct its local shard.
+pub async fn partition_local_value(
+    input: &Value,
+    scheme: &DistributionScheme,
+    count: LabCount,
+    rank: LabRank,
+) -> Result<
+    (
+        Vec<u64>,
+        Vec<DistributedPartitionLayout>,
+        DistributedPartitionValue,
+    ),
+    RuntimeError,
+> {
+    let shape = distributable_shape(input).ok_or_else(|| {
+        error("this value does not support class-preserving distributed partitioning")
+    })?;
+    let layouts = partition_layouts_usize(&shape, scheme, count)?;
+    let layout = layouts
+        .iter()
+        .find(|layout| layout.rank == rank)
+        .cloned()
+        .ok_or_else(|| error("distributed rank lies outside the admitted partition layout"))?;
+    let value = extract_partition(input, scheme, &shape, &layout)?;
+    Ok((
+        usize_shape_to_u64(&shape)?,
+        layouts,
+        DistributedPartitionValue { layout, value },
+    ))
+}
+
+fn extract_partition(
+    input: &Value,
+    scheme: &DistributionScheme,
+    shape: &[usize],
+    layout: &DistributedPartitionLayout,
+) -> Result<Value, RuntimeError> {
+    if matches!(scheme, DistributionScheme::Replicated) {
+        return Ok(input.clone());
+    }
+    let selectors = selectors_from_layout(layout)?;
+    let plan = build_index_plan(&selectors, shape.len(), shape)?;
+    let scalar_source = scalar_partition_source(input)?;
+    assembly::read_with_plan(scalar_source.as_ref().unwrap_or(input), &plan)
+}
+
+fn distributable_shape(value: &Value) -> Option<Vec<usize>> {
+    assembly::value_shape(value).or_else(|| {
+        matches!(
+            value,
+            Value::Num(_) | Value::Int(_) | Value::Complex(_, _) | Value::Bool(_)
+        )
+        .then(|| vec![1, 1])
+    })
+}
+
+fn scalar_partition_source(value: &Value) -> Result<Option<Value>, RuntimeError> {
+    let source = match value {
+        Value::Num(value) => {
+            Tensor::from_numeric_storage(NumericStorage::F64(vec![*value]), vec![1, 1])
+                .map(Value::Tensor)
+                .map_err(error)?
+        }
+        Value::Int(value) => {
+            let storage = match value {
+                runmat_value::IntValue::I8(value) => NumericStorage::I8(vec![*value]),
+                runmat_value::IntValue::I16(value) => NumericStorage::I16(vec![*value]),
+                runmat_value::IntValue::I32(value) => NumericStorage::I32(vec![*value]),
+                runmat_value::IntValue::I64(value) => NumericStorage::I64(vec![*value]),
+                runmat_value::IntValue::U8(value) => NumericStorage::U8(vec![*value]),
+                runmat_value::IntValue::U16(value) => NumericStorage::U16(vec![*value]),
+                runmat_value::IntValue::U32(value) => NumericStorage::U32(vec![*value]),
+                runmat_value::IntValue::U64(value) => NumericStorage::U64(vec![*value]),
+            };
+            Tensor::from_numeric_storage(storage, vec![1, 1])
+                .map(Value::Tensor)
+                .map_err(error)?
+        }
+        Value::Complex(real, imaginary) => ComplexTensor::from_complex_storage(
+            ComplexStorage::F64(vec![runmat_value::ComplexElement(*real, *imaginary)].into()),
+            vec![1, 1],
+        )
+        .map(Value::ComplexTensor)
+        .map_err(error)?,
+        Value::Bool(value) => LogicalArray::new(vec![u8::from(*value)], vec![1, 1])
+            .map(Value::LogicalArray)
+            .map_err(error)?,
+        _ => return Ok(None),
+    };
+    Ok(Some(source))
+}
+
+pub fn partition_layouts(
+    global_shape: &[u64],
+    scheme: &DistributionScheme,
+    count: LabCount,
+) -> Result<Vec<DistributedPartitionLayout>, RuntimeError> {
+    let shape = global_shape
+        .iter()
+        .map(|extent| {
+            usize::try_from(*extent).map_err(|_| error("global extent exceeds this host"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    partition_layouts_usize(&shape, scheme, count)
+}
+
+fn partition_layouts_usize(
+    shape: &[usize],
+    scheme: &DistributionScheme,
+    count: LabCount,
+) -> Result<Vec<DistributedPartitionLayout>, RuntimeError> {
+    if count.0 == 0 {
+        return Err(error("distributed values require at least one partition"));
+    }
     if matches!(scheme, DistributionScheme::Custom { .. }) {
         return Err(error(
             "custom distributed partitioners require a registered partitioner service",
         ));
     }
-    let shape = assembly::value_shape(input).ok_or_else(|| {
-        error("this value does not support class-preserving distributed partitioning")
-    })?;
+    if matches!(scheme, DistributionScheme::Replicated) {
+        let selections = full_selections(shape)?;
+        let local_shape = usize_shape_to_u64(shape)?;
+        return Ok((1..=count.0)
+            .map(|rank| DistributedPartitionLayout {
+                rank: LabRank(rank),
+                selections: selections.clone(),
+                local_shape: local_shape.clone(),
+            })
+            .collect());
+    }
     if let DistributionScheme::TwoDimensionalBlockCyclic {
         worker_grid,
         block_size,
         orientation,
     } = scheme
     {
-        return partition_two_dimensional(
-            input,
-            shape,
-            count,
-            *worker_grid,
-            *block_size,
-            *orientation,
-        )
-        .await;
+        return two_dimensional_layouts(shape, count, *worker_grid, *block_size, *orientation);
     }
-    let dimension = scheme_dimension(scheme, &shape)?;
-    let index_sets = partition_indices(shape[dimension], count, scheme)?;
-    let mut partitions = Vec::with_capacity(index_sets.len());
-    for (offset, indices) in index_sets.into_iter().enumerate() {
-        let selectors = selectors_for_dimension(&shape, dimension, &indices);
-        let plan = build_index_plan(&selectors, shape.len(), &shape)?;
-        let value = assembly::read_with_plan(input, &plan)?;
-        let rank = u32::try_from(offset + 1)
-            .map_err(|_| error("distributed partition rank exceeds its portable representation"))?;
-        let selections = layout_selections(&shape, dimension, &indices, scheme, rank, count)?;
-        partitions.push(DistributedPartitionValue {
-            layout: DistributedPartitionLayout {
+    let dimension = scheme_dimension(scheme, shape)?;
+    partition_indices(shape[dimension], count, scheme)?
+        .into_iter()
+        .enumerate()
+        .map(|(offset, indices)| {
+            let rank = u32::try_from(offset + 1).map_err(|_| {
+                error("distributed partition rank exceeds its portable representation")
+            })?;
+            let selections = layout_selections(shape, dimension, &indices, scheme, rank, count)?;
+            Ok(DistributedPartitionLayout {
                 rank: LabRank(rank),
+                local_shape: selections
+                    .iter()
+                    .map(|selection| selection.element_count())
+                    .collect(),
                 selections,
-                local_shape: usize_shape_to_u64(&plan.output_shape)?,
-            },
-            value,
-        });
-    }
-    Ok((shape, partitions))
+            })
+        })
+        .collect()
 }
 
 pub async fn materialize_partitions(
@@ -122,6 +232,17 @@ pub async fn materialize_partitions(
 
 async fn runtime_shape(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     crate::builtins::common::shape::value_dimensions(value).await
+}
+
+pub async fn value_shape(value: &Value) -> Result<Vec<u64>, RuntimeError> {
+    runtime_shape(value)
+        .await?
+        .into_iter()
+        .map(|extent| {
+            u64::try_from(extent)
+                .map_err(|_| error("value extent exceeds its portable representation"))
+        })
+        .collect()
 }
 
 fn scheme_dimension(scheme: &DistributionScheme, shape: &[usize]) -> Result<usize, RuntimeError> {
@@ -192,22 +313,6 @@ fn partition_indices(
     }
 }
 
-fn selectors_for_dimension(
-    shape: &[usize],
-    dimension: usize,
-    zero_based: &[usize],
-) -> Vec<SliceSelector> {
-    (0..shape.len())
-        .map(|current| {
-            if current == dimension {
-                SliceSelector::Indices(zero_based.iter().map(|index| index + 1).collect())
-            } else {
-                SliceSelector::Colon
-            }
-        })
-        .collect()
-}
-
 fn full_selections(shape: &[usize]) -> Result<Vec<PartitionSelection>, RuntimeError> {
     shape
         .iter()
@@ -271,14 +376,13 @@ fn layout_selections(
         .collect()
 }
 
-async fn partition_two_dimensional(
-    input: &Value,
-    shape: Vec<usize>,
+fn two_dimensional_layouts(
+    shape: &[usize],
     count: LabCount,
     worker_grid: [u32; 2],
     block_size: u64,
     orientation: runmat_types::WorkerGridOrientation,
-) -> Result<(Vec<usize>, Vec<DistributedPartitionValue>), RuntimeError> {
+) -> Result<Vec<DistributedPartitionLayout>, RuntimeError> {
     if shape.len() != 2 || worker_grid.contains(&0) || block_size == 0 {
         return Err(error(
             "2-D block-cyclic distribution requires a matrix, positive worker grid, and positive block size",
@@ -299,41 +403,33 @@ async fn partition_two_dimensional(
         let (grid_row, grid_column) = worker_position(rank, worker_grid, orientation);
         let rows = block_cyclic_indices(shape[0], block_size, worker_grid[0], grid_row);
         let columns = block_cyclic_indices(shape[1], block_size, worker_grid[1], grid_column);
-        let selectors = vec![
-            SliceSelector::Indices(rows.iter().map(|index| index + 1).collect()),
-            SliceSelector::Indices(columns.iter().map(|index| index + 1).collect()),
-        ];
-        let plan = build_index_plan(&selectors, 2, &shape)?;
-        let value = assembly::read_with_plan(input, &plan)?;
-        partitions.push(DistributedPartitionValue {
-            layout: DistributedPartitionLayout {
-                rank: LabRank(rank),
-                selections: vec![
-                    PartitionSelection::Indices {
-                        dimension: 1,
-                        indices: rows
-                            .into_iter()
-                            .map(|index| {
-                                u64::try_from(index).map_err(|_| error("row index exceeds u64"))
-                            })
-                            .collect::<Result<_, _>>()?,
-                    },
-                    PartitionSelection::Indices {
-                        dimension: 2,
-                        indices: columns
-                            .into_iter()
-                            .map(|index| {
-                                u64::try_from(index).map_err(|_| error("column index exceeds u64"))
-                            })
-                            .collect::<Result<_, _>>()?,
-                    },
-                ],
-                local_shape: usize_shape_to_u64(&plan.output_shape)?,
-            },
-            value,
+        let local_shape = vec![rows.len() as u64, columns.len() as u64];
+        partitions.push(DistributedPartitionLayout {
+            rank: LabRank(rank),
+            selections: vec![
+                PartitionSelection::Indices {
+                    dimension: 1,
+                    indices: rows
+                        .into_iter()
+                        .map(|index| {
+                            u64::try_from(index).map_err(|_| error("row index exceeds u64"))
+                        })
+                        .collect::<Result<_, _>>()?,
+                },
+                PartitionSelection::Indices {
+                    dimension: 2,
+                    indices: columns
+                        .into_iter()
+                        .map(|index| {
+                            u64::try_from(index).map_err(|_| error("column index exceeds u64"))
+                        })
+                        .collect::<Result<_, _>>()?,
+                },
+            ],
+            local_shape,
         });
     }
-    Ok((shape, partitions))
+    Ok(partitions)
 }
 
 fn worker_position(
@@ -414,6 +510,33 @@ fn zero_like(prototype: &Value, shape: &[usize]) -> Result<Value, RuntimeError> 
         .try_fold(1usize, |length, dimension| length.checked_mul(*dimension))
         .ok_or_else(|| error("distributed global shape exceeds this host"))?;
     match prototype {
+        Value::Num(_) => {
+            Tensor::from_numeric_storage(NumericStorage::F64(vec![0.0; length]), shape.to_vec())
+                .map(Value::Tensor)
+                .map_err(error)
+        }
+        Value::Int(value) => {
+            let storage = match value {
+                runmat_value::IntValue::I8(_) => NumericStorage::I8(vec![0; length]),
+                runmat_value::IntValue::I16(_) => NumericStorage::I16(vec![0; length]),
+                runmat_value::IntValue::I32(_) => NumericStorage::I32(vec![0; length]),
+                runmat_value::IntValue::I64(_) => NumericStorage::I64(vec![0; length]),
+                runmat_value::IntValue::U8(_) => NumericStorage::U8(vec![0; length]),
+                runmat_value::IntValue::U16(_) => NumericStorage::U16(vec![0; length]),
+                runmat_value::IntValue::U32(_) => NumericStorage::U32(vec![0; length]),
+                runmat_value::IntValue::U64(_) => NumericStorage::U64(vec![0; length]),
+            };
+            Tensor::from_numeric_storage(storage, shape.to_vec())
+                .map(Value::Tensor)
+                .map_err(error)
+        }
+        Value::Complex(_, _) => ComplexTensor::from_complex_storage(
+            ComplexStorage::F64(vec![runmat_value::ComplexElement(0.0, 0.0); length].into()),
+            shape.to_vec(),
+        )
+        .map(Value::ComplexTensor)
+        .map_err(error),
+        Value::Bool(_) => Ok(Value::LogicalArray(LogicalArray::zeros(shape.to_vec()))),
         Value::Tensor(value) => Tensor::from_numeric_storage(
             NumericStorage::zeros(value.numeric_dtype(), length),
             shape.to_vec(),
@@ -566,5 +689,79 @@ mod tests {
             let output = block_on(materialize_partitions(&shape, &scheme, &parts)).unwrap();
             assert_eq!(output, input);
         }
+    }
+
+    #[test]
+    fn worker_partitioning_extracts_only_the_requested_rank_from_the_shared_layout() {
+        let input = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 3, u64::MAX]), vec![1, 4]).unwrap(),
+        );
+        let scheme = DistributionScheme::OneDimensional {
+            dimension: 2,
+            partition: vec![2, 2],
+        };
+        let (shape, layouts, local) = block_on(partition_local_value(
+            &input,
+            &scheme,
+            LabCount(2),
+            LabRank(2),
+        ))
+        .unwrap();
+
+        assert_eq!(shape, vec![1, 4]);
+        assert_eq!(layouts.len(), 2);
+        assert_eq!(local.layout, layouts[1]);
+        assert_eq!(
+            local.value,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![3, u64::MAX]), vec![1, 2]).unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn one_element_numeric_shards_materialize_from_their_exact_scalar_class() {
+        let input = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
+                vec![1, 2],
+            )
+            .unwrap(),
+        );
+        let scheme = DistributionScheme::OneDimensional {
+            dimension: 2,
+            partition: vec![1, 1],
+        };
+        let (shape, partitions) = block_on(partition_value(&input, &scheme, LabCount(2))).unwrap();
+        assert!(partitions
+            .iter()
+            .all(|partition| matches!(partition.value, Value::Int(_))));
+        let output = block_on(materialize_partitions(&shape, &scheme, &partitions)).unwrap();
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn scalar_partitioning_retains_exact_class_and_typed_empty_shards() {
+        let input = Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993));
+        let scheme = DistributionScheme::Block { dimension: 1 };
+        let (shape, partitions) = block_on(partition_value(&input, &scheme, LabCount(3))).unwrap();
+
+        assert_eq!(shape, vec![1, 1]);
+        assert_eq!(partitions[0].value, input);
+        for partition in &partitions[1..] {
+            assert_eq!(
+                partition.value,
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U64(Vec::new()), vec![0, 1]).unwrap()
+                )
+            );
+        }
+        assert_eq!(
+            block_on(materialize_partitions(&shape, &scheme, &partitions)).unwrap(),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1],)
+                    .unwrap()
+            )
+        );
     }
 }

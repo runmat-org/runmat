@@ -1,6 +1,27 @@
 use runmat_types::{LabCount, LabRank, ParallelRegionId, SpmdLabRequirement};
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "snake_case",
+    tag = "kind",
+    content = "value",
+    deny_unknown_fields
+)]
+pub enum SpmdOutputValue {
+    Value(crate::value::ValuePayload),
+    Distributed(Box<crate::DistributedShardSnapshot>),
+}
+
+impl SpmdOutputValue {
+    pub fn validate(&self) -> Result<(), crate::ContractError> {
+        match self {
+            Self::Value(value) => value.validate(crate::value::ValueLimits::default()),
+            Self::Distributed(snapshot) => snapshot.validate(),
+        }
+    }
+}
+
 use crate::{ContractError, ExecutionScopeId, GangId, PoolHandle};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

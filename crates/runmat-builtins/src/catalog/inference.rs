@@ -1,13 +1,35 @@
 use super::{BuiltinCatalogEntry, BuiltinContractMaturity};
 use runmat_types::{
     codistributor_fact, infer_call, CallContract, CallInference, CallRequest, CodistributorClass,
-    DynamicReason, ExecutionFact, FutureStateFact, InferenceDiagnostic, LiteralValue, NumericClass,
-    NumericDomain, NumericFact, OutputListFact, ResidencyFact, ShapeFact, StorageFact, StructFact,
-    ValueFact, ValueKindFact,
+    DistributedFact, DynamicReason, ExecutionFact, FutureStateFact, InferenceDiagnostic,
+    LiteralValue, NumericClass, NumericDomain, NumericFact, OutputListFact, ResidencyFact,
+    ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
+    let distributed = request.arguments.iter().find_map(|argument| {
+        let ValueKindFact::Distributed(distributed) = &argument.kind else {
+            return None;
+        };
+        Some(distributed.clone())
+    });
+    if let Some(distributed) = distributed {
+        match entry.placement.distributed {
+            crate::BuiltinDistributedPolicy::MapUnary => {
+                return infer_distributed_map(entry, request, distributed);
+            }
+            crate::BuiltinDistributedPolicy::MaterializeArguments => {
+                return infer_partition_local_call(entry, request);
+            }
+            crate::BuiltinDistributedPolicy::Unsupported
+            | crate::BuiltinDistributedPolicy::InspectHandles => {}
+        }
+    }
+    infer_catalog_call_local(entry, request)
+}
+
+fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
     match entry.contract.inference_rule.0 {
         "array.full" => infer_full(request, entry),
         "array.zeros" => infer_zeros(request, entry),
@@ -21,8 +43,11 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
         "parallel.fetch-outputs" => infer_parallel_fetch(request, entry, false),
         "parallel.fetch-next" => infer_parallel_fetch(request, entry, true),
         "parallel.distributed"
+        | "parallel.codistributed"
+        | "parallel.codistributed-build"
         | "parallel.redistribute"
         | "parallel.get-codistributor"
+        | "parallel.global-indices"
         | "parallel.codistributor1d"
         | "parallel.codistributor2dbc"
         | "parallel.codistributor"
@@ -65,7 +90,29 @@ pub fn infer_partition_local_call(
             _ => argument.clone(),
         })
         .collect();
-    infer_catalog_call(entry, &projected)
+    infer_catalog_call_local(entry, &projected)
+}
+
+fn infer_distributed_map(
+    entry: &BuiltinCatalogEntry,
+    request: &CallRequest,
+    source: DistributedFact,
+) -> CallInference {
+    let mut inference = infer_partition_local_call(entry, request);
+    inference.outputs = inference
+        .outputs
+        .into_iter()
+        .map(|value| {
+            ValueFact::scalar(ValueKindFact::Distributed(DistributedFact {
+                id: source.id,
+                owner: source.owner,
+                scheme: source.scheme.clone(),
+                value: Box::new(value),
+                materializable: source.materializable,
+            }))
+        })
+        .collect();
+    inference
 }
 
 fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -97,6 +144,7 @@ fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
             });
             codistributor_fact(class)
         }
+        "parallel.global-indices" => ValueFact::unknown(DynamicReason::RuntimeValue),
         "parallel.codistributor1d" => codistributor_fact(Some(CodistributorClass::OneDimensional)),
         "parallel.codistributor2dbc" => {
             codistributor_fact(Some(CodistributorClass::TwoDimensionalBlockCyclic))
@@ -130,9 +178,10 @@ fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
             })
             .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
         "parallel.functional-reduce" => ValueFact::unknown(DynamicReason::RuntimeValue),
-        "parallel.distributed" | "parallel.receive" => {
-            ValueFact::unknown(DynamicReason::RuntimeValue)
-        }
+        "parallel.distributed"
+        | "parallel.codistributed"
+        | "parallel.codistributed-build"
+        | "parallel.receive" => ValueFact::unknown(DynamicReason::RuntimeValue),
         _ => unreachable!("parallel data inference is dispatched by a closed rule set"),
     };
     finish_fixed(entry, request, output, Vec::new())

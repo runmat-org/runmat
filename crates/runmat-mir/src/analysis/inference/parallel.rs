@@ -1,5 +1,6 @@
 use runmat_types::{
-    codistributor_fact, CodistributorClass, DynamicReason, ValueFact, ValueKindFact,
+    codistributor_fact, CodistributorClass, DynamicReason, NumericClass, NumericDomain,
+    NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 use crate::analysis::engine::FlowState;
@@ -28,6 +29,40 @@ pub(crate) fn distributed_fact(
                 materializable: true,
             }))
         }
+        MirDistributedOp::Codistributed {
+            id, owner, input, ..
+        } => {
+            let value = operand_fact(input, state);
+            state.distributed.insert(*id, value.clone());
+            ValueFact::scalar(ValueKindFact::Distributed(runmat_types::DistributedFact {
+                id: *id,
+                owner: *owner,
+                scheme: None,
+                value: Box::new(value),
+                materializable: true,
+            }))
+        }
+        MirDistributedOp::Build {
+            id,
+            owner,
+            local_part: input,
+            ..
+        } => {
+            let mut value = operand_fact(input, state);
+            value.shape = value
+                .shape
+                .rank()
+                .map_or(ShapeFact::Unknown, |rank| ShapeFact::Ranked { rank });
+            value.storage = StorageFact::Unknown;
+            state.distributed.insert(*id, value.clone());
+            ValueFact::scalar(ValueKindFact::Distributed(runmat_types::DistributedFact {
+                id: *id,
+                owner: *owner,
+                scheme: None,
+                value: Box::new(value),
+                materializable: true,
+            }))
+        }
         MirDistributedOp::LocalPart { value } | MirDistributedOp::Materialize { value } => {
             match operand_fact(value, state).kind {
                 ValueKindFact::Distributed(distributed) => *distributed.value,
@@ -43,6 +78,27 @@ pub(crate) fn distributed_fact(
                 _ => None,
             };
             codistributor_fact(class)
+        }
+        MirDistributedOp::GlobalIndices {
+            requested_outputs, ..
+        } => {
+            let kind = ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::UInt64,
+                domain: NumericDomain::Real,
+            });
+            if *requested_outputs == 1 {
+                ValueFact::proven(
+                    kind,
+                    ShapeFact::from(vec![Some(1), None]),
+                    StorageFact::Dense,
+                )
+            } else {
+                let index = ValueFact::scalar(kind);
+                ValueFact::scalar(ValueKindFact::OutputList(runmat_types::OutputListFact {
+                    outputs: vec![index.clone(), index],
+                    variadic: false,
+                }))
+            }
         }
         MirDistributedOp::Redistribute { value, .. } => {
             let ValueKindFact::Distributed(distributed) = operand_fact(value, state).kind else {

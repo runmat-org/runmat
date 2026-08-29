@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use super::{build_user_function_expand_multi_args, calls, DispatchDecision, DispatchHandled};
 
 mod distributed;
+pub(crate) use distributed::encode_spmd_output;
 
 pub(super) struct ParallelDispatchContext<'a> {
     pub bytecode: &'a crate::bytecode::Bytecode,
@@ -537,6 +538,12 @@ async fn collective_response(
             Ok(accumulator)
         }
         CollectiveResponse::Probe { available } => Ok(Value::Bool(available)),
+        CollectiveResponse::Agreement { .. } | CollectiveResponse::DistributedBuild { .. } => {
+            Err(crate::interpreter::errors::mex(
+                "CollectiveContract",
+                "internal distributed construction response reached a public collective instruction",
+            ))
+        }
     }
 }
 
@@ -756,14 +763,21 @@ async fn execute_spmd(
                 "SPMD runtime returned a different number of outputs than the compiler contract",
             ));
         }
-        for (output, handle) in executable.outputs.iter().zip(handles) {
+        for (output, retained) in executable.outputs.iter().zip(handles) {
             let destination = vars.get_mut(output.slot).ok_or_else(|| {
                 crate::interpreter::errors::mex(
                     "SpmdFrame",
                     "SPMD output is outside its compiler-bound VM frame",
                 )
             })?;
-            *destination = Value::Composite(Box::new(handle));
+            *destination = match retained {
+                runmat_runtime::context::RuntimeSpmdRetainedOutput::Composite(handle) => {
+                    Value::Composite(Box::new(handle))
+                }
+                runmat_runtime::context::RuntimeSpmdRetainedOutput::Distributed(handle) => {
+                    Value::Distributed(Box::new(handle))
+                }
+            };
             crate::runtime::workspace::mark_workspace_assigned(output.slot);
         }
         Ok(())
@@ -827,13 +841,13 @@ async fn execute_spmd_in_process(
                 &bytecode,
                 resume,
                 Some(&function_name),
-                runtime,
+                runtime.clone(),
             )
             .await;
             match result {
                 Ok(InterpreterOutcome::Completed(completion)) => {
                     spmd.rank_finished(&gang, rank)?;
-                    Ok((rank, completion))
+                    Ok((rank, completion, runtime))
                 }
                 Err(error) => {
                     // Wake peers that may be waiting in a collective, but keep
@@ -844,31 +858,28 @@ async fn execute_spmd_in_process(
             }
         });
     }
-    futures::future::try_join_all(tasks)
-        .await?
-        .into_iter()
-        .map(|(rank, completion)| {
-            let outputs = executable
-                .outputs
-                .iter()
-                .map(|output| {
-                    if !completion.assigned_slots.contains(&output.slot) {
-                        return Ok(None);
-                    }
-                    let value = completion.values.get(output.slot).ok_or_else(|| {
-                        crate::interpreter::errors::mex(
-                            "SpmdFrame",
-                            "an assigned SPMD output is outside its completed VM frame",
-                        )
-                    })?;
-                    encode_inline_value(value)
-                        .map(Some)
-                        .map_err(value_codec_error)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(runmat_runtime::execution::SpmdRankResult { rank, outputs })
-        })
-        .collect()
+    let completions = futures::future::try_join_all(tasks).await?;
+    let mut results = Vec::with_capacity(completions.len());
+    for (rank, completion, runtime) in completions {
+        let mut outputs = Vec::with_capacity(executable.outputs.len());
+        for output in &executable.outputs {
+            if !completion.assigned_slots.contains(&output.slot) {
+                outputs.push(None);
+                continue;
+            }
+            let value = completion.values.get(output.slot).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "SpmdFrame",
+                    "an assigned SPMD output is outside its completed VM frame",
+                )
+            })?;
+            outputs.push(Some(
+                distributed::encode_spmd_output(&runtime, value).await?,
+            ));
+        }
+        results.push(runmat_runtime::execution::SpmdRankResult { rank, outputs });
+    }
+    Ok(results)
 }
 
 fn validate_spmd_rank_results(

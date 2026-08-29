@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 mod spmd;
 pub use spmd::SpmdLabRequirement;
 
-pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 8;
+pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
@@ -162,13 +162,52 @@ pub enum WorkerGridOrientation {
     Column,
 }
 
+/// Compiler-visible construction policy for a distributed value.
+///
+/// This records what the source program asked the execution service to do. It
+/// deliberately does not pretend that a runtime codistributor is a statically
+/// known [`DistributionScheme`]. The admitted live handle records that exact
+/// scheme after the codistributor and pool have been validated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum DistributedConstruction {
+    /// RunMat's direct `distributed(value)` form with a compiler-selected
+    /// scheme.
+    Fixed { scheme: DistributionScheme },
+    /// `codistributed(value)` distributes an input available on every
+    /// participating execution context using the default codistributor.
+    ReplicatedInputDefault,
+    /// The two-argument compatible form. The validated runtime type of the
+    /// second operand selects a codistributor or a designated worker.
+    CodistributorOrDesignatedWorker,
+    /// A designated worker and codistributor are both explicit operands.
+    DesignatedWorkerWithCodistributor,
+    /// `codistributed.build` assembles one local contribution per worker.
+    LocalParts {
+        has_codistributor: bool,
+        validation: DistributedBuildValidation,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DistributedBuildValidation {
+    ValidateAcrossWorkers,
+    NoCommunication,
+    RuntimeOption,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DistributedValueContract {
     pub id: DistributedValueId,
     pub value: ValueFact,
-    pub scheme: DistributionScheme,
+    pub construction: DistributedConstruction,
     pub owner: crate::DistributedOwner,
+    /// Compiler-owned synchronization identity for worker-scoped compatible
+    /// construction. Client construction and fixed RunMat distribution do not
+    /// allocate one.
+    pub coordination: Option<CollectiveId>,
     pub materializable: bool,
 }
 
@@ -331,7 +370,39 @@ impl ParallelManifest {
                     "owner must name the same client function or a declared parallel region in that function",
                 ));
             }
-            if let DistributionScheme::Custom { partitioner } = &distributed.scheme {
+            let worker_scoped =
+                matches!(
+                    distributed.construction,
+                    DistributedConstruction::ReplicatedInputDefault
+                        | DistributedConstruction::CodistributorOrDesignatedWorker
+                        | DistributedConstruction::DesignatedWorkerWithCodistributor
+                        | DistributedConstruction::LocalParts { .. }
+                ) && matches!(distributed.owner, crate::DistributedOwner::Region(_));
+            match (worker_scoped, distributed.coordination) {
+                (true, Some(coordination)) if matches!(distributed.owner, crate::DistributedOwner::Region(region) if coordination.region == region) =>
+                    {}
+                (true, _) => {
+                    return Err(SchemaValidationError::new(
+                        "parallel.distributed_values.coordination",
+                        "worker-scoped construction requires a compiler-owned coordination identity in its owner region",
+                    ));
+                }
+                (false, None) => {}
+                (false, Some(_)) => {
+                    return Err(SchemaValidationError::new(
+                        "parallel.distributed_values.coordination",
+                        "client or fixed construction cannot carry a worker coordination identity",
+                    ));
+                }
+            }
+            let fixed_scheme = match &distributed.construction {
+                DistributedConstruction::Fixed { scheme } => Some(scheme),
+                DistributedConstruction::ReplicatedInputDefault
+                | DistributedConstruction::CodistributorOrDesignatedWorker
+                | DistributedConstruction::DesignatedWorkerWithCodistributor
+                | DistributedConstruction::LocalParts { .. } => None,
+            };
+            if let Some(DistributionScheme::Custom { partitioner }) = fixed_scheme {
                 super::schema::validate_token(
                     "parallel.distributed_values.partitioner",
                     partitioner,
@@ -339,28 +410,32 @@ impl ParallelManifest {
                 )?;
             }
             if matches!(
-                distributed.scheme,
-                DistributionScheme::Block { dimension: 0 }
-                    | DistributionScheme::Cyclic { dimension: 0 }
-                    | DistributionScheme::OneDimensional { dimension: 0, .. }
+                fixed_scheme,
+                Some(
+                    DistributionScheme::Block { dimension: 0 }
+                        | DistributionScheme::Cyclic { dimension: 0 }
+                        | DistributionScheme::OneDimensional { dimension: 0, .. }
+                )
             ) {
                 return Err(SchemaValidationError::new(
                     "parallel.distributed_values.scheme",
                     "distribution dimensions use one-based nonzero identities",
                 ));
             }
-            match &distributed.scheme {
-                DistributionScheme::OneDimensional { partition, .. } if partition.is_empty() => {
+            match fixed_scheme {
+                Some(DistributionScheme::OneDimensional { partition, .. })
+                    if partition.is_empty() =>
+                {
                     return Err(SchemaValidationError::new(
                         "parallel.distributed_values.scheme",
                         "one-dimensional distributions require partition lengths",
                     ));
                 }
-                DistributionScheme::TwoDimensionalBlockCyclic {
+                Some(DistributionScheme::TwoDimensionalBlockCyclic {
                     worker_grid,
                     block_size,
                     ..
-                } if worker_grid.contains(&0) || *block_size == 0 => {
+                }) if worker_grid.contains(&0) || *block_size == 0 => {
                     return Err(SchemaValidationError::new(
                         "parallel.distributed_values.scheme",
                         "two-dimensional block-cyclic distributions require a positive worker grid and block size",

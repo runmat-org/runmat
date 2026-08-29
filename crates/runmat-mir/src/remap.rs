@@ -277,6 +277,15 @@ fn remap_distributed(
     match operation {
         MirDistributedOp::Create {
             id, owner, input, ..
+        }
+        | MirDistributedOp::Codistributed {
+            id, owner, input, ..
+        }
+        | MirDistributedOp::Build {
+            id,
+            owner,
+            local_part: input,
+            ..
         } => {
             remap_program_function(&mut id.function, remap)?;
             match owner {
@@ -288,11 +297,68 @@ fn remap_distributed(
                 }
             }
             remap_operand(input, remap);
+            match operation {
+                MirDistributedOp::Codistributed { overload, .. } => match overload {
+                    crate::parallel::MirCodistributedOverload::ReplicatedInputDefault => {}
+                    crate::parallel::MirCodistributedOverload::CodistributorOrDesignatedWorker {
+                        operand,
+                    } => remap_operand(operand, remap),
+                    crate::parallel::MirCodistributedOverload::DesignatedWorkerWithCodistributor {
+                        worker,
+                        codistributor,
+                    } => {
+                        remap_operand(worker, remap);
+                        remap_operand(codistributor, remap);
+                    }
+                },
+                MirDistributedOp::Build {
+                    codistributor,
+                    validation,
+                    ..
+                } => {
+                    if let Some(codistributor) = codistributor {
+                        remap_operand(codistributor, remap);
+                    }
+                    if let crate::parallel::MirDistributedBuildValidation::RuntimeOption(option) =
+                        validation
+                    {
+                        remap_operand(option, remap);
+                    }
+                }
+                MirDistributedOp::Create { .. } => {}
+                _ => unreachable!("construction variants matched above"),
+            }
+            match operation {
+                MirDistributedOp::Codistributed {
+                    coordination: Some(coordination),
+                    ..
+                } => remap_parallel_region(&mut coordination.region, remap)?,
+                MirDistributedOp::Build { coordination, .. } => {
+                    remap_parallel_region(&mut coordination.region, remap)?;
+                }
+                MirDistributedOp::Create { .. }
+                | MirDistributedOp::Codistributed {
+                    coordination: None, ..
+                } => {}
+                _ => unreachable!("construction variants matched above"),
+            }
         }
         MirDistributedOp::LocalPart { value }
         | MirDistributedOp::Materialize { value }
         | MirDistributedOp::Codistributor { value } => {
             remap_operand(value, remap);
+        }
+        MirDistributedOp::GlobalIndices {
+            value,
+            dimension,
+            lab,
+            ..
+        } => {
+            remap_operand(value, remap);
+            remap_operand(dimension, remap);
+            if let Some(lab) = lab {
+                remap_operand(lab, remap);
+            }
         }
         MirDistributedOp::Redistribute {
             value,

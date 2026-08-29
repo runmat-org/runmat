@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use runmat_hir::FunctionId;
 use runmat_types::{
     CapabilityRequirement, CapabilitySet, CollectiveContract, CollectiveOperation,
-    DistributedValueContract, LabCount, ParallelAccess, ParallelManifest, ParallelVariableContract,
-    ParallelVariableRole, ProgramFunctionId, RegionValueId, SpmdContract, SpmdLabRequirement,
-    ValueFact, ValueKindFact,
+    DistributedConstruction, DistributedValueContract, LabCount, ParallelAccess, ParallelManifest,
+    ParallelVariableContract, ParallelVariableRole, ProgramFunctionId, RegionValueId, SpmdContract,
+    SpmdLabRequirement, ValueFact, ValueKindFact,
 };
 
 use crate::parallel::{MirCollectiveOp, MirDistributedOp, MirSpmdHeader};
@@ -151,20 +151,83 @@ pub(super) fn classify_distributed_body(
     for block in &body.blocks {
         for (position, statement) in block.statements.iter().enumerate() {
             visit_statement_rvalues(statement, &mut |value| {
-                let MirRvalue::Distributed(MirDistributedOp::Create {
-                    id,
-                    owner,
-                    input,
-                    scheme,
-                }) = value
-                else {
+                let MirRvalue::Distributed(operation) = value else {
                     return;
                 };
+                let (id, owner, input, construction, coordination) = match operation {
+                    MirDistributedOp::Create {
+                        id,
+                        owner,
+                        input,
+                        scheme,
+                    } => (
+                        id,
+                        owner,
+                        input,
+                        DistributedConstruction::Fixed {
+                            scheme: scheme.clone(),
+                        },
+                        None,
+                    ),
+                    MirDistributedOp::Codistributed {
+                        id,
+                        owner,
+                        input,
+                        overload,
+                        coordination,
+                    } => {
+                        let construction = match overload {
+                            crate::parallel::MirCodistributedOverload::ReplicatedInputDefault => {
+                                DistributedConstruction::ReplicatedInputDefault
+                            }
+                            crate::parallel::MirCodistributedOverload::CodistributorOrDesignatedWorker { .. } => {
+                                DistributedConstruction::CodistributorOrDesignatedWorker
+                            }
+                            crate::parallel::MirCodistributedOverload::DesignatedWorkerWithCodistributor { .. } => {
+                                DistributedConstruction::DesignatedWorkerWithCodistributor
+                            }
+                        };
+                        (id, owner, input, construction, *coordination)
+                    }
+                    MirDistributedOp::Build {
+                        id,
+                        owner,
+                        local_part,
+                        codistributor,
+                        validation,
+                        coordination,
+                    } => (
+                        id,
+                        owner,
+                        local_part,
+                        DistributedConstruction::LocalParts {
+                            has_codistributor: codistributor.is_some(),
+                            validation: validation.contract(),
+                        },
+                        Some(*coordination),
+                    ),
+                    MirDistributedOp::LocalPart { .. }
+                    | MirDistributedOp::Materialize { .. }
+                    | MirDistributedOp::Codistributor { .. }
+                    | MirDistributedOp::GlobalIndices { .. }
+                    | MirDistributedOp::Redistribute { .. } => return,
+                };
+                let mut value = facts::operand_fact(store, function, block.id, position, input);
+                if matches!(&construction, DistributedConstruction::LocalParts { .. }) {
+                    value.shape = value
+                        .shape
+                        .rank()
+                        .map_or(runmat_types::ShapeFact::Unknown, |rank| {
+                            runmat_types::ShapeFact::Ranked { rank }
+                        });
+                    value.storage = runmat_types::StorageFact::Unknown;
+                }
                 manifest.distributed_values.push(DistributedValueContract {
                     id: *id,
-                    value: facts::operand_fact(store, function, block.id, position, input),
-                    scheme: scheme.clone(),
+                    value,
+                    construction,
                     owner: *owner,
+                    coordination,
                     materializable: true,
                 });
             });
