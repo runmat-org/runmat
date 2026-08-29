@@ -69,7 +69,31 @@ const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 
 const DISTRIBUTED_INPUTS: [BuiltinParamDescriptor; 1] = [ANY_REQUIRED];
 const LOCAL_PART_INPUTS: [BuiltinParamDescriptor; 1] = [ANY_REQUIRED];
+const IS_COMPLETE_INPUTS: [BuiltinParamDescriptor; 1] = [ANY_REQUIRED];
 const REDISTRIBUTE_INPUTS: [BuiltinParamDescriptor; 2] = [ANY_REQUIRED, ANY_REQUIRED];
+const CODISTRIBUTOR_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "scheme",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("1d"),
+        description: "Distribution scheme, 1d or 2dbc.",
+    },
+    BuiltinParamDescriptor {
+        name: "first_parameter",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional distribution dimension or worker grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "second_parameter",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional partition vector or block size.",
+    },
+];
 const CODISTRIBUTOR_1D_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "dimension",
@@ -166,6 +190,12 @@ macro_rules! signature {
 }
 
 signature!(
+    CODISTRIBUTOR_SIGNATURES,
+    "codist = codistributor(scheme, first_parameter, second_parameter)",
+    &CODISTRIBUTOR_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
     DISTRIBUTED_SIGNATURES,
     "D = distributed(value)",
     &DISTRIBUTED_INPUTS,
@@ -193,6 +223,18 @@ signature!(
     CODISTRIBUTOR_2DBC_SIGNATURES,
     "codist = codistributor2dbc(worker_grid, block_size, orientation, global_size)",
     &CODISTRIBUTOR_2DBC_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    IS_COMPLETE_SIGNATURES,
+    "tf = isComplete(codist)",
+    &IS_COMPLETE_INPUTS,
+    &ANY_OUTPUT
+);
+signature!(
+    IS_CODISTRIBUTED_SIGNATURES,
+    "tf = iscodistributed(value)",
+    &LOCAL_PART_INPUTS,
     &ANY_OUTPUT
 );
 signature!(
@@ -322,8 +364,11 @@ descriptor!(DISTRIBUTED_DESCRIPTOR, DISTRIBUTED_SIGNATURES);
 descriptor!(GET_LOCAL_PART_DESCRIPTOR, LOCAL_PART_SIGNATURES);
 descriptor!(REDISTRIBUTE_DESCRIPTOR, REDISTRIBUTE_SIGNATURES);
 descriptor!(GET_CODISTRIBUTOR_DESCRIPTOR, GET_CODISTRIBUTOR_SIGNATURES);
+descriptor!(CODISTRIBUTOR_DESCRIPTOR, CODISTRIBUTOR_SIGNATURES);
 descriptor!(CODISTRIBUTOR_1D_DESCRIPTOR, CODISTRIBUTOR_1D_SIGNATURES);
 descriptor!(CODISTRIBUTOR_2DBC_DESCRIPTOR, CODISTRIBUTOR_2DBC_SIGNATURES);
+descriptor!(IS_COMPLETE_DESCRIPTOR, IS_COMPLETE_SIGNATURES);
+descriptor!(IS_CODISTRIBUTED_DESCRIPTOR, IS_CODISTRIBUTED_SIGNATURES);
 descriptor!(LAB_BARRIER_DESCRIPTOR, BARRIER_SIGNATURES);
 descriptor!(LAB_BROADCAST_DESCRIPTOR, BROADCAST_SIGNATURES);
 descriptor!(LAB_SEND_DESCRIPTOR, SEND_SIGNATURES);
@@ -356,6 +401,10 @@ const PARALLEL_PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
     residency: BuiltinResidencyPolicy::Dynamic,
     fusion: BuiltinFusionPolicy::Boundary,
     distributed: crate::BuiltinDistributedPolicy::Unsupported,
+};
+const DISTRIBUTED_INSPECTION_PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
+    distributed: crate::BuiltinDistributedPolicy::InspectHandles,
+    ..PARALLEL_PLACEMENT
 };
 const PARALLEL_LINK: BuiltinLinkContract = BuiltinLinkContract {
     reachability: BuiltinReachability::Always,
@@ -431,6 +480,16 @@ parallel_data_entry!(
 
 macro_rules! codistributor_entry {
     ($constant:ident, $name:literal, $rule:literal, $summary:literal, $descriptor:ident) => {
+        codistributor_entry!(
+            $constant,
+            $name,
+            $rule,
+            $summary,
+            $descriptor,
+            PARALLEL_PLACEMENT
+        );
+    };
+    ($constant:ident, $name:literal, $rule:literal, $summary:literal, $descriptor:ident, $placement:expr) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
@@ -455,7 +514,7 @@ macro_rules! codistributor_entry {
                 effects: &[],
                 capabilities: &[],
             },
-            placement: PARALLEL_PLACEMENT,
+            placement: $placement,
             link: PARALLEL_LINK,
             bindings: &[BuiltinBindingDeclaration {
                 identity: BuiltinBindingIdentity {
@@ -473,6 +532,13 @@ macro_rules! codistributor_entry {
 }
 
 codistributor_entry!(
+    CODISTRIBUTOR_CATALOG_ENTRY,
+    "codistributor",
+    "parallel.codistributor",
+    "Create a one-dimensional or two-dimensional codistributor.",
+    CODISTRIBUTOR_DESCRIPTOR
+);
+codistributor_entry!(
     CODISTRIBUTOR_1D_CATALOG_ENTRY,
     "codistributor1d",
     "parallel.codistributor1d",
@@ -485,6 +551,21 @@ codistributor_entry!(
     "parallel.codistributor2dbc",
     "Create a two-dimensional block-cyclic codistributor.",
     CODISTRIBUTOR_2DBC_DESCRIPTOR
+);
+codistributor_entry!(
+    IS_COMPLETE_CATALOG_ENTRY,
+    "isComplete",
+    "parallel.codistributor-is-complete",
+    "Return whether a codistributor has a complete global size.",
+    IS_COMPLETE_DESCRIPTOR
+);
+codistributor_entry!(
+    IS_CODISTRIBUTED_CATALOG_ENTRY,
+    "iscodistributed",
+    "parallel.iscodistributed",
+    "Return whether a value is a codistributed array.",
+    IS_CODISTRIBUTED_DESCRIPTOR,
+    DISTRIBUTED_INSPECTION_PLACEMENT
 );
 parallel_data_entry!(
     GET_LOCAL_PART_CATALOG_ENTRY,

@@ -25,6 +25,9 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
         | "parallel.get-codistributor"
         | "parallel.codistributor1d"
         | "parallel.codistributor2dbc"
+        | "parallel.codistributor"
+        | "parallel.codistributor-is-complete"
+        | "parallel.iscodistributed"
         | "parallel.local-part"
         | "parallel.barrier"
         | "parallel.broadcast"
@@ -97,6 +100,10 @@ fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
         "parallel.codistributor1d" => codistributor_fact(Some(CodistributorClass::OneDimensional)),
         "parallel.codistributor2dbc" => {
             codistributor_fact(Some(CodistributorClass::TwoDimensionalBlockCyclic))
+        }
+        "parallel.codistributor" => codistributor_fact(None),
+        "parallel.codistributor-is-complete" | "parallel.iscodistributed" => {
+            ValueFact::scalar(ValueKindFact::Logical)
         }
         "parallel.broadcast" => request
             .arguments
