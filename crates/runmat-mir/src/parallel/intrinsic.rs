@@ -8,8 +8,11 @@ use runmat_types::{BuiltinId, CallableIdentity};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ParallelIntrinsic {
     Distributed,
+    Codistributed,
+    CodistributedBuild,
     GetLocalPart,
     GetCodistributor,
+    GlobalIndices,
     Redistribute,
     LabBarrier,
     LabBroadcast,
@@ -29,8 +32,11 @@ impl ParallelIntrinsic {
         };
         match name.as_str() {
             "distributed" => Some(Self::Distributed),
+            "codistributed" => Some(Self::Codistributed),
+            "codistributed.build" => Some(Self::CodistributedBuild),
             "getLocalPart" => Some(Self::GetLocalPart),
             "getCodistributor" => Some(Self::GetCodistributor),
+            "globalIndices" => Some(Self::GlobalIndices),
             "redistribute" => Some(Self::Redistribute),
             "labBarrier" => Some(Self::LabBarrier),
             "spmdBarrier" => Some(Self::LabBarrier),
@@ -54,8 +60,11 @@ impl ParallelIntrinsic {
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Distributed => "distributed",
+            Self::Codistributed => "codistributed",
+            Self::CodistributedBuild => "codistributed.build",
             Self::GetLocalPart => "getLocalPart",
             Self::GetCodistributor => "getCodistributor",
+            Self::GlobalIndices => "globalIndices",
             Self::Redistribute => "redistribute",
             Self::LabBarrier => "labBarrier",
             Self::LabBroadcast => "labBroadcast",

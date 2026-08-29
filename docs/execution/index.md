@@ -77,7 +77,7 @@ The execution path resets and drains per-thread runtime buffers around every req
 | Page | Purpose |
 | --- | --- |
 | [Async Execution](/docs/runtime/execution/async) | Where execution awaits host input, builtin futures, GPU/provider work, filesystem/network work, async semantic calls, and current RunMat async extensions. |
-| [Parallel Execution](/docs/runtime/execution/parallel) | How to use `parfor`, pools, futures, worker context, cancellation, and native, browser, or remote worker backends. |
+| [Parallel Execution](/docs/runtime/execution/parallel) | How to use `parfor`, SPMD, distributed arrays, collectives, pools, futures, cancellation, and native, browser, or remote worker backends. |
 | [Errors & Diagnostics](/docs/runtime/execution/errors) | How syntax, semantic, compile, runtime, warning, `MException`, catch/rethrow, and WASM error payloads are represented. |
 | [Remote Execution](/docs/runtime/execution/remote) | How to configure clusters, enroll customer nodes, submit content-blind jobs and tests, use browser workers, drain nodes, and configure organization recovery. |
 | [Native Library Interfaces](/docs/runtime/execution/native-libraries) | How to prepare, declare, package, compile, distribute, and call native shared-library interfaces. |

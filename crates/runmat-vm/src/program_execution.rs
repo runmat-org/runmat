@@ -336,26 +336,32 @@ async fn execute_spmd_region_request(
             side_effect_epoch: 0,
         },
         Some(&callable_name),
-        runtime,
+        runtime.clone(),
     )
     .await;
     match result {
         Ok(crate::InterpreterOutcome::Completed(completion)) => {
-            let outputs = executable
-                .outputs
-                .iter()
-                .map(|output| {
-                    if !completion.assigned_slots.contains(&output.slot) {
-                        return Ok(None);
+            let mut outputs = Vec::with_capacity(executable.outputs.len());
+            let mut failure = None;
+            for output in &executable.outputs {
+                if !completion.assigned_slots.contains(&output.slot) {
+                    outputs.push(None);
+                    continue;
+                }
+                let Some(value) = completion.values.get(output.slot) else {
+                    failure =
+                        Some("SPMD output lies outside its compiler-bound VM frame".to_string());
+                    break;
+                };
+                match crate::interpreter::dispatch::encode_spmd_output(&runtime, value).await {
+                    Ok(value) => outputs.push(Some(value)),
+                    Err(error) => {
+                        failure = Some(error.to_string());
+                        break;
                     }
-                    let value = completion.values.get(output.slot).ok_or_else(|| {
-                        "SPMD output lies outside its compiler-bound VM frame".to_string()
-                    })?;
-                    runmat_runtime::execution::value_codec::encode_inline_value(value)
-                        .map(Some)
-                        .map_err(|error| error.to_string())
-                })
-                .collect::<Result<Vec<_>, _>>();
+                }
+            }
+            let outputs = failure.map_or(Ok(outputs), Err);
             match outputs {
                 Ok(outputs) => ProgramExecutionResponse::SpmdSuccess { outputs },
                 Err(message) => ProgramExecutionResponse::Failure { message },

@@ -1,12 +1,12 @@
 use runmat_execution::{DistributedObjectId, DistributedValueHandle, PoolSnapshot};
 use runmat_execution_runner::{DistributedStore, OwnedPartition};
 use runmat_runtime::context::{
-    RuntimeDistributedCallRequest, RuntimeDistributedRetirement, RuntimeDistributedService,
-    RuntimeDistributedSnapshot, RuntimeServiceFuture,
+    RuntimeDistributedCallRequest, RuntimeDistributedInvocation, RuntimeDistributedRetirement,
+    RuntimeDistributedService, RuntimeDistributedSnapshot, RuntimeServiceFuture,
 };
 use runmat_runtime::parallel::distribution::DistributedPartitionValue;
 use runmat_runtime::RuntimeError;
-use runmat_types::{DistributedValueContract, DistributionScheme, LabRank};
+use runmat_types::{DistributedValueContract, DistributionScheme, FactSatisfaction, LabRank};
 use runmat_value::Value;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -51,6 +51,7 @@ impl RuntimeDistributedService for CoreDistributedService {
         &self,
         contract: DistributedValueContract,
         input: Value,
+        scheme: DistributionScheme,
         pool: PoolSnapshot,
     ) -> RuntimeServiceFuture<Result<DistributedValueHandle, RuntimeError>> {
         if pool.state != runmat_execution::PoolState::Ready
@@ -72,8 +73,65 @@ impl RuntimeDistributedService for CoreDistributedService {
             generation,
             contract,
             input,
+            scheme,
             pool.handle,
             pool.workers,
+        ))
+    }
+
+    fn create_worker(
+        &self,
+        contract: DistributedValueContract,
+        input: Value,
+        scheme: DistributionScheme,
+        context: runmat_execution::SpmdTaskContext,
+    ) -> RuntimeServiceFuture<Result<DistributedValueHandle, RuntimeError>> {
+        if !matches!(contract.owner, runmat_types::DistributedOwner::Region(region) if region == context.region)
+            || contract.coordination.is_none()
+            || context.gang.labs.0 == 0
+        {
+            return Box::pin(async {
+                Err(error(
+                    "worker distributed construction disagrees with its compiler-owned region contract",
+                ))
+            });
+        }
+        Box::pin(create_worker_value(
+            Rc::clone(&self.store),
+            contract,
+            input,
+            scheme,
+            context,
+        ))
+    }
+
+    fn build_worker(
+        &self,
+        contract: DistributedValueContract,
+        local_part: Value,
+        global_shape: Vec<u64>,
+        scheme: DistributionScheme,
+        layouts: Vec<runmat_execution::DistributedPartitionLayout>,
+        context: runmat_execution::SpmdTaskContext,
+    ) -> RuntimeServiceFuture<Result<DistributedValueHandle, RuntimeError>> {
+        if !matches!(contract.owner, runmat_types::DistributedOwner::Region(region) if region == context.region)
+            || contract.coordination.is_none()
+            || context.gang.labs.0 == 0
+        {
+            return Box::pin(async {
+                Err(error(
+                    "worker local-part construction disagrees with its compiler-owned region contract",
+                ))
+            });
+        }
+        Box::pin(build_worker_value(
+            Rc::clone(&self.store),
+            contract,
+            local_part,
+            global_shape,
+            scheme,
+            layouts,
+            context,
         ))
     }
 
@@ -86,6 +144,20 @@ impl RuntimeDistributedService for CoreDistributedService {
             .borrow()
             .layouts(&handle)
             .map(|partitions| RuntimeDistributedSnapshot { handle, partitions })
+            .map_err(error);
+        Box::pin(async move { result })
+    }
+
+    fn export_local(
+        &self,
+        handle: DistributedValueHandle,
+        rank: LabRank,
+    ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedShardSnapshot, RuntimeError>>
+    {
+        let result = self
+            .store
+            .borrow()
+            .export_local(&handle, rank)
             .map_err(error);
         Box::pin(async move { result })
     }
@@ -134,11 +206,15 @@ impl RuntimeDistributedService for CoreDistributedService {
                 DistributedValueContract {
                     id: handle.contract,
                     value: handle.value,
-                    scheme,
+                    construction: runmat_types::DistributedConstruction::Fixed {
+                        scheme: scheme.clone(),
+                    },
                     owner: handle.owner,
+                    coordination: None,
                     materializable: handle.materializable,
                 },
                 input,
+                scheme,
                 handle.pool,
                 handle.partition_count.0,
             )
@@ -202,10 +278,32 @@ impl RuntimeDistributedService for CoreDistributedService {
             });
         }
         let source = (**handle).clone();
-        let parts = self.store.borrow().cloned_parts(&source).map_err(error);
-        let generation = match self.reserve_generation() {
-            Ok(generation) => generation,
-            Err(error) => return Box::pin(async move { Err(error) }),
+        let layouts = self.store.borrow().layouts(&source).map_err(error);
+        let parts = match &request.invocation {
+            RuntimeDistributedInvocation::Client => {
+                self.store.borrow().cloned_parts(&source).map_err(error)
+            }
+            RuntimeDistributedInvocation::Worker(context) => {
+                if context.gang.pool != source.pool
+                    || context.gang.scope_id != source.scope_id
+                    || context.gang.labs != source.partition_count
+                {
+                    Err(error(
+                        "partition-local invocation disagrees with its admitted worker context",
+                    ))
+                } else {
+                    self.store
+                        .borrow()
+                        .local_part(&source, context.rank)
+                        .cloned()
+                        .map(|part| vec![part])
+                        .map_err(error)
+                }
+            }
+        };
+        let generation = match source.generation.checked_add(1) {
+            Some(generation) => generation,
+            None => return Box::pin(async { Err(error("distributed map generation overflowed")) }),
         };
         let store = Rc::clone(&self.store);
         Box::pin(async move {
@@ -228,10 +326,10 @@ impl RuntimeDistributedService for CoreDistributedService {
             }
             let handle = DistributedValueHandle {
                 id: DistributedObjectId::derive(&[
+                    b"partition-local-map-v1",
                     source.scope_id.bytes(),
                     source.id.bytes(),
                     request.builtin.0.as_bytes(),
-                    &generation.to_be_bytes(),
                 ]),
                 contract: source.contract,
                 owner: source.owner,
@@ -244,10 +342,13 @@ impl RuntimeDistributedService for CoreDistributedService {
                 scheme: source.scheme,
                 materializable: source.materializable,
             };
-            store
-                .borrow_mut()
-                .insert(handle.clone(), outputs)
-                .map_err(error)?;
+            let layouts = layouts?;
+            for output in outputs {
+                store
+                    .borrow_mut()
+                    .insert_local_coordinated(handle.clone(), layouts.clone(), output)
+                    .map_err(error)?;
+            }
             Ok(Value::Distributed(Box::new(handle)))
         })
     }
@@ -277,6 +378,7 @@ async fn create_value(
     generation: u64,
     contract: DistributedValueContract,
     input: Value,
+    scheme: DistributionScheme,
     pool: runmat_execution::PoolHandle,
     workers: u32,
 ) -> Result<DistributedValueHandle, RuntimeError> {
@@ -285,12 +387,10 @@ async fn create_value(
     // handle records the admitted runtime representation so later partition
     // calls retain its exact class, shape, storage, and residency facts.
     let value = runmat_runtime::value_fact::value_fact(&input);
-    let (shape, parts) = runmat_runtime::parallel::distribution::partition_value(
-        &input,
-        &contract.scheme,
-        partition_count,
-    )
-    .await?;
+    validate_value_contract(&value, &contract)?;
+    let (shape, parts) =
+        runmat_runtime::parallel::distribution::partition_value(&input, &scheme, partition_count)
+            .await?;
     let handle = DistributedValueHandle {
         id: DistributedObjectId::derive(&[
             pool.scope_id.bytes(),
@@ -311,12 +411,131 @@ async fn create_value(
                 u64::try_from(*dimension).map_err(|_| error("distributed shape exceeds u64"))
             })
             .collect::<Result<Vec<_>, _>>()?,
-        scheme: contract.scheme,
+        scheme,
         materializable: contract.materializable,
     };
     store
         .borrow_mut()
         .insert(handle.clone(), encode_parts(parts)?)
+        .map_err(error)?;
+    Ok(handle)
+}
+
+async fn create_worker_value(
+    store: Rc<RefCell<DistributedStore>>,
+    contract: DistributedValueContract,
+    input: Value,
+    scheme: DistributionScheme,
+    context: runmat_execution::SpmdTaskContext,
+) -> Result<DistributedValueHandle, RuntimeError> {
+    let value = runmat_runtime::value_fact::value_fact(&input);
+    validate_value_contract(&value, &contract)?;
+    let (global_shape, layouts, local) =
+        runmat_runtime::parallel::distribution::partition_local_value(
+            &input,
+            &scheme,
+            context.gang.labs,
+            context.rank,
+        )
+        .await?;
+    let handle = DistributedValueHandle {
+        id: DistributedObjectId::derive(&[
+            context.gang.id.bytes(),
+            &context.gang.generation.to_be_bytes(),
+            &contract.id.function.0.to_be_bytes(),
+            &contract.id.ordinal.to_be_bytes(),
+        ]),
+        contract: contract.id,
+        owner: contract.owner,
+        scope_id: context.gang.scope_id,
+        generation: context.gang.generation,
+        pool: context.gang.pool,
+        partition_count: context.gang.labs,
+        value,
+        global_shape,
+        scheme,
+        materializable: contract.materializable,
+    };
+    let payload =
+        runmat_runtime::execution::value_codec::encode_inline_value(&local.value).map_err(error)?;
+    store
+        .borrow_mut()
+        .insert_local_coordinated(
+            handle.clone(),
+            layouts,
+            OwnedPartition {
+                layout: local.layout,
+                value: payload,
+            },
+        )
+        .map_err(error)?;
+    Ok(handle)
+}
+
+async fn build_worker_value(
+    store: Rc<RefCell<DistributedStore>>,
+    contract: DistributedValueContract,
+    local_part: Value,
+    global_shape: Vec<u64>,
+    scheme: DistributionScheme,
+    layouts: Vec<runmat_execution::DistributedPartitionLayout>,
+    context: runmat_execution::SpmdTaskContext,
+) -> Result<DistributedValueHandle, RuntimeError> {
+    let layout = layouts
+        .iter()
+        .find(|layout| layout.rank == context.rank)
+        .cloned()
+        .ok_or_else(|| error("local worker has no authoritative distributed partition layout"))?;
+    let local_shape = runmat_runtime::parallel::distribution::value_shape(&local_part).await?;
+    if local_shape != layout.local_shape {
+        return Err(error(
+            "local-part shape disagrees with this worker's authoritative partition layout",
+        ));
+    }
+    let mut value = runmat_runtime::value_fact::value_fact(&local_part);
+    value.shape = runmat_types::ShapeFact::from(
+        global_shape
+            .iter()
+            .map(|extent| usize::try_from(*extent).ok())
+            .collect::<Vec<_>>(),
+    );
+    let global_element_count = global_shape
+        .iter()
+        .try_fold(1_u64, |count, extent| count.checked_mul(*extent));
+    if value.storage == runmat_types::StorageFact::Scalar && global_element_count != Some(1) {
+        value.storage = runmat_types::StorageFact::Dense;
+    }
+    validate_value_contract(&value, &contract)?;
+    let handle = DistributedValueHandle {
+        id: DistributedObjectId::derive(&[
+            context.gang.id.bytes(),
+            &context.gang.generation.to_be_bytes(),
+            &contract.id.function.0.to_be_bytes(),
+            &contract.id.ordinal.to_be_bytes(),
+        ]),
+        contract: contract.id,
+        owner: contract.owner,
+        scope_id: context.gang.scope_id,
+        generation: context.gang.generation,
+        pool: context.gang.pool,
+        partition_count: context.gang.labs,
+        value,
+        global_shape,
+        scheme,
+        materializable: contract.materializable,
+    };
+    let payload =
+        runmat_runtime::execution::value_codec::encode_inline_value(&local_part).map_err(error)?;
+    store
+        .borrow_mut()
+        .insert_local_coordinated(
+            handle.clone(),
+            layouts,
+            OwnedPartition {
+                layout,
+                value: payload,
+            },
+        )
         .map_err(error)?;
     Ok(handle)
 }
@@ -370,6 +589,35 @@ fn encode_parts(
             })
         })
         .collect()
+}
+
+fn validate_value_contract(
+    value: &runmat_types::ValueFact,
+    contract: &DistributedValueContract,
+) -> Result<(), RuntimeError> {
+    let expected = &contract.value;
+    let mismatch = if !value.kind.satisfies(&expected.kind) {
+        Some("class")
+    } else if !value.shape.satisfies(&expected.shape) {
+        Some("global shape")
+    } else if expected.storage != runmat_types::StorageFact::Unknown
+        && value.storage != expected.storage
+    {
+        Some("storage")
+    } else if expected.layout != runmat_types::LayoutFact::Unknown
+        && value.layout != expected.layout
+    {
+        Some("layout")
+    } else if !value.residency.satisfies(&expected.residency) {
+        Some("residency")
+    } else {
+        None
+    };
+    mismatch.map_or(Ok(()), |field| {
+        Err(error(format!(
+            "distributed runtime value disagrees with its compiler-owned {field} contract"
+        )))
+    })
 }
 
 fn error(message: impl std::fmt::Display) -> RuntimeError {

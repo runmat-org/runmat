@@ -203,7 +203,7 @@ pub enum ProgramExecutionResponse {
     /// `None` means the corresponding output was not assigned on this rank;
     /// it is distinct from every representable language value.
     SpmdSuccess {
-        outputs: Vec<Option<ValuePayload>>,
+        outputs: Vec<Option<runmat_execution::SpmdOutputValue>>,
     },
     Failure {
         message: String,
@@ -241,7 +241,7 @@ impl ProgramExecutionResponse {
                 }
                 for output in outputs.iter().flatten() {
                     output
-                        .validate(ValueLimits::default())
+                        .validate()
                         .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
                 }
                 Ok(())
@@ -514,9 +514,11 @@ mod tests {
 
         let response = ProgramExecutionResponse::SpmdSuccess {
             outputs: vec![
-                Some(ValuePayload::Inline(Box::new(
-                    runmat_execution::value::InlineValue::U64(9_007_199_254_740_993),
-                ))),
+                Some(runmat_execution::SpmdOutputValue::Value(
+                    ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::U64(
+                        9_007_199_254_740_993,
+                    ))),
+                )),
                 None,
             ],
         };

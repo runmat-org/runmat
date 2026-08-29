@@ -2848,6 +2848,100 @@ fn parallel_primitives_lower_to_typed_mir_and_manifest_contracts() {
 }
 
 #[test]
+fn codistributed_construction_modes_remain_typed_through_mir_and_manifest() {
+    use runmat_mir::parallel::{
+        MirCodistributedOverload, MirDistributedBuildValidation, MirDistributedOp,
+    };
+    use runmat_types::{DistributedBuildValidation, DistributedConstruction};
+
+    let mir = lower_mir(
+        "input = [1, 2]; selector = 1; worker = 1; codist = codistributor1d(); localPart = 1; dimension = 1; spmd (2); defaultValue = codistributed(input); selectedValue = codistributed(input, selector); designatedValue = codistributed(input, worker, codist); option = 'noCommunication'; builtValue = codistributed.build(localPart, codist, option); [first, last] = globalIndices(builtValue, dimension); end;",
+    );
+    let operations = mir
+        .bodies
+        .values()
+        .flat_map(|body| &body.blocks)
+        .flat_map(|block| &block.statements)
+        .filter_map(|statement| match &statement.kind {
+            runmat_mir::MirStmtKind::Assign {
+                value: runmat_mir::MirRvalue::Distributed(operation),
+                ..
+            }
+            | runmat_mir::MirStmtKind::MultiAssign {
+                value: runmat_mir::MirRvalue::Distributed(operation),
+                ..
+            } => Some(operation),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        MirDistributedOp::Codistributed {
+            overload: MirCodistributedOverload::ReplicatedInputDefault,
+            coordination: Some(_),
+            ..
+        }
+    )));
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        MirDistributedOp::Codistributed {
+            overload: MirCodistributedOverload::CodistributorOrDesignatedWorker { .. },
+            coordination: Some(_),
+            ..
+        }
+    )));
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        MirDistributedOp::Codistributed {
+            overload: MirCodistributedOverload::DesignatedWorkerWithCodistributor { .. },
+            coordination: Some(_),
+            ..
+        }
+    )));
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        MirDistributedOp::Build {
+            validation: MirDistributedBuildValidation::RuntimeOption(_),
+            ..
+        }
+    )));
+    assert!(operations.iter().any(|operation| matches!(
+        operation,
+        MirDistributedOp::GlobalIndices {
+            requested_outputs: 2,
+            ..
+        }
+    )));
+
+    let store = analyze_assembly(&mir);
+    let constructions = store
+        .parallel
+        .distributed_values
+        .iter()
+        .map(|contract| &contract.construction)
+        .collect::<Vec<_>>();
+    assert!(constructions.contains(&&DistributedConstruction::ReplicatedInputDefault));
+    assert!(constructions.contains(&&DistributedConstruction::CodistributorOrDesignatedWorker));
+    assert!(constructions.contains(&&DistributedConstruction::DesignatedWorkerWithCodistributor));
+    assert!(
+        constructions.contains(&&DistributedConstruction::LocalParts {
+            has_codistributor: true,
+            validation: DistributedBuildValidation::RuntimeOption,
+        })
+    );
+    assert!(store
+        .parallel
+        .distributed_values
+        .iter()
+        .all(|contract| contract.coordination.is_some()));
+    store
+        .parallel
+        .validate()
+        .expect("typed codistributed construction manifest");
+}
+
+#[test]
 fn modern_spmd_primitives_keep_dynamic_operands_and_result_arity_in_mir() {
     let mir = lower_mir(
         "spmd; spmdSend(uint64(9), 1, 7); [received, source, tag] = spmdReceive(\"any\", 7); exchanged = spmdSendReceive(1, 1, uint16(5)); total = spmdPlus(uint32(2)); joined = spmdCat(uint16([1, 2]), 2, 1); reduced = spmdReduce(@plus, uint32(3)); spmdBarrier(); end;",
@@ -2927,7 +3021,7 @@ fn every_mir_construct_has_one_explicit_native_lowering_class() {
     use runmat_mir::{MirConstructKind, NativeLoweringClass};
     use std::collections::HashSet;
 
-    assert_eq!(MirConstructKind::ALL.len(), 52);
+    assert_eq!(MirConstructKind::ALL.len(), 55);
     assert_eq!(
         MirConstructKind::ALL
             .into_iter()

@@ -38,16 +38,70 @@ pub enum BytecodeDistributedOp {
         owner: runmat_types::DistributedOwner,
         scheme: runmat_types::DistributionScheme,
     },
+    Codistributed {
+        id: runmat_types::DistributedValueId,
+        owner: runmat_types::DistributedOwner,
+        overload: BytecodeCodistributedOverload,
+        coordination: Option<runmat_types::CollectiveId>,
+    },
+    Build {
+        id: runmat_types::DistributedValueId,
+        owner: runmat_types::DistributedOwner,
+        has_codistributor: bool,
+        validation: BytecodeDistributedBuildValidation,
+        coordination: runmat_types::CollectiveId,
+    },
     LocalPart,
     Materialize,
     Codistributor,
+    GlobalIndices {
+        has_lab: bool,
+        requested_outputs: u8,
+    },
     Redistribute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BytecodeCodistributedOverload {
+    ReplicatedInputDefault,
+    CodistributorOrDesignatedWorker,
+    DesignatedWorkerWithCodistributor,
+}
+
+impl BytecodeCodistributedOverload {
+    pub const fn operand_count(self) -> usize {
+        match self {
+            Self::ReplicatedInputDefault => 1,
+            Self::CodistributorOrDesignatedWorker => 2,
+            Self::DesignatedWorkerWithCodistributor => 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BytecodeDistributedBuildValidation {
+    ValidateAcrossWorkers,
+    NoCommunication,
+    RuntimeOption,
 }
 
 impl BytecodeDistributedOp {
     pub const fn operand_count(&self) -> usize {
         match self {
             Self::Create { .. } | Self::LocalPart | Self::Materialize | Self::Codistributor => 1,
+            Self::GlobalIndices { has_lab, .. } => 2 + *has_lab as usize,
+            Self::Codistributed { overload, .. } => overload.operand_count(),
+            Self::Build {
+                has_codistributor,
+                validation,
+                ..
+            } => {
+                1 + *has_codistributor as usize
+                    + matches!(
+                        validation,
+                        BytecodeDistributedBuildValidation::RuntimeOption
+                    ) as usize
+            }
             Self::Redistribute => 2,
         }
     }

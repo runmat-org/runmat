@@ -6,6 +6,7 @@ mod exceptions;
 mod indexing;
 mod object;
 mod parallel;
+pub(crate) use parallel::encode_spmd_output;
 mod stack;
 
 use crate::bytecode::Instr;

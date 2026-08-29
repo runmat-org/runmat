@@ -440,6 +440,14 @@ async fn try_distributed_builtin(
                     arguments: args.to_vec(),
                     requested_outputs,
                     output,
+                    invocation: context.service_ports().collective().map_or(
+                        crate::context::RuntimeDistributedInvocation::Client,
+                        |collective| {
+                            crate::context::RuntimeDistributedInvocation::Worker(
+                                collective.context().clone(),
+                            )
+                        },
+                    ),
                 })
                 .await
                 .map(Some)

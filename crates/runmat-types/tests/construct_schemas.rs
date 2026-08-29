@@ -135,8 +135,11 @@ fn parallel() -> ParallelManifest {
         distributed_values: vec![DistributedValueContract {
             id: distributed,
             value: ValueFact::scalar(ValueKindFact::Logical),
-            scheme: DistributionScheme::Block { dimension: 1 },
+            construction: runmat_types::DistributedConstruction::Fixed {
+                scheme: DistributionScheme::Block { dimension: 1 },
+            },
             owner: runmat_types::DistributedOwner::Region(region),
+            coordination: None,
             materializable: true,
         }],
         collectives: vec![CollectiveContract {

@@ -32,9 +32,12 @@ pub enum MirConstructKind {
     Future,
     Spawn,
     DistributedCreate,
+    CodistributedCreate,
+    CodistributedBuild,
     DistributedLocalPart,
     DistributedMaterialize,
     DistributedCodistributor,
+    DistributedGlobalIndices,
     DistributedRedistribute,
     CollectiveBarrier,
     CollectiveBroadcast,
@@ -93,9 +96,12 @@ pub fn rvalue_construct_kind(value: &crate::MirRvalue) -> MirConstructKind {
         R::Spawn(_) => K::Spawn,
         R::Distributed(operation) => match operation {
             D::Create { .. } => K::DistributedCreate,
+            D::Codistributed { .. } => K::CodistributedCreate,
+            D::Build { .. } => K::CodistributedBuild,
             D::LocalPart { .. } => K::DistributedLocalPart,
             D::Materialize { .. } => K::DistributedMaterialize,
             D::Codistributor { .. } => K::DistributedCodistributor,
+            D::GlobalIndices { .. } => K::DistributedGlobalIndices,
             D::Redistribute { .. } => K::DistributedRedistribute,
         },
         R::Collective(operation) => match operation {
@@ -263,7 +269,7 @@ pub fn statement_declared_effects(statement: &crate::MirStmtKind) -> runmat_type
 }
 
 impl MirConstructKind {
-    pub const ALL: [Self; 52] = [
+    pub const ALL: [Self; 55] = [
         Self::Use,
         Self::Unary,
         Self::Binary,
@@ -283,9 +289,12 @@ impl MirConstructKind {
         Self::Future,
         Self::Spawn,
         Self::DistributedCreate,
+        Self::CodistributedCreate,
+        Self::CodistributedBuild,
         Self::DistributedLocalPart,
         Self::DistributedMaterialize,
         Self::DistributedCodistributor,
+        Self::DistributedGlobalIndices,
         Self::DistributedRedistribute,
         Self::CollectiveBarrier,
         Self::CollectiveBroadcast,
@@ -352,9 +361,12 @@ impl MirConstructKind {
             | K::TryCatch => C::RuntimeSlowPath,
             K::Future | K::Spawn | K::ParFor | K::Spmd | K::Await => C::StructuredSuspendResume,
             K::DistributedCreate
+            | K::CodistributedCreate
+            | K::CodistributedBuild
             | K::DistributedLocalPart
             | K::DistributedMaterialize
             | K::DistributedCodistributor
+            | K::DistributedGlobalIndices
             | K::DistributedRedistribute
             | K::CollectiveBarrier
             | K::CollectiveBroadcast

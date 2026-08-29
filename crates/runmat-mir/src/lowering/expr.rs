@@ -206,7 +206,8 @@ fn lower_parallel_intrinsic(
     args: &[MirCallArg],
 ) -> Result<Option<MirRvalue>, HirError> {
     use crate::parallel::{
-        MirCollectiveOp as Collective, MirDistributedOp as Distributed, ParallelIntrinsic,
+        MirCodistributedOverload, MirCollectiveOp as Collective, MirDistributedBuildValidation,
+        MirDistributedOp as Distributed, ParallelIntrinsic,
     };
 
     let Some(intrinsic) = call
@@ -254,6 +255,73 @@ fn lower_parallel_intrinsic(
                 scheme: runmat_types::DistributionScheme::Block { dimension: 1 },
             }))
         }
+        ParallelIntrinsic::Codistributed => {
+            let values = operands()?;
+            arity(&values, &[1, 2, 3])?;
+            let (id, owner) = ctx.distributed_identity();
+            let coordination = ctx
+                .in_spmd_region()
+                .then(|| ctx.collective_identity())
+                .transpose()?;
+            let overload = match values.as_slice() {
+                [_] => MirCodistributedOverload::ReplicatedInputDefault,
+                [_, operand] => MirCodistributedOverload::CodistributorOrDesignatedWorker {
+                    operand: operand.clone(),
+                },
+                [_, worker, codistributor] => {
+                    MirCodistributedOverload::DesignatedWorkerWithCodistributor {
+                        worker: worker.clone(),
+                        codistributor: codistributor.clone(),
+                    }
+                }
+                _ => unreachable!("arity was validated above"),
+            };
+            Some(MirRvalue::Distributed(Distributed::Codistributed {
+                id,
+                owner,
+                input: values[0].clone(),
+                overload,
+                coordination,
+            }))
+        }
+        ParallelIntrinsic::CodistributedBuild => {
+            if !ctx.in_spmd_region() {
+                return Err(HirError::new(
+                    "codistributed.build: local-part construction requires an SPMD region",
+                ));
+            }
+            let values = operands()?;
+            arity(&values, &[1, 2, 3])?;
+            let (id, owner) = ctx.distributed_identity();
+            let coordination = ctx.collective_identity()?;
+            let (codistributor, validation) = match values.as_slice() {
+                [_] => (None, MirDistributedBuildValidation::ValidateAcrossWorkers),
+                [_, codistributor] => (
+                    Some(codistributor.clone()),
+                    MirDistributedBuildValidation::ValidateAcrossWorkers,
+                ),
+                [_, codistributor, option] => {
+                    let validation = match option {
+                        MirOperand::Constant(MirConstant::String(value))
+                            if value.0.eq_ignore_ascii_case("noCommunication") =>
+                        {
+                            MirDistributedBuildValidation::NoCommunication
+                        }
+                        operand => MirDistributedBuildValidation::RuntimeOption(operand.clone()),
+                    };
+                    (Some(codistributor.clone()), validation)
+                }
+                _ => unreachable!("arity was validated above"),
+            };
+            Some(MirRvalue::Distributed(Distributed::Build {
+                id,
+                owner,
+                local_part: values[0].clone(),
+                codistributor,
+                validation,
+                coordination,
+            }))
+        }
         ParallelIntrinsic::GetLocalPart => {
             let values = operands()?;
             arity(&values, &[1])?;
@@ -266,6 +334,21 @@ fn lower_parallel_intrinsic(
             arity(&values, &[1])?;
             Some(MirRvalue::Distributed(Distributed::Codistributor {
                 value: values[0].clone(),
+            }))
+        }
+        ParallelIntrinsic::GlobalIndices => {
+            let values = operands()?;
+            arity(&values, &[2, 3])?;
+            let requested_outputs = u8::try_from(call.requested_outputs.fixed_count())
+                .map_err(|_| HirError::new("globalIndices: output count exceeds u8"))?;
+            if !(1..=2).contains(&requested_outputs) {
+                return Err(HirError::new("globalIndices: expected one or two outputs"));
+            }
+            Some(MirRvalue::Distributed(Distributed::GlobalIndices {
+                value: values[0].clone(),
+                dimension: values[1].clone(),
+                lab: values.get(2).cloned(),
+                requested_outputs,
             }))
         }
         ParallelIntrinsic::Redistribute => {

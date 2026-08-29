@@ -18,6 +18,38 @@ pub struct ReceiveSelection {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DistributedBuildContribution {
+    pub value: runmat_types::ValueFact,
+    pub local_shape: Vec<u64>,
+    pub codistributor: Option<ValuePayload>,
+}
+
+impl DistributedBuildContribution {
+    fn validate(&self) -> Result<(), ContractError> {
+        if self.local_shape.is_empty() {
+            return Err(ContractError::invalid(
+                "distributed build contribution",
+                "local shape must have at least one dimension",
+            ));
+        }
+        if let Some(codistributor) = &self.codistributor {
+            codistributor.validate(crate::value::ValueLimits::default())?;
+            if matches!(
+                codistributor,
+                ValuePayload::Distributed(_) | ValuePayload::Composite(_)
+            ) {
+                return Err(ContractError::invalid(
+                    "distributed build contribution",
+                    "codistributor metadata cannot contain a live execution handle",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "operation", deny_unknown_fields)]
 pub enum CollectiveInvocation {
     Barrier,
@@ -35,6 +67,19 @@ pub enum CollectiveInvocation {
     },
     AllGather {
         value: ValuePayload,
+    },
+    /// Internal compiler-owned agreement check for replicated construction.
+    /// Only the canonical logical digest crosses the coordination boundary;
+    /// each worker retains its local value payload.
+    AssertEqual {
+        digest: crate::Digest,
+    },
+    /// Internal compiler-owned coordination for `codistributed.build`.
+    /// Only facts, shapes, and immutable codistributor metadata cross this
+    /// boundary; each partition payload remains on its owning worker.
+    DistributedBuild {
+        contribution: Box<DistributedBuildContribution>,
+        validate_across_workers: bool,
     },
     Reduce {
         root: Option<LabRank>,
@@ -101,6 +146,12 @@ pub enum CollectiveResponse {
     },
     Values {
         values: Vec<ValuePayload>,
+    },
+    Agreement {
+        equal: bool,
+    },
+    DistributedBuild {
+        contributions: Vec<DistributedBuildContribution>,
     },
     /// Ordered, rank-stable inputs for a runtime-owned reduction. The
     /// execution coordinator never interprets language values or duplicates
@@ -176,7 +227,10 @@ fn validate_invocation(
         CollectiveInvocation::Receive { selection } | CollectiveInvocation::Probe { selection } => {
             selection.source.map(validate_rank).transpose().map(|_| ())
         }
-        CollectiveInvocation::Barrier | CollectiveInvocation::AllGather { .. } => Ok(()),
+        CollectiveInvocation::DistributedBuild { contribution, .. } => contribution.validate(),
+        CollectiveInvocation::Barrier
+        | CollectiveInvocation::AllGather { .. }
+        | CollectiveInvocation::AssertEqual { .. } => Ok(()),
     }
 }
 

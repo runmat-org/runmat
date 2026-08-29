@@ -24,8 +24,11 @@ macro_rules! lowering_builtin {
 }
 
 lowering_builtin!(distributed_builtin, "distributed");
+lowering_builtin!(codistributed_builtin, "codistributed");
+lowering_builtin!(codistributed_build_builtin, "codistributed.build");
 lowering_builtin!(get_local_part_builtin, "getLocalPart");
 lowering_builtin!(get_codistributor_builtin, "getCodistributor");
+lowering_builtin!(global_indices_builtin, "globalIndices");
 lowering_builtin!(redistribute_builtin, "redistribute");
 lowering_builtin!(lab_barrier_builtin, "labBarrier");
 lowering_builtin!(lab_broadcast_builtin, "labBroadcast");

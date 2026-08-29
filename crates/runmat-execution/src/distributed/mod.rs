@@ -295,6 +295,46 @@ pub struct DistributedValueSnapshot {
     pub partitions: Vec<DistributedPartition>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DistributedOwnedPartition {
+    pub layout: DistributedPartitionLayout,
+    pub value: crate::value::ValuePayload,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DistributedShardSnapshot {
+    pub handle: DistributedValueHandle,
+    pub layouts: Vec<DistributedPartitionLayout>,
+    pub owned: DistributedOwnedPartition,
+}
+
+impl DistributedShardSnapshot {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        self.handle.validate()?;
+        validate_partition_layouts(&self.handle, &self.layouts)?;
+        self.owned
+            .value
+            .validate(crate::value::ValueLimits::default())?;
+        if matches!(
+            self.owned.value,
+            crate::value::ValuePayload::Distributed(_) | crate::value::ValuePayload::Composite(_)
+        ) || self
+            .layouts
+            .iter()
+            .find(|layout| layout.rank == self.owned.layout.rank)
+            != Some(&self.owned.layout)
+        {
+            return Err(ContractError::invalid(
+                "distributed shard snapshot",
+                "owned payload must match one authoritative non-recursive partition layout",
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl DistributedValueSnapshot {
     pub fn validate(&self) -> Result<(), ContractError> {
         self.handle.validate()?;

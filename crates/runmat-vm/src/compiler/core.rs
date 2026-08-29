@@ -2426,6 +2426,67 @@ impl Compiler {
                             scheme: scheme.clone(),
                         }
                     }
+                    MirDistributedOp::Codistributed {
+                        id,
+                        owner,
+                        input,
+                        overload,
+                        coordination,
+                    } => {
+                        self.compile_mir_operand(input)?;
+                        let overload = match overload {
+                            runmat_mir::parallel::MirCodistributedOverload::ReplicatedInputDefault => {
+                                crate::BytecodeCodistributedOverload::ReplicatedInputDefault
+                            }
+                            runmat_mir::parallel::MirCodistributedOverload::CodistributorOrDesignatedWorker { operand } => {
+                                self.compile_mir_operand(operand)?;
+                                crate::BytecodeCodistributedOverload::CodistributorOrDesignatedWorker
+                            }
+                            runmat_mir::parallel::MirCodistributedOverload::DesignatedWorkerWithCodistributor { worker, codistributor } => {
+                                self.compile_mir_operand(worker)?;
+                                self.compile_mir_operand(codistributor)?;
+                                crate::BytecodeCodistributedOverload::DesignatedWorkerWithCodistributor
+                            }
+                        };
+                        crate::BytecodeDistributedOp::Codistributed {
+                            id: *id,
+                            owner: *owner,
+                            overload,
+                            coordination: *coordination,
+                        }
+                    }
+                    MirDistributedOp::Build {
+                        id,
+                        owner,
+                        local_part,
+                        codistributor,
+                        validation,
+                        coordination,
+                    } => {
+                        self.compile_mir_operand(local_part)?;
+                        if let Some(codistributor) = codistributor {
+                            self.compile_mir_operand(codistributor)?;
+                        }
+                        let validation = match validation {
+                            runmat_mir::parallel::MirDistributedBuildValidation::ValidateAcrossWorkers => {
+                                crate::BytecodeDistributedBuildValidation::ValidateAcrossWorkers
+                            }
+                            runmat_mir::parallel::MirDistributedBuildValidation::NoCommunication => {
+                                crate::BytecodeDistributedBuildValidation::NoCommunication
+                            }
+                            runmat_mir::parallel::MirDistributedBuildValidation::RuntimeOption(option) => {
+                                self.compile_mir_operand(option)?;
+                                crate::BytecodeDistributedBuildValidation::RuntimeOption
+                            }
+                        };
+                        crate::BytecodeDistributedOp::Build {
+                            id: *id,
+                            owner: *owner,
+                            has_codistributor: codistributor.is_some(),
+                            validation,
+                            coordination: *coordination,
+                        }
+                    }
                     MirDistributedOp::LocalPart { value } => {
                         self.compile_mir_operand(value)?;
                         crate::BytecodeDistributedOp::LocalPart
@@ -2437,6 +2498,22 @@ impl Compiler {
                     MirDistributedOp::Codistributor { value } => {
                         self.compile_mir_operand(value)?;
                         crate::BytecodeDistributedOp::Codistributor
+                    }
+                    MirDistributedOp::GlobalIndices {
+                        value,
+                        dimension,
+                        lab,
+                        requested_outputs,
+                    } => {
+                        self.compile_mir_operand(value)?;
+                        self.compile_mir_operand(dimension)?;
+                        if let Some(lab) = lab {
+                            self.compile_mir_operand(lab)?;
+                        }
+                        crate::BytecodeDistributedOp::GlobalIndices {
+                            has_lab: lab.is_some(),
+                            requested_outputs: *requested_outputs,
+                        }
                     }
                     MirDistributedOp::Redistribute {
                         value,

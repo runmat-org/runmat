@@ -2,6 +2,36 @@ use crate::bytecode::program::ExecutionContext;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
+mod arguments;
+mod construction;
+mod coordination;
+mod indices;
+
+pub(crate) async fn encode_spmd_output(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    value: &Value,
+) -> Result<runmat_execution::SpmdOutputValue, RuntimeError> {
+    if let Value::Distributed(handle) = value {
+        runmat_runtime::parallel::lease::validate_distributed(runtime, handle)?;
+        let collective = runtime
+            .service_ports()
+            .require_collective("distributed SPMD output")
+            .map_err(super::capability_error)?;
+        let service = runtime
+            .service_ports()
+            .require_distributed("distributed SPMD output")
+            .map_err(super::capability_error)?;
+        return service
+            .export_local((**handle).clone(), collective.context().rank)
+            .await
+            .map(Box::new)
+            .map(runmat_execution::SpmdOutputValue::Distributed);
+    }
+    runmat_runtime::execution::value_codec::encode_inline_value(value)
+        .map(runmat_execution::SpmdOutputValue::Value)
+        .map_err(super::value_codec_error)
+}
+
 pub(super) async fn execute(
     bytecode: &crate::Bytecode,
     operation: &crate::BytecodeDistributedOp,
@@ -16,33 +46,43 @@ pub(super) async fn execute(
         .require_distributed("distributed value operation")
         .map_err(super::capability_error)?
         .clone();
+    let constructor = construction::Executor::new(&*service, bytecode, execution);
     match operation {
         Op::Create { id, owner, scheme } => {
-            let [input] = decode_arguments(arguments)?;
-            let contract = bytecode
-                .distributed_values
-                .iter()
-                .find(|contract| contract.id == *id)
-                .filter(|contract| contract.owner == *owner && contract.scheme == *scheme)
-                .cloned()
-                .ok_or_else(|| {
-                    crate::interpreter::errors::mex(
-                        "DistributedContractMissing",
-                        "distributed instruction has no matching compiler-owned semantic contract",
-                    )
-                })?;
-            let pool = execution
-                .runtime
-                .execution()
-                .ensure_pool(runmat_execution::PoolRequest::automatic())
-                .map_err(super::execution_error)?;
-            service
-                .create(contract, input, pool)
+            constructor
+                .create(*id, *owner, scheme.clone(), arguments)
                 .await
-                .map(|handle| Value::Distributed(Box::new(handle)))
+        }
+        Op::Codistributed {
+            id,
+            owner,
+            overload,
+            coordination,
+        } => {
+            constructor
+                .codistributed(*id, *owner, *overload, *coordination, arguments)
+                .await
+        }
+        Op::Build {
+            id,
+            owner,
+            has_codistributor,
+            validation,
+            coordination,
+        } => {
+            constructor
+                .build(
+                    *id,
+                    *owner,
+                    *has_codistributor,
+                    *validation,
+                    *coordination,
+                    arguments,
+                )
+                .await
         }
         Op::LocalPart => {
-            let [input] = decode_arguments(arguments)?;
+            let [input] = arguments::decode(arguments)?;
             let Value::Distributed(handle) = input else {
                 return Err(crate::interpreter::errors::mex(
                     "DistributedValueRequired",
@@ -63,7 +103,7 @@ pub(super) async fn execute(
             service.local_part(*handle, rank).await
         }
         Op::Materialize => {
-            let [input] = decode_arguments(arguments)?;
+            let [input] = arguments::decode(arguments)?;
             let Value::Distributed(handle) = input else {
                 return Err(crate::interpreter::errors::mex(
                     "DistributedValueRequired",
@@ -74,7 +114,7 @@ pub(super) async fn execute(
             service.materialize(*handle).await
         }
         Op::Codistributor => {
-            let [input] = decode_arguments(arguments)?;
+            let [input] = arguments::decode(arguments)?;
             let Value::Distributed(handle) = input else {
                 return Err(crate::interpreter::errors::mex(
                     "DistributedValueRequired",
@@ -87,8 +127,21 @@ pub(super) async fn execute(
                 &handle.global_shape,
             )
         }
+        Op::GlobalIndices {
+            has_lab,
+            requested_outputs,
+        } => {
+            indices::execute(
+                &*service,
+                *has_lab,
+                *requested_outputs,
+                arguments,
+                execution,
+            )
+            .await
+        }
         Op::Redistribute => {
-            let [input, codistributor] = decode_arguments(arguments)?;
+            let [input, codistributor] = arguments::decode(arguments)?;
             let Value::Distributed(handle) = input else {
                 return Err(crate::interpreter::errors::mex(
                     "DistributedValueRequired",
@@ -107,13 +160,4 @@ pub(super) async fn execute(
                 .map(|handle| Value::Distributed(Box::new(handle)))
         }
     }
-}
-
-fn decode_arguments<const N: usize>(arguments: Vec<Value>) -> Result<[Value; N], RuntimeError> {
-    arguments.try_into().map_err(|_| {
-        crate::interpreter::errors::mex(
-            "InvalidDistributedInstruction",
-            "distributed instruction operand count does not match its bytecode contract",
-        )
-    })
 }

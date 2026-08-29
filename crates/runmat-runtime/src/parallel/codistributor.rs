@@ -13,6 +13,183 @@ pub fn is_supported_class(class_name: &str) -> bool {
     matches!(class_name, ONE_DIMENSIONAL_CLASS | TWO_DIMENSIONAL_CLASS)
 }
 
+pub fn is_codistributor(value: &Value) -> bool {
+    matches!(value, Value::Object(object) if is_supported_class(&object.class_name))
+}
+
+pub fn declared_global_shape(value: &Value) -> Result<Vec<u64>, RuntimeError> {
+    let Value::Object(object) = value else {
+        return Err(error("globalIndices requires a codistributor object"));
+    };
+    validate_definition(object)?;
+    optional_vector_property(object, "GlobalSize")?
+        .ok_or_else(|| error("globalIndices requires a complete codistributor"))
+}
+
+pub fn designated_worker(value: &Value) -> Result<runmat_types::LabRank, RuntimeError> {
+    one_based_u32(value, "designated worker").map(runmat_types::LabRank)
+}
+
+pub fn distribution_dimension(value: &Value) -> Result<u32, RuntimeError> {
+    one_based_u32(value, "distribution dimension")
+}
+
+fn one_based_u32(value: &Value, label: &str) -> Result<u32, RuntimeError> {
+    let value = positive_scalar(value, label)?;
+    u32::try_from(value).map_err(|_| error(format!("{label} exceeds u32")))
+}
+
+pub fn build_validation_option(value: &Value) -> Result<bool, RuntimeError> {
+    let option = string_scalar(value)
+        .ok_or_else(|| error("codistributed.build option must be 'noCommunication'"))?;
+    if option.eq_ignore_ascii_case("noCommunication") {
+        Ok(false)
+    } else {
+        Err(error(
+            "codistributed.build option must be 'noCommunication'",
+        ))
+    }
+}
+
+pub fn default_scheme(
+    global_shape: &[u64],
+    labs: LabCount,
+) -> Result<DistributionScheme, RuntimeError> {
+    let Value::Object(object) = one_dimensional(&[])? else {
+        unreachable!("one-dimensional factory always returns an object")
+    };
+    resolve_one_dimensional(&object, global_shape, labs)
+}
+
+pub fn resolve_local_parts(
+    codistributor: Option<&Value>,
+    local_shapes: &[Vec<u64>],
+    labs: LabCount,
+    validate_across_workers: bool,
+) -> Result<(Vec<u64>, DistributionScheme), RuntimeError> {
+    if labs.0 == 0 || local_shapes.len() != labs.0 as usize || local_shapes.is_empty() {
+        return Err(error(
+            "codistributed.build requires one local shape per admitted worker",
+        ));
+    }
+    let rank = local_shapes[0].len();
+    if rank == 0 || local_shapes.iter().any(|shape| shape.len() != rank) {
+        return Err(error(
+            "codistributed.build local parts must have a consistent array rank",
+        ));
+    }
+    match codistributor {
+        None => {
+            resolve_one_dimensional_local_parts(None, local_shapes, labs, validate_across_workers)
+        }
+        Some(Value::Object(object)) if object.class_name == ONE_DIMENSIONAL_CLASS => {
+            validate_definition(object)?;
+            resolve_one_dimensional_local_parts(
+                Some(object),
+                local_shapes,
+                labs,
+                validate_across_workers,
+            )
+        }
+        Some(Value::Object(object)) if object.class_name == TWO_DIMENSIONAL_CLASS => {
+            validate_definition(object)?;
+            let global_shape =
+                optional_vector_property(object, "GlobalSize")?.ok_or_else(|| {
+                    error("codistributor2dbc must declare GlobalSize for local-part construction")
+                })?;
+            let scheme = resolve_two_dimensional(object, &global_shape, labs)?;
+            if validate_across_workers {
+                let layouts =
+                    crate::parallel::distribution::partition_layouts(&global_shape, &scheme, labs)?;
+                if layouts
+                    .iter()
+                    .zip(local_shapes)
+                    .any(|(layout, shape)| layout.local_shape != *shape)
+                {
+                    return Err(error(
+                        "codistributed.build local shapes disagree with the 2-D block-cyclic layout",
+                    ));
+                }
+            }
+            Ok((global_shape, scheme))
+        }
+        Some(_) => Err(error(
+            "codistributed.build requires a codistributor1d or codistributor2dbc object",
+        )),
+    }
+}
+
+fn resolve_one_dimensional_local_parts(
+    object: Option<&ObjectInstance>,
+    local_shapes: &[Vec<u64>],
+    labs: LabCount,
+    validate_across_workers: bool,
+) -> Result<(Vec<u64>, DistributionScheme), RuntimeError> {
+    let dimension = object
+        .map(|object| optional_positive_property(object, "Dimension"))
+        .transpose()?
+        .flatten()
+        .unwrap_or_else(|| {
+            local_shapes[0]
+                .iter()
+                .rposition(|extent| *extent != 1)
+                .map(|axis| axis as u64 + 1)
+                .unwrap_or(if local_shapes[0].len() >= 2 { 2 } else { 1 })
+        });
+    let axis = usize::try_from(dimension)
+        .ok()
+        .and_then(|dimension| dimension.checked_sub(1))
+        .filter(|axis| *axis < local_shapes[0].len())
+        .ok_or_else(|| error("codistributor1d dimension lies outside the local-part rank"))?;
+    if validate_across_workers
+        && local_shapes.iter().skip(1).any(|shape| {
+            shape
+                .iter()
+                .enumerate()
+                .any(|(current, extent)| current != axis && *extent != local_shapes[0][current])
+        })
+    {
+        return Err(error(
+            "codistributed.build local shapes disagree outside the distribution dimension",
+        ));
+    }
+    let partition = local_shapes
+        .iter()
+        .map(|shape| shape[axis])
+        .collect::<Vec<_>>();
+    let mut global_shape = local_shapes[0].clone();
+    global_shape[axis] = partition.iter().try_fold(0_u64, |sum, extent| {
+        sum.checked_add(*extent)
+            .ok_or_else(|| error("codistributed.build global extent overflowed"))
+    })?;
+    if let Some(object) = object {
+        if let Some(declared) = optional_vector_property(object, "GlobalSize")? {
+            if declared != global_shape {
+                return Err(error(
+                    "codistributed.build local shapes disagree with the declared GlobalSize",
+                ));
+            }
+        }
+        if let Some(declared) = optional_vector_property(object, "Partition")? {
+            if declared.len() != labs.0 as usize
+                || (validate_across_workers && declared != partition)
+            {
+                return Err(error(
+                    "codistributed.build local shapes disagree with the declared partition",
+                ));
+            }
+        }
+    }
+    Ok((
+        global_shape,
+        DistributionScheme::OneDimensional {
+            dimension: u32::try_from(dimension)
+                .map_err(|_| error("distribution dimension exceeds u32"))?,
+            partition,
+        },
+    ))
+}
+
 pub fn factory(arguments: &[Value]) -> Result<Value, RuntimeError> {
     let Some((scheme, parameters)) = arguments.split_first() else {
         return one_dimensional(&[]);

@@ -16,10 +16,11 @@ pub(crate) mod runtime;
 
 pub use bytecode::{compile, compile_semantic_function_registry};
 pub use bytecode::{
-    AsyncMetadata, AwaitSite, Bytecode, BytecodeCollectiveOp, BytecodeDistributedOp,
-    BytecodeParallelVariable, BytecodeParforRegion, BytecodeRegion, BytecodeRegionBoundary,
-    BytecodeSpmdHeader, BytecodeSpmdRegion, EmitLabel, FunctionBytecode, FunctionRegistry, Instr,
-    SpawnSite, StackEffect, BYTECODE_SCHEMA_VERSION, FUNCTION_REGISTRY_SCHEMA_VERSION,
+    AsyncMetadata, AwaitSite, Bytecode, BytecodeCodistributedOverload, BytecodeCollectiveOp,
+    BytecodeDistributedBuildValidation, BytecodeDistributedOp, BytecodeParallelVariable,
+    BytecodeParforRegion, BytecodeRegion, BytecodeRegionBoundary, BytecodeSpmdHeader,
+    BytecodeSpmdRegion, EmitLabel, FunctionBytecode, FunctionRegistry, Instr, SpawnSite,
+    StackEffect, BYTECODE_SCHEMA_VERSION, FUNCTION_REGISTRY_SCHEMA_VERSION,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{

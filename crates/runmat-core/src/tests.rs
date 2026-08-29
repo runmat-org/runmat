@@ -14860,6 +14860,44 @@ fn distributed_values_preserve_typed_local_storage_through_compiler_lowering() {
 }
 
 #[test]
+fn distributed_builtin_mapping_retains_partition_facts_in_the_compiled_unit() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-distributed-fact-test@1",
+            "mappedDistributed.m",
+            "function y = mappedDistributed(); source = distributed(int16([-1, 2])); y = abs(source); end",
+        ),
+        None,
+    ))
+    .expect("compile distributed mapping unit");
+    let function = unit
+        .functions()
+        .resolve_name("mappedDistributed")
+        .expect("mappedDistributed identity");
+    let analysis = unit
+        .analysis()
+        .function(runmat_types::ProgramFunctionId(
+            u32::try_from(function.0).expect("portable function identity"),
+        ))
+        .expect("mappedDistributed analysis");
+    let runmat_types::ValueKindFact::Distributed(distributed) = &analysis.outputs[0].kind else {
+        panic!("mapped output must remain a distributed fact");
+    };
+    assert_eq!(
+        distributed.value.kind,
+        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::Int16,
+            domain: runmat_types::NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        distributed.value.shape,
+        runmat_types::ShapeFact::from(vec![Some(1), Some(2)])
+    );
+}
+
+#[test]
 fn codistributor_factory_and_codistributed_inspection_use_canonical_runtime_values() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
@@ -14895,11 +14933,188 @@ fn codistributor_factory_and_codistributed_inspection_use_canonical_runtime_valu
 }
 
 #[test]
+fn compatible_codistributed_client_construction_preserves_exact_indices() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = uint64([1, 9007199254740993]); value = codistributed(source); local = getLocalPart(value); indices = globalIndices(value, uint32(2), uint32(1)); [first, last] = globalIndices(value, uint32(2), uint32(1)); codist = getCodistributor(value);",
+    )
+    .expect("execute compatible client codistributed construction");
+    let variables = session.get_variables();
+    assert_eq!(variables.get("local"), variables.get("source"));
+    assert_eq!(
+        variables.get("indices"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![1, 2]),
+                vec![1, 2],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("first"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(1)))
+    );
+    assert_eq!(
+        variables.get("last"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(2)))
+    );
+    assert!(matches!(
+        variables.get("codist"),
+        Some(runmat_value::Value::Object(object)) if object.class_name == "codistributor1d"
+    ));
+}
+
+#[test]
+fn cooperative_codistributed_build_keeps_partition_payloads_worker_owned() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    execute_text_request(
+        &mut session,
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; local = uint64([1, 2]); else; local = uint64([3, 4]); end; codist = codistributor1d(uint32(2), uint64([2, 2]), uint64([1, 4])); value = codistributed.build(local, codist); part = getLocalPart(value); indices = globalIndices(value, uint32(2)); end; assembled = gather(value); part1 = part{1}; part2 = part{2}; indices1 = indices{1}; indices2 = indices{2};",
+    )
+    .expect("build a codistributed value from worker-local partitions");
+    let variables = session.get_variables();
+    assert!(matches!(
+        variables.get("value"),
+        Some(runmat_value::Value::Distributed(_))
+    ));
+    assert_eq!(
+        variables.get("assembled"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![1, 2, 3, 4]),
+                vec![1, 4],
+            )
+            .unwrap()
+        ))
+    );
+    for (name, values) in [("part1", vec![1, 2]), ("part2", vec![3, 4])] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(values),
+                    vec![1, 2],
+                )
+                .unwrap()
+            ))
+        );
+    }
+    for (name, values) in [("indices1", vec![1, 2]), ("indices2", vec![3, 4])] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(values),
+                    vec![1, 2],
+                )
+                .unwrap()
+            ))
+        );
+    }
+}
+
+#[test]
+fn cooperative_codistributed_construction_selects_the_typed_source_mode() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(2); shared = uint64([1, 0x0020000000000001u64]); spmd(2); rank = spmdIndex(); local = uint64([10 * rank + 1, 10 * rank + 2]); codist = codistributor1d(uint32(2), uint64([1, 1]), uint64([1, 2])); replicated = codistributed(shared, codist); fromSecond = codistributed(local, uint32(2)); fromFirstWithCodist = codistributed(local, uint32(1), codist); end; replicatedValue = gather(replicated); secondValue = gather(fromSecond); firstValue = gather(fromFirstWithCodist);",
+    )
+    .expect("construct codistributed values through each worker-scoped source mode");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "codistributed construction diagnostics: {:?}",
+        outcome.diagnostics
+    );
+    let variables = session.get_variables();
+    for (name, expected) in [
+        ("replicatedValue", vec![1, 9_007_199_254_740_993]),
+        ("secondValue", vec![21, 22]),
+        ("firstValue", vec![11, 12]),
+    ] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(expected),
+                    vec![1, 2],
+                )
+                .unwrap()
+            ))
+        );
+    }
+}
+
+#[test]
+fn two_dimensional_global_indices_use_the_authoritative_block_cyclic_layout() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(4)));
+    execute_text_request(
+        &mut session,
+        "pool = parpool(4); source = uint64(reshape(1:16, 4, 4)); original = distributed(source); codist = codistributor2dbc(uint32([2, 2]), uint64(1), 'row', uint64([4, 4])); value = redistribute(original, codist); rows1 = globalIndices(value, uint32(1), uint32(1)); columns1 = globalIndices(value, uint32(2), uint32(1)); rows2 = globalIndices(value, uint32(1), uint32(2)); columns2 = globalIndices(value, uint32(2), uint32(2));",
+    )
+    .expect("inspect exact block-cyclic global indices");
+    let variables = session.get_variables();
+    for (name, expected) in [
+        ("rows1", vec![1, 3]),
+        ("columns1", vec![1, 3]),
+        ("rows2", vec![1, 3]),
+        ("columns2", vec![2, 4]),
+    ] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(expected),
+                    vec![1, 2],
+                )
+                .unwrap()
+            ))
+        );
+    }
+}
+
+#[test]
+fn global_indices_preserve_empty_partition_endpoints() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(3)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(3); value = distributed(uint64(7)); indices = globalIndices(value, uint32(1), uint32(3)); [first, last] = globalIndices(value, uint32(1), uint32(3));",
+    )
+    .expect("inspect an empty distributed partition");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    let variables = session.get_variables();
+    assert_eq!(
+        variables.get("indices"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(Vec::new()),
+                vec![1, 0],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("first"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(1)))
+    );
+    assert_eq!(
+        variables.get("last"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(0)))
+    );
+}
+
+#[test]
 fn distributed_builtin_policy_maps_admitted_operations_and_materializes_gather() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
         &mut session,
-        "source = int16([-32768, 2]); distributedSource = distributed(source); mapped = abs(distributedSource); materialized = gather(mapped);",
+        "source = int16([-32768, 2]); distributedSource = distributed(source); mapped = abs(distributedSource); mappedAgain = abs(distributedSource); materialized = gather(mapped);",
     )
     .expect("execute catalog-admitted distributed builtin operations");
     let variables = session.get_variables();
@@ -14909,10 +15124,14 @@ fn distributed_builtin_policy_maps_admitted_operations_and_materializes_gather()
     let Some(runmat_value::Value::Distributed(mapped)) = variables.get("mapped") else {
         panic!("mapped must retain a distributed handle");
     };
+    let Some(runmat_value::Value::Distributed(mapped_again)) = variables.get("mappedAgain") else {
+        panic!("mappedAgain must retain a distributed handle");
+    };
     assert_eq!(mapped.scheme, source.scheme);
     assert_eq!(mapped.partition_count, source.partition_count);
     assert_eq!(mapped.pool, source.pool);
     assert!(mapped.generation > source.generation);
+    assert_eq!(mapped_again, mapped);
     assert_eq!(
         mapped.value.kind,
         runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {

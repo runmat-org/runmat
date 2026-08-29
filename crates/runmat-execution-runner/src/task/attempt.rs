@@ -26,7 +26,7 @@ pub enum AttemptSuccess {
         result_objects: Vec<ValueRef>,
     },
     Spmd {
-        outputs: Vec<Option<ValuePayload>>,
+        outputs: Vec<Option<runmat_execution::SpmdOutputValue>>,
     },
 }
 
@@ -51,7 +51,7 @@ impl AttemptSuccess {
         }
     }
 
-    pub fn spmd_outputs(&self) -> Option<&[Option<ValuePayload>]> {
+    pub fn spmd_outputs(&self) -> Option<&[Option<runmat_execution::SpmdOutputValue>]> {
         match self {
             Self::Spmd { outputs } => Some(outputs),
             Self::Values { .. } => None,

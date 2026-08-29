@@ -11,7 +11,8 @@ pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 4;
 
 pub use compile::{compile, compile_semantic_function_registry};
 pub use instr::{
-    BytecodeCollectiveOp, BytecodeDistributedOp, BytecodeSpmdHeader, EmitLabel, Instr, StackEffect,
+    BytecodeCodistributedOverload, BytecodeCollectiveOp, BytecodeDistributedBuildValidation,
+    BytecodeDistributedOp, BytecodeSpmdHeader, EmitLabel, Instr, StackEffect,
 };
 pub use parallel::{BytecodeParallelVariable, BytecodeParforRegion, BytecodeSpmdRegion};
 pub use program::{

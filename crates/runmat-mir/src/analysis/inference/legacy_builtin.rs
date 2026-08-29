@@ -2,25 +2,36 @@
 //! catalog cohorts yet.
 //!
 //! The identity lookup is the inventory: only a registered builtin's own
-//! legacy resolver/declared return participates. No semantic name category is
-//! reinterpreted here. C00-C07 replace these identity-owned legacy contracts
-//! with canonical catalog entries, and R29 removes this module.
+//! legacy resolver/declared return participates. Primitive numeric class
+//! constructors additionally use the shared, class-exhaustive conversion
+//! rule because the legacy `Type` enum cannot retain their storage width.
+//! C00-C07 replace these identity-owned legacy contracts with canonical
+//! catalog entries, and R29 removes this module.
 
 use std::collections::BTreeMap;
 
 use runmat_builtins::Type;
 use runmat_types::{
-    infer_call, infer_concatenate, infer_reduction, infer_repmat, infer_reshape, permute_shape,
-    CallContract, CallInference, CallRequest, CellFact, DimensionFact, DynamicReason,
-    FactInference, FactJoin, InferenceDiagnostic, NumericClass, NumericDomain, NumericFact,
-    ObjectFact, OutputListFact, QualifiedName, ShapeFact, StorageFact, StructFact, SymbolName,
-    ValueFact, ValueKindFact,
+    infer_call, infer_concatenate, infer_numeric_conversion, infer_reduction, infer_repmat,
+    infer_reshape, permute_shape, CallContract, CallInference, CallRequest, CellFact,
+    DimensionFact, DynamicReason, FactInference, FactJoin, InferenceDiagnostic, NumericClass,
+    NumericDomain, NumericFact, ObjectFact, OutputListFact, QualifiedName, ShapeFact, StorageFact,
+    StructFact, SymbolName, ValueFact, ValueKindFact,
 };
 
 pub(crate) fn infer_legacy_builtin(name: &str, request: &CallRequest) -> Option<CallInference> {
     let function = runmat_builtins::builtin_functions()
         .into_iter()
         .find(|function| function.name.eq_ignore_ascii_case(name))?;
+
+    if request.arguments.len() == 1 {
+        if let Some(target) = NumericClass::from_class_name(function.name) {
+            return Some(call_from_fact(
+                infer_numeric_conversion(&request.arguments[0], target),
+                request,
+            ));
+        }
+    }
 
     if name.eq_ignore_ascii_case("linspace") {
         return Some(infer_call(

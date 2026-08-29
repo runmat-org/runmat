@@ -72,7 +72,7 @@ pub struct SpmdGangCall {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SpmdRankResult {
     pub rank: runmat_types::LabRank,
-    pub outputs: Vec<Option<runmat_execution::value::ValuePayload>>,
+    pub outputs: Vec<Option<runmat_execution::SpmdOutputValue>>,
 }
 
 /// How an execution backend runs one compiler-owned SPMD gang.

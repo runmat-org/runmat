@@ -210,11 +210,21 @@ spmd
   exchanged = spmdSendReceive(destination, source, uint16(rank));
   joined = spmdCat(uint16(rank), 2);
   total = spmdReduce(@plus, uint32(rank));
+  local_part = uint64([2 * rank - 1, 2 * rank]);
+  codist = codistributor1d(uint32(2), uint64([2, 2, 2]), uint64([1, 6]));
+  build_option = "noCommunication";
+  built = codistributed.build(local_part, codist, build_option);
+  mapped = abs(built);
+  retained_part = getLocalPart(built);
+  mapped_part = getLocalPart(mapped);
+  retained_indices = globalIndices(built, uint32(2));
   wide_output = wide_input;
   if rank == 2
     assigned_on_second = uint16(22);
   end
 end
+assembled = gather(built);
+mapped_assembled = gather(mapped);
 assert(wide_output{3} == wide_input);
 fprintf("SPMD_RANKS %.0f %.0f %.0f\n", rank{:});
 fprintf("SPMD_COUNT %.0f %.0f %.0f\n", count{[1, 2, 3]});
@@ -222,6 +232,11 @@ fprintf("SPMD_EXCHANGE %.0f %.0f %.0f\n", exchanged{1}, exchanged{2}, exchanged{
 fprintf("SPMD_JOINED %.0f %.0f %.0f\n", joined{1});
 fprintf("SPMD_TOTAL %.0f\n", total{1});
 fprintf("SPMD_OPTIONAL %.0f\n", assigned_on_second{2});
+fprintf("SPMD_PARTS %.0f %.0f %.0f %.0f %.0f %.0f\n", retained_part{1}, retained_part{2}, retained_part{3});
+fprintf("SPMD_MAPPED_PARTS %.0f %.0f %.0f %.0f %.0f %.0f\n", mapped_part{1}, mapped_part{2}, mapped_part{3});
+fprintf("SPMD_INDICES %.0f %.0f %.0f %.0f %.0f %.0f\n", retained_indices{1}, retained_indices{2}, retained_indices{3});
+fprintf("SPMD_ASSEMBLED %.0f %.0f %.0f %.0f %.0f %.0f\n", assembled);
+fprintf("SPMD_MAPPED %.0f %.0f %.0f %.0f %.0f %.0f\n", mapped_assembled);
 fprintf("SPMD_WIDE_OK\n");
 "#,
     )
@@ -241,6 +256,11 @@ fprintf("SPMD_WIDE_OK\n");
         "SPMD_JOINED 1 2 3",
         "SPMD_TOTAL 6",
         "SPMD_OPTIONAL 22",
+        "SPMD_PARTS 1 2 3 4 5 6",
+        "SPMD_MAPPED_PARTS 1 2 3 4 5 6",
+        "SPMD_INDICES 1 2 3 4 5 6",
+        "SPMD_ASSEMBLED 1 2 3 4 5 6",
+        "SPMD_MAPPED 1 2 3 4 5 6",
         "SPMD_WIDE_OK",
     ] {
         assert!(

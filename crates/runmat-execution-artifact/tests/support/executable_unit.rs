@@ -135,8 +135,11 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                 distributed_values: vec![DistributedValueContract {
                     id: distributed,
                     value: dynamic_fact(),
-                    scheme: DistributionScheme::Block { dimension: 1 },
+                    construction: runmat_types::DistributedConstruction::Fixed {
+                        scheme: DistributionScheme::Block { dimension: 1 },
+                    },
                     owner: runmat_types::DistributedOwner::Region(spmd),
+                    coordination: None,
                     materializable: true,
                 }],
                 collectives: vec![CollectiveContract {
