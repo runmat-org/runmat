@@ -60,6 +60,12 @@ pub enum BytecodeCollectiveOp {
     AllReduce {
         operator: runmat_types::OperatorKind,
     },
+    Cat {
+        has_root: bool,
+    },
+    FunctionalReduce {
+        has_root: bool,
+    },
     Send {
         has_tag: bool,
     },
@@ -84,6 +90,7 @@ impl BytecodeCollectiveOp {
             Self::Broadcast { has_input } => 1 + has_input as usize,
             Self::Gather | Self::Scatter | Self::Reduce { .. } => 2,
             Self::AllGather | Self::AllReduce { .. } => 1,
+            Self::Cat { has_root } | Self::FunctionalReduce { has_root } => 2 + has_root as usize,
             Self::Send { has_tag } => 2 + has_tag as usize,
             Self::Receive {
                 has_source,

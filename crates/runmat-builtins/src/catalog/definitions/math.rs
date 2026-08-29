@@ -145,6 +145,7 @@ pub const ABS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::PreserveInputs,
         fusion: BuiltinFusionPolicy::Candidate,
+        distributed: crate::BuiltinDistributedPolicy::MapUnary,
     },
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,

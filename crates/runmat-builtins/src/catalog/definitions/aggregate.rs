@@ -209,6 +209,7 @@ pub const STRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         residency: BuiltinResidencyPolicy::PreserveInputs,
         fusion: BuiltinFusionPolicy::Boundary,
+        distributed: crate::BuiltinDistributedPolicy::Unsupported,
     },
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,

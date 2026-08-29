@@ -281,6 +281,7 @@ pub struct RuntimeDistributedCallRequest {
     pub builtin: BuiltinId,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
+    pub output: runmat_types::ValueFact,
 }
 
 /// Live distributed metadata visible to language/runtime consumers. Payloads

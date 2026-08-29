@@ -167,6 +167,7 @@ pub const FEVAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,
         fusion: BuiltinFusionPolicy::Boundary,
+        distributed: crate::BuiltinDistributedPolicy::Unsupported,
     },
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Dynamic,

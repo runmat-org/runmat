@@ -51,6 +51,7 @@ const PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
     accelerator: BuiltinAcceleratorPolicy::Forbidden,
     residency: BuiltinResidencyPolicy::Host,
     fusion: BuiltinFusionPolicy::Boundary,
+    distributed: crate::BuiltinDistributedPolicy::Unsupported,
 };
 const LINK: BuiltinLinkContract = BuiltinLinkContract {
     reachability: BuiltinReachability::Always,

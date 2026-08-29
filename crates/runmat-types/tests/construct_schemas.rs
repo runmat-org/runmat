@@ -156,6 +156,8 @@ fn parallel() -> ParallelManifest {
             source: None,
             destination: None,
             tag: None,
+            dimension: None,
+            reducer: None,
         }],
     }
 }

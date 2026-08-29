@@ -160,6 +160,7 @@ pub const GATHER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::GatherToHost,
         fusion: BuiltinFusionPolicy::Boundary,
+        distributed: crate::BuiltinDistributedPolicy::MaterializeArguments,
     },
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,

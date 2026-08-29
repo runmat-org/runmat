@@ -41,6 +41,16 @@ pub enum CollectiveInvocation {
         operator: OperatorKind,
         value: ValuePayload,
     },
+    Cat {
+        root: Option<LabRank>,
+        dimension: u32,
+        value: ValuePayload,
+    },
+    FunctionalReduce {
+        root: Option<LabRank>,
+        reducer: ValuePayload,
+        value: ValuePayload,
+    },
     Send {
         destination: LabRank,
         tag: CollectiveMessageTag,
@@ -99,6 +109,14 @@ pub enum CollectiveResponse {
         operator: OperatorKind,
         values: Vec<ValuePayload>,
     },
+    ConcatenationInputs {
+        dimension: u32,
+        values: Vec<ValuePayload>,
+    },
+    FunctionalReductionInputs {
+        reducer: ValuePayload,
+        values: Vec<ValuePayload>,
+    },
     Received {
         value: ValuePayload,
         source: LabRank,
@@ -128,6 +146,21 @@ fn validate_invocation(
         | CollectiveInvocation::Gather { root, .. }
         | CollectiveInvocation::Scatter { root, .. } => validate_rank(*root),
         CollectiveInvocation::Reduce { root, .. } => {
+            root.map(validate_rank).transpose().map(|_| ())
+        }
+        CollectiveInvocation::Cat {
+            root, dimension, ..
+        } => {
+            if *dimension == 0 {
+                return Err(ContractError::invalid(
+                    "collective concatenation",
+                    "dimension must be one-based",
+                ));
+            }
+            root.map(validate_rank).transpose().map(|_| ())
+        }
+        CollectiveInvocation::FunctionalReduce { root, reducer, .. } => {
+            reducer.validate(crate::value::ValueLimits::default())?;
             root.map(validate_rank).transpose().map(|_| ())
         }
         CollectiveInvocation::Send { destination, .. } => validate_rank(*destination),

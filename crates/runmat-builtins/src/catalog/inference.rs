@@ -28,10 +28,36 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
         | "parallel.receive"
         | "parallel.probe"
         | "parallel.gplus"
+        | "parallel.cat"
+        | "parallel.functional-reduce"
         | "parallel.spmd-index"
         | "parallel.spmd-size" => infer_parallel_data(request, entry),
         _ => unavailable_rule(entry, request),
     }
+}
+
+/// Infer the local result produced by one catalog-admitted partition-local
+/// builtin invocation.
+///
+/// Distributed handles remain execution-owned. Static builtin rules operate
+/// on the value fact carried by each handle, which is the same fact presented
+/// to the builtin for every partition. The returned outputs therefore
+/// describe partition payloads, not another distributed handle; the execution
+/// service wraps those facts in a newly fenced handle after the map completes.
+pub fn infer_partition_local_call(
+    entry: &BuiltinCatalogEntry,
+    request: &CallRequest,
+) -> CallInference {
+    let mut projected = request.clone();
+    projected.arguments = request
+        .arguments
+        .iter()
+        .map(|argument| match &argument.kind {
+            ValueKindFact::Distributed(distributed) => distributed.value.as_ref().clone(),
+            _ => argument.clone(),
+        })
+        .collect();
+    infer_catalog_call(entry, &projected)
 }
 
 fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -63,6 +89,16 @@ fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
             .first()
             .cloned()
             .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
+        "parallel.cat" => request
+            .arguments
+            .first()
+            .cloned()
+            .map(|mut fact| {
+                fact.shape = ShapeFact::Unknown;
+                fact
+            })
+            .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
+        "parallel.functional-reduce" => ValueFact::unknown(DynamicReason::RuntimeValue),
         "parallel.distributed" | "parallel.receive" => {
             ValueFact::unknown(DynamicReason::RuntimeValue)
         }

@@ -4789,7 +4789,7 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
-    fn compile_rejects_distributed_values_until_runtime_capability_is_available() {
+    fn compile_emits_typed_distributed_instruction() {
         let ast = runmat_parser::parse("x = 1;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4820,12 +4820,18 @@ y = x^[1 2; 3 4];\n",
             scheme: runmat_types::DistributionScheme::Replicated,
         });
 
-        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
-        assert_eq!(
-            err.identifier.as_deref(),
-            Some("RunMat:MirDistributedCapabilityUnsupported")
-        );
-        assert!(err.span.is_some());
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile distributed value");
+        assert!(bytecode.instructions.iter().any(|instruction| matches!(
+            instruction,
+            Instr::Distributed(crate::BytecodeDistributedOp::Create {
+                id: runmat_types::DistributedValueId {
+                    function: runmat_types::ProgramFunctionId(0),
+                    ordinal: 0,
+                },
+                owner: runmat_types::DistributedOwner::Region(_),
+                scheme: runmat_types::DistributionScheme::Replicated,
+            })
+        )));
     }
 
     #[test]

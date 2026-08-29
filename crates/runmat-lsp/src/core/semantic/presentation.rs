@@ -252,10 +252,12 @@ mod tests {
                         function: runmat_types::ProgramFunctionId(1),
                         ordinal: 2,
                     },
-                    owner: runmat_types::ParallelRegionId(runmat_types::RegionId {
-                        function: runmat_types::ProgramFunctionId(1),
-                        ordinal: 3,
-                    }),
+                    owner: runmat_types::DistributedOwner::Region(runmat_types::ParallelRegionId(
+                        runmat_types::RegionId {
+                            function: runmat_types::ProgramFunctionId(1),
+                            ordinal: 3,
+                        },
+                    )),
                     scheme: Some(runmat_types::DistributionScheme::Replicated),
                     value: Box::new(unknown()),
                     materializable: true,

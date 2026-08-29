@@ -130,6 +130,7 @@ fn encode_parameters(hash: &mut Sha256, parameters: &[crate::BuiltinParamDescrip
                 BuiltinParamType::StyleSpec => b"style-spec",
                 BuiltinParamType::PropertyName => b"property-name",
                 BuiltinParamType::PropertyValue => b"property-value",
+                BuiltinParamType::Callable => b"callable",
             },
         );
         field(

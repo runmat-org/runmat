@@ -30,10 +30,23 @@ pub enum BuiltinFusionPolicy {
     Boundary,
 }
 
+/// How a builtin may consume execution-owned distributed values.
+///
+/// This is intentionally narrower than accelerator residency. Each admitted
+/// form names an execution strategy that the distributed runtime can validate
+/// without inferring semantics from a builtin's spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinDistributedPolicy {
+    Unsupported,
+    MaterializeArguments,
+    MapUnary,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BuiltinPlacementContract {
     pub portability: BuiltinPortability,
     pub accelerator: BuiltinAcceleratorPolicy,
     pub residency: BuiltinResidencyPolicy,
     pub fusion: BuiltinFusionPolicy,
+    pub distributed: BuiltinDistributedPolicy,
 }

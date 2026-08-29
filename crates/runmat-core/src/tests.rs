@@ -2,6 +2,174 @@ use crate::*;
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
 
+struct InProcessMultiLabExecutionService {
+    serial: runmat_runtime::execution::RuntimeExecutionService,
+    maximum_labs: u32,
+    pool: std::sync::Mutex<Option<runmat_execution::PoolSnapshot>>,
+}
+
+impl InProcessMultiLabExecutionService {
+    fn new(maximum_labs: u32) -> Self {
+        Self {
+            serial: runmat_runtime::execution::RuntimeExecutionService::new(),
+            maximum_labs,
+            pool: std::sync::Mutex::new(None),
+        }
+    }
+}
+
+impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabExecutionService {
+    fn scope_id(&self) -> runmat_execution::ExecutionScopeId {
+        runmat_runtime::execution::RuntimeExecutionServices::scope_id(&self.serial)
+    }
+
+    fn current_pool(
+        &self,
+    ) -> Result<
+        Option<runmat_execution::PoolSnapshot>,
+        runmat_runtime::execution::ExecutionServiceError,
+    > {
+        Ok(self.pool.lock().expect("test pool state poisoned").clone())
+    }
+
+    fn ensure_pool(
+        &self,
+        request: runmat_execution::PoolRequest,
+    ) -> Result<runmat_execution::PoolSnapshot, runmat_runtime::execution::ExecutionServiceError>
+    {
+        let workers = request.workers.unwrap_or(self.maximum_labs);
+        if workers == 0 || workers > self.maximum_labs {
+            return Err(runmat_runtime::execution::ExecutionServiceError::Failed(
+                format!(
+                    "test pool lab count must be between 1 and {}",
+                    self.maximum_labs
+                ),
+            ));
+        }
+        let scope_id = self.scope_id();
+        let snapshot = runmat_execution::PoolSnapshot {
+            handle: runmat_execution::PoolHandle {
+                id: runmat_execution::PoolId::derive(&[scope_id.bytes(), b"in-process-test"]),
+                scope_id,
+                generation: 1,
+            },
+            backend: runmat_execution::PoolBackend::LocalProcesses,
+            workers,
+            state: runmat_execution::PoolState::Ready,
+        };
+        *self.pool.lock().expect("test pool state poisoned") = Some(snapshot.clone());
+        Ok(snapshot)
+    }
+
+    fn close_pool(
+        &self,
+        pool: &runmat_execution::PoolHandle,
+    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
+        let mut current = self.pool.lock().expect("test pool state poisoned");
+        match current.as_ref() {
+            Some(snapshot) if snapshot.handle == *pool => {
+                *current = None;
+                Ok(())
+            }
+            Some(snapshot) if snapshot.handle.scope_id != pool.scope_id => {
+                Err(runmat_runtime::execution::ExecutionServiceError::ForeignScope)
+            }
+            _ => Err(runmat_runtime::execution::ExecutionServiceError::UnknownHandle),
+        }
+    }
+
+    fn create_future(
+        &self,
+        call: runmat_runtime::execution::DeferredCall,
+    ) -> Result<runmat_execution::FutureHandle, runmat_runtime::execution::ExecutionServiceError>
+    {
+        runmat_runtime::execution::RuntimeExecutionServices::create_future(&self.serial, call)
+    }
+
+    fn spawn(
+        &self,
+        future: &runmat_execution::FutureHandle,
+    ) -> Result<runmat_execution::TaskHandle, runmat_runtime::execution::ExecutionServiceError>
+    {
+        runmat_runtime::execution::RuntimeExecutionServices::spawn(&self.serial, future)
+    }
+
+    fn inspect_future(
+        &self,
+        future: &runmat_execution::FutureHandle,
+    ) -> Result<
+        runmat_execution::ExecutionHandleSnapshot,
+        runmat_runtime::execution::ExecutionServiceError,
+    > {
+        runmat_runtime::execution::RuntimeExecutionServices::inspect_future(&self.serial, future)
+    }
+
+    fn inspect_task(
+        &self,
+        task: &runmat_execution::TaskHandle,
+    ) -> Result<
+        runmat_execution::ExecutionHandleSnapshot,
+        runmat_runtime::execution::ExecutionServiceError,
+    > {
+        runmat_runtime::execution::RuntimeExecutionServices::inspect_task(&self.serial, task)
+    }
+
+    fn claim_next_task_result(
+        &self,
+        tasks: &[runmat_execution::TaskHandle],
+    ) -> Result<runmat_execution::TaskResultClaim, runmat_runtime::execution::ExecutionServiceError>
+    {
+        runmat_runtime::execution::RuntimeExecutionServices::claim_next_task_result(
+            &self.serial,
+            tasks,
+        )
+    }
+
+    fn mark_task_result_read(
+        &self,
+        task: &runmat_execution::TaskHandle,
+    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
+        runmat_runtime::execution::RuntimeExecutionServices::mark_task_result_read(
+            &self.serial,
+            task,
+        )
+    }
+
+    fn begin_await(
+        &self,
+        value: runmat_value::Value,
+    ) -> Result<
+        runmat_runtime::execution::AwaitAction,
+        runmat_runtime::execution::ExecutionServiceError,
+    > {
+        runmat_runtime::execution::RuntimeExecutionServices::begin_await(&self.serial, value)
+    }
+
+    fn complete_future(
+        &self,
+        future: &runmat_execution::FutureHandle,
+        result: Result<runmat_value::Value, runmat_runtime::execution::ExecutionServiceError>,
+    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
+        runmat_runtime::execution::RuntimeExecutionServices::complete_future(
+            &self.serial,
+            future,
+            result,
+        )
+    }
+
+    fn cancel(
+        &self,
+        value: &runmat_value::Value,
+        reason: runmat_execution::CancellationReason,
+    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
+        runmat_runtime::execution::RuntimeExecutionServices::cancel(&self.serial, value, reason)
+    }
+
+    fn drain_scope(&self, reason: runmat_execution::CancellationReason) {
+        runmat_runtime::execution::RuntimeExecutionServices::drain_scope(&self.serial, reason);
+    }
+}
+
 const DEEP_SEMANTIC_TEST_STACK_BYTES: usize = 32 * 1024 * 1024;
 static TIMER_CORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -14492,6 +14660,123 @@ fn modern_spmd_point_to_point_surface_executes_through_typed_bytecode() {
 }
 
 #[test]
+fn modern_and_legacy_spmd_aggregate_surfaces_use_runtime_language_semantics() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = "spmd; modernCat = spmdCat(uint16([1, 2]), 2); modernReduce = spmdReduce(@plus, uint32(3)); legacyCat = gcat(int16([4, 5]), 2, 1); legacyReduce = gop(@plus, uint64(6), 1); end;";
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new("core-spmd-aggregate-test@1", "aggregate_spmd.m", source),
+        None,
+    ))
+    .expect("compile aggregate SPMD surface");
+    assert_eq!(unit.bytecode().spmd_regions[0].outputs.len(), 4);
+    let outcome = execute_text_request(&mut session, source)
+        .expect("execute rank-ordered concatenation and callable reductions");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "aggregate SPMD execution diagnostics: {:?}",
+        outcome.diagnostics
+    );
+    for name in ["modernCat", "modernReduce", "legacyCat", "legacyReduce"] {
+        assert!(
+            matches!(
+                session.get_variables().get(name),
+                Some(runmat_value::Value::Composite(_))
+            ),
+            "{name} must be retained as a Composite output: {:?}",
+            session.get_variables()
+        );
+    }
+    execute_text_request(
+        &mut session,
+        "modernCatValue = modernCat{1}; modernReduceValue = modernReduce{1}; legacyCatValue = legacyCat{1}; legacyReduceValue = legacyReduce{1};",
+    )
+    .expect("read aggregate Composite entries");
+    let variables = session.get_variables();
+    assert_eq!(
+        variables.get("modernCatValue"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U16(vec![1, 2]),
+                vec![1, 2],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("modernReduceValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U32(3)))
+    );
+    assert_eq!(
+        variables.get("legacyCatValue"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::I16(vec![4, 5]),
+                vec![1, 2],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("legacyReduceValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(6)))
+    );
+}
+
+#[test]
+fn local_multi_rank_spmd_preserves_rank_order_and_collective_results() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(3)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(3); spmd; labNumber = spmdIndex(); joined = spmdCat(uint16(labNumber), 2); total = spmdReduce(@plus, uint32(labNumber)); end;",
+    )
+    .expect("execute a three-rank SPMD region");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    for name in ["labNumber", "joined", "total"] {
+        assert!(
+            matches!(
+                session.get_variables().get(name),
+                Some(runmat_value::Value::Composite(_))
+            ),
+            "{name} must be retained as a compiler-declared Composite output: {:?}",
+            session.get_variables()
+        );
+    }
+    execute_text_request(
+        &mut session,
+        "firstRank = labNumber{1}; secondRank = labNumber{2}; thirdRank = labNumber{3}; joinedValue = joined{1}; totalValue = total{1};",
+    )
+    .expect("read rank-ordered multi-lab Composite entries");
+    let variables = session.get_variables();
+    assert_eq!(
+        variables.get("firstRank"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert_eq!(
+        variables.get("secondRank"),
+        Some(&runmat_value::Value::Num(2.0))
+    );
+    assert_eq!(
+        variables.get("thirdRank"),
+        Some(&runmat_value::Value::Num(3.0))
+    );
+    assert_eq!(
+        variables.get("joinedValue"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U16(vec![1, 2, 3]),
+                vec![1, 3],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("totalValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U32(6)))
+    );
+}
+
+#[test]
 fn distributed_values_preserve_typed_local_storage_through_compiler_lowering() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
@@ -14507,46 +14792,100 @@ fn distributed_values_preserve_typed_local_storage_through_compiler_lowering() {
     assert_eq!(variables.get("local"), variables.get("source"));
 }
 
+#[test]
+fn distributed_builtin_policy_maps_admitted_operations_and_materializes_gather() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = int16([-32768, 2]); distributedSource = distributed(source); mapped = abs(distributedSource); materialized = gather(mapped);",
+    )
+    .expect("execute catalog-admitted distributed builtin operations");
+    let variables = session.get_variables();
+    let Some(runmat_value::Value::Distributed(source)) = variables.get("distributedSource") else {
+        panic!("distributedSource must retain a distributed handle");
+    };
+    let Some(runmat_value::Value::Distributed(mapped)) = variables.get("mapped") else {
+        panic!("mapped must retain a distributed handle");
+    };
+    assert_eq!(mapped.scheme, source.scheme);
+    assert_eq!(mapped.partition_count, source.partition_count);
+    assert_eq!(mapped.pool, source.pool);
+    assert!(mapped.generation > source.generation);
+    assert_eq!(
+        mapped.value.kind,
+        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::Int16,
+            domain: runmat_types::NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        variables.get("materialized"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::I16(vec![i16::MAX, 2]),
+                vec![1, 2],
+            )
+            .unwrap()
+        ))
+    );
+}
+
+#[test]
+fn distributed_builtin_policy_rejects_unclassified_operations() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "distributedSource = distributed([1, 2]); unsupported = full(distributedSource);",
+    )
+    .expect("execution returns a structured diagnostic");
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|diagnostic| { diagnostic.code == "RunMat:parallel:DistributedBuiltinUnsupported" }));
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn generic_native_deoptimizes_at_the_exact_parfor_boundary() {
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let unit = block_on(session.compile_executable_unit(
-        ExecutableSource::new(
-            "core-native-parfor-test@1",
-            "nativeParfor.m",
-            "function [values, total] = nativeParfor(n)\nvalues = zeros(1, n);\ntotal = 0;\nparfor index = 1:n\nvalues(index) = index * 2;\ntotal = total + index;\nend\nend\n",
-        ),
-        None,
-    ))
-    .expect("compile native parfor unit");
-    let invocation = ProcedureInvocation {
-        target: ProcedureTarget::Function("nativeParfor".into()),
-        arguments: vec![runmat_value::Value::Num(4.0)],
-        requested_outputs: 2,
-    };
-    let established = block_on(session.invoke_executable(
-        &unit,
-        invocation.clone(),
-        &InvocationControl::default(),
-    ))
-    .expect("established parfor execution");
-    let native = block_on(session.invoke_executable(
-        &unit,
-        invocation,
-        &InvocationControl::default().force_generic_native(),
-    ))
-    .expect("generic-native parfor execution");
-    assert_eq!(native, established);
-    let runmat_value::Value::OutputList(outputs) = native else {
-        panic!("expected two parfor outputs");
-    };
-    assert!(matches!(
-        &outputs[0],
-        runmat_value::Value::Tensor(value)
-            if value.materialize_f64() == vec![2.0, 4.0, 6.0, 8.0]
-    ));
-    assert_eq!(outputs[1], runmat_value::Value::Num(10.0));
+    run_deep_semantic_test(|| {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "core-native-parfor-test@1",
+                "nativeParfor.m",
+                "function [values, total] = nativeParfor(n)\nvalues = zeros(1, n);\ntotal = 0;\nparfor index = 1:n\nvalues(index) = index * 2;\ntotal = total + index;\nend\nend\n",
+            ),
+            None,
+        ))
+        .expect("compile native parfor unit");
+        let invocation = ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeParfor".into()),
+            arguments: vec![runmat_value::Value::Num(4.0)],
+            requested_outputs: 2,
+        };
+        let established = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established parfor execution");
+        let native = block_on(session.invoke_executable(
+            &unit,
+            invocation,
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("generic-native parfor execution");
+        assert_eq!(native, established);
+        let runmat_value::Value::OutputList(outputs) = native else {
+            panic!("expected two parfor outputs");
+        };
+        assert!(matches!(
+            &outputs[0],
+            runmat_value::Value::Tensor(value)
+                if value.materialize_f64() == vec![2.0, 4.0, 6.0, 8.0]
+        ));
+        assert_eq!(outputs[1], runmat_value::Value::Num(10.0));
+    });
 }
 
 #[test]

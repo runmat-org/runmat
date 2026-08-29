@@ -2478,6 +2478,18 @@ impl Compiler {
                             operator: *operator,
                         },
                     ),
+                    MirCollectiveOp::Cat { id, root, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Cat {
+                            has_root: root.is_some(),
+                        },
+                    ),
+                    MirCollectiveOp::FunctionalReduce { id, root, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::FunctionalReduce {
+                            has_root: root.is_some(),
+                        },
+                    ),
                     MirCollectiveOp::Send { id, tag, .. } => (
                         *id,
                         crate::BytecodeCollectiveOp::Send {

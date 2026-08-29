@@ -137,12 +137,107 @@ impl RuntimeDistributedService for CoreDistributedService {
 
     fn invoke(
         &self,
-        _request: RuntimeDistributedCallRequest,
+        request: RuntimeDistributedCallRequest,
     ) -> RuntimeServiceFuture<Result<Value, RuntimeError>> {
-        Box::pin(async {
-            Err(error(
-                "distributed builtin routing requires an admitted locality contract",
-            ))
+        let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&request.builtin.0) else {
+            return Box::pin(async {
+                Err(error(
+                    "distributed builtin request is not admitted for partition-local execution",
+                ))
+            });
+        };
+        if entry.placement.distributed != runmat_builtins::BuiltinDistributedPolicy::MapUnary {
+            return Box::pin(async {
+                Err(error(
+                    "distributed builtin request is not admitted for partition-local execution",
+                ))
+            });
+        }
+        if request.requested_outputs != 1 || request.arguments.len() != 1 {
+            return Box::pin(async {
+                Err(error(
+                    "partition-local unary execution requires one input and one output",
+                ))
+            });
+        }
+        let Value::Distributed(handle) = &request.arguments[0] else {
+            return Box::pin(async {
+                Err(error(
+                    "partition-local unary execution requires a distributed input",
+                ))
+            });
+        };
+        let inference = runmat_builtins::infer_partition_local_call(
+            entry,
+            &runmat_types::CallRequest {
+                arguments: request
+                    .arguments
+                    .iter()
+                    .map(runmat_runtime::value_fact::value_fact)
+                    .collect(),
+                literals: runmat_types::LiteralContext::default(),
+                outputs: runmat_types::OutputSelection::new(
+                    runmat_types::RequestedOutputCount::One,
+                ),
+            },
+        );
+        if !inference.diagnostics.is_empty()
+            || inference.outputs.as_slice() != [request.output.clone()]
+        {
+            return Box::pin(async {
+                Err(error(
+                    "distributed builtin request disagrees with canonical output inference",
+                ))
+            });
+        }
+        let source = (**handle).clone();
+        let parts = self.store.borrow().cloned_parts(&source).map_err(error);
+        let generation = match self.reserve_generation() {
+            Ok(generation) => generation,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        let store = Rc::clone(&self.store);
+        Box::pin(async move {
+            let mut outputs = Vec::new();
+            for part in parts? {
+                let input =
+                    runmat_runtime::execution::value_codec::decode_inline_value(&part.value)
+                        .map_err(error)?;
+                let value = runmat_runtime::call_builtin_async_with_outputs(
+                    &request.builtin.0,
+                    &[input],
+                    request.requested_outputs,
+                )
+                .await?;
+                outputs.push(OwnedPartition {
+                    layout: part.layout,
+                    value: runmat_runtime::execution::value_codec::encode_inline_value(&value)
+                        .map_err(error)?,
+                });
+            }
+            let handle = DistributedValueHandle {
+                id: DistributedObjectId::derive(&[
+                    source.scope_id.bytes(),
+                    source.id.bytes(),
+                    request.builtin.0.as_bytes(),
+                    &generation.to_be_bytes(),
+                ]),
+                contract: source.contract,
+                owner: source.owner,
+                scope_id: source.scope_id,
+                generation,
+                pool: source.pool,
+                partition_count: source.partition_count,
+                value: request.output,
+                global_shape: source.global_shape,
+                scheme: source.scheme,
+                materializable: source.materializable,
+            };
+            store
+                .borrow_mut()
+                .insert(handle.clone(), outputs)
+                .map_err(error)?;
+            Ok(Value::Distributed(Box::new(handle)))
         })
     }
 
@@ -175,6 +270,10 @@ async fn create_value(
     workers: u32,
 ) -> Result<DistributedValueHandle, RuntimeError> {
     let partition_count = runmat_types::LabCount(workers);
+    // The compiler contract supplies the stable creation identity. The live
+    // handle records the admitted runtime representation so later partition
+    // calls retain its exact class, shape, storage, and residency facts.
+    let value = runmat_runtime::value_fact::value_fact(&input);
     let (shape, parts) = runmat_runtime::parallel::distribution::partition_value(
         &input,
         &contract.scheme,
@@ -194,7 +293,7 @@ async fn create_value(
         generation,
         pool,
         partition_count,
-        value: contract.value,
+        value,
         global_shape: shape
             .iter()
             .map(|dimension| {

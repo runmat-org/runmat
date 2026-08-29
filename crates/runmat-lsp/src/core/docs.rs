@@ -463,6 +463,7 @@ fn format_param_for_completion(param: &runmat_builtins::BuiltinParamDescriptor) 
         BuiltinParamType::StyleSpec => "style",
         BuiltinParamType::PropertyName => "property",
         BuiltinParamType::PropertyValue => "value",
+        BuiltinParamType::Callable => "function",
     };
     format!("{}: {}", param.name, ty)
 }

@@ -16,6 +16,8 @@ pub(crate) enum ParallelIntrinsic {
     LabProbe,
     LabSendReceive,
     Gplus,
+    Gcat,
+    Gop,
 }
 
 impl ParallelIntrinsic {
@@ -39,6 +41,8 @@ impl ParallelIntrinsic {
             "labSendReceive" | "spmdSendReceive" => Some(Self::LabSendReceive),
             "gplus" => Some(Self::Gplus),
             "spmdPlus" => Some(Self::Gplus),
+            "gcat" | "spmdCat" => Some(Self::Gcat),
+            "gop" | "spmdReduce" => Some(Self::Gop),
             _ => None,
         }
     }
@@ -54,6 +58,8 @@ impl ParallelIntrinsic {
             Self::LabProbe => "labProbe",
             Self::LabSendReceive => "labSendReceive",
             Self::Gplus => "gplus",
+            Self::Gcat => "gcat",
+            Self::Gop => "gop",
         }
     }
 }

@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 mod spmd;
 pub use spmd::SpmdLabRequirement;
 
-pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 6;
+pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
@@ -161,6 +161,8 @@ pub struct CollectiveContract {
     pub source: Option<ValueFact>,
     pub destination: Option<ValueFact>,
     pub tag: Option<ValueFact>,
+    pub dimension: Option<ValueFact>,
+    pub reducer: Option<ValueFact>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,6 +175,8 @@ pub enum CollectiveOperation {
     AllGather,
     Reduce { operator: OperatorKind },
     AllReduce { operator: OperatorKind },
+    Cat,
+    FunctionalReduce,
     Send,
     Receive { requested_outputs: u8 },
     SendReceive,
@@ -398,21 +402,37 @@ impl CollectiveContract {
             self.root.is_some(),
             self.source.is_some(),
             self.destination.is_some(),
+            self.dimension.is_some(),
+            self.reducer.is_some(),
         );
         let expected = match self.operation {
-            CollectiveOperation::Barrier => (false, false, false, false, false),
-            CollectiveOperation::Broadcast => (self.input.is_some(), true, true, false, false),
+            CollectiveOperation::Barrier => (false, false, false, false, false, false, false),
+            CollectiveOperation::Broadcast => {
+                (self.input.is_some(), true, true, false, false, false, false)
+            }
             CollectiveOperation::Gather
             | CollectiveOperation::Scatter
-            | CollectiveOperation::Reduce { .. } => (true, true, true, false, false),
+            | CollectiveOperation::Reduce { .. } => (true, true, true, false, false, false, false),
             CollectiveOperation::AllGather | CollectiveOperation::AllReduce { .. } => {
-                (true, true, false, false, false)
+                (true, true, false, false, false, false, false)
             }
-            CollectiveOperation::Send => (true, false, false, false, true),
-            CollectiveOperation::Receive { .. } | CollectiveOperation::Probe => {
-                (false, true, false, self.source.is_some(), false)
+            CollectiveOperation::Cat => {
+                (true, true, self.root.is_some(), false, false, true, false)
             }
-            CollectiveOperation::SendReceive => (true, true, false, true, true),
+            CollectiveOperation::FunctionalReduce => {
+                (true, true, self.root.is_some(), false, false, false, true)
+            }
+            CollectiveOperation::Send => (true, false, false, false, true, false, false),
+            CollectiveOperation::Receive { .. } | CollectiveOperation::Probe => (
+                false,
+                true,
+                false,
+                self.source.is_some(),
+                false,
+                false,
+                false,
+            ),
+            CollectiveOperation::SendReceive => (true, true, false, true, true, false, false),
         };
         if actual != expected {
             return Err(SchemaValidationError::new(

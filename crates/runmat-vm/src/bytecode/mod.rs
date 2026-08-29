@@ -5,7 +5,7 @@ pub mod program;
 mod region;
 
 /// Portable schema for serialized [`Bytecode`] payloads.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 4;
+pub const BYTECODE_SCHEMA_VERSION: u16 = 5;
 /// Portable schema for serialized [`FunctionRegistry`] payloads.
 pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 4;
 

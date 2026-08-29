@@ -42,6 +42,8 @@ pub enum MirConstructKind {
     CollectiveAllGather,
     CollectiveReduce,
     CollectiveAllReduce,
+    CollectiveCat,
+    CollectiveFunctionalReduce,
     CollectiveSend,
     CollectiveReceive,
     CollectiveSendReceive,
@@ -102,6 +104,8 @@ pub fn rvalue_construct_kind(value: &crate::MirRvalue) -> MirConstructKind {
             C::AllGather { .. } => K::CollectiveAllGather,
             C::Reduce { .. } => K::CollectiveReduce,
             C::AllReduce { .. } => K::CollectiveAllReduce,
+            C::Cat { .. } => K::CollectiveCat,
+            C::FunctionalReduce { .. } => K::CollectiveFunctionalReduce,
             C::Send { .. } => K::CollectiveSend,
             C::Receive { .. } => K::CollectiveReceive,
             C::SendReceive { .. } => K::CollectiveSendReceive,
@@ -257,7 +261,7 @@ pub fn statement_declared_effects(statement: &crate::MirStmtKind) -> runmat_type
 }
 
 impl MirConstructKind {
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 51] = [
         Self::Use,
         Self::Unary,
         Self::Binary,
@@ -287,6 +291,8 @@ impl MirConstructKind {
         Self::CollectiveAllGather,
         Self::CollectiveReduce,
         Self::CollectiveAllReduce,
+        Self::CollectiveCat,
+        Self::CollectiveFunctionalReduce,
         Self::CollectiveSend,
         Self::CollectiveReceive,
         Self::CollectiveSendReceive,
@@ -353,6 +359,8 @@ impl MirConstructKind {
             | K::CollectiveAllGather
             | K::CollectiveReduce
             | K::CollectiveAllReduce
+            | K::CollectiveCat
+            | K::CollectiveFunctionalReduce
             | K::CollectiveSend
             | K::CollectiveReceive
             | K::CollectiveSendReceive

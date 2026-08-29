@@ -344,6 +344,29 @@ fn lower_parallel_intrinsic(
                 }
             }))
         }
+        ParallelIntrinsic::Gcat => {
+            let values = operands()?;
+            arity(&values, &[1, 2, 3])?;
+            Some(MirRvalue::Collective(Collective::Cat {
+                id: ctx.collective_identity()?,
+                input: values[0].clone(),
+                dimension: values
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(|| MirOperand::Constant(MirConstant::Number("2".into()))),
+                root: values.get(2).cloned(),
+            }))
+        }
+        ParallelIntrinsic::Gop => {
+            let values = operands()?;
+            arity(&values, &[2, 3])?;
+            Some(MirRvalue::Collective(Collective::FunctionalReduce {
+                id: ctx.collective_identity()?,
+                reducer: values[0].clone(),
+                input: values[1].clone(),
+                root: values.get(2).cloned(),
+            }))
+        }
     };
     Ok(value)
 }
