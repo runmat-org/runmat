@@ -15335,11 +15335,23 @@
           "identifier": "RunMat:onCleanup:GcFailure",
           "when": "The cleanup object target cannot be allocated, rooted, or mutated.",
           "message": "onCleanup: internal object storage failed"
+        },
+        {
+          "code": "RM.CANCEL.RUNTIME_CONTEXT",
+          "identifier": "RunMat:parallel:RuntimeContextUnavailable",
+          "when": "A task, future, or job is cancelled without an active runtime context.",
+          "message": "cancel: no active runtime context"
+        },
+        {
+          "code": "RM.CANCEL.EXECUTION_SERVICE",
+          "identifier": "RunMat:cancel:ExecutionService",
+          "when": "The execution service rejects cancellation of a task, future, or job.",
+          "message": "cancel: execution service failed"
         }
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "cancel accepts only an onCleanup handle and returns a fixed double status; it has no integer data, control, or class-preserving form."
+        "notes": "cancel accepts lifecycle and execution handles and returns a fixed double status; it has no integer data, control, or class-preserving form."
       }
     },
     {
@@ -35681,6 +35693,12 @@
           "identifier": "RunMat:DELETE:PermissionDenied",
           "when": "Underlying filesystem operation fails while deleting files.",
           "message": "delete: filesystem deletion failed"
+        },
+        {
+          "code": "RM.DELETE.RUNTIME_CONTEXT",
+          "identifier": "RunMat:parallel:RuntimeContextUnavailable",
+          "when": "Pool deletion is requested without an active runtime context.",
+          "message": "delete: no active runtime context"
         }
       ],
       "integer_capabilities": [
@@ -76444,7 +76462,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar/array value to convert."
+              "description": "Input scalar or array value to convert."
             }
           ],
           "outputs": [
@@ -76462,19 +76480,19 @@
         {
           "code": "RM.INT32.INVALID_ARGUMENT",
           "identifier": "RunMat:int32:InvalidArgument",
-          "when": "Optional arguments are malformed or unsupported.",
+          "when": "The call has an unsupported number of arguments.",
           "message": "int32: invalid argument"
         },
         {
           "code": "RM.INT32.INVALID_INPUT",
           "identifier": "RunMat:int32:InvalidInput",
-          "when": "Input value cannot be converted to int32.",
+          "when": "Input cannot be converted to int32.",
           "message": "int32: invalid input"
         },
         {
           "code": "RM.INT32.INTERNAL",
           "identifier": "RunMat:int32:Internal",
-          "when": "Internal conversion, gather, or provider upload failed.",
+          "when": "Internal conversion, gather, or provider upload fails.",
           "message": "int32: internal error"
         }
       ],
@@ -162151,7 +162169,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar/array value to convert."
+              "description": "Input scalar or array value to convert."
             }
           ],
           "outputs": [
@@ -162169,19 +162187,19 @@
         {
           "code": "RM.UINT16.INVALID_ARGUMENT",
           "identifier": "RunMat:uint16:InvalidArgument",
-          "when": "Optional arguments are malformed or unsupported.",
+          "when": "The call has an unsupported number of arguments.",
           "message": "uint16: invalid argument"
         },
         {
           "code": "RM.UINT16.INVALID_INPUT",
           "identifier": "RunMat:uint16:InvalidInput",
-          "when": "Input value cannot be converted to uint16.",
+          "when": "Input cannot be converted to uint16.",
           "message": "uint16: invalid input"
         },
         {
           "code": "RM.UINT16.INTERNAL",
           "identifier": "RunMat:uint16:Internal",
-          "when": "Internal conversion, gather, or provider upload failed.",
+          "when": "Internal conversion, gather, or provider upload fails.",
           "message": "uint16: internal error"
         }
       ],
@@ -162369,7 +162387,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar/array value to convert."
+              "description": "Input scalar or array value to convert."
             }
           ],
           "outputs": [
@@ -162387,19 +162405,19 @@
         {
           "code": "RM.UINT32.INVALID_ARGUMENT",
           "identifier": "RunMat:uint32:InvalidArgument",
-          "when": "Optional arguments are malformed or unsupported.",
+          "when": "The call has an unsupported number of arguments.",
           "message": "uint32: invalid argument"
         },
         {
           "code": "RM.UINT32.INVALID_INPUT",
           "identifier": "RunMat:uint32:InvalidInput",
-          "when": "Input value cannot be converted to uint32.",
+          "when": "Input cannot be converted to uint32.",
           "message": "uint32: invalid input"
         },
         {
           "code": "RM.UINT32.INTERNAL",
           "identifier": "RunMat:uint32:Internal",
-          "when": "Internal conversion, gather, or provider upload failed.",
+          "when": "Internal conversion, gather, or provider upload fails.",
           "message": "uint32: internal error"
         }
       ],
@@ -162728,7 +162746,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar/array value to convert."
+              "description": "Input scalar or array value to convert."
             }
           ],
           "outputs": [
@@ -162746,19 +162764,19 @@
         {
           "code": "RM.UINT8.INVALID_ARGUMENT",
           "identifier": "RunMat:uint8:InvalidArgument",
-          "when": "Optional arguments are malformed or unsupported.",
+          "when": "The call has an unsupported number of arguments.",
           "message": "uint8: invalid argument"
         },
         {
           "code": "RM.UINT8.INVALID_INPUT",
           "identifier": "RunMat:uint8:InvalidInput",
-          "when": "Input value cannot be converted to uint8.",
+          "when": "Input cannot be converted to uint8.",
           "message": "uint8: invalid input"
         },
         {
           "code": "RM.UINT8.INTERNAL",
           "identifier": "RunMat:uint8:Internal",
-          "when": "Internal conversion, gather, or provider upload failed.",
+          "when": "Internal conversion, gather, or provider upload fails.",
           "message": "uint8: internal error"
         }
       ],
@@ -175634,6 +175652,1644 @@
           "notes": "Extension mode performs one checked conversion into the floating root and graphics domain; strict mode rejects before provider or graphics state access."
         }
       ]
+    },
+    {
+      "name": "int8",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = int8(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array value to convert."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "int8-converted output value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.INT8.INVALID_ARGUMENT",
+          "identifier": "RunMat:int8:InvalidArgument",
+          "when": "The call has an unsupported number of arguments.",
+          "message": "int8: invalid argument"
+        },
+        {
+          "code": "RM.INT8.INVALID_INPUT",
+          "identifier": "RunMat:int8:InvalidInput",
+          "when": "Input cannot be converted to int8.",
+          "message": "int8: invalid input"
+        },
+        {
+          "code": "RM.INT8.INTERNAL",
+          "identifier": "RunMat:int8:Internal",
+          "when": "Internal conversion, gather, or provider upload fails.",
+          "message": "int8: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = int8(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every native integer class converts directly to authoritative int8 storage without a floating intermediate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native int8 device storage, owner, and residency."
+        }
+      ]
+    },
+    {
+      "name": "int16",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = int16(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array value to convert."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "int16-converted output value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.INT16.INVALID_ARGUMENT",
+          "identifier": "RunMat:int16:InvalidArgument",
+          "when": "The call has an unsupported number of arguments.",
+          "message": "int16: invalid argument"
+        },
+        {
+          "code": "RM.INT16.INVALID_INPUT",
+          "identifier": "RunMat:int16:InvalidInput",
+          "when": "Input cannot be converted to int16.",
+          "message": "int16: invalid input"
+        },
+        {
+          "code": "RM.INT16.INTERNAL",
+          "identifier": "RunMat:int16:Internal",
+          "when": "Internal conversion, gather, or provider upload fails.",
+          "message": "int16: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = int16(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every native integer class converts directly to authoritative int16 storage without a floating intermediate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native int16 device storage, owner, and residency."
+        }
+      ]
+    },
+    {
+      "name": "int64",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = int64(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array value to convert."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "int64-converted output value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.INT64.INVALID_ARGUMENT",
+          "identifier": "RunMat:int64:InvalidArgument",
+          "when": "The call has an unsupported number of arguments.",
+          "message": "int64: invalid argument"
+        },
+        {
+          "code": "RM.INT64.INVALID_INPUT",
+          "identifier": "RunMat:int64:InvalidInput",
+          "when": "Input cannot be converted to int64.",
+          "message": "int64: invalid input"
+        },
+        {
+          "code": "RM.INT64.INTERNAL",
+          "identifier": "RunMat:int64:Internal",
+          "when": "Internal conversion, gather, or provider upload fails.",
+          "message": "int64: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = int64(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every native integer class converts directly to authoritative int64 storage without a floating intermediate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native int64 device storage, owner, and residency."
+        }
+      ]
+    },
+    {
+      "name": "uint64",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = uint64(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input scalar or array value to convert."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "uint64-converted output value."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.UINT64.INVALID_ARGUMENT",
+          "identifier": "RunMat:uint64:InvalidArgument",
+          "when": "The call has an unsupported number of arguments.",
+          "message": "uint64: invalid argument"
+        },
+        {
+          "code": "RM.UINT64.INVALID_INPUT",
+          "identifier": "RunMat:uint64:InvalidInput",
+          "when": "Input cannot be converted to uint64.",
+          "message": "uint64: invalid input"
+        },
+        {
+          "code": "RM.UINT64.INTERNAL",
+          "identifier": "RunMat:uint64:Internal",
+          "when": "Internal conversion, gather, or provider upload fails.",
+          "message": "uint64: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = uint64(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every native integer class converts directly to authoritative uint64 storage without a floating intermediate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native uint64 device storage, owner, and residency."
+        }
+      ]
+    },
+    {
+      "name": "javaObject",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Java operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "javaObjectEDT",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Java operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "javaMethod",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Java operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "javaMethodEDT",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Java operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "javaArray",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Java operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "javaaddpath",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Java operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "javarmpath",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Java operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "javaclasspath",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Java operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "jenv",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Java operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "usejava",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(name)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Java class, method, feature, or classpath name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "isjava",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = java_operation(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Java object or RunMat value used by the operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Java operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.JAVA.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no native Java runtime capability.",
+          "message": "Java interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.JAVA.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Java interoperability contract.",
+          "message": "Invalid Java interoperability operation."
+        },
+        {
+          "code": "RM.JAVA.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Java operation is invoked without an active runtime context.",
+          "message": "Java operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars retain exact signed classes or use a checked Java widening conversion."
+      }
+    },
+    {
+      "name": "pyenv",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = python_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Python operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Python operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PYTHON.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no explicitly provided CPython capability.",
+          "message": "Python interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.PYTHON.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Python interoperability contract.",
+          "message": "Invalid Python interoperability operation."
+        },
+        {
+          "code": "RM.PYTHON.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Python operation is invoked without an active runtime context.",
+          "message": "Python operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars and arrays retain their exact signed or unsigned Python representation."
+      }
+    },
+    {
+      "name": "pyargs",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = python_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Python operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Python operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PYTHON.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no explicitly provided CPython capability.",
+          "message": "Python interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.PYTHON.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Python interoperability contract.",
+          "message": "Invalid Python interoperability operation."
+        },
+        {
+          "code": "RM.PYTHON.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Python operation is invoked without an active runtime context.",
+          "message": "Python operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars and arrays retain their exact signed or unsigned Python representation."
+      }
+    },
+    {
+      "name": "pyrun",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = python_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Python operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Python operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PYTHON.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no explicitly provided CPython capability.",
+          "message": "Python interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.PYTHON.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Python interoperability contract.",
+          "message": "Invalid Python interoperability operation."
+        },
+        {
+          "code": "RM.PYTHON.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Python operation is invoked without an active runtime context.",
+          "message": "Python operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars and arrays retain their exact signed or unsigned Python representation."
+      }
+    },
+    {
+      "name": "pyrunfile",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = python_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Python operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Python operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PYTHON.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no explicitly provided CPython capability.",
+          "message": "Python interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.PYTHON.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Python interoperability contract.",
+          "message": "Invalid Python interoperability operation."
+        },
+        {
+          "code": "RM.PYTHON.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Python operation is invoked without an active runtime context.",
+          "message": "Python operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars and arrays retain their exact signed or unsigned Python representation."
+      }
+    },
+    {
+      "name": "terminate",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = python_operation(arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments supplied to the Python operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result of the Python operation."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.PYTHON.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host has no explicitly provided CPython capability.",
+          "message": "Python interoperability is unavailable on this host."
+        },
+        {
+          "code": "RM.PYTHON.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the Python interoperability contract.",
+          "message": "Invalid Python interoperability operation."
+        },
+        {
+          "code": "RM.PYTHON.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A Python operation is invoked without an active runtime context.",
+          "message": "Python operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Fixed-width integer scalars and arrays retain their exact signed or unsigned Python representation."
+      }
+    },
+    {
+      "name": "loadlibrary",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[notfound, warnings] = loadlibrary(library, header, options)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments required by this shared-library operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NATIVE_FFI.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host cannot load a native shared library.",
+          "message": "Native shared libraries are unavailable on this host."
+        },
+        {
+          "code": "RM.NATIVE_FFI.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the normalized shared-library contract.",
+          "message": "Invalid shared-library operation."
+        },
+        {
+          "code": "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A native shared-library operation is invoked without an active runtime context.",
+          "message": "Native shared-library operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed integer values retain native storage and are range-checked against the declared C ABI type."
+      }
+    },
+    {
+      "name": "calllib",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[outputs] = calllib(library, function, arguments)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments required by this shared-library operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NATIVE_FFI.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host cannot load a native shared library.",
+          "message": "Native shared libraries are unavailable on this host."
+        },
+        {
+          "code": "RM.NATIVE_FFI.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the normalized shared-library contract.",
+          "message": "Invalid shared-library operation."
+        },
+        {
+          "code": "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A native shared-library operation is invoked without an active runtime context.",
+          "message": "Native shared-library operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed integer values retain native storage and are range-checked against the declared C ABI type."
+      }
+    },
+    {
+      "name": "unloadlibrary",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = shared_library_operation(name)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Library, header, alias, function, or pointer type name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NATIVE_FFI.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host cannot load a native shared library.",
+          "message": "Native shared libraries are unavailable on this host."
+        },
+        {
+          "code": "RM.NATIVE_FFI.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the normalized shared-library contract.",
+          "message": "Invalid shared-library operation."
+        },
+        {
+          "code": "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A native shared-library operation is invoked without an active runtime context.",
+          "message": "Native shared-library operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed integer values retain native storage and are range-checked against the declared C ABI type."
+      }
+    },
+    {
+      "name": "libisloaded",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "result = shared_library_operation(name)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Library, header, alias, function, or pointer type name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NATIVE_FFI.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host cannot load a native shared library.",
+          "message": "Native shared libraries are unavailable on this host."
+        },
+        {
+          "code": "RM.NATIVE_FFI.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the normalized shared-library contract.",
+          "message": "Invalid shared-library operation."
+        },
+        {
+          "code": "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A native shared-library operation is invoked without an active runtime context.",
+          "message": "Native shared-library operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed integer values retain native storage and are range-checked against the declared C ABI type."
+      }
+    },
+    {
+      "name": "libfunctions",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "names = libfunctions(library)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Library, header, alias, function, or pointer type name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        },
+        {
+          "label": "signatures = libfunctions(library, '-full')",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments required by this shared-library operation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NATIVE_FFI.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host cannot load a native shared library.",
+          "message": "Native shared libraries are unavailable on this host."
+        },
+        {
+          "code": "RM.NATIVE_FFI.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the normalized shared-library contract.",
+          "message": "Invalid shared-library operation."
+        },
+        {
+          "code": "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A native shared-library operation is invoked without an active runtime context.",
+          "message": "Native shared-library operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed integer values retain native storage and are range-checked against the declared C ABI type."
+      }
+    },
+    {
+      "name": "libpointer",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "pointer = libpointer()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        },
+        {
+          "label": "pointer = libpointer(type)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Library, header, alias, function, or pointer type name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        },
+        {
+          "label": "pointer = libpointer(type, value)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Library, header, alias, function, or pointer type name."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Value passed through the normalized native ABI contract."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NATIVE_FFI.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host cannot load a native shared library.",
+          "message": "Native shared libraries are unavailable on this host."
+        },
+        {
+          "code": "RM.NATIVE_FFI.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the normalized shared-library contract.",
+          "message": "Invalid shared-library operation."
+        },
+        {
+          "code": "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A native shared-library operation is invoked without an active runtime context.",
+          "message": "Native shared-library operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed integer values retain native storage and are range-checked against the declared C ABI type."
+      }
+    },
+    {
+      "name": "setdatatype",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "setdatatype(pointer, type, dimensions)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Arguments required by this shared-library operation."
+            }
+          ],
+          "outputs": []
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NATIVE_FFI.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host cannot load a native shared library.",
+          "message": "Native shared libraries are unavailable on this host."
+        },
+        {
+          "code": "RM.NATIVE_FFI.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the normalized shared-library contract.",
+          "message": "Invalid shared-library operation."
+        },
+        {
+          "code": "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A native shared-library operation is invoked without an active runtime context.",
+          "message": "Native shared-library operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed integer values retain native storage and are range-checked against the declared C ABI type."
+      }
+    },
+    {
+      "name": "libstruct",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = libstruct(type)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Library, header, alias, function, or pointer type name."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        },
+        {
+          "label": "value = libstruct(type, structure)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Library, header, alias, function, or pointer type name."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Value passed through the normalized native ABI contract."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Native return value followed by declared output parameters."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.NATIVE_FFI.UNAVAILABLE",
+          "identifier": "RunMat:Foreign:UnsupportedOnWasm",
+          "when": "The current host cannot load a native shared library.",
+          "message": "Native shared libraries are unavailable on this host."
+        },
+        {
+          "code": "RM.NATIVE_FFI.INVALID_CALL",
+          "identifier": "RunMat:Foreign:InvalidCall",
+          "when": "Arguments do not satisfy the normalized shared-library contract.",
+          "message": "Invalid shared-library operation."
+        },
+        {
+          "code": "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+          "identifier": "RunMat:Foreign:HostUnavailable",
+          "when": "A native shared-library operation is invoked without an active runtime context.",
+          "message": "Native shared-library operation has no active runtime context."
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed integer values retain native storage and are range-checked against the declared C ABI type."
+      }
     }
   ]
 }

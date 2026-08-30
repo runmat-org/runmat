@@ -180,7 +180,13 @@ const DELETE_ERROR_OS_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Underlying filesystem operation fails while deleting files.",
     message: "delete: filesystem deletion failed",
 };
-const DELETE_ERRORS: [BuiltinErrorDescriptor; 7] = [
+const DELETE_ERROR_RUNTIME_CONTEXT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DELETE.RUNTIME_CONTEXT",
+    identifier: Some("RunMat:parallel:RuntimeContextUnavailable"),
+    when: "Pool deletion is requested without an active runtime context.",
+    message: "delete: no active runtime context",
+};
+const DELETE_ERRORS: [BuiltinErrorDescriptor; 8] = [
     DELETE_ERROR_INVALID_INPUT,
     DELETE_ERROR_INVALID_HANDLE,
     DELETE_ERROR_EMPTY_FILENAME,
@@ -188,6 +194,7 @@ const DELETE_ERRORS: [BuiltinErrorDescriptor; 7] = [
     DELETE_ERROR_FILE_NOT_FOUND,
     DELETE_ERROR_IS_DIRECTORY,
     DELETE_ERROR_OS_ERROR,
+    DELETE_ERROR_RUNTIME_CONTEXT,
 ];
 pub const DELETE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DELETE_SIGNATURES,
@@ -246,10 +253,10 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
     if let [Value::Pool(pool)] = args.as_slice() {
         let context = crate::context::legacy::active().ok_or_else(|| {
-            crate::build_runtime_error("delete: no active runtime context")
-                .with_builtin("delete")
-                .with_identifier("RunMat:parallel:RuntimeContextUnavailable")
-                .build()
+            delete_error_with(
+                &DELETE_ERROR_RUNTIME_CONTEXT,
+                DELETE_ERROR_RUNTIME_CONTEXT.message,
+            )
         })?;
         crate::parallel::pool::close(&context, pool)?;
         return Ok(Value::Num(0.0));

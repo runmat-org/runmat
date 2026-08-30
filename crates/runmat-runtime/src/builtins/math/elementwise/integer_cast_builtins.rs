@@ -6,18 +6,15 @@ macro_rules! define_integer_cast_builtin {
         $function:ident,
         $name:literal,
         $target:expr,
-        $summary:literal,
-        $keywords:literal,
-        $descriptor:path,
         $path:literal,
-        $argument_code:literal,
-        $input_code:literal,
-        $internal_code:literal
+        $argument_error:path,
+        $input_error:path,
+        $internal_error:path
     ) => {
         pub(crate) mod $module {
-            use runmat_builtins::{BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor};
-            use runmat_value::{Value};
+            use runmat_builtins::BuiltinErrorDescriptor;
             use runmat_macros::runtime_builtin;
+            use runmat_value::Value;
 
             use crate::builtins::common::spec::{
                 BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy,
@@ -27,54 +24,7 @@ macro_rules! define_integer_cast_builtin {
             use crate::builtins::math::elementwise::integer_cast::{
                 cast_value, CastError, IntegerTarget,
             };
-            use crate::builtins::math::type_resolvers::numeric_unary_type;
             use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-
-            const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-                name: "Y",
-                ty: BuiltinParamType::NumericArray,
-                arity: BuiltinParamArity::Required,
-                default: None,
-                description: "Converted integer output value.",
-            }];
-            const INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-                name: "X",
-                ty: BuiltinParamType::Any,
-                arity: BuiltinParamArity::Required,
-                default: None,
-                description: "Input scalar or array value to convert.",
-            }];
-            const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-                label: concat!("Y = ", $name, "(X)"),
-                inputs: &INPUT,
-                outputs: &OUTPUT,
-            }];
-            const INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-                code: $argument_code,
-                identifier: Some(concat!("RunMat:", $name, ":InvalidArgument")),
-                when: "Optional arguments are malformed or unsupported.",
-                message: concat!($name, ": invalid argument"),
-            };
-            const INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-                code: $input_code,
-                identifier: Some(concat!("RunMat:", $name, ":InvalidInput")),
-                when: "Input value cannot be converted to the requested integer class.",
-                message: concat!($name, ": invalid input"),
-            };
-            const INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-                code: $internal_code,
-                identifier: Some(concat!("RunMat:", $name, ":Internal")),
-                when: "Internal conversion or GPU gather failed.",
-                message: concat!($name, ": internal error"),
-            };
-            const ERRORS: [BuiltinErrorDescriptor; 3] = [INVALID_ARGUMENT, INVALID_INPUT, INTERNAL];
-
-            pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-                signatures: &SIGNATURES,
-                output_mode: BuiltinOutputMode::Fixed,
-                completion_policy: BuiltinCompletionPolicy::Public,
-                errors: &ERRORS,
-            };
 
             #[runmat_macros::register_gpu_spec(builtin_path = $path)]
             pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -105,27 +55,22 @@ macro_rules! define_integer_cast_builtin {
 
             #[runtime_builtin(
                 name = $name,
-                category = "math/elementwise",
-                summary = $summary,
-                keywords = $keywords,
-                accel = "unary",
-                type_resolver(numeric_unary_type),
-                descriptor($descriptor),
+                binding_variant = "default",
                 builtin_path = $path
             )]
             pub(crate) async fn $function(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
                 if !rest.is_empty() {
                     return Err(error(
-                        &INVALID_ARGUMENT,
+                        &$argument_error,
                         "too many input arguments",
                     ));
                 }
                 cast_value(value, $target).await.map_err(|cause| match cause {
                     CastError::Unsupported(type_name) => error(
-                        &INVALID_INPUT,
+                        &$input_error,
                         format!("conversion to {} from {type_name} is not possible", $name),
                     ),
-                    CastError::Internal(detail) => error(&INTERNAL, detail),
+                    CastError::Internal(detail) => error(&$internal_error, detail),
                 })
             }
 
@@ -146,52 +91,40 @@ define_integer_cast_builtin!(
     int8_builtin,
     "int8",
     IntegerTarget::I8,
-    "Convert scalars and arrays to int8 using MATLAB saturating rounding.",
-    "int8,cast,integer,conversion,gpuArray",
-    crate::builtins::math::elementwise::integer_cast_builtins::int8::DESCRIPTOR,
     "crate::builtins::math::elementwise::integer_cast_builtins::int8",
-    "RM.INT8.INVALID_ARGUMENT",
-    "RM.INT8.INVALID_INPUT",
-    "RM.INT8.INTERNAL"
+    runmat_builtins::INT8_ERROR_INVALID_ARGUMENT,
+    runmat_builtins::INT8_ERROR_INVALID_INPUT,
+    runmat_builtins::INT8_ERROR_INTERNAL
 );
 define_integer_cast_builtin!(
     int16,
     int16_builtin,
     "int16",
     IntegerTarget::I16,
-    "Convert scalars and arrays to int16 using MATLAB saturating rounding.",
-    "int16,cast,integer,conversion,gpuArray",
-    crate::builtins::math::elementwise::integer_cast_builtins::int16::DESCRIPTOR,
     "crate::builtins::math::elementwise::integer_cast_builtins::int16",
-    "RM.INT16.INVALID_ARGUMENT",
-    "RM.INT16.INVALID_INPUT",
-    "RM.INT16.INTERNAL"
+    runmat_builtins::INT16_ERROR_INVALID_ARGUMENT,
+    runmat_builtins::INT16_ERROR_INVALID_INPUT,
+    runmat_builtins::INT16_ERROR_INTERNAL
 );
 define_integer_cast_builtin!(
     int64,
     int64_builtin,
     "int64",
     IntegerTarget::I64,
-    "Convert scalars and arrays to int64 using MATLAB saturating rounding.",
-    "int64,cast,integer,conversion,gpuArray",
-    crate::builtins::math::elementwise::integer_cast_builtins::int64::DESCRIPTOR,
     "crate::builtins::math::elementwise::integer_cast_builtins::int64",
-    "RM.INT64.INVALID_ARGUMENT",
-    "RM.INT64.INVALID_INPUT",
-    "RM.INT64.INTERNAL"
+    runmat_builtins::INT64_ERROR_INVALID_ARGUMENT,
+    runmat_builtins::INT64_ERROR_INVALID_INPUT,
+    runmat_builtins::INT64_ERROR_INTERNAL
 );
 define_integer_cast_builtin!(
     uint64,
     uint64_builtin,
     "uint64",
     IntegerTarget::U64,
-    "Convert scalars and arrays to uint64 using MATLAB saturating rounding.",
-    "uint64,cast,integer,conversion,gpuArray",
-    crate::builtins::math::elementwise::integer_cast_builtins::uint64::DESCRIPTOR,
     "crate::builtins::math::elementwise::integer_cast_builtins::uint64",
-    "RM.UINT64.INVALID_ARGUMENT",
-    "RM.UINT64.INVALID_INPUT",
-    "RM.UINT64.INTERNAL"
+    runmat_builtins::UINT64_ERROR_INVALID_ARGUMENT,
+    runmat_builtins::UINT64_ERROR_INVALID_INPUT,
+    runmat_builtins::UINT64_ERROR_INTERNAL
 );
 
 #[cfg(test)]

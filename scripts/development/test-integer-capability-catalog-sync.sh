@@ -42,11 +42,18 @@ expect_sync_rejection() {
 expect_sync_rejection --catalog "${checked}" --live "${live}" --output "${temp_dir}/too-small.json" "${names[@]:0:7}"
 expect_sync_rejection --catalog "${checked}" --live "${live}" --output "${temp_dir}/too-large.json" "${all_names[@]:0:26}"
 expect_sync_rejection --catalog "${checked}" --live "${live}" --output "${temp_dir}/duplicate.json" "${names[0]}" "${names[0]}" "${names[@]:1:6}"
-expect_sync_rejection --catalog "${checked}" --live "${live}" --output "${temp_dir}/missing-checked.json" missing-checked "${names[@]:1:7}"
 expect_sync_rejection --catalog "${checked}" --live "${live}" --output "${temp_dir}/missing-live.json" missing-live "${names[@]:1:7}"
 jq -n '{}' >"${temp_dir}/existing.json"
 expect_sync_rejection --catalog "${checked}" --live "${live}" --output "${temp_dir}/existing.json" "${names[@]}"
 expect_sync_rejection --catalog "${checked}" --live "${live}" --output "${temp_dir}/mutually-exclusive.json" --in-place "${names[@]}"
+
+added_output="${temp_dir}/added.json"
+"${sync_script}" --catalog "${checked}" --live "${live}" --output "${added_output}" missing-checked "${names[@]:1:7}" >/dev/null
+jq -e '([.builtins[] | select(.name == "missing-checked" and .marker == "live")] | length) == 1' "${added_output}" >/dev/null
+jq -e --slurpfile checked "${checked}" '([.builtins[] | select(.name != "missing-checked") | .name] | sort) == ([$checked[0].builtins[].name] | sort)' "${added_output}" >/dev/null
+
+jq '.builtins += [.builtins[0]]' "${checked}" >"${temp_dir}/duplicate-checked.json"
+expect_sync_rejection --catalog "${temp_dir}/duplicate-checked.json" --live "${live}" --output "${temp_dir}/duplicate-checked-output.json" "${names[@]}"
 
 cp "${checked}" "${temp_dir}/failed-in-place.json"
 cp "${temp_dir}/failed-in-place.json" "${temp_dir}/failed-in-place-before.json"

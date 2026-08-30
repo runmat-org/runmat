@@ -45,7 +45,14 @@ const ERROR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Arguments do not satisfy the Python interoperability contract.",
     message: "Invalid Python interoperability operation.",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_UNAVAILABLE, ERROR_INVALID];
+const ERROR_HOST_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PYTHON.HOST_UNAVAILABLE",
+    identifier: Some("RunMat:Foreign:HostUnavailable"),
+    when: "A Python operation is invoked without an active runtime context.",
+    message: "Python operation has no active runtime context.",
+};
+const ERRORS: [BuiltinErrorDescriptor; 3] =
+    [ERROR_UNAVAILABLE, ERROR_INVALID, ERROR_HOST_UNAVAILABLE];
 const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -62,19 +69,12 @@ async fn invoke_python(operation: &str, arguments: Vec<Value>) -> BuiltinResult<
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (operation, arguments);
-        Err(build_runtime_error(ERROR_UNAVAILABLE.message)
-            .with_builtin("python")
-            .with_identifier("RunMat:Foreign:UnsupportedOnWasm")
-            .build())
+        Err(python_error(&ERROR_UNAVAILABLE, ERROR_UNAVAILABLE.message))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let context = crate::context::legacy::active().ok_or_else(|| {
-            build_runtime_error("Python operation has no active runtime context")
-                .with_builtin("python")
-                .with_identifier("RunMat:Foreign:HostUnavailable")
-                .build()
-        })?;
+        let context = crate::context::legacy::active()
+            .ok_or_else(|| python_error(&ERROR_HOST_UNAVAILABLE, ERROR_HOST_UNAVAILABLE.message))?;
         let service = context
             .service_ports()
             .require_foreign(operation)
@@ -232,8 +232,16 @@ fn requested_output_names(arguments: &mut Vec<Value>, builtin: &str) -> BuiltinR
 }
 
 fn invalid_call(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("python")
-        .with_identifier("RunMat:Foreign:InvalidCall")
-        .build()
+    python_error(&ERROR_INVALID, message)
+}
+
+fn python_error(
+    descriptor: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("python");
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }

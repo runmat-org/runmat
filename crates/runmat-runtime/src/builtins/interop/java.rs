@@ -73,7 +73,14 @@ const ERROR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Arguments do not satisfy the Java interoperability contract.",
     message: "Invalid Java interoperability operation.",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_UNAVAILABLE, ERROR_INVALID];
+const ERROR_HOST_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JAVA.HOST_UNAVAILABLE",
+    identifier: Some("RunMat:Foreign:HostUnavailable"),
+    when: "A Java operation is invoked without an active runtime context.",
+    message: "Java operation has no active runtime context.",
+};
+const ERRORS: [BuiltinErrorDescriptor; 3] =
+    [ERROR_UNAVAILABLE, ERROR_INVALID, ERROR_HOST_UNAVAILABLE];
 const TEXT_DESCRIPTOR: BuiltinDescriptor = descriptor(&TEXT_SIGNATURES);
 const VALUE_DESCRIPTOR: BuiltinDescriptor = descriptor(&VALUE_SIGNATURES);
 const VARIADIC_DESCRIPTOR: BuiltinDescriptor = descriptor(&VARIADIC_SIGNATURES);
@@ -97,19 +104,12 @@ async fn invoke_java(operation: &str, arguments: Vec<Value>) -> BuiltinResult<Va
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (operation, arguments);
-        Err(build_runtime_error(ERROR_UNAVAILABLE.message)
-            .with_builtin("java")
-            .with_identifier("RunMat:Foreign:UnsupportedOnWasm")
-            .build())
+        Err(java_error(&ERROR_UNAVAILABLE, ERROR_UNAVAILABLE.message))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let context = crate::context::legacy::active().ok_or_else(|| {
-            build_runtime_error("Java operation has no active runtime context")
-                .with_builtin("java")
-                .with_identifier("RunMat:Foreign:HostUnavailable")
-                .build()
-        })?;
+        let context = crate::context::legacy::active()
+            .ok_or_else(|| java_error(&ERROR_HOST_UNAVAILABLE, ERROR_HOST_UNAVAILABLE.message))?;
         let service = context
             .service_ports()
             .require_foreign(operation)
@@ -404,8 +404,16 @@ fn text_entries(arguments: Vec<Value>, builtin: &str) -> BuiltinResult<Vec<Strin
 }
 
 fn invalid_call(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("java")
-        .with_identifier("RunMat:Foreign:InvalidCall")
-        .build()
+    java_error(&ERROR_INVALID, message)
+}
+
+fn java_error(
+    descriptor: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("java");
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
