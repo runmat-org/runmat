@@ -369,6 +369,13 @@ pub fn free_unprotected_exact_owner(handle: &GpuTensorHandle, protected: &[&GpuT
     }
 }
 
+/// Return whether an optional provider hook reported the API's canonical
+/// unsupported-operation result. Other provider failures must remain visible
+/// instead of silently changing the execution path.
+pub fn provider_hook_is_unsupported(error: &anyhow::Error, hook: &str) -> bool {
+    error.to_string() == format!("{hook} not supported by provider")
+}
+
 /// Download a GPU tensor handle to host memory, returning a dense `Tensor`.
 ///
 /// This helper routes through the dispatcher so residency hooks and provider

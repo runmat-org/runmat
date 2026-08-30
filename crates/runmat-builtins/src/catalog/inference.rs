@@ -12,6 +12,8 @@ use runmat_types::{
 };
 use std::collections::BTreeMap;
 
+mod math_unary;
+
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
     let distributed = request.arguments.iter().find_map(|argument| {
         let ValueKindFact::Distributed(distributed) = &argument.kind else {
@@ -39,6 +41,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Array(ArrayInferenceRule::Full) => infer_full(request, entry),
         BuiltinInferenceRule::Array(ArrayInferenceRule::Zeros) => infer_zeros(request, entry),
         BuiltinInferenceRule::Math(MathInferenceRule::Abs) => infer_abs(request, entry),
+        BuiltinInferenceRule::Math(MathInferenceRule::PhaseAngle) => {
+            math_unary::infer_phase_angle(request, entry)
+        }
         BuiltinInferenceRule::Math(MathInferenceRule::Exp) => infer_exp(request, entry),
         BuiltinInferenceRule::Math(MathInferenceRule::NumericConversion(target)) => {
             infer_numeric_conversion_call(request, entry, target)
@@ -48,6 +53,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         }
         BuiltinInferenceRule::Math(MathInferenceRule::NumericComponent(rule)) => {
             infer_numeric_component_call(request, entry, rule)
+        }
+        BuiltinInferenceRule::Math(MathInferenceRule::Signum) => {
+            math_unary::infer_signum(request, entry)
         }
         BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather) => {
             infer_gather(request, entry)

@@ -5310,7 +5310,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Phase angle in radians."
+              "description": "Real phase angle in radians with the input floating-point class and shape."
             }
           ]
         }
@@ -5325,7 +5325,7 @@
         {
           "code": "RM.ANGLE.INTERNAL",
           "identifier": "RunMat:angle:Internal",
-          "when": "Internal tensor conversion/allocation/provider interaction failed.",
+          "when": "Internal tensor conversion, allocation, or provider interaction fails.",
           "message": "angle: internal error"
         }
       ],
@@ -5338,7 +5338,7 @@
               "classes": [],
               "availability": "Rejected",
               "scalar_double": "NotApplicable",
-              "notes": "The documented input domain is real or complex single/double; every real or componentwise-complex typed-integer class is rejected before host or provider computation."
+              "notes": "Real and componentwise-complex fixed-width integer classes are rejected before host or provider computation."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -5346,7 +5346,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "angle has no integer overload. Host scalars, dense arrays, typed complex integer arrays, and resident integer handles reject with the same public invalid-input category without floating materialization."
+          "notes": "angle has no fixed-width integer overload. Scalars, arrays, typed complex integers, and resident integer handles reject without floating-point materialization."
         }
       ]
     },
@@ -140854,7 +140854,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Real or complex numeric input."
+              "description": "Real numeric, logical, character, or floating-point complex input."
             }
           ],
           "outputs": [
@@ -140863,7 +140863,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Elementwise sign result."
+              "description": "Elementwise sign result. Numeric inputs retain their class; logical and character inputs return double."
             }
           ]
         }
@@ -140872,13 +140872,13 @@
         {
           "code": "RM.SIGN.INVALID_INPUT",
           "identifier": "RunMat:sign:InvalidInput",
-          "when": "Input is not a supported numeric/logical/character value.",
+          "when": "Input is not a supported numeric, logical, or character value.",
           "message": "sign: invalid input"
         },
         {
           "code": "RM.SIGN.INTERNAL",
           "identifier": "RunMat:sign:Internal",
-          "when": "Internal gather/provider/tensor construction failed.",
+          "when": "Internal tensor construction or provider interaction fails.",
           "message": "sign: internal error"
         }
       ],
@@ -140900,7 +140900,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "All eight real integer classes are read and transformed directly in authoritative native storage."
+              "notes": "All eight real integer classes are transformed directly in native storage."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -140908,7 +140908,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Signed values map to -1, 0, or 1 and unsigned values to 0 or 1 in the input class; unsupported resident hooks gather exact typed storage."
+          "notes": "Signed values map to -1, 0, or 1 and unsigned values to 0 or 1 in the input class. Unsupported resident hooks use an exact owner-preserving fallback."
         }
       ]
     },

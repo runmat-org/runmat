@@ -1,14 +1,9 @@
 //! MATLAB-compatible `angle` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, ANGLE_ERROR_INTERNAL, ANGLE_ERROR_INVALID_INPUT};
+#[cfg(test)]
+use runmat_builtins::{ANGLE_DESCRIPTOR, ANGLE_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
@@ -18,7 +13,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::angle")]
@@ -64,67 +58,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "angle";
 
-const ANGLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "theta",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Phase angle in radians.",
-}];
-const ANGLE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Real or complex single- or double-precision input.",
-}];
-const ANGLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "theta = angle(X)",
-    inputs: &ANGLE_INPUTS,
-    outputs: &ANGLE_OUTPUT,
-}];
-const ANGLE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ANGLE.INVALID_INPUT",
-    identifier: Some("RunMat:angle:InvalidInput"),
-    when: "Input is not real or complex single- or double-precision data.",
-    message: "angle: invalid input",
-};
-const ANGLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ANGLE.INTERNAL",
-    identifier: Some("RunMat:angle:Internal"),
-    when: "Internal tensor conversion/allocation/provider interaction failed.",
-    message: "angle: internal error",
-};
-const ANGLE_ERRORS: [BuiltinErrorDescriptor; 2] = [ANGLE_ERROR_INVALID_INPUT, ANGLE_ERROR_INTERNAL];
-
-const ANGLE_REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented input domain is real or complex single/double; every real or componentwise-complex typed-integer class is rejected before host or provider computation.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "theta = angle(integer_X)",
-        inputs: &ANGLE_REJECTED_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "angle has no integer overload. Host scalars, dense arrays, typed complex integer arrays, and resident integer handles reject with the same public invalid-input category without floating materialization.",
-    }];
-
-pub const ANGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ANGLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ANGLE_ERRORS,
-};
-
 fn builtin_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -139,13 +72,7 @@ fn builtin_error_with_detail(
 
 #[runtime_builtin(
     name = "angle",
-    category = "math/elementwise",
-    summary = "Phase angle (argument) of real and complex values.",
-    keywords = "angle,phase,argument,complex,gpu",
-    accel = "unary",
-    type_resolver(angle_type),
-    descriptor(crate::builtins::math::elementwise::angle::ANGLE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::elementwise::angle::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::angle"
 )]
 async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
@@ -174,35 +101,87 @@ async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn angle_type(args: &[Type], context: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::Int | Type::Bool | Type::Logical { .. }) => Type::Unknown,
-        _ => numeric_unary_type(args, context),
-    }
-}
-
 async fn angle_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
+    if gpu_helpers::expected_handle_numeric_element_type(&handle).is_err() {
+        return Err(builtin_error_with_detail(
+            &ANGLE_ERROR_INTERNAL,
+            "GPU input class metadata contradicts its physical storage",
+        ));
+    }
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
         return Err(builtin_error_with_detail(
             &ANGLE_ERROR_INVALID_INPUT,
             "integer gpuArray input is not supported",
         ));
     }
-    if let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
-    {
-        if let Ok(device_result) = provider.unary_angle(&handle).await {
-            return Ok(Value::GpuTensor(device_result));
+    if runmat_accelerate_api::handle_is_logical(&handle) {
+        return Err(builtin_error_with_detail(
+            &ANGLE_ERROR_INVALID_INPUT,
+            "logical gpuArray input is not supported",
+        ));
+    }
+    if runmat_accelerate_api::handle_precision(&handle) == Some(provider.precision()) {
+        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let result = provider.unary_angle(&handle).await;
+        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        match result {
+            Ok(mut output) if valid_angle_gpu_output(&output, &handle, provider) => {
+                runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
+                return Ok(gpu_helpers::resident_gpu_value(output));
+            }
+            Ok(output) => {
+                gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
+                return Err(builtin_error_with_detail(
+                    &ANGLE_ERROR_INTERNAL,
+                    "provider unary_angle returned malformed output",
+                ));
+            }
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error, "unary_angle") => {}
+            Err(error) => {
+                return Err(builtin_error_with_detail(
+                    &ANGLE_ERROR_INTERNAL,
+                    format!("provider unary_angle failed: {error}"),
+                ));
+            }
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-        .await
+    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let gathered_result =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
+    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+    let gathered = gathered_result
         .map_err(|err| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, err.to_string()))?;
-    match gathered {
+    let host = match gathered {
         Value::Complex(re, im) => Ok(Value::Num(angle_scalar(re, im))),
         Value::ComplexTensor(ct) => angle_complex_tensor(ct),
         other => angle_real(other),
-    }
+    }?;
+    gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
+        .map_err(|err| builtin_error_with_detail(&ANGLE_ERROR_INTERNAL, err.message()))
+}
+
+fn valid_angle_gpu_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    gpu_helpers::unary_gpu_output_matches(
+        output,
+        input,
+        provider,
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            precision: runmat_accelerate_api::handle_precision(input),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        },
+    )
 }
 
 fn angle_real(value: Value) -> BuiltinResult<Value> {
@@ -271,6 +250,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::BuiltinIntegerInputAvailability;
 
     #[cfg(feature = "wgpu")]
     fn register_wgpu_provider_available() -> bool {
@@ -310,55 +290,12 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"theta = angle(X)"));
-        assert_eq!(INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(ANGLE_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(
-            INTEGER_CAPABILITIES[0].inputs[0].availability,
+            ANGLE_INTEGER_CAPABILITIES[0].inputs[0].availability,
             BuiltinIntegerInputAvailability::Rejected
         );
-        assert!(INTEGER_CAPABILITIES[0].inputs[0].classes.is_empty());
-    }
-
-    #[test]
-    fn angle_type_preserves_tensor_shape() {
-        let out = angle_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn angle_type_scalar_tensor_returns_num() {
-        let out = angle_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
-    }
-
-    #[test]
-    fn angle_type_rejects_known_integer_and_logical_inputs() {
-        let context = ResolveContext::new(Vec::new());
-        assert_eq!(angle_type(&[Type::Int], &context), Type::Unknown);
-        assert_eq!(angle_type(&[Type::Bool], &context), Type::Unknown);
-        assert_eq!(
-            angle_type(
-                &[Type::Logical {
-                    shape: Some(vec![Some(2), Some(3)]),
-                }],
-                &context,
-            ),
-            Type::Unknown
-        );
+        assert!(ANGLE_INTEGER_CAPABILITIES[0].inputs[0].classes.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

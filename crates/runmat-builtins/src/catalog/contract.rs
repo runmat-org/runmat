@@ -49,10 +49,12 @@ pub enum IntrospectionInferenceRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum MathInferenceRule {
     Abs,
+    PhaseAngle,
     Exp,
     NumericConversion(runmat_types::NumericClass),
     NumericConversionWithLike(runmat_types::NumericClass),
     NumericComponent(NumericComponentRule),
+    Signum,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
