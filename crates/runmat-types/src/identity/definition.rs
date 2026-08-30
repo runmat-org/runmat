@@ -50,7 +50,7 @@ impl QualifiedName {
 
 macro_rules! string_identity {
     ($name:ident) => {
-        #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Serialize, Deserialize)]
         pub struct $name(pub String);
     };
 }

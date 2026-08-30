@@ -4,6 +4,7 @@ mod visit;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use runmat_hir::{FunctionId, FunctionKind};
+use runmat_types::BuiltinId;
 
 use super::{
     ReachabilityCertainty as Certainty, ReachabilityEdge, ReachabilityNames, ReachabilityNode,
@@ -145,6 +146,28 @@ impl<'a> Walker<'a> {
             });
     }
 
+    fn builtin_node(
+        &mut self,
+        id: String,
+        builtin: BuiltinId,
+        symbol: String,
+        certainty: Certainty,
+    ) {
+        self.nodes
+            .entry(id.clone())
+            .and_modify(|node| {
+                node.certainty = node.certainty.min(certainty);
+                debug_assert_eq!(node.builtin_id(), Some(&builtin));
+            })
+            .or_insert(ReachabilityNode {
+                id,
+                kind: Kind::Builtin(builtin),
+                module: "runmat-builtins".into(),
+                symbol,
+                certainty,
+            });
+    }
+
     fn edge(
         &mut self,
         from: Option<String>,
@@ -167,10 +190,10 @@ fn function_id(function: FunctionId) -> String {
     format!("function:{}", function.0)
 }
 
-fn kind_token(kind: Kind) -> &'static str {
+fn kind_token(kind: &Kind) -> &'static str {
     match kind {
         Kind::Function => "function",
-        Kind::Builtin => "builtin",
+        Kind::Builtin(_) => "builtin",
         Kind::Class => "class",
         Kind::Method => "method",
         Kind::Provider => "provider",

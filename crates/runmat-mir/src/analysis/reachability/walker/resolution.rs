@@ -57,7 +57,8 @@ impl Walker<'_> {
     }
 
     pub(super) fn named_dynamic(&mut self, from: &str, kind: Kind, symbol: String, detail: &str) {
-        let id = format!("{}:{}", kind_token(kind), symbol.to_ascii_lowercase());
+        let id = format!("{}:{}", kind_token(&kind), symbol.to_ascii_lowercase());
+        let is_method = kind == Kind::Method;
         self.node(
             id.clone(),
             kind,
@@ -69,7 +70,7 @@ impl Walker<'_> {
             Some(from.into()),
             id,
             Certainty::FiniteDynamic,
-            if kind == Kind::Method {
+            if is_method {
                 Reason::MethodDispatch
             } else {
                 Reason::DynamicNamedCall
@@ -142,8 +143,14 @@ impl Walker<'_> {
         reason: Reason,
         detail: Option<String>,
     ) {
-        let id = format!("builtin:{}", name.to_ascii_lowercase());
-        let contract_certainty = builtin_catalog_entry_by_name(name)
+        let entry = builtin_catalog_entry_by_name(name);
+        let canonical_name = entry.map_or_else(
+            || name.to_ascii_lowercase(),
+            |entry| entry.identity.name.into(),
+        );
+        let builtin = runmat_types::BuiltinId(canonical_name.clone());
+        let id = format!("builtin:{canonical_name}");
+        let contract_certainty = entry
             .map(|entry| match entry.link.reachability {
                 BuiltinReachability::Always => Certainty::Definite,
                 BuiltinReachability::Dynamic | BuiltinReachability::Feature(_) => {
@@ -152,15 +159,9 @@ impl Walker<'_> {
             })
             .unwrap_or(Certainty::Definite);
         let certainty = requested_certainty.max(contract_certainty);
-        self.node(
-            id.clone(),
-            Kind::Builtin,
-            "runmat-builtins".into(),
-            name.into(),
-            certainty,
-        );
+        self.builtin_node(id.clone(), builtin, canonical_name, certainty);
         self.edge(Some(from.into()), id.clone(), certainty, reason, detail);
-        let Some(entry) = builtin_catalog_entry_by_name(name) else {
+        let Some(entry) = entry else {
             return;
         };
         for dependency in entry.link.artifact_dependencies {

@@ -36,7 +36,10 @@ end
             && edge.certainty == ReachabilityCertainty::Definite
     }));
     assert!(report.nodes.iter().any(|node| {
-        node.id == "builtin:abs" && node.module == "runmat-builtins" && node.symbol == "abs"
+        node.id == "builtin:abs"
+            && node.module == "runmat-builtins"
+            && node.symbol == "abs"
+            && node.builtin_id() == Some(&runmat_types::BuiltinId("abs".into()))
     }));
     assert!(report.edges.iter().any(|edge| {
         edge.to == "builtin:plus"
