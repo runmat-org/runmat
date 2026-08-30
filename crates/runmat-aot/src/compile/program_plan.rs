@@ -292,16 +292,18 @@ mod tests {
 
     #[test]
     fn closed_world_maps_catalog_bindings_to_stable_native_symbols() {
-        let bindings =
-            retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report("abs"))
-                .expect("catalog-backed closed-world binding");
-        assert_eq!(bindings.len(), 1);
-        assert_eq!(bindings[0].name, "abs");
-        assert_eq!(bindings[0].variant, "default");
-        assert_eq!(
-            bindings[0].native_symbol,
-            runmat_builtins::native_binding_symbol("abs", "default")
-        );
+        for name in ["abs", "exp", "uint16"] {
+            let bindings =
+                retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report(name))
+                    .expect("catalog-backed closed-world binding");
+            assert_eq!(bindings.len(), 1);
+            assert_eq!(bindings[0].name, name);
+            assert_eq!(bindings[0].variant, "default");
+            assert_eq!(
+                bindings[0].native_symbol,
+                runmat_builtins::native_binding_symbol(name, "default")
+            );
+        }
     }
 
     #[test]

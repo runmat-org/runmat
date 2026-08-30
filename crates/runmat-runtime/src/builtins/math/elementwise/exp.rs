@@ -4,13 +4,11 @@
 //! RunMat integer, logical, and character extensions. GPU fallbacks preserve the source owner.
 
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
+#[cfg(test)]
+use runmat_builtins::EXP_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, EXP_CHARACTER_INPUT_EXTENSION, EXP_ERROR_INTERNAL,
+    EXP_ERROR_INVALID_INPUT, EXP_INTEGER_INPUT_EXTENSION, EXP_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -25,7 +23,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::symbolic::symbolic_function;
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::exp")]
@@ -66,88 +63,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "exp";
 
-const EXP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Elementwise exponential result.",
-}];
-const EXP_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
-}];
-const EXP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = exp(X)",
-    inputs: &EXP_INPUTS,
-    outputs: &EXP_OUTPUT,
-}];
-const EXP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EXP.INVALID_INPUT",
-    identifier: Some("RunMat:exp:InvalidInput"),
-    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
-    message: "exp: invalid input",
-};
-const EXP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EXP.INTERNAL",
-    identifier: Some("RunMat:exp:Internal"),
-    when: "Internal tensor construction or provider interaction failed.",
-    message: "exp: internal error",
-};
-const EXP_ERRORS: [BuiltinErrorDescriptor; 2] = [EXP_ERROR_INVALID_INPUT, EXP_ERROR_INTERNAL];
-
-const EXP_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "exp-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "exp with integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ExpIntegerInputExtension"),
-};
-const EXP_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "exp-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "exp with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ExpLogicalInputExtension"),
-};
-const EXP_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "exp-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "exp with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ExpCharacterInputExtension"),
-};
-const EXP_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    EXP_INTEGER_INPUT_EXTENSION,
-    EXP_LOGICAL_INPUT_EXTENSION,
-    EXP_CHARACTER_INPUT_EXTENSION,
-];
-
-const EXP_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "All eight integer classes are accepted only in RunMat extension mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53].",
-}];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = exp(integer_X)",
-        inputs: &EXP_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The RunMat-only overload validates exact binary64 conversion before exponentiation. Resident integer input gathers exactly through its owning provider; the double result is restored only when that provider physically supports binary64, otherwise it remains a host double.",
-    }];
-pub const EXP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &EXP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &EXP_ERRORS,
-};
-
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -168,14 +83,7 @@ fn exp_error_with_detail(
 
 #[runtime_builtin(
     name = "exp",
-    category = "math/elementwise",
-    summary = "Compute element-wise exponential values.",
-    keywords = "exp,exponential,elementwise,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::exp::EXP_DESCRIPTOR),
-    extensions(EXP_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::elementwise::exp::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::exp"
 )]
 async fn exp_builtin(value: Value) -> BuiltinResult<Value> {
@@ -667,7 +575,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor};
 
     fn exp_builtin(value: Value) -> BuiltinResult<Value> {
@@ -694,33 +601,6 @@ pub(crate) mod tests {
     fn exp_string_rejected_with_stable_identifier() {
         let err = exp_builtin(Value::from("bad")).expect_err("expected input error");
         assert_eq!(err.identifier(), EXP_ERROR_INVALID_INPUT.identifier);
-    }
-
-    #[test]
-    fn exp_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn exp_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

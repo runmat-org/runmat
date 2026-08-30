@@ -594,6 +594,171 @@ fn abs_contract_preserves_class_shape_storage_and_residency_but_makes_complex_re
 }
 
 #[test]
+fn exp_contract_preserves_floating_facts_and_marks_conversion_residency_dynamic() {
+    use runmat_types::{
+        AliasFact, CallRequest, ContiguityFact, LayoutFact, NumericClass, NumericDomain,
+        NumericFact, OutputSelection, RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact,
+        ValueFact, ValueKindFact, ViewFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("exp").expect("exp catalog entry");
+    let shape = ShapeFact::from(vec![Some(3), Some(2)]);
+    let mut complex_single = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        shape.clone(),
+        StorageFact::Dense,
+    );
+    complex_single.residency = ResidencyFact::Device {
+        provider: Some("wgpu".into()),
+    };
+    let preserve = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![complex_single],
+            literals: runmat_types::LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(preserve.diagnostics.is_empty());
+    assert_eq!(
+        preserve.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        })
+    );
+    assert_eq!(preserve.outputs[0].shape, shape);
+    assert_eq!(
+        preserve.outputs[0].residency,
+        ResidencyFact::Device {
+            provider: Some("wgpu".into())
+        }
+    );
+    assert_eq!(preserve.outputs[0].layout, LayoutFact::ColumnMajor);
+    assert_eq!(preserve.outputs[0].contiguity, ContiguityFact::Contiguous);
+    assert_eq!(preserve.outputs[0].view, ViewFact::Materialized);
+    assert_eq!(preserve.outputs[0].alias, AliasFact::Unique);
+
+    let mut integer = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt16,
+            domain: NumericDomain::Real,
+        }),
+        shape.clone(),
+        StorageFact::Dense,
+    );
+    integer.residency = ResidencyFact::Device {
+        provider: Some("integer-provider".into()),
+    };
+    let converted = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![integer],
+            literals: runmat_types::LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(
+        converted.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(converted.outputs[0].shape, shape);
+    assert_eq!(converted.outputs[0].residency, ResidencyFact::Unknown);
+
+    let sparse = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        shape,
+        StorageFact::Sparse,
+    );
+    let densified = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![sparse],
+            literals: runmat_types::LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(densified.outputs[0].storage, StorageFact::Dense);
+    assert_eq!(densified.outputs[0].residency, ResidencyFact::Host);
+}
+
+#[test]
+fn uint16_contract_preserves_shape_domain_storage_and_residency_with_typed_output() {
+    use runmat_types::{
+        AliasFact, CallRequest, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+        ViewFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("uint16").expect("uint16 catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::NumericConversion(NumericClass::UInt16))
+    );
+
+    let mut source = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Sparse,
+    );
+    source.residency = ResidencyFact::Device {
+        provider: Some("integer-provider".into()),
+    };
+    let converted = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![source.clone()],
+            literals: runmat_types::LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+
+    assert!(converted.diagnostics.is_empty());
+    assert_eq!(
+        converted.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt16,
+            domain: NumericDomain::Complex,
+        })
+    );
+    assert_eq!(converted.outputs[0].shape, source.shape);
+    assert_eq!(converted.outputs[0].storage, StorageFact::Sparse);
+    assert_eq!(converted.outputs[0].residency, source.residency);
+    assert_eq!(converted.outputs[0].view, ViewFact::Materialized);
+    assert_eq!(converted.outputs[0].alias, AliasFact::Unique);
+
+    let invalid = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![ValueFact::scalar(ValueKindFact::String)],
+            literals: runmat_types::LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(
+        invalid.outputs[0].kind,
+        ValueKindFact::Unknown,
+        "unsupported input must not be assigned a numeric class"
+    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-NUMERIC-CONVERSION"));
+}
+
+#[test]
 fn gather_contract_maps_corresponding_outputs_to_host_and_checks_output_count() {
     use runmat_types::{
         CallRequest, OutputSelection, RequestedOutputCount, ResidencyFact, ValueFact, ValueKindFact,
