@@ -1269,6 +1269,140 @@ fn signum_contract_preserves_numeric_facts_and_types_conversion_boundaries() {
 }
 
 #[test]
+fn exponential_contracts_share_class_rules_but_keep_exact_sparse_semantics() {
+    use std::collections::BTreeMap;
+
+    use runmat_types::{
+        AliasFact, CallRequest, NumericClass, NumericDomain, NumericFact, ObjectFact,
+        OutputSelection, QualifiedName, RequestedOutputCount, ShapeFact, StorageFact, SymbolName,
+        ValueFact, ValueKindFact, ViewFact,
+    };
+
+    let input = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(5), Some(3)]),
+        StorageFact::Sparse,
+    );
+    let request = CallRequest {
+        arguments: vec![input],
+        literals: Default::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+
+    let exp = infer_catalog_call(
+        builtin_catalog_entry_by_name("exp").expect("exp entry"),
+        &request,
+    );
+    let expm1 = infer_catalog_call(
+        builtin_catalog_entry_by_name("expm1").expect("expm1 entry"),
+        &request,
+    );
+    assert!(exp.diagnostics.is_empty());
+    assert!(expm1.diagnostics.is_empty());
+    assert_eq!(exp.outputs[0].kind, expm1.outputs[0].kind);
+    assert_eq!(exp.outputs[0].shape, expm1.outputs[0].shape);
+    assert_eq!(exp.outputs[0].storage, StorageFact::Dense);
+    assert_eq!(expm1.outputs[0].storage, StorageFact::Sparse);
+    assert_eq!(expm1.outputs[0].view, ViewFact::Materialized);
+    assert_eq!(expm1.outputs[0].alias, AliasFact::Unique);
+
+    let integer = infer_catalog_call(
+        builtin_catalog_entry_by_name("expm1").expect("expm1 entry"),
+        &CallRequest {
+            arguments: vec![ValueFact::proven(
+                ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::UInt64,
+                    domain: NumericDomain::Real,
+                }),
+                ShapeFact::from(vec![Some(1), Some(4)]),
+                StorageFact::Dense,
+            )],
+            ..request
+        },
+    );
+    assert_eq!(
+        integer.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        integer.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), Some(4)])
+    );
+
+    let complex_integer = infer_catalog_call(
+        builtin_catalog_entry_by_name("expm1").expect("expm1 entry"),
+        &CallRequest {
+            arguments: vec![ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Int32,
+                domain: NumericDomain::Complex,
+            }))],
+            literals: Default::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(complex_integer
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-EXPONENTIAL-COMPLEX-INTEGER"));
+
+    let table = ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(QualifiedName(vec![SymbolName("table".into())])),
+            properties: BTreeMap::from([(
+                "Variables".into(),
+                ValueFact::scalar(ValueKindFact::Logical),
+            )]),
+            properties_complete: true,
+            handle_semantics: Some(false),
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    );
+    let table_output = infer_catalog_call(
+        builtin_catalog_entry_by_name("expm1").expect("expm1 entry"),
+        &CallRequest {
+            arguments: vec![table],
+            literals: Default::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    let ValueKindFact::Object(table_output) = &table_output.outputs[0].kind else {
+        panic!("expected tabular object fact");
+    };
+    assert_eq!(
+        table_output.runtime_class,
+        Some(QualifiedName(vec![SymbolName("table".into())]))
+    );
+    assert!(table_output.properties.is_empty());
+    assert!(!table_output.properties_complete);
+
+    let user_object = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(QualifiedName(vec![SymbolName("UserClass".into())])),
+        properties: BTreeMap::new(),
+        properties_complete: false,
+        handle_semantics: None,
+    }));
+    let overloaded = infer_catalog_call(
+        builtin_catalog_entry_by_name("expm1").expect("expm1 entry"),
+        &CallRequest {
+            arguments: vec![user_object],
+            literals: Default::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(overloaded.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(overloaded.outputs[0].shape, ShapeFact::Scalar);
+}
+
+#[test]
 fn gather_contract_maps_corresponding_outputs_to_host_and_checks_output_count() {
     use runmat_types::{
         CallRequest, OutputSelection, RequestedOutputCount, ResidencyFact, ValueFact, ValueKindFact,
