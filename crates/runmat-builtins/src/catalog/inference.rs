@@ -1,4 +1,8 @@
-use super::{BuiltinCatalogEntry, BuiltinContractMaturity};
+use super::{
+    AccelerationInferenceRule, AggregateInferenceRule, ArrayInferenceRule, BuiltinCatalogEntry,
+    BuiltinContractMaturity, BuiltinInferenceRule, IntrospectionInferenceRule, MathInferenceRule,
+    ParallelInferenceRule,
+};
 use runmat_types::{
     codistributor_fact, infer_call, CallContract, CallInference, CallRequest, CodistributorClass,
     DistributedFact, DynamicReason, ExecutionFact, FutureStateFact, InferenceDiagnostic,
@@ -30,43 +34,43 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
 }
 
 fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
-    match entry.contract.inference_rule.0 {
-        "array.full" => infer_full(request, entry),
-        "array.zeros" => infer_zeros(request, entry),
-        "math.abs" => infer_abs(request, entry),
-        "acceleration.gather" => infer_gather(request, entry),
-        "acceleration.gpu-array" => infer_gpu_array(request, entry),
-        "aggregate.struct" => infer_struct_builtin(request, entry),
-        "introspection.feval" => infer_feval(request, entry),
-        "parallel.parpool" => infer_parallel_pool(request, entry, false),
-        "parallel.gcp" => infer_parallel_pool(request, entry, true),
-        "parallel.parfeval" | "parallel.parfeval-on-all" => infer_parallel_future(request, entry),
-        "parallel.fetch-outputs" => infer_parallel_fetch(request, entry, false),
-        "parallel.fetch-next" => infer_parallel_fetch(request, entry, true),
-        "parallel.distributed"
-        | "parallel.codistributed"
-        | "parallel.codistributed-build"
-        | "parallel.redistribute"
-        | "parallel.get-codistributor"
-        | "parallel.global-indices"
-        | "parallel.codistributor1d"
-        | "parallel.codistributor2dbc"
-        | "parallel.codistributor"
-        | "parallel.codistributor-is-complete"
-        | "parallel.iscodistributed"
-        | "parallel.local-part"
-        | "parallel.barrier"
-        | "parallel.broadcast"
-        | "parallel.send"
-        | "parallel.send-receive"
-        | "parallel.receive"
-        | "parallel.probe"
-        | "parallel.gplus"
-        | "parallel.cat"
-        | "parallel.functional-reduce"
-        | "parallel.spmd-index"
-        | "parallel.spmd-size" => infer_parallel_data(request, entry),
-        _ => unavailable_rule(entry, request),
+    match entry.contract.inference_rule {
+        BuiltinInferenceRule::Array(ArrayInferenceRule::Full) => infer_full(request, entry),
+        BuiltinInferenceRule::Array(ArrayInferenceRule::Zeros) => infer_zeros(request, entry),
+        BuiltinInferenceRule::Math(MathInferenceRule::Abs) => infer_abs(request, entry),
+        BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather) => {
+            infer_gather(request, entry)
+        }
+        BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::GpuArray) => {
+            infer_gpu_array(request, entry)
+        }
+        BuiltinInferenceRule::Aggregate(AggregateInferenceRule::Struct) => {
+            infer_struct_builtin(request, entry)
+        }
+        BuiltinInferenceRule::Introspection(IntrospectionInferenceRule::Feval) => {
+            infer_feval(request, entry)
+        }
+        BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parpool) => {
+            infer_parallel_pool(request, entry, false)
+        }
+        BuiltinInferenceRule::Parallel(ParallelInferenceRule::Gcp) => {
+            infer_parallel_pool(request, entry, true)
+        }
+        BuiltinInferenceRule::Parallel(
+            ParallelInferenceRule::Parfeval | ParallelInferenceRule::ParfevalOnAll,
+        ) => infer_parallel_future(request, entry),
+        BuiltinInferenceRule::Parallel(ParallelInferenceRule::FetchOutputs) => {
+            infer_parallel_fetch(request, entry, false)
+        }
+        BuiltinInferenceRule::Parallel(ParallelInferenceRule::FetchNext) => {
+            infer_parallel_fetch(request, entry, true)
+        }
+        BuiltinInferenceRule::Parallel(
+            ParallelInferenceRule::GetCurrentJob
+            | ParallelInferenceRule::GetCurrentTask
+            | ParallelInferenceRule::GetCurrentWorker,
+        ) => unavailable_rule(entry, request),
+        BuiltinInferenceRule::Parallel(_) => infer_parallel_data(request, entry),
     }
 }
 
@@ -117,25 +121,32 @@ fn infer_distributed_map(
 }
 
 fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    let output = match entry.contract.inference_rule.0 {
-        "parallel.barrier" | "parallel.send" => ValueFact::scalar(ValueKindFact::Void),
-        "parallel.probe" => ValueFact::scalar(ValueKindFact::Logical),
-        "parallel.spmd-index" | "parallel.spmd-size" => {
+    let BuiltinInferenceRule::Parallel(rule) = entry.contract.inference_rule else {
+        unreachable!("parallel inference accepts only typed parallel rules")
+    };
+    let output = match rule {
+        ParallelInferenceRule::Barrier | ParallelInferenceRule::Send => {
+            ValueFact::scalar(ValueKindFact::Void)
+        }
+        ParallelInferenceRule::Probe => ValueFact::scalar(ValueKindFact::Logical),
+        ParallelInferenceRule::SpmdIndex | ParallelInferenceRule::SpmdSize => {
             ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Double,
                 domain: NumericDomain::Real,
             }))
         }
-        "parallel.local-part" => match request.arguments.first().map(|fact| &fact.kind) {
-            Some(ValueKindFact::Distributed(distributed)) => distributed.value.as_ref().clone(),
-            _ => ValueFact::unknown(DynamicReason::RuntimeValue),
-        },
-        "parallel.redistribute" => request
+        ParallelInferenceRule::LocalPart => {
+            match request.arguments.first().map(|fact| &fact.kind) {
+                Some(ValueKindFact::Distributed(distributed)) => distributed.value.as_ref().clone(),
+                _ => ValueFact::unknown(DynamicReason::RuntimeValue),
+            }
+        }
+        ParallelInferenceRule::Redistribute => request
             .arguments
             .first()
             .cloned()
             .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
-        "parallel.get-codistributor" => {
+        ParallelInferenceRule::GetCodistributor => {
             let class = request.arguments.first().and_then(|fact| match &fact.kind {
                 ValueKindFact::Distributed(distributed) => distributed
                     .scheme
@@ -145,31 +156,33 @@ fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
             });
             codistributor_fact(class)
         }
-        "parallel.global-indices" => ValueFact::unknown(DynamicReason::RuntimeValue),
-        "parallel.codistributor1d" => codistributor_fact(Some(CodistributorClass::OneDimensional)),
-        "parallel.codistributor2dbc" => {
+        ParallelInferenceRule::GlobalIndices => ValueFact::unknown(DynamicReason::RuntimeValue),
+        ParallelInferenceRule::Codistributor1d => {
+            codistributor_fact(Some(CodistributorClass::OneDimensional))
+        }
+        ParallelInferenceRule::Codistributor2dbc => {
             codistributor_fact(Some(CodistributorClass::TwoDimensionalBlockCyclic))
         }
-        "parallel.codistributor" => codistributor_fact(None),
-        "parallel.codistributor-is-complete" | "parallel.iscodistributed" => {
+        ParallelInferenceRule::Codistributor => codistributor_fact(None),
+        ParallelInferenceRule::CodistributorIsComplete | ParallelInferenceRule::Iscodistributed => {
             ValueFact::scalar(ValueKindFact::Logical)
         }
-        "parallel.broadcast" => request
+        ParallelInferenceRule::Broadcast => request
             .arguments
             .get(1)
             .cloned()
             .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
-        "parallel.send-receive" => request
+        ParallelInferenceRule::SendReceive => request
             .arguments
             .get(2)
             .cloned()
             .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
-        "parallel.gplus" => request
+        ParallelInferenceRule::Gplus => request
             .arguments
             .first()
             .cloned()
             .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
-        "parallel.cat" => request
+        ParallelInferenceRule::Cat => request
             .arguments
             .first()
             .cloned()
@@ -178,12 +191,22 @@ fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
                 fact
             })
             .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
-        "parallel.functional-reduce" => ValueFact::unknown(DynamicReason::RuntimeValue),
-        "parallel.distributed"
-        | "parallel.codistributed"
-        | "parallel.codistributed-build"
-        | "parallel.receive" => ValueFact::unknown(DynamicReason::RuntimeValue),
-        _ => unreachable!("parallel data inference is dispatched by a closed rule set"),
+        ParallelInferenceRule::FunctionalReduce => ValueFact::unknown(DynamicReason::RuntimeValue),
+        ParallelInferenceRule::Distributed
+        | ParallelInferenceRule::Codistributed
+        | ParallelInferenceRule::CodistributedBuild
+        | ParallelInferenceRule::Receive => ValueFact::unknown(DynamicReason::RuntimeValue),
+        ParallelInferenceRule::FetchNext
+        | ParallelInferenceRule::FetchOutputs
+        | ParallelInferenceRule::Gcp
+        | ParallelInferenceRule::GetCurrentJob
+        | ParallelInferenceRule::GetCurrentTask
+        | ParallelInferenceRule::GetCurrentWorker
+        | ParallelInferenceRule::Parfeval
+        | ParallelInferenceRule::ParfevalOnAll
+        | ParallelInferenceRule::Parpool => {
+            unreachable!("parallel rule was routed to its dedicated inference handler")
+        }
     };
     finish_fixed(entry, request, output, Vec::new())
 }
@@ -730,8 +753,8 @@ fn unavailable_rule(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallI
         inference.diagnostics.push(InferenceDiagnostic::error(
             "RM-CATALOG-INFERENCE-RULE",
             format!(
-                "complete builtin contract `{}` has no registered inference rule",
-                entry.contract.inference_rule.0
+                "complete builtin contract `{:?}` has no registered inference rule",
+                entry.contract.inference_rule
             ),
         ));
     }

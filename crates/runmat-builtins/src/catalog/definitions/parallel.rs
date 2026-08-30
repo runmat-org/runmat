@@ -3,10 +3,10 @@ use crate::{
     BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
     BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
     BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinFusionPolicy, BuiltinInferenceRuleId, BuiltinLinkContract, BuiltinLinkPolicy,
+    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinLinkContract, BuiltinLinkPolicy,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinPlacementContract, BuiltinPortability, BuiltinPurity, BuiltinReachability,
-    BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
+    BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor, ParallelInferenceRule,
 };
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
@@ -355,7 +355,7 @@ macro_rules! parallel_entry {
     (
         $constant:ident,
         $name:literal,
-        $rule:literal,
+        $rule:expr,
         $summary:literal,
         $keywords:expr,
         $descriptor:ident,
@@ -378,7 +378,7 @@ macro_rules! parallel_entry {
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
                 maturity: $maturity,
-                inference_rule: BuiltinInferenceRuleId($rule),
+                inference_rule: $rule,
                 compatibility: BuiltinCompatibility::Matlab,
                 async_behavior: $async_behavior,
                 purity: $purity,
@@ -408,7 +408,7 @@ macro_rules! parallel_entry {
 parallel_entry!(
     PARPOOL_CATALOG_ENTRY,
     "parpool",
-    "parallel.parpool",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parpool),
     "Create or return the execution pool for the current session.",
     &["parallel", "pool", "workers", "parpool"],
     PARPOOL_DESCRIPTOR,
@@ -420,7 +420,7 @@ parallel_entry!(
 parallel_entry!(
     GCP_CATALOG_ENTRY,
     "gcp",
-    "parallel.gcp",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Gcp),
     "Return the current execution pool.",
     &["parallel", "pool", "current", "gcp", "nocreate"],
     GCP_DESCRIPTOR,
@@ -432,7 +432,7 @@ parallel_entry!(
 parallel_entry!(
     PARFEVAL_CATALOG_ENTRY,
     "parfeval",
-    "parallel.parfeval",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parfeval),
     "Schedule a function for asynchronous execution on a pool.",
     &["parallel", "future", "async", "parfeval"],
     PARFEVAL_DESCRIPTOR,
@@ -444,7 +444,7 @@ parallel_entry!(
 parallel_entry!(
     PARFEVAL_ON_ALL_CATALOG_ENTRY,
     "parfevalOnAll",
-    "parallel.parfeval-on-all",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::ParfevalOnAll),
     "Schedule a function once on every worker in a pool.",
     &["parallel", "future", "async", "workers"],
     PARFEVAL_ON_ALL_DESCRIPTOR,
@@ -456,7 +456,7 @@ parallel_entry!(
 parallel_entry!(
     FETCH_OUTPUTS_CATALOG_ENTRY,
     "fetchOutputs",
-    "parallel.fetch-outputs",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::FetchOutputs),
     "Wait for a future and return its outputs.",
     &["parallel", "future", "wait", "outputs"],
     FETCH_OUTPUTS_DESCRIPTOR,
@@ -468,7 +468,7 @@ parallel_entry!(
 parallel_entry!(
     FETCH_NEXT_CATALOG_ENTRY,
     "fetchNext",
-    "parallel.fetch-next",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::FetchNext),
     "Retrieve the next completed unread result from a future array.",
     &["parallel", "future", "wait", "completion order"],
     FETCH_NEXT_DESCRIPTOR,
@@ -479,7 +479,7 @@ parallel_entry!(
 );
 
 macro_rules! current_execution_entry {
-    ($constant:ident, $name:literal, $rule:literal, $summary:literal, $keywords:expr, $descriptor:ident) => {
+    ($constant:ident, $name:literal, $rule:expr, $summary:literal, $keywords:expr, $descriptor:ident) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
@@ -496,7 +496,7 @@ macro_rules! current_execution_entry {
                 // The result depends on the scoped execution identity: it is
                 // empty outside that scope and an object inside it.
                 maturity: BuiltinContractMaturity::DynamicByDesign,
-                inference_rule: BuiltinInferenceRuleId($rule),
+                inference_rule: $rule,
                 compatibility: BuiltinCompatibility::Matlab,
                 async_behavior: BuiltinAsyncBehavior::NeverSuspends,
                 purity: BuiltinPurity::DeterministicReadOnly,
@@ -526,7 +526,7 @@ macro_rules! current_execution_entry {
 current_execution_entry!(
     GET_CURRENT_TASK_CATALOG_ENTRY,
     "getCurrentTask",
-    "parallel.get-current-task",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCurrentTask),
     "Return the task executing the current function.",
     &["parallel", "current", "task", "worker"],
     GET_CURRENT_TASK_DESCRIPTOR
@@ -534,7 +534,7 @@ current_execution_entry!(
 current_execution_entry!(
     GET_CURRENT_WORKER_CATALOG_ENTRY,
     "getCurrentWorker",
-    "parallel.get-current-worker",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCurrentWorker),
     "Return the worker executing the current function.",
     &["parallel", "current", "worker", "pool"],
     GET_CURRENT_WORKER_DESCRIPTOR
@@ -542,7 +542,7 @@ current_execution_entry!(
 current_execution_entry!(
     GET_CURRENT_JOB_CATALOG_ENTRY,
     "getCurrentJob",
-    "parallel.get-current-job",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCurrentJob),
     "Return the job executing the current function.",
     &["parallel", "current", "job", "worker"],
     GET_CURRENT_JOB_DESCRIPTOR

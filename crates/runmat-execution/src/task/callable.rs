@@ -1,4 +1,4 @@
-use runmat_types::{ParallelRegionId, ProgramFunctionId};
+use runmat_types::{BuiltinId, ParallelRegionId, ProgramFunctionId};
 use serde::{Deserialize, Serialize};
 
 use crate::{ContractError, Digest};
@@ -16,7 +16,7 @@ pub enum ProgramCallable {
         display_name: Option<String>,
     },
     Builtin {
-        name: String,
+        name: BuiltinId,
     },
     ParallelRegion {
         region: ParallelRegionId,
@@ -35,7 +35,9 @@ impl ProgramCallable {
     }
 
     pub fn builtin(name: impl Into<String>) -> Result<Self, ContractError> {
-        let callable = Self::Builtin { name: name.into() };
+        let callable = Self::Builtin {
+            name: BuiltinId(name.into()),
+        };
         callable.validate()?;
         Ok(callable)
     }
@@ -61,7 +63,7 @@ impl ProgramCallable {
                     ));
                 }
             }
-            Self::Builtin { name } if name.trim().is_empty() || name.contains('\0') => {
+            Self::Builtin { name } if name.0.trim().is_empty() || name.0.contains('\0') => {
                 return Err(ContractError::invalid(
                     "program callable",
                     "builtin name is empty or contains NUL",
@@ -86,7 +88,7 @@ impl ProgramCallable {
     pub fn recipe_entrypoint(&self) -> String {
         match self {
             Self::Semantic { function, .. } => function.0.to_string(),
-            Self::Builtin { name } => format!("builtin:{name}"),
+            Self::Builtin { name } => format!("builtin:{}", name.0),
             Self::ParallelRegion { region } => format!(
                 "parallel-region:{}:{}",
                 region.0.function.0, region.0.ordinal
@@ -105,7 +107,7 @@ impl ProgramCallable {
             } => display_name
                 .clone()
                 .unwrap_or_else(|| format!("function#{}", function.0)),
-            Self::Builtin { name } => name.clone(),
+            Self::Builtin { name } => name.0.clone(),
             Self::ParallelRegion { region } => {
                 format!("parfor region {}:{}", region.0.function.0, region.0.ordinal)
             }
@@ -120,5 +122,37 @@ impl ProgramCallable {
             "runmat-program-callable-v1\0{}",
             self.recipe_entrypoint()
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProgramCallable;
+    use runmat_types::BuiltinId;
+
+    #[test]
+    fn builtin_constructor_resolves_to_the_shared_identity_type() {
+        let callable = ProgramCallable::builtin("mean").expect("valid builtin identity");
+        assert_eq!(
+            callable,
+            ProgramCallable::Builtin {
+                name: BuiltinId("mean".into())
+            }
+        );
+    }
+
+    #[test]
+    fn builtin_wire_shape_remains_a_plain_name() {
+        let callable = ProgramCallable::builtin("mean").expect("valid builtin identity");
+        assert_eq!(
+            serde_json::to_value(callable).expect("serialize callable"),
+            serde_json::json!({ "kind": "builtin", "name": "mean" })
+        );
+    }
+
+    #[test]
+    fn builtin_constructor_rejects_unresolved_names() {
+        assert!(ProgramCallable::builtin("  ").is_err());
+        assert!(ProgramCallable::builtin("bad\0name").is_err());
     }
 }

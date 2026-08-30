@@ -317,7 +317,10 @@ pub(crate) mod tests {
     fn full_uses_canonical_catalog_contract_without_legacy_registration() {
         let entry = runmat_builtins::builtin_catalog_entry_by_name("full")
             .expect("canonical full catalog entry");
-        assert_eq!(entry.contract.inference_rule.0, "array.full");
+        assert_eq!(
+            entry.contract.inference_rule,
+            runmat_builtins::BuiltinInferenceRule::Array(runmat_builtins::ArrayInferenceRule::Full)
+        );
         assert!(runmat_builtins::builtin_function_by_name("full").is_none());
     }
 

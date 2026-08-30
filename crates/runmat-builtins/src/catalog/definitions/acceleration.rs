@@ -1,16 +1,17 @@
 use crate::{
-    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingAvailability,
-    BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
-    BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
-    BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRuleId,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
-    BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, ALL_INTEGER_CLASSES,
+    AccelerationInferenceRule, BuiltinAcceleratorPolicy, BuiltinAsyncBehavior,
+    BuiltinBindingAvailability, BuiltinBindingDeclaration, BuiltinBindingIdentity,
+    BuiltinCatalogEntry, BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy,
+    BuiltinInferenceRule, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinLinkContract,
+    BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinPlacementContract, BuiltinPortability, BuiltinPurity,
+    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
+    ALL_INTEGER_CLASSES,
 };
 use runmat_types::EffectKind;
 
@@ -145,7 +146,7 @@ pub const GATHER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &GATHER_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRuleId("acceleration.gather"),
+        inference_rule: BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Pure,

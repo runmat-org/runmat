@@ -273,8 +273,8 @@ fn callable_capabilities(
         ProgramCallable::Semantic { function: id, .. } => function(*id)
             .map(|function| function.capabilities.clone())
             .ok_or_else(|| "worker could not resolve callable requirements".into()),
-        ProgramCallable::Builtin { name } if runmat_builtins::builtin_name_is_known(name) => {
-            Ok(runmat_builtins::builtin_required_capabilities(name))
+        ProgramCallable::Builtin { name } if runmat_builtins::builtin_name_is_known(&name.0) => {
+            Ok(runmat_builtins::builtin_required_capabilities(&name.0))
         }
         ProgramCallable::Builtin { .. } => {
             Err("worker could not resolve builtin requirements".into())
@@ -674,7 +674,7 @@ async fn execute_function_request(
         }
         runmat_execution::ProgramCallable::Builtin { name } => {
             let descriptor = runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                runmat_hir::CallableIdentity::Builtin(runmat_hir::BuiltinId(name.clone())),
+                runmat_hir::CallableIdentity::Builtin(name.clone()),
                 arguments,
                 requested_outputs,
                 runmat_hir::CallableFallbackPolicy::None,

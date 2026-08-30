@@ -194,7 +194,7 @@ pub const STRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &STRUCT_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRuleId("aggregate.struct"),
+        inference_rule: BuiltinInferenceRule::Aggregate(AggregateInferenceRule::Struct),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Pure,

@@ -1,4 +1,4 @@
-use super::{BuiltinBindingAvailability, BuiltinCatalogEntry, BuiltinContractMaturity};
+use super::{BuiltinBindingAvailability, BuiltinCatalogEntry};
 use crate::BuiltinAsyncBehavior;
 use runmat_types::EffectKind;
 use std::collections::{BTreeMap, BTreeSet};
@@ -34,14 +34,6 @@ pub fn validate_builtin_catalog(
             errors.push(error(
                 Some(name),
                 "catalog entry has no runtime binding declaration",
-            ));
-        }
-        if matches!(entry.contract.maturity, BuiltinContractMaturity::Complete)
-            && entry.contract.inference_rule.0.is_empty()
-        {
-            errors.push(error(
-                Some(name),
-                "complete contract has no inference rule identity",
             ));
         }
         let declares_suspension = entry.contract.effects.contains(&EffectKind::MaySuspend);
