@@ -177,7 +177,7 @@ pub(in crate::builtins::table) fn is_timetable_option_token(value: &Value) -> bo
 pub(in crate::builtins::table) fn is_time_like_value(value: &Value) -> bool {
     matches!(
         value,
-        Value::Object(obj) if obj.is_class("datetime") || obj.is_class("duration")
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) || obj.is_class(runmat_types::standard::DURATION)
     )
 }
 

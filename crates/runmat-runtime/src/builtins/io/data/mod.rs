@@ -2499,7 +2499,11 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
 )]
 async fn data_tx_commit_alias_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     match &base {
-        Value::Object(obj) if obj.class_name == "DataTransaction" => {
+        Value::Object(obj)
+            if obj
+                .class_name
+                .is(runmat_types::StaticClassIdentity::new("DataTransaction")) =>
+        {
             data_tx_commit_builtin(base, rest).await
         }
         _ => Err(data_error(

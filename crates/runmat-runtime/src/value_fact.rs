@@ -90,7 +90,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
             }
         }
         Value::Object(value) => object(
-            &value.class_name,
+            value.class_name.clone(),
             value
                 .properties
                 .iter()
@@ -101,7 +101,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
             ShapeFact::Scalar,
         ),
         Value::ObjectArray(value) => object(
-            value.class_name(),
+            value.class_name().clone(),
             BTreeMap::new(),
             false,
             value
@@ -111,14 +111,14 @@ pub fn value_fact(value: &Value) -> ValueFact {
             shape(value.shape()),
         ),
         Value::HandleObject(value) => object(
-            &value.class_name,
+            value.class_name.clone(),
             BTreeMap::new(),
             false,
             true,
             ShapeFact::Scalar,
         ),
         Value::Listener(value) => object(
-            &value.target_class_name,
+            value.target_class_name.clone(),
             BTreeMap::new(),
             false,
             true,
@@ -150,7 +150,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::ClassRef(name) => scalar(ValueKindFact::ClassReference(
             runmat_types::ClassReferenceFact {
                 class: None,
-                runtime_class: Some(qualified_name(name)),
+                runtime_class: Some(name.clone()),
             },
         )),
         Value::MException(value) => scalar(ValueKindFact::Exception(ExceptionFact {
@@ -293,7 +293,7 @@ fn fact(kind: ValueKindFact, shape: ShapeFact, storage: StorageFact) -> ValueFac
 }
 
 fn object(
-    class_name: &str,
+    class_name: runmat_types::ClassIdentity,
     properties: BTreeMap<String, ValueFact>,
     properties_complete: bool,
     handle_semantics: bool,
@@ -302,7 +302,7 @@ fn object(
     let mut fact = fact(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(qualified_name(class_name)),
+            runtime_class: Some(class_name),
             properties,
             properties_complete,
             handle_semantics: Some(handle_semantics),
@@ -413,11 +413,9 @@ fn gpu_kind(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<ValueKind
         .or_else(|| match runmat_accelerate_api::handle_precision(handle) {
             Some(ProviderPrecision::F32) => Some(NumericClass::Single),
             Some(ProviderPrecision::F64) => Some(NumericClass::Double),
-            None => match runmat_accelerate_api::handle_class_name(handle).as_deref() {
-                Some("single") => Some(NumericClass::Single),
-                Some("double") => Some(NumericClass::Double),
-                _ => None,
-            },
+            None => runmat_accelerate_api::handle_class_identity(handle)
+                .as_ref()
+                .and_then(NumericClass::from_class_identity),
         })?;
     let domain = match runmat_accelerate_api::handle_storage(handle) {
         GpuTensorStorage::Real => NumericDomain::Real,

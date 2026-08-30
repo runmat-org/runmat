@@ -74,8 +74,10 @@ pub const OBJECT_INDEX_BRACE: &str = "{}";
 pub const OBJECT_INDEX_MEMBER: &str = ".";
 pub const CALL_METHOD_BUILTIN_NAME: &str = "call_method";
 pub const CALL_BOUND_METHOD_BUILTIN_NAME: &str = "__runmat_call_bound_method__";
-pub const OBJECT_SUBSREF_METHOD: &str = "subsref";
-pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
+pub const OBJECT_SUBSREF_METHOD: runmat_types::StaticMethodName =
+    runmat_types::StaticMethodName::new("subsref");
+pub const OBJECT_SUBSASGN_METHOD: runmat_types::StaticMethodName =
+    runmat_types::StaticMethodName::new("subsasgn");
 pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
 pub(crate) const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
 
@@ -186,15 +188,15 @@ where
     }
 }
 
-fn constructor_receiver_class_name(receiver: &Value) -> Option<&str> {
+fn constructor_receiver_class_name(receiver: &Value) -> Option<&runmat_types::ClassIdentity> {
     match receiver {
-        Value::Object(obj) => Some(obj.class_name.as_str()),
-        Value::HandleObject(handle) => Some(handle.class_name.as_str()),
+        Value::Object(obj) => Some(&obj.class_name),
+        Value::HandleObject(handle) => Some(&handle.class_name),
         _ => None,
     }
 }
 
-fn active_constructor_receiver_for(class_name: &str) -> Option<Value> {
+fn active_constructor_receiver_for(class_name: &runmat_types::ClassIdentity) -> Option<Value> {
     let find = |stack: &[Value]| {
         stack
             .iter()
@@ -268,7 +270,7 @@ fn runtime_descriptor_error_with_message(
     builder.build()
 }
 
-pub(crate) fn object_receiver_class_name(receiver: &Value) -> Option<String> {
+pub(crate) fn object_receiver_class_name(receiver: &Value) -> Option<runmat_types::ClassIdentity> {
     match receiver {
         Value::Object(obj) => Some(obj.class_name.clone()),
         Value::HandleObject(handle) => {
@@ -283,11 +285,13 @@ pub(crate) fn object_receiver_class_name(receiver: &Value) -> Option<String> {
     }
 }
 
-fn class_member_identity(class_name: &str, member: &str) -> runmat_types::CallableIdentity {
-    runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
-        runmat_types::SymbolName(class_name.to_string()),
-        runmat_types::SymbolName(member.to_string()),
-    ]))
+fn class_member_identity(
+    class_name: &runmat_types::ClassIdentity,
+    member: &str,
+) -> runmat_types::CallableIdentity {
+    let mut segments = class_name.qualified_name().0;
+    segments.push(runmat_types::SymbolName(member.to_string()));
+    runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(segments))
 }
 
 pub(crate) fn qualified_name_segments(name: &str) -> Vec<runmat_types::SymbolName> {
@@ -333,7 +337,7 @@ pub(crate) fn external_callable_identity_for_name(name: &str) -> runmat_types::C
 }
 
 pub(crate) async fn dispatch_object_external_member(
-    class_name: String,
+    class_name: runmat_types::ClassIdentity,
     member: &str,
     args: Vec<Value>,
     requested_outputs: usize,
@@ -560,7 +564,7 @@ pub(crate) async fn new_handle_object_builtin(class_name: String) -> crate::Buil
     }
     let gc = runmat_gc::gc_allocate(obj).map_err(|e| format!("gc: {e}"))?;
     Ok(Value::HandleObject(runmat_value::HandleRef {
-        class_name,
+        class_name: class_name.into(),
         target: gc,
         valid: true,
     }))
@@ -909,23 +913,34 @@ pub(crate) async fn make_anon_builtin(params: String, body: String) -> crate::Bu
 }
 
 pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Value> {
-    if crate::class_registry::is_class_abstract(&class_name) {
+    let class_identity = runmat_types::ClassIdentity::new(class_name.clone()).map_err(|error| {
+        build_runtime_error(format!("Invalid class name '{class_name}': {error}"))
+            .with_identifier("RunMat:InvalidClassName")
+            .build()
+    })?;
+    create_class_object_by_identity(class_identity).await
+}
+
+async fn create_class_object_by_identity(
+    class_identity: runmat_types::ClassIdentity,
+) -> crate::BuiltinResult<Value> {
+    if crate::class_registry::is_class_abstract(&class_identity) {
         return Err(build_runtime_error(format!(
             "Cannot instantiate abstract class '{}'.",
-            class_name
+            class_identity
         ))
         .with_identifier("RunMat:AbstractMethodMissing")
         .build());
     }
-    if let Some(def) = crate::class_registry::get_class(&class_name) {
+    if let Some(def) = crate::class_registry::get_class(&class_identity) {
         // Collect class hierarchy from root to leaf for default initialization
         let mut chain: Vec<crate::class_registry::RuntimeClass> = Vec::new();
         let mut is_handle_class = false;
         let mut visited = std::collections::HashSet::new();
         // Walk up to root
-        let mut cursor: Option<String> = Some(def.name.clone());
+        let mut cursor = Some(def.name.clone());
         while let Some(name) = cursor {
-            if name.eq_ignore_ascii_case("handle") {
+            if name.is(runmat_types::standard::HANDLE) {
                 is_handle_class = true;
                 break;
             }
@@ -936,7 +951,7 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
                 if cd
                     .parent
                     .as_ref()
-                    .is_some_and(|parent| parent.eq_ignore_ascii_case("handle"))
+                    .is_some_and(|parent| parent.is(runmat_types::standard::HANDLE))
                 {
                     is_handle_class = true;
                 }
@@ -956,7 +971,7 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
             for (k, p) in cd.properties.iter() {
                 if !p.is_static {
                     obj.properties.insert(
-                        k.clone(),
+                        k.to_string(),
                         p.default_value.clone().unwrap_or_else(empty_default),
                     );
                 }
@@ -973,28 +988,39 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
             Ok(Value::Object(obj))
         }
     } else {
-        Ok(Value::Object(runmat_value::ObjectInstance::new(class_name)))
+        Ok(Value::Object(runmat_value::ObjectInstance::new(
+            class_identity,
+        )))
     }
 }
 
 pub async fn call_super_constructor(
-    class_name: String,
-    super_class_name: String,
+    class_identity: runmat_types::ClassIdentity,
+    super_class_identity: runmat_types::ClassIdentity,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let receiver = if let Some(active) = active_constructor_receiver_for(&class_name) {
+    let receiver = if let Some(active) = active_constructor_receiver_for(&class_identity) {
         active
     } else {
-        create_class_object(class_name).await?
+        create_class_object_by_identity(class_identity.clone()).await?
     };
     let ctor_result = with_constructor_receiver(receiver.clone(), async {
-        let ctor_name = super_class_name
+        let ctor_name = super_class_identity
+            .display_name()
             .rsplit('.')
             .next()
             .filter(|name| !name.trim().is_empty())
-            .unwrap_or(super_class_name.as_str());
-        let ctor_lookup = crate::class_registry::lookup_method(&super_class_name, ctor_name)
-            .or_else(|| crate::class_registry::lookup_method(&super_class_name, &super_class_name));
+            .unwrap_or(super_class_identity.display_name());
+        let ctor_identity = runmat_types::MethodName::from(ctor_name);
+        let qualified_ctor_identity =
+            runmat_types::MethodName::from(super_class_identity.display_name());
+        let ctor_lookup = crate::class_registry::lookup_method(
+            &super_class_identity,
+            &ctor_identity,
+        )
+        .or_else(|| {
+            crate::class_registry::lookup_method(&super_class_identity, &qualified_ctor_identity)
+        });
         let Some((ctor, _owner)) = ctor_lookup else {
             return Ok::<Option<Value>, RuntimeError>(None);
         };
@@ -1112,17 +1138,17 @@ pub async fn call_super_constructor(
 }
 
 pub async fn call_super_method(
-    class_name: String,
-    super_class_name: String,
-    method_name: String,
+    class_identity: runmat_types::ClassIdentity,
+    super_class_identity: runmat_types::ClassIdentity,
+    method_name: runmat_types::MethodName,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let Some((method, owner)) =
-        crate::class_registry::lookup_method(&super_class_name, &method_name)
+        crate::class_registry::lookup_method(&super_class_identity, &method_name)
     else {
         return Err(build_runtime_error(format!(
             "Undefined superclass method '{}@{}'",
-            method_name, super_class_name
+            method_name, super_class_identity
         ))
         .with_identifier("RunMat:UndefinedFunction")
         .build());
@@ -1130,7 +1156,7 @@ pub async fn call_super_method(
     if method.is_static {
         return Err(build_runtime_error(format!(
             "Superclass method '{}@{}' is static and cannot be called with super method syntax.",
-            method_name, super_class_name
+            method_name, super_class_identity
         ))
         .with_identifier("RunMat:MethodStaticAccess")
         .build());
@@ -1138,14 +1164,14 @@ pub async fn call_super_method(
     let access_allowed = match method.access {
         runmat_types::MemberAccess::Public => true,
         runmat_types::MemberAccess::Protected => {
-            crate::class_registry::is_class_or_subclass(&class_name, &owner)
+            crate::class_registry::is_class_or_subclass(&class_identity, &owner)
         }
-        runmat_types::MemberAccess::Private => class_name == owner,
+        runmat_types::MemberAccess::Private => class_identity == owner,
     };
     if !access_allowed {
         return Err(build_runtime_error(format!(
             "Method '{}@{}' is not accessible from class '{}'.",
-            method_name, super_class_name, class_name
+            method_name, super_class_identity, class_identity
         ))
         .with_identifier("RunMat:MethodPrivate")
         .build());
@@ -1166,15 +1192,20 @@ pub async fn call_super_method(
 // handle-object builtins removed for now
 
 pub(crate) async fn classref_builtin(class_name: String) -> crate::BuiltinResult<Value> {
-    Ok(Value::ClassRef(class_name))
+    let identity = runmat_types::ClassIdentity::new(class_name).map_err(|error| {
+        build_runtime_error(format!("classref: {error}"))
+            .with_identifier("RunMat:InvalidClassName")
+            .build()
+    })?;
+    Ok(Value::ClassRef(identity))
 }
 
 pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
     let mut props = std::collections::HashMap::new();
     props.insert(
-        "x".to_string(),
+        "x".into(),
         crate::class_registry::RuntimeProperty {
-            name: "x".to_string(),
+            name: "x".into(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
@@ -1184,9 +1215,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
         },
     );
     props.insert(
-        "y".to_string(),
+        "y".into(),
         crate::class_registry::RuntimeProperty {
-            name: "y".to_string(),
+            name: "y".into(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
@@ -1196,9 +1227,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
         },
     );
     props.insert(
-        "staticValue".to_string(),
+        "staticValue".into(),
         crate::class_registry::RuntimeProperty {
-            name: "staticValue".to_string(),
+            name: "staticValue".into(),
             is_static: true,
             is_constant: false,
             is_dependent: false,
@@ -1208,9 +1239,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
         },
     );
     props.insert(
-        "secret".to_string(),
+        "secret".into(),
         crate::class_registry::RuntimeProperty {
-            name: "secret".to_string(),
+            name: "secret".into(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
@@ -1221,31 +1252,31 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     );
     let mut methods = std::collections::HashMap::new();
     methods.insert(
-        "move".to_string(),
+        "move".into(),
         crate::class_registry::RuntimeMethod {
-            name: "move".to_string(),
+            name: "move".into(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
             access: MemberAccess::Public,
-            function_name: "Point.move".to_string(),
+            function_name: "Point.move".into(),
             implicit_class_argument: None,
         },
     );
     methods.insert(
-        "origin".to_string(),
+        "origin".into(),
         crate::class_registry::RuntimeMethod {
-            name: "origin".to_string(),
+            name: "origin".into(),
             is_static: true,
             is_abstract: false,
             is_sealed: false,
             access: MemberAccess::Public,
-            function_name: "Point.origin".to_string(),
+            function_name: "Point.origin".into(),
             implicit_class_argument: None,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: "Point".to_string(),
+        name: "Point".into(),
         parent: None,
         properties: props,
         methods,
@@ -1254,9 +1285,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     // Namespaced class example: pkg.PointNS with same shape as Point
     let mut ns_props = std::collections::HashMap::new();
     ns_props.insert(
-        "x".to_string(),
+        "x".into(),
         crate::class_registry::RuntimeProperty {
-            name: "x".to_string(),
+            name: "x".into(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
@@ -1266,9 +1297,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
         },
     );
     ns_props.insert(
-        "y".to_string(),
+        "y".into(),
         crate::class_registry::RuntimeProperty {
-            name: "y".to_string(),
+            name: "y".into(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
@@ -1279,7 +1310,7 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     );
     let ns_methods = std::collections::HashMap::new();
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: "pkg.PointNS".to_string(),
+        name: "pkg.PointNS".into(),
         parent: None,
         properties: ns_props,
         methods: ns_methods,
@@ -1289,19 +1320,19 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let shape_props = std::collections::HashMap::new();
     let mut shape_methods = std::collections::HashMap::new();
     shape_methods.insert(
-        "area".to_string(),
+        "area".into(),
         crate::class_registry::RuntimeMethod {
-            name: "area".to_string(),
+            name: "area".into(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
             access: MemberAccess::Public,
-            function_name: "Shape.area".to_string(),
+            function_name: "Shape.area".into(),
             implicit_class_argument: None,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: "Shape".to_string(),
+        name: "Shape".into(),
         parent: None,
         properties: shape_props,
         methods: shape_methods,
@@ -1309,9 +1340,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
 
     let mut circle_props = std::collections::HashMap::new();
     circle_props.insert(
-        "r".to_string(),
+        "r".into(),
         crate::class_registry::RuntimeProperty {
-            name: "r".to_string(),
+            name: "r".into(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
@@ -1322,20 +1353,20 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     );
     let mut circle_methods = std::collections::HashMap::new();
     circle_methods.insert(
-        "area".to_string(),
+        "area".into(),
         crate::class_registry::RuntimeMethod {
-            name: "area".to_string(),
+            name: "area".into(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
             access: MemberAccess::Public,
-            function_name: "Circle.area".to_string(),
+            function_name: "Circle.area".into(),
             implicit_class_argument: None,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: "Circle".to_string(),
-        parent: Some("Shape".to_string()),
+        name: "Circle".into(),
+        parent: Some("Shape".into()),
         properties: circle_props,
         methods: circle_methods,
     });
@@ -1344,19 +1375,19 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let ctor_props = std::collections::HashMap::new();
     let mut ctor_methods = std::collections::HashMap::new();
     ctor_methods.insert(
-        "Ctor".to_string(),
+        "Ctor".into(),
         crate::class_registry::RuntimeMethod {
-            name: "Ctor".to_string(),
+            name: "Ctor".into(),
             is_static: true,
             is_abstract: false,
             is_sealed: false,
             access: MemberAccess::Public,
-            function_name: "Ctor.Ctor".to_string(),
+            function_name: "Ctor.Ctor".into(),
             implicit_class_argument: None,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: "Ctor".to_string(),
+        name: "Ctor".into(),
         parent: None,
         properties: ctor_props,
         methods: ctor_methods,
@@ -1366,9 +1397,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
     let overidx_props = std::collections::HashMap::new();
     let mut overidx_methods = std::collections::HashMap::new();
     overidx_methods.insert(
-        OBJECT_SUBSREF_METHOD.to_string(),
+        OBJECT_SUBSREF_METHOD.into(),
         crate::class_registry::RuntimeMethod {
-            name: OBJECT_SUBSREF_METHOD.to_string(),
+            name: OBJECT_SUBSREF_METHOD.into(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
@@ -1378,9 +1409,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
         },
     );
     overidx_methods.insert(
-        OBJECT_SUBSASGN_METHOD.to_string(),
+        OBJECT_SUBSASGN_METHOD.into(),
         crate::class_registry::RuntimeMethod {
-            name: OBJECT_SUBSASGN_METHOD.to_string(),
+            name: OBJECT_SUBSASGN_METHOD.into(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
@@ -1390,12 +1421,11 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
         },
     );
     overidx_methods.insert(
-        crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
-            .to_string(),
+        crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.into(),
         crate::class_registry::RuntimeMethod {
             name:
                 crate::builtins::introspection::object_indexing::NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD
-                    .to_string(),
+                    .into(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
@@ -1418,9 +1448,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
         ),
     ] {
         overidx_methods.insert(
-            name.to_string(),
+            name.into(),
             crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
+                name: name.into(),
                 is_static,
                 is_abstract: false,
                 is_sealed: false,
@@ -1435,9 +1465,9 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
         "mldivide", "and", "or", "xor",
     ] {
         overidx_methods.insert(
-            name.to_string(),
+            name.into(),
             crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
+                name: name.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
@@ -1448,7 +1478,7 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
         );
     }
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: "OverIdx".to_string(),
+        name: "OverIdx".into(),
         parent: None,
         properties: overidx_props,
         methods: overidx_methods,
@@ -1456,7 +1486,7 @@ pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Valu
 
     // Class without indexing protocol methods, used by negative subsref/subsasgn contracts.
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: "NoIdx".to_string(),
+        name: "NoIdx".into(),
         parent: None,
         properties: std::collections::HashMap::new(),
         methods: std::collections::HashMap::new(),
@@ -1784,7 +1814,7 @@ mod tests {
     fn non_object_handle_targets_are_invalid() {
         let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocate target");
         let handle = HandleRef {
-            class_name: "MalformedHandle".to_string(),
+            class_name: "MalformedHandle".into(),
             target,
             valid: true,
         };
@@ -1803,7 +1833,7 @@ mod tests {
             },
         )));
         let closure = Value::Closure(runmat_value::Closure {
-            function_name: "function_target".to_string(),
+            function_name: "function_target".into(),
             bound_function: Some(42),
             captures: Vec::new(),
         });
@@ -1824,7 +1854,7 @@ mod tests {
             },
         )));
         let handle = Value::BoundFunctionHandle {
-            name: "function_target".to_string(),
+            name: "function_target".into(),
             function: 43,
         };
 
@@ -1837,7 +1867,7 @@ mod tests {
     fn feval_semantic_function_handle_errors_when_semantic_invoker_unavailable() {
         let _guard = crate::user_functions::clear_semantic_function_invoker();
         let handle = Value::BoundFunctionHandle {
-            name: "function_target".to_string(),
+            name: "function_target".into(),
             function: 9043,
         };
 
@@ -1925,7 +1955,7 @@ mod tests {
         ));
 
         let closure = Value::Closure(runmat_value::Closure {
-            function_name: "resolved_target".to_string(),
+            function_name: "resolved_target".into(),
             bound_function: None,
             captures: vec![Value::Num(9.0)],
         });
@@ -1944,7 +1974,7 @@ mod tests {
         let _invoker_guard = crate::user_functions::clear_semantic_function_invoker();
 
         let closure = Value::Closure(runmat_value::Closure {
-            function_name: "sin".to_string(),
+            function_name: "sin".into(),
             bound_function: None,
             captures: Vec::new(),
         });
@@ -2136,7 +2166,7 @@ mod tests {
         assert_eq!(
             value,
             Value::BoundFunctionHandle {
-                name: "resolved_target".to_string(),
+                name: "resolved_target".into(),
                 function: 145,
             }
         );
@@ -2254,7 +2284,7 @@ mod tests {
         assert_eq!(
             value,
             Value::BoundFunctionHandle {
-                name: "resolved_target".to_string(),
+                name: "resolved_target".into(),
                 function: 445,
             }
         );
@@ -2321,7 +2351,7 @@ mod tests {
         assert_eq!(
             value,
             Value::BoundFunctionHandle {
-                name: "pkg.resolved_target".to_string(),
+                name: "pkg.resolved_target".into(),
                 function: 446,
             }
         );
@@ -2332,7 +2362,7 @@ mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = crate::builtins::introspection::getmethod::dispatch_getmethod(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef("Point".into()),
             "origin".to_string(),
         )
         .expect("getmethod should resolve classref method handle");
@@ -2346,7 +2376,7 @@ mod tests {
     fn getmethod_rejects_empty_method_name() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = crate::builtins::introspection::getmethod::dispatch_getmethod(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef("Point".into()),
             "   ".to_string(),
         )
         .expect_err("empty method name should be rejected");
@@ -2374,9 +2404,9 @@ mod tests {
 
         let mut props_a = HashMap::new();
         props_a.insert(
-            "fromA".to_string(),
+            "fromA".into(),
             crate::class_registry::RuntimeProperty {
-                name: "fromA".to_string(),
+                name: "fromA".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -2387,9 +2417,9 @@ mod tests {
         );
         let mut props_b = HashMap::new();
         props_b.insert(
-            "fromB".to_string(),
+            "fromB".into(),
             crate::class_registry::RuntimeProperty {
-                name: "fromB".to_string(),
+                name: "fromB".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -2400,14 +2430,14 @@ mod tests {
         );
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: class_a.clone(),
-            parent: Some(class_b.clone()),
+            name: class_a.clone().into(),
+            parent: Some(class_b.clone().into()),
             properties: props_a,
             methods: HashMap::new(),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: class_b,
-            parent: Some(class_a.clone()),
+            name: class_b.into(),
+            parent: Some(class_a.clone().into()),
             properties: props_b,
             methods: HashMap::new(),
         });
@@ -2417,7 +2447,7 @@ mod tests {
         let Value::Object(obj) = value else {
             panic!("expected object result");
         };
-        assert_eq!(obj.class_name, class_a);
+        assert_eq!(obj.class_name.display_name(), class_a);
         assert_eq!(obj.properties.get("fromA"), Some(&Value::Num(1.0)));
         assert_eq!(obj.properties.get("fromB"), Some(&Value::Num(2.0)));
     }
@@ -2427,7 +2457,7 @@ mod tests {
         let class_name = unique_class_name("runtime_ctor_abstract");
         crate::class_registry::register_class_with_modifiers(
             crate::class_registry::RuntimeClass {
-                name: class_name.clone(),
+                name: class_name.clone().into(),
                 parent: None,
                 properties: HashMap::new(),
                 methods: HashMap::new(),
@@ -2552,7 +2582,7 @@ mod tests {
         assert_eq!(
             crate::builtins::introspection::function_handle_text::dispatch_func2str(
                 Value::BoundFunctionHandle {
-                    name: "local_fn".to_string(),
+                    name: "local_fn".into(),
                     function: 44,
                 }
             )
@@ -2562,7 +2592,7 @@ mod tests {
         assert_eq!(
             crate::builtins::introspection::function_handle_text::dispatch_func2str(
                 Value::Closure(runmat_value::Closure {
-                    function_name: "captured_fn".to_string(),
+                    function_name: "captured_fn".into(),
                     bound_function: None,
                     captures: Vec::new(),
                 })
@@ -2950,7 +2980,7 @@ mod tests {
             "NoSuchMethodClass".to_string(),
         ));
         let closure = Value::Closure(runmat_value::Closure {
-            function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
+            function_name: CALL_METHOD_BUILTIN_NAME.into(),
             bound_function: None,
             captures: vec![
                 base.clone(),
@@ -2982,7 +3012,7 @@ mod tests {
             "NoSuchMethodClass".to_string(),
         ));
         let closure = Value::Closure(runmat_value::Closure {
-            function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
+            function_name: CALL_METHOD_BUILTIN_NAME.into(),
             bound_function: None,
             captures: vec![
                 base.clone(),
@@ -3010,7 +3040,7 @@ mod tests {
     #[test]
     fn feval_call_method_closure_rejects_nontext_method_capture_with_identifier() {
         let closure = Value::Closure(runmat_value::Closure {
-            function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
+            function_name: CALL_METHOD_BUILTIN_NAME.into(),
             bound_function: None,
             captures: vec![
                 Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
@@ -3271,7 +3301,7 @@ mod tests {
     fn addlistener_rejects_invalid_handle_target_with_identifier() {
         listener_gc_test(|| {
             let target = runmat_value::HandleRef {
-                class_name: "EventTarget".to_string(),
+                class_name: "EventTarget".into(),
                 target: runmat_gc::gc_allocate(Value::Object(runmat_value::ObjectInstance::new(
                     "EventTarget".to_string(),
                 )))
@@ -3332,7 +3362,7 @@ mod tests {
                 .expect("listener target should survive construction");
             assert!(matches!(
                 target,
-                Value::Object(ref object) if object.class_name == "EventTarget"
+                Value::Object(ref object) if object.class_name.is(runmat_types::StaticClassIdentity::new("EventTarget"))
             ));
             assert_eq!(
                 runmat_gc::gc_clone_value(&listener.callback)
@@ -3501,7 +3531,7 @@ mod tests {
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let callback = Value::Closure(runmat_value::Closure {
-                function_name: "event_callback".to_string(),
+                function_name: "event_callback".into(),
                 bound_function: None,
                 captures: vec![Value::Num(9.0)],
             });
@@ -3540,7 +3570,7 @@ mod tests {
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let callback = Value::BoundFunctionHandle {
-                name: "event_callback".to_string(),
+                name: "event_callback".into(),
                 function: 44,
             };
 
@@ -3611,7 +3641,7 @@ mod tests {
         )));
         let _output_guard = crate::output_count::push_output_count(Some(0));
         let handle = Value::BoundFunctionHandle {
-            name: "function_target".to_string(),
+            name: "function_target".into(),
             function: 46,
         };
 
@@ -3632,7 +3662,7 @@ mod tests {
         )));
         let _output_guard = crate::output_count::push_output_count(Some(2));
         let handle = Value::BoundFunctionHandle {
-            name: "function_target".to_string(),
+            name: "function_target".into(),
             function: 47,
         };
 
@@ -3648,7 +3678,7 @@ mod tests {
     fn feval_semantic_closure_errors_when_semantic_invoker_unavailable() {
         let _guard = crate::user_functions::clear_semantic_function_invoker();
         let closure = Value::Closure(runmat_value::Closure {
-            function_name: "function_target".to_string(),
+            function_name: "function_target".into(),
             bound_function: Some(9044),
             captures: vec![Value::Num(1.0)],
         });

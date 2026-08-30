@@ -17,8 +17,10 @@ use crate::builtins::common::tensor;
 use crate::builtins::table::{table_from_columns, table_variables};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const GRAPH_CLASS: &str = "graph";
-const DIGRAPH_CLASS: &str = "digraph";
+const GRAPH_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("graph");
+const DIGRAPH_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("digraph");
 const NUM_NODES_PROPERTY: &str = "NumNodes";
 const GRAPH_NAME: &str = "graph";
 const DIGRAPH_NAME: &str = "digraph";
@@ -1670,13 +1672,13 @@ fn ensure_graph_classes_registered() {
     });
 }
 
-fn register_graph_class(name: &str) {
+fn register_graph_class(name: runmat_types::StaticClassIdentity) {
     let mut properties = HashMap::new();
     for property_name in ["Edges", "Nodes", NUM_NODES_PROPERTY] {
         properties.insert(
-            property_name.to_string(),
+            property_name.into(),
             crate::class_registry::RuntimeProperty {
-                name: property_name.to_string(),
+                name: property_name.into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -1687,10 +1689,10 @@ fn register_graph_class(name: &str) {
         );
     }
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: name.to_string(),
+        name: name.into(),
         parent: None,
         properties,
-        methods: HashMap::<String, crate::class_registry::RuntimeMethod>::new(),
+        methods: HashMap::<runmat_types::MethodName, crate::class_registry::RuntimeMethod>::new(),
     });
 }
 

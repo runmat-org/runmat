@@ -23,7 +23,8 @@ use crate::builtins::math::linalg::ops::{mldivide::mldivide_eval, mrdivide::mrdi
 use crate::{build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER};
 
 const NAME: &str = "decomposition";
-const CLASS_NAME: &str = "decomposition";
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("decomposition");
 
 const DECOMPOSITION_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
@@ -321,7 +322,7 @@ const SCALE_FACTOR_FIELD: &str = "ScaleFactor";
 const RANK_TOLERANCE_FIELD: &str = "RankTolerance";
 
 static DECOMPOSITION_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(CLASS_NAME);
+    crate::class_registry::ClassRegistration::new(CLASS_IDENTITY);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DecompositionType {
@@ -548,9 +549,9 @@ fn ensure_decomposition_class_registered() {
             SCALE_FACTOR_FIELD,
         ] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -561,9 +562,9 @@ fn ensure_decomposition_class_registered() {
             );
         }
         properties.insert(
-            MATRIX_FIELD.to_string(),
+            MATRIX_FIELD.into(),
             crate::class_registry::RuntimeProperty {
-                name: MATRIX_FIELD.to_string(),
+                name: MATRIX_FIELD.into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -575,32 +576,32 @@ fn ensure_decomposition_class_registered() {
 
         let mut methods = HashMap::new();
         for method_name in [
-            "subsref",
-            "uplus",
-            "uminus",
-            "ctranspose",
-            "times",
-            "mtimes",
-            "rdivide",
-            "mrdivide",
-            "mldivide",
+            runmat_types::StaticMethodName::new("subsref"),
+            runmat_types::StaticMethodName::new("uplus"),
+            runmat_types::StaticMethodName::new("uminus"),
+            runmat_types::StaticMethodName::new("ctranspose"),
+            runmat_types::StaticMethodName::new("times"),
+            runmat_types::StaticMethodName::new("mtimes"),
+            runmat_types::StaticMethodName::new("rdivide"),
+            runmat_types::StaticMethodName::new("mrdivide"),
+            runmat_types::StaticMethodName::new("mldivide"),
         ] {
             methods.insert(
-                method_name.to_string(),
+                method_name.into(),
                 crate::class_registry::RuntimeMethod {
-                    name: method_name.to_string(),
+                    name: method_name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
-                    function_name: format!("{CLASS_NAME}.{method_name}"),
+                    function_name: format!("{CLASS_IDENTITY}.{method_name}"),
                     implicit_class_argument: None,
                 },
             );
         }
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: CLASS_NAME.to_string(),
+            name: CLASS_IDENTITY.into(),
             parent: None,
             properties,
             methods,
@@ -1534,7 +1535,7 @@ fn is_hermitian_matrix(matrix: &Value) -> bool {
 }
 
 fn spec_to_object(spec: &DecompositionSpec) -> BuiltinResult<ObjectInstance> {
-    let mut object = ObjectInstance::new(CLASS_NAME.to_string());
+    let mut object = ObjectInstance::new(CLASS_IDENTITY);
     let public_matrix = oriented_matrix(spec)?;
     object
         .properties
@@ -1652,7 +1653,7 @@ fn object_to_spec(value: &Value) -> BuiltinResult<DecompositionSpec> {
 
 fn expect_object(value: &Value) -> BuiltinResult<&ObjectInstance> {
     match value {
-        Value::Object(object) if object.is_class(CLASS_NAME) => Ok(object),
+        Value::Object(object) if object.is_class(CLASS_IDENTITY) => Ok(object),
         _ => Err(invalid("receiver must be a decomposition object")),
     }
 }
@@ -1721,7 +1722,7 @@ async fn left_solve(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 fn is_decomposition_value(value: &Value) -> bool {
-    matches!(value, Value::Object(object) if object.is_class(CLASS_NAME))
+    matches!(value, Value::Object(object) if object.is_class(CLASS_IDENTITY))
 }
 
 fn effective_matrix(spec: &DecompositionSpec) -> BuiltinResult<Value> {
@@ -2552,7 +2553,8 @@ mod tests {
     #[test]
     fn decomposition_ldivide_is_not_a_public_method() {
         let _ = call_constructor(vec![tensor(&[1.0], 1, 1)]).expect("register class");
-        let class = crate::class_registry::get_class(CLASS_NAME).expect("decomposition class");
+        let class =
+            crate::class_registry::get_class(&CLASS_IDENTITY.owned()).expect("decomposition class");
         assert!(!class.methods.contains_key("ldivide"));
 
         assert!(runmat_builtins::builtin_function_by_name("decomposition.ldivide").is_none());

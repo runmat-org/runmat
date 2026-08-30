@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 fn package(identity: &str, local_name: &str, path: &str, version: &str) -> PathPackageInput {
     PathPackageInput {
         package: identity.parse::<CanonicalPackageId>().unwrap(),
-        local_name: local_name.to_string(),
+        local_name: local_name.into(),
         workspace_path: path.parse().unwrap(),
         manifest_digest: ContentDigest::sha256(format!("{path}/runmat.toml")),
         tree_digest: ContentDigest::sha256(format!("{path}/tree")),

@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn object_callbacks_preserve_handle_identity_and_mutate_its_target() {
-        let mut target = ObjectInstance::new("FixtureHandle".into());
+        let mut target = ObjectInstance::new("FixtureHandle");
         target.properties.insert("Value".into(), Value::Num(4.0));
         let target = runmat_gc::gc_allocate(Value::Object(target)).expect("allocate handle target");
         let handle = HandleRef {
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn indexed_object_callbacks_select_exact_zero_based_element() {
         let make_handle = |value| {
-            let mut target = ObjectInstance::new("FixtureHandle".into());
+            let mut target = ObjectInstance::new("FixtureHandle");
             target.properties.insert("Value".into(), Value::Num(value));
             let target = runmat_gc::gc_allocate(Value::Object(target))
                 .expect("allocate indexed handle target");
@@ -477,7 +477,7 @@ public:
         )
         .expect("write C++ MEX fixture");
 
-        let mut target = ObjectInstance::new("FixtureHandle".into());
+        let mut target = ObjectInstance::new("FixtureHandle");
         target.properties.insert("Value".into(), Value::Num(4.0));
         let target = runmat_gc::gc_allocate(Value::Object(target)).expect("allocate handle target");
         let handle = HandleRef {

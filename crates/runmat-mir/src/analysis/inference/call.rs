@@ -116,8 +116,10 @@ fn bound_function(call: &MirCall) -> Option<FunctionId> {
 fn static_name(call: &MirCall) -> Option<String> {
     match &call.callee {
         MirCallee::Static(identity) => identity.display_name(),
-        MirCallee::SuperConstructor { super_class, .. } => Some(super_class.clone()),
-        MirCallee::SuperMethod { method, .. } => Some(method.clone()),
+        MirCallee::SuperConstructor { super_class, .. } => {
+            Some(super_class.display_name().to_owned())
+        }
+        MirCallee::SuperMethod { method, .. } => Some(method.display_name().to_owned()),
         MirCallee::Dynamic(_) => None,
     }
 }

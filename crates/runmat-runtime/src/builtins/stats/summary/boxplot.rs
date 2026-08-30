@@ -1500,7 +1500,8 @@ fn numeric_group_label(value: NumericScalar) -> Option<GroupLabel> {
 fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<GroupLabel>>> {
     match value {
         Value::Cell(cell) => group_labels_from_cell(cell, expected_len),
-        Value::Object(object) if object.is_class("categorical") => (0..expected_len)
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => (0
+            ..expected_len)
             .map(|row| {
                 let label = crate::builtins::table::categorical_label_at(object, row)
                     .ok_or_else(|| invalid("boxplot: invalid categorical grouping variable"))?;

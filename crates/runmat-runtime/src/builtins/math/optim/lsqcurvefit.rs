@@ -1126,7 +1126,7 @@ mod tests {
 
         let result = block_on(lsqcurvefit_builtin(
             Value::BoundFunctionHandle {
-                name: "wide_xdata".to_string(),
+                name: "wide_xdata".into(),
                 function: 901,
             },
             Value::Num(0.0),
@@ -1159,7 +1159,7 @@ mod tests {
                 automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let result = block_on(lsqcurvefit_builtin(
                 Value::BoundFunctionHandle {
-                    name: "zero_model".to_string(),
+                    name: "zero_model".into(),
                     function: 904,
                 },
                 Value::GpuTensor(automatic),
@@ -1222,7 +1222,7 @@ mod tests {
         )));
         let result = block_on(lsqcurvefit_builtin(
             Value::BoundFunctionHandle {
-                name: "line".to_string(),
+                name: "line".into(),
                 function: 1,
             },
             tensor(vec![0.0, 0.0], vec![2, 1]),
@@ -1271,7 +1271,7 @@ mod tests {
             .collect::<Vec<_>>();
         let result = block_on(lsqcurvefit_builtin(
             Value::BoundFunctionHandle {
-                name: "exp_decay".to_string(),
+                name: "exp_decay".into(),
                 function: 2,
             },
             tensor(vec![1.0, 0.1], vec![2, 1]),
@@ -1311,7 +1311,7 @@ mod tests {
         )));
         let result = block_on(lsqcurvefit_builtin(
             Value::BoundFunctionHandle {
-                name: "bounded_line".to_string(),
+                name: "bounded_line".into(),
                 function: 3,
             },
             tensor(vec![0.5], vec![1, 1]),
@@ -1350,7 +1350,7 @@ mod tests {
         )));
         let result = block_on(lsqcurvefit_builtin(
             Value::BoundFunctionHandle {
-                name: "line_multi".to_string(),
+                name: "line_multi".into(),
                 function: 4,
             },
             tensor(vec![0.0, 0.0], vec![1, 2]),
@@ -1411,7 +1411,7 @@ mod tests {
         options.insert("Algorithm", Value::from("trust-region-reflective"));
         let result = block_on(lsqcurvefit_builtin(
             Value::BoundFunctionHandle {
-                name: "line_algorithm".to_string(),
+                name: "line_algorithm".into(),
                 function: 45,
             },
             Value::Num(0.0),
@@ -1451,7 +1451,7 @@ mod tests {
         )));
         let result = block_on(lsqcurvefit_builtin(
             Value::BoundFunctionHandle {
-                name: "underdetermined".to_string(),
+                name: "underdetermined".into(),
                 function: 5,
             },
             tensor(vec![0.0, 0.0], vec![2, 1]),
@@ -1477,7 +1477,7 @@ mod tests {
         )));
         let err = block_on(lsqcurvefit_builtin(
             Value::BoundFunctionHandle {
-                name: "bad_shape".to_string(),
+                name: "bad_shape".into(),
                 function: 6,
             },
             Value::Num(0.0),

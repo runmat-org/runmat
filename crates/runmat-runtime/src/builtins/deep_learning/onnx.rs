@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::BuiltinResult;
 
+use super::layer_identity::ForwardLayerKind;
 use super::{
     any_type, deep_learning_error, gather_args, logical_scalar, model, parse_name_values,
     positive_i64, scalar_text, unsupported_error,
@@ -248,8 +249,8 @@ fn build_export_graph(
             ));
         };
         let layer_name = layer_names[idx].clone();
-        match layer.class_name.as_str() {
-            "nnet.cnn.layer.FeatureInputLayer" => {
+        match ForwardLayerKind::from_identity(&layer.class_name) {
+            Some(ForwardLayerKind::FeatureInput) => {
                 if idx != 0 {
                     return Err(deep_learning_error(
                         EXPORT_ONNX,
@@ -259,7 +260,7 @@ fn build_export_graph(
                 current_features = Some(model::feature_input_width(layer, EXPORT_ONNX)? as i64);
                 saw_input = true;
             }
-            "nnet.cnn.layer.FullyConnectedLayer" => {
+            Some(ForwardLayerKind::FullyConnected) => {
                 let input_features = current_features.ok_or_else(|| {
                     deep_learning_error(
                         EXPORT_ONNX,
@@ -323,7 +324,7 @@ fn build_export_graph(
                 current_tensor = next_tensor;
                 current_features = Some(output_size);
             }
-            "nnet.cnn.layer.ReLULayer" => {
+            Some(ForwardLayerKind::Relu) => {
                 let next_tensor = format!("{layer_name}/Relu");
                 nodes.push(Node {
                     name: layer_name,
@@ -334,7 +335,7 @@ fn build_export_graph(
                 });
                 current_tensor = next_tensor;
             }
-            "nnet.cnn.layer.ELULayer" => {
+            Some(ForwardLayerKind::Elu) => {
                 let alpha = layer
                     .properties
                     .get("Alpha")
@@ -354,7 +355,7 @@ fn build_export_graph(
                 });
                 current_tensor = next_tensor;
             }
-            "nnet.cnn.layer.SoftmaxLayer" => {
+            Some(ForwardLayerKind::Softmax) => {
                 let next_tensor = format!("{layer_name}/Softmax");
                 nodes.push(Node {
                     name: layer_name,
@@ -368,7 +369,7 @@ fn build_export_graph(
                 });
                 current_tensor = next_tensor;
             }
-            "nnet.cnn.layer.ClassificationOutputLayer" | "nnet.cnn.layer.RegressionOutputLayer" => {
+            Some(kind) if kind.is_output() => {
                 if idx + 1 != layers.len() {
                     return Err(deep_learning_error(
                         EXPORT_ONNX,
@@ -376,10 +377,13 @@ fn build_export_graph(
                     ));
                 }
             }
-            other => {
+            _ => {
                 return Err(unsupported_error(
                     EXPORT_ONNX,
-                    format!("exportONNXNetwork: layer type '{other}' cannot be exported to ONNX"),
+                    format!(
+                        "exportONNXNetwork: layer type '{}' cannot be exported to ONNX",
+                        layer.class_name
+                    ),
                 ));
             }
         }
@@ -399,7 +403,7 @@ fn build_export_graph(
     })?;
     if current_tensor != output_name {
         nodes.push(Node {
-            name: "output".to_string(),
+            name: "output".into(),
             op_type: "Identity".to_string(),
             inputs: vec![current_tensor],
             outputs: vec![output_name.clone()],
@@ -431,7 +435,7 @@ fn feature_input_width_from_first_layer(layers: &[Value]) -> BuiltinResult<i64> 
             "exportONNXNetwork: network must start with a featureInputLayer",
         ));
     };
-    if layer.class_name != "nnet.cnn.layer.FeatureInputLayer" {
+    if !layer.class_name.is(super::FEATURE_INPUT_LAYER_CLASS) {
         return Err(deep_learning_error(
             EXPORT_ONNX,
             "exportONNXNetwork: network must start with a featureInputLayer",
@@ -712,7 +716,7 @@ mod tests {
     #[test]
     fn initializer_name_uses_tensor_proto_name_field() {
         let initializer = Initializer {
-            name: "fc.Weights".to_string(),
+            name: "fc.Weights".into(),
             dims: vec![2, 3],
             data: NumericStorage::F64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
         };
@@ -725,7 +729,7 @@ mod tests {
     #[test]
     fn initializer_encodes_native_single_type_and_raw_width() {
         let initializer = Initializer {
-            name: "fc.Bias".to_string(),
+            name: "fc.Bias".into(),
             dims: vec![2],
             data: NumericStorage::F32(vec![1.25, -2.5]),
         };

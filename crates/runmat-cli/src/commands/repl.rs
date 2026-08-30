@@ -402,7 +402,7 @@ async fn process_repl_line(
 
     let request = ExecutionRequest::for_source(
         SourceInput::Text {
-            name: "<repl>".to_string(),
+            name: "<repl>".into(),
             text: line.to_string(),
         },
         crate::diagnostics::parser_compat(config.language.compat),

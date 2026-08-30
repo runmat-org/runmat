@@ -394,7 +394,10 @@ impl FunctionRegistry {
                         }
                     }
                     CallableIdentity::Method(method) => registry
-                        .registered_named_method_execution_stack(&method.0, visiting)
+                        .registered_named_method_execution_stack(
+                            &runmat_types::MethodName::from(method.0.as_str()),
+                            visiting,
+                        )
                         .unwrap_or(runmat_types::ExecutionStackRequirement::Process),
                     CallableIdentity::ExternalName(_) | CallableIdentity::Imported(_) => {
                         runmat_types::ExecutionStackRequirement::Process
@@ -458,9 +461,9 @@ impl FunctionRegistry {
                 let Instr::RegisterClass { methods, .. } = candidate else {
                     continue;
                 };
-                for (method_name, target, _, _, _, _) in methods {
-                    if instruction_may_dispatch_method(instruction, method_name) {
-                        targets.insert(target.as_str());
+                for method in methods {
+                    if instruction_may_dispatch_method(instruction, &method.name) {
+                        targets.insert(method.function_name.as_str());
                     }
                 }
             }
@@ -471,7 +474,7 @@ impl FunctionRegistry {
 
     fn registered_named_method_execution_stack(
         &self,
-        requested_name: &str,
+        requested_name: &runmat_types::MethodName,
         visiting: &mut HashSet<FunctionId>,
     ) -> Option<runmat_types::ExecutionStackRequirement> {
         let mut targets = HashSet::new();
@@ -480,9 +483,9 @@ impl FunctionRegistry {
                 let Instr::RegisterClass { methods, .. } = candidate else {
                     continue;
                 };
-                for (method_name, target, _, _, _, _) in methods {
-                    if method_name.eq_ignore_ascii_case(requested_name) {
-                        targets.insert(target.as_str());
+                for method in methods {
+                    if &method.name == requested_name {
+                        targets.insert(method.function_name.as_str());
                     }
                 }
             }
@@ -495,9 +498,10 @@ impl FunctionRegistry {
         requested_name: &str,
         visiting: &mut HashSet<FunctionId>,
     ) -> Option<runmat_types::ExecutionStackRequirement> {
-        if let Some(requirement) =
-            self.registered_named_method_execution_stack(requested_name, visiting)
-        {
+        if let Some(requirement) = self.registered_named_method_execution_stack(
+            &runmat_types::MethodName::from(requested_name),
+            visiting,
+        ) {
             return Some(requirement);
         }
         let mut property_is_registered = false;
@@ -514,17 +518,19 @@ impl FunctionRegistry {
                 };
                 if !properties
                     .iter()
-                    .any(|(name, ..)| name.eq_ignore_ascii_case(requested_name))
+                    .any(|property| property.name.display_name() == requested_name)
                 {
                     continue;
                 }
                 property_is_registered = true;
-                let getter = format!("get.{requested_name}");
-                for (method_name, target, _, _, _, _) in methods {
-                    if method_name.eq_ignore_ascii_case("subsref")
-                        || method_name.eq_ignore_ascii_case(&getter)
+                let getter = runmat_types::MethodName::property_getter(&runmat_types::MemberName(
+                    requested_name.to_owned(),
+                ));
+                for method in methods {
+                    if runmat_runtime::OBJECT_SUBSREF_METHOD.is(&method.name)
+                        || method.name == getter
                     {
-                        targets.insert(target.as_str());
+                        targets.insert(method.function_name.as_str());
                     }
                 }
             }
@@ -586,10 +592,13 @@ fn instruction_has_dynamic_dispatch(instruction: &Instr) -> bool {
         )
 }
 
-fn instruction_may_dispatch_method(instruction: &Instr, method_name: &str) -> bool {
+fn instruction_may_dispatch_method(
+    instruction: &Instr,
+    method_name: &runmat_types::MethodName,
+) -> bool {
     if dynamic_dispatch_method_names(instruction)
         .iter()
-        .any(|candidate| method_name.eq_ignore_ascii_case(candidate))
+        .any(|candidate| candidate.is(method_name))
     {
         return true;
     }
@@ -599,7 +608,7 @@ fn instruction_may_dispatch_method(instruction: &Instr, method_name: &str) -> bo
         | Instr::IndexSliceExpr { .. }
         | Instr::IndexCell { .. }
         | Instr::IndexCellExpand { .. }
-        | Instr::IndexCellList { .. } => method_name.eq_ignore_ascii_case("subsref"),
+        | Instr::IndexCellList { .. } => runmat_runtime::OBJECT_SUBSREF_METHOD.is(method_name),
         Instr::StoreIndex(_)
         | Instr::StoreIndexCell { .. }
         | Instr::StoreIndexDelete(_)
@@ -607,56 +616,103 @@ fn instruction_may_dispatch_method(instruction: &Instr, method_name: &str) -> bo
         | Instr::StoreSlice(..)
         | Instr::StoreSliceDelete(..)
         | Instr::StoreSliceExpr { .. }
-        | Instr::StoreSliceExprDelete { .. } => method_name.eq_ignore_ascii_case("subsasgn"),
+        | Instr::StoreSliceExprDelete { .. } => {
+            runmat_runtime::OBJECT_SUBSASGN_METHOD.is(method_name)
+        }
         Instr::LoadMember(name) | Instr::LoadMemberOrInit(name) => {
-            method_name.eq_ignore_ascii_case("subsref")
-                || method_name.eq_ignore_ascii_case(&format!("get.{name}"))
+            runmat_runtime::OBJECT_SUBSREF_METHOD.is(method_name)
+                || method_name == &runmat_types::MethodName::property_getter(name)
         }
         Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => {
-            method_name.eq_ignore_ascii_case("subsref")
-                || method_name
-                    .get(..4)
-                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("get."))
+            runmat_runtime::OBJECT_SUBSREF_METHOD.is(method_name)
+                || method_name.is_property_getter()
         }
         Instr::StoreMember(name) | Instr::StoreMemberOrInit(name) => {
-            method_name.eq_ignore_ascii_case("subsasgn")
-                || method_name.eq_ignore_ascii_case(&format!("set.{name}"))
+            runmat_runtime::OBJECT_SUBSASGN_METHOD.is(method_name)
+                || method_name == &runmat_types::MethodName::property_setter(name)
         }
         Instr::StoreMemberDynamic | Instr::StoreMemberDynamicOrInit => {
-            method_name.eq_ignore_ascii_case("subsasgn")
-                || method_name
-                    .get(..4)
-                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("set."))
+            runmat_runtime::OBJECT_SUBSASGN_METHOD.is(method_name)
+                || method_name.is_property_setter()
         }
         _ => false,
     }
 }
 
-fn dynamic_dispatch_method_names(instruction: &Instr) -> &'static [&'static str] {
+fn dynamic_dispatch_method_names(instruction: &Instr) -> &'static [runmat_types::StaticMethodName] {
+    use runmat_types::StaticMethodName;
+
+    const PLUS: &[StaticMethodName] = &[StaticMethodName::new("plus")];
+    const MINUS: &[StaticMethodName] = &[StaticMethodName::new("minus")];
+    const MTIMES: &[StaticMethodName] = &[StaticMethodName::new("mtimes")];
+    const RIGHT_DIVIDE: &[StaticMethodName] = &[
+        StaticMethodName::new("mrdivide"),
+        StaticMethodName::new("rdivide"),
+    ];
+    const LEFT_DIVIDE: &[StaticMethodName] = &[
+        StaticMethodName::new("mldivide"),
+        StaticMethodName::new("ldivide"),
+    ];
+    const POWER: &[StaticMethodName] = &[
+        StaticMethodName::new("mpower"),
+        StaticMethodName::new("power"),
+    ];
+    const NEGATE: &[StaticMethodName] = &[
+        StaticMethodName::new("uminus"),
+        StaticMethodName::new("times"),
+    ];
+    const UPLUS: &[StaticMethodName] = &[StaticMethodName::new("uplus")];
+    const TRANSPOSE: &[StaticMethodName] = &[StaticMethodName::new("transpose")];
+    const CONJUGATE_TRANSPOSE: &[StaticMethodName] = &[StaticMethodName::new("ctranspose")];
+    const TIMES: &[StaticMethodName] = &[StaticMethodName::new("times")];
+    const RDIVIDE: &[StaticMethodName] = &[StaticMethodName::new("rdivide")];
+    const ELEMENTWISE_POWER: &[StaticMethodName] = &[StaticMethodName::new("power")];
+    const LDIVIDE: &[StaticMethodName] = &[StaticMethodName::new("ldivide")];
+    const LESS_EQUAL: &[StaticMethodName] = &[
+        StaticMethodName::new("le"),
+        StaticMethodName::new("gt"),
+        StaticMethodName::new("ge"),
+        StaticMethodName::new("lt"),
+    ];
+    const LESS: &[StaticMethodName] = &[StaticMethodName::new("lt"), StaticMethodName::new("gt")];
+    const GREATER: &[StaticMethodName] =
+        &[StaticMethodName::new("gt"), StaticMethodName::new("lt")];
+    const GREATER_EQUAL: &[StaticMethodName] = &[
+        StaticMethodName::new("ge"),
+        StaticMethodName::new("lt"),
+        StaticMethodName::new("le"),
+        StaticMethodName::new("gt"),
+    ];
+    const EQUAL: &[StaticMethodName] = &[StaticMethodName::new("eq")];
+    const NOT_EQUAL: &[StaticMethodName] = &[StaticMethodName::new("ne")];
+    const NOT: &[StaticMethodName] = &[StaticMethodName::new("not")];
+    const AND: &[StaticMethodName] = &[StaticMethodName::new("and")];
+    const OR: &[StaticMethodName] = &[StaticMethodName::new("or")];
+
     match instruction {
-        Instr::Add => &["plus"],
-        Instr::Sub => &["minus"],
-        Instr::Mul => &["mtimes"],
-        Instr::RightDiv => &["mrdivide", "rdivide"],
-        Instr::LeftDiv => &["mldivide", "ldivide"],
-        Instr::Pow => &["mpower", "power"],
-        Instr::Neg => &["uminus", "times"],
-        Instr::UPlus => &["uplus"],
-        Instr::Transpose => &["transpose"],
-        Instr::ConjugateTranspose => &["ctranspose"],
-        Instr::ElemMul => &["times"],
-        Instr::ElemDiv => &["rdivide"],
-        Instr::ElemPow => &["power"],
-        Instr::ElemLeftDiv => &["ldivide"],
-        Instr::LessEqual => &["le", "gt", "ge", "lt"],
-        Instr::Less => &["lt", "gt"],
-        Instr::Greater => &["gt", "lt"],
-        Instr::GreaterEqual => &["ge", "lt", "le", "gt"],
-        Instr::Equal => &["eq"],
-        Instr::NotEqual => &["ne"],
-        Instr::LogicalNot => &["not"],
-        Instr::LogicalAnd => &["and"],
-        Instr::LogicalOr => &["or"],
+        Instr::Add => PLUS,
+        Instr::Sub => MINUS,
+        Instr::Mul => MTIMES,
+        Instr::RightDiv => RIGHT_DIVIDE,
+        Instr::LeftDiv => LEFT_DIVIDE,
+        Instr::Pow => POWER,
+        Instr::Neg => NEGATE,
+        Instr::UPlus => UPLUS,
+        Instr::Transpose => TRANSPOSE,
+        Instr::ConjugateTranspose => CONJUGATE_TRANSPOSE,
+        Instr::ElemMul => TIMES,
+        Instr::ElemDiv => RDIVIDE,
+        Instr::ElemPow => ELEMENTWISE_POWER,
+        Instr::ElemLeftDiv => LDIVIDE,
+        Instr::LessEqual => LESS_EQUAL,
+        Instr::Less => LESS,
+        Instr::Greater => GREATER,
+        Instr::GreaterEqual => GREATER_EQUAL,
+        Instr::Equal => EQUAL,
+        Instr::NotEqual => NOT_EQUAL,
+        Instr::LogicalNot => NOT,
+        Instr::LogicalAnd => AND,
+        Instr::LogicalOr => OR,
         _ => &[],
     }
 }
@@ -974,7 +1030,7 @@ mod function_registry_tests {
     fn test_function(id: usize, display_name: &str, private_owner_scope: &str) -> FunctionBytecode {
         FunctionBytecode {
             function: FunctionId(id),
-            display_name: display_name.to_string(),
+            display_name: display_name.into(),
             private_owner_scope: private_owner_scope.to_string(),
             source_id: None,
             capabilities: Default::default(),
@@ -1090,14 +1146,14 @@ mod function_registry_tests {
                 is_sealed: false,
                 is_abstract: false,
                 properties: Vec::new(),
-                methods: vec![(
-                    "plus".into(),
-                    "Example.plus".into(),
-                    false,
-                    false,
-                    false,
-                    "public".into(),
-                )],
+                methods: vec![crate::bytecode::instr::BytecodeClassMethod {
+                    name: "plus".into(),
+                    function_name: "Example.plus".into(),
+                    is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: runmat_types::MemberAccess::Public,
+                }],
                 enumerations: Vec::new(),
             },
             Instr::Add,
@@ -1123,22 +1179,23 @@ mod function_registry_tests {
                 super_class: None,
                 is_sealed: false,
                 is_abstract: false,
-                properties: vec![(
-                    "data".into(),
-                    false,
-                    false,
-                    None,
-                    "public".into(),
-                    "public".into(),
-                )],
-                methods: vec![(
-                    "get.data".into(),
-                    "Example.get.data".into(),
-                    false,
-                    false,
-                    false,
-                    "public".into(),
-                )],
+                properties: vec![crate::bytecode::instr::BytecodeClassProperty {
+                    name: "data".into(),
+                    is_static: false,
+                    is_constant: false,
+                    is_dependent: false,
+                    default_literal: None,
+                    get_access: runmat_types::MemberAccess::Public,
+                    set_access: runmat_types::MemberAccess::Public,
+                }],
+                methods: vec![crate::bytecode::instr::BytecodeClassMethod {
+                    name: "get.data".into(),
+                    function_name: "Example.get.data".into(),
+                    is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: runmat_types::MemberAccess::Public,
+                }],
                 enumerations: Vec::new(),
             },
             Instr::CallMethodOrMemberIndexMulti {

@@ -1,8 +1,10 @@
 use runmat_execution::TaskHandle;
 use runmat_value::{ObjectArray, ObjectInstance, Value};
 
-pub const FEVAL_FUTURE_CLASS: &str = "parallel.FevalFuture";
-pub const FEVAL_ON_ALL_FUTURE_CLASS: &str = "parallel.FevalOnAllFuture";
+pub const FEVAL_FUTURE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("parallel.FevalFuture");
+pub const FEVAL_ON_ALL_FUTURE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("parallel.FevalOnAllFuture");
 const EXECUTION_HANDLE_PROPERTY: &str = "__runmat_execution_handle";
 
 pub fn wrap_task(task: TaskHandle) -> Value {
@@ -32,7 +34,7 @@ pub fn wrap_on_all_tasks(tasks: Vec<TaskHandle>) -> Result<Value, String> {
 
 pub fn execution_value(value: &Value) -> Option<&Value> {
     match value {
-        Value::Object(object) if object.class_name == FEVAL_FUTURE_CLASS => {
+        Value::Object(object) if object.class_name.is(FEVAL_FUTURE_CLASS) => {
             object.properties.get(EXECUTION_HANDLE_PROPERTY)
         }
         Value::Future(_) | Value::Task(_) | Value::Job(_) => Some(value),
@@ -43,7 +45,7 @@ pub fn execution_value(value: &Value) -> Option<&Value> {
 pub fn tasks(value: &Value) -> Option<Vec<TaskHandle>> {
     match value {
         Value::Object(object) => task_from_object(object).map(|task| vec![task]),
-        Value::ObjectArray(array) if array.class_name() == FEVAL_FUTURE_CLASS => array
+        Value::ObjectArray(array) if array.class_name().is(FEVAL_FUTURE_CLASS) => array
             .data()
             .iter()
             .map(|value| match value {
@@ -58,7 +60,7 @@ pub fn tasks(value: &Value) -> Option<Vec<TaskHandle>> {
 
 pub fn output_tasks(value: &Value) -> Option<Vec<TaskHandle>> {
     match value {
-        Value::Object(object) if object.class_name == FEVAL_ON_ALL_FUTURE_CLASS => object
+        Value::Object(object) if object.class_name.is(FEVAL_ON_ALL_FUTURE_CLASS) => object
             .properties
             .get(EXECUTION_HANDLE_PROPERTY)
             .and_then(tasks),
@@ -75,7 +77,7 @@ fn future_object(task: TaskHandle) -> ObjectInstance {
 }
 
 fn task_from_object(object: &ObjectInstance) -> Option<TaskHandle> {
-    if object.class_name != FEVAL_FUTURE_CLASS {
+    if !object.class_name.is(FEVAL_FUTURE_CLASS) {
         return None;
     }
     match object.properties.get(EXECUTION_HANDLE_PROPERTY) {

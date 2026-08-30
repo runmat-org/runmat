@@ -191,7 +191,7 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
         Value::StringArray(_) => false,
         Value::Struct(_) => false,
         Value::Cell(_) => false,
-        Value::Object(obj) if obj.is_class("duration") => true,
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => true,
         Value::ObjectArray(_) | Value::Object(_) => false,
         Value::HandleObject(_) => false,
         Value::Listener(_) => false,
@@ -328,7 +328,7 @@ pub(crate) mod tests {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
         let mut fields = StructValue::new();
         fields.fields.insert("name".into(), Value::from("Ada"));
-        let object = ObjectInstance::new("RunMat.Object".into());
+        let object = ObjectInstance::new("RunMat.Object");
 
         let tensor_flag = run_isreal(Value::Tensor(tensor)).expect("isreal");
         let logical_flag = run_isreal(Value::LogicalArray(logical)).expect("isreal");

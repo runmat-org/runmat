@@ -748,7 +748,7 @@ pub(crate) mod tests {
                 expected_storage,
                 expected_precision,
             ));
-            runmat_accelerate_api::set_handle_class_name(&output, "uint64");
+            runmat_accelerate_api::set_handle_class_identity(&output, "uint64");
             assert!(!valid_inv_gpu_output(
                 &input,
                 &output,

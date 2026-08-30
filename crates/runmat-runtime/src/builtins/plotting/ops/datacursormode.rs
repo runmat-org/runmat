@@ -20,7 +20,8 @@ use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "datacursormode";
-const DATA_CURSOR_CLASS_NAME: &str = "matlab.graphics.shape.internal.DataCursorManager";
+const DATA_CURSOR_CLASS_NAME: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.graphics.shape.internal.DataCursorManager");
 
 const OUTPUT_OBJECT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "dcm",
@@ -312,7 +313,7 @@ fn object_from_snapshot(snapshot: DataCursorStateSnapshot) -> BuiltinResult<Valu
     let target =
         runmat_gc::gc_allocate(Value::Object(object)).map_err(|err| internal(err.to_string()))?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: DATA_CURSOR_CLASS_NAME.to_string(),
+        class_name: DATA_CURSOR_CLASS_NAME.into(),
         target,
         valid: true,
     }))

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use jni::objects::{GlobalRef, JClass, JObject, JValue, JValueOwned};
 
-use super::{error::jni_error, JavaInvocationError, JavaSession};
+use super::{conversion::WellKnownJavaClass, error::jni_error, JavaInvocationError, JavaSession};
 use crate::{ClasspathLayer, ClasspathSnapshot, SessionClasspath};
 
 impl JavaSession {
@@ -102,10 +102,8 @@ impl JavaSession {
             |environment| match self.load_class(environment, class_name) {
                 Ok(_) => Ok(true),
                 Err(JavaInvocationError::Exception(exception))
-                    if matches!(
-                        exception.class_name.as_str(),
-                        "java.lang.ClassNotFoundException" | "java.lang.NoClassDefFoundError"
-                    ) =>
+                    if WellKnownJavaClass::from_name(&exception.class_name)
+                        .is_some_and(WellKnownJavaClass::is_missing_class_error) =>
                 {
                     Ok(false)
                 }

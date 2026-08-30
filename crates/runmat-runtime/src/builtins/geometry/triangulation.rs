@@ -21,7 +21,8 @@ use crate::{
     build_runtime_error, current_requested_outputs, gather_if_needed_async, BuiltinResult,
 };
 
-pub const DELAUNAY_TRI_CLASS: &str = "DelaunayTri";
+pub const DELAUNAY_TRI_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("DelaunayTri");
 const BUILTIN_NAME: &str = "DelaunayTri";
 const POINTS_PROPERTY: &str = "Points";
 const CONNECTIVITY_PROPERTY: &str = "ConnectivityList";
@@ -430,9 +431,9 @@ fn ensure_registered() {
             DIMENSION_PROPERTY,
         ] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -444,11 +445,15 @@ fn ensure_registered() {
         }
 
         let mut methods = HashMap::new();
-        for name in ["freeBoundary", "nearestNeighbor", "pointLocation"] {
+        for name in [
+            runmat_types::StaticMethodName::new("freeBoundary"),
+            runmat_types::StaticMethodName::new("nearestNeighbor"),
+            runmat_types::StaticMethodName::new("pointLocation"),
+        ] {
             methods.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeMethod {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
@@ -460,7 +465,7 @@ fn ensure_registered() {
         }
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: DELAUNAY_TRI_CLASS.to_string(),
+            name: DELAUNAY_TRI_CLASS.into(),
             parent: None,
             properties,
             methods,
@@ -725,7 +730,7 @@ fn object_points(object: &ObjectInstance) -> BuiltinResult<Vec<[f64; 2]>> {
         .get(POINTS_PROPERTY)
         .or_else(|| object.properties.get(LEGACY_POINTS_PROPERTY))
         .ok_or_else(|| invalid("DelaunayTri object is missing point coordinates"))?;
-    matrix_points(value, DELAUNAY_TRI_CLASS)
+    matrix_points(value, DELAUNAY_TRI_CLASS.display_name())
 }
 
 fn object_triangles(
@@ -820,7 +825,7 @@ fn connectivity_from_value(
     value: &Value,
     point_count: Option<usize>,
 ) -> BuiltinResult<Vec<[usize; 3]>> {
-    let tensor = numeric_tensor(value, DELAUNAY_TRI_CLASS)?;
+    let tensor = numeric_tensor(value, DELAUNAY_TRI_CLASS.display_name())?;
     if tensor.cols != 3 {
         return Err(invalid("DelaunayTri connectivity must be an M-by-3 matrix"));
     }
@@ -1007,7 +1012,7 @@ mod tests {
             )]))
             .unwrap(),
         );
-        assert_eq!(dt.class_name, DELAUNAY_TRI_CLASS);
+        assert!(dt.class_name.is(DELAUNAY_TRI_CLASS));
         let Value::Tensor(points) = dt.properties.get("X").unwrap() else {
             panic!("expected points")
         };

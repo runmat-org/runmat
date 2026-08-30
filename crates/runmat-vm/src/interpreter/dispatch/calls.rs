@@ -93,15 +93,17 @@ pub struct WorkspaceFirstCallContext<'a> {
 
 fn imported_static_method_owner(
     imports: &[(Vec<String>, bool)],
-    method_name: &str,
-) -> Result<Option<String>, RuntimeError> {
+    method_name: &runmat_types::MethodName,
+) -> Result<Option<runmat_types::ClassIdentity>, RuntimeError> {
     let mut owners = Vec::new();
     for (path, wildcard) in imports {
         if *wildcard {
             if path.is_empty() {
                 continue;
             }
-            let class_name = path.join(".");
+            let class_name = runmat_types::ClassIdentity::new(path.join(".")).map_err(|error| {
+                crate::interpreter::errors::mex("InvalidClassIdentity", &error.to_string())
+            })?;
             if let Some((method, owner)) =
                 runmat_runtime::class_registry::lookup_method(&class_name, method_name)
             {
@@ -111,10 +113,13 @@ fn imported_static_method_owner(
             }
             continue;
         }
-        if path.len() < 2 || path[path.len() - 1] != method_name {
+        if path.len() < 2 || path[path.len() - 1] != method_name.display_name() {
             continue;
         }
-        let class_name = path[..path.len() - 1].join(".");
+        let class_name = runmat_types::ClassIdentity::new(path[..path.len() - 1].join("."))
+            .map_err(|error| {
+                crate::interpreter::errors::mex("InvalidClassIdentity", &error.to_string())
+            })?;
         if let Some((method, owner)) =
             runmat_runtime::class_registry::lookup_method(&class_name, method_name)
         {
@@ -129,7 +134,11 @@ fn imported_static_method_owner(
             &format!(
                 "ambiguous static method '{}' via imports: {}",
                 method_name,
-                owners.join(", ")
+                owners
+                    .iter()
+                    .map(runmat_types::ClassIdentity::display_name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         ));
     }
@@ -339,13 +348,25 @@ pub async fn handle_prepared_user_function_call(
                 .map(|segment| segment.0.as_str())
                 .collect::<Vec<_>>()
                 .join(".");
-            Some((class_name, segments[segments.len() - 1].0.clone()))
+            Some((
+                runmat_types::ClassIdentity::new(class_name).map_err(|error| {
+                    crate::interpreter::errors::mex("InvalidClassIdentity", &error.to_string())
+                })?,
+                runmat_types::MethodName::from(segments[segments.len() - 1].0.as_str()),
+            ))
         }
         runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
             if name.contains('.') =>
         {
             name.rsplit_once('.')
-                .map(|(class_name, method_name)| (class_name.to_string(), method_name.to_string()))
+                .map(|(class_name, method_name)| {
+                    runmat_types::ClassIdentity::new(class_name)
+                        .map(|class_name| (class_name, runmat_types::MethodName::from(method_name)))
+                })
+                .transpose()
+                .map_err(|error| {
+                    crate::interpreter::errors::mex("InvalidClassIdentity", &error.to_string())
+                })?
         }
         _ => None,
     };
@@ -358,9 +379,7 @@ pub async fn handle_prepared_user_function_call(
                     if method.is_static {
                         let allowed = match method.access {
                             MemberAccess::Public => true,
-                            MemberAccess::Private => {
-                                current_class_context.as_deref() == Some(owner.as_str())
-                            }
+                            MemberAccess::Private => current_class_context.as_ref() == Some(&owner),
                             MemberAccess::Protected => {
                                 current_class_context.as_ref().is_some_and(|caller_class| {
                                     runmat_runtime::class_registry::is_class_or_subclass(
@@ -411,12 +430,12 @@ pub async fn handle_prepared_user_function_call(
         runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
             if !name.contains('.') && !name.trim().is_empty() =>
         {
-            Some(name.trim().to_string())
+            Some(runmat_types::MethodName::from(name.trim()))
         }
         runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
             if segments.len() == 1 && !segments[0].0.trim().is_empty() =>
         {
-            Some(segments[0].0.trim().to_string())
+            Some(runmat_types::MethodName::from(segments[0].0.trim()))
         }
         _ => None,
     };
@@ -430,9 +449,7 @@ pub async fn handle_prepared_user_function_call(
             if method.is_static {
                 let allowed = match method.access {
                     MemberAccess::Public => true,
-                    MemberAccess::Private => {
-                        current_class_context.as_deref() == Some(owner.as_str())
-                    }
+                    MemberAccess::Private => current_class_context.as_ref() == Some(&owner),
                     MemberAccess::Protected => {
                         current_class_context.as_ref().is_some_and(|caller_class| {
                             runmat_runtime::class_registry::is_class_or_subclass(
@@ -482,9 +499,7 @@ pub async fn handle_prepared_user_function_call(
                 if method.is_static {
                     let allowed = match method.access {
                         MemberAccess::Public => true,
-                        MemberAccess::Private => {
-                            current_class_context.as_deref() == Some(owner.as_str())
-                        }
+                        MemberAccess::Private => current_class_context.as_ref() == Some(&owner),
                         MemberAccess::Protected => {
                             current_class_context.as_ref().is_some_and(|caller_class| {
                                 runmat_runtime::class_registry::is_class_or_subclass(
@@ -804,50 +819,42 @@ pub fn handle_create_semantic_closure(
 
 pub fn handle_load_static_property(
     stack: &mut Vec<Value>,
-    class_name: &str,
+    class_identity: &runmat_types::ClassIdentity,
     prop: &str,
 ) -> Result<MethodHandling, RuntimeError> {
-    let value = obj_resolve::load_static_member(class_name, prop, None)?;
+    let value = obj_resolve::load_static_member(class_identity, prop, None)?;
     stack.push(value);
     Ok(MethodHandling::Completed)
 }
 
 pub fn handle_register_class(
-    name: String,
-    super_class: Option<String>,
+    name: runmat_types::ClassIdentity,
+    super_class: Option<runmat_types::ClassIdentity>,
     is_sealed: bool,
     is_abstract: bool,
-    properties: Vec<(
-        String,
-        bool,
-        bool,
-        Option<PropertyDefaultLiteral>,
-        String,
-        String,
-    )>,
-    methods: Vec<(String, String, bool, bool, bool, String)>,
+    properties: Vec<crate::bytecode::instr::BytecodeClassProperty>,
+    methods: Vec<crate::bytecode::instr::BytecodeClassMethod>,
     enumerations: Vec<String>,
 ) -> Result<MethodHandling, RuntimeError> {
     let properties = properties
         .into_iter()
-        .map(
-            |(name, is_static, is_constant, default_literal, get_access, set_access)| {
-                let default_value = default_literal.map(|literal| match literal {
-                    PropertyDefaultLiteral::Num(value) => Value::Num(value),
-                    PropertyDefaultLiteral::Int(value) => Value::Int(value),
-                    PropertyDefaultLiteral::Bool(value) => Value::Bool(value),
-                    PropertyDefaultLiteral::String(value) => Value::String(value),
-                });
-                (
-                    name,
-                    is_static,
-                    is_constant,
-                    default_value,
-                    get_access,
-                    set_access,
-                )
-            },
-        )
+        .map(|property| {
+            let default_value = property.default_literal.map(|literal| match literal {
+                PropertyDefaultLiteral::Num(value) => Value::Num(value),
+                PropertyDefaultLiteral::Int(value) => Value::Int(value),
+                PropertyDefaultLiteral::Bool(value) => Value::Bool(value),
+                PropertyDefaultLiteral::String(value) => Value::String(value),
+            });
+            crate::object::class_def::RuntimeClassPropertyRegistration {
+                name: property.name,
+                is_static: property.is_static,
+                is_constant: property.is_constant,
+                is_dependent: property.is_dependent,
+                default_value,
+                get_access: property.get_access,
+                set_access: property.set_access,
+            }
+        })
         .collect();
     obj_class_def::register_class(
         name,

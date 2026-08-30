@@ -237,13 +237,13 @@ fn solid_curve_evaluator_provider_filters_geometry_curve_samples() {
     geometry.source_geometry.cad_evaluators = vec![CadEvaluatorSet {
         evaluator_id: "cad_evaluator_test".to_string(),
         backend: "test".to_string(),
-        format_name: "step".to_string(),
+        format_name: "step".into(),
         requires_source_geometry: true,
         faces: Vec::new(),
         curves: vec![CadCurveEvaluator {
             evaluator_id: "cad_curve_12".to_string(),
             imported_curve_id: 12,
-            name: "edge".to_string(),
+            name: "edge".into(),
             supports_point_evaluation: true,
             supports_projection: true,
             supports_tangent: true,
@@ -1196,7 +1196,7 @@ fn cube_geometry() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "region_boundary".to_string(),
-            name: "boundary".to_string(),
+            name: "boundary".into(),
             tag: Some("boundary".to_string()),
             cad_ownership: None,
         }],
@@ -1245,13 +1245,13 @@ fn split_material_cube_geometry() -> GeometryAsset {
     geometry.regions = vec![
         Region {
             region_id: "region_base".to_string(),
-            name: "base".to_string(),
+            name: "base".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "region_cap".to_string(),
-            name: "cap".to_string(),
+            name: "cap".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
@@ -1287,7 +1287,7 @@ fn thin_arm_geometry() -> GeometryAsset {
     }
     geometry.regions = vec![Region {
         region_id: "body".to_string(),
-        name: "body".to_string(),
+        name: "body".into(),
         tag: Some("material".to_string()),
         cad_ownership: None,
     }];
@@ -1343,13 +1343,13 @@ fn through_hole_plate_study_geometry() -> GeometryAsset {
     geometry.regions.extend([
         Region {
             region_id: "root".to_string(),
-            name: "root".to_string(),
+            name: "root".into(),
             tag: Some("fixed".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "tip".to_string(),
-            name: "tip".to_string(),
+            name: "tip".into(),
             tag: Some("load".to_string()),
             cad_ownership: None,
         },
@@ -1380,13 +1380,13 @@ fn split_material_close_parallel_wall_slot_geometry() -> GeometryAsset {
     geometry.regions = vec![
         Region {
             region_id: "region_base".to_string(),
-            name: "base".to_string(),
+            name: "base".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "region_cap".to_string(),
-            name: "cap".to_string(),
+            name: "cap".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
@@ -1474,7 +1474,7 @@ fn faceted_cylinder_geometry() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "body".to_string(),
-            name: "body".to_string(),
+            name: "body".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         }],
@@ -1533,7 +1533,7 @@ fn octahedron_geometry() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "region_boundary".to_string(),
-            name: "boundary".to_string(),
+            name: "boundary".into(),
             tag: Some("boundary".to_string()),
             cad_ownership: None,
         }],
@@ -1581,7 +1581,7 @@ fn tetrahedron_geometry() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "region_boundary".to_string(),
-            name: "boundary".to_string(),
+            name: "boundary".into(),
             tag: Some("boundary".to_string()),
             cad_ownership: None,
         }],

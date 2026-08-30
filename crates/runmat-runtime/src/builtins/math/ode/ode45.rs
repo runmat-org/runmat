@@ -377,7 +377,7 @@ mod tests {
                 automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let result = block_on(ode45_builtin(
                 Value::BoundFunctionHandle {
-                    name: "constant_rhs".to_string(),
+                    name: "constant_rhs".into(),
                     function: 905,
                 },
                 Value::GpuTensor(automatic),

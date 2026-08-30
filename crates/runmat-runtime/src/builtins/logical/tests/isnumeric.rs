@@ -339,7 +339,7 @@ pub(crate) mod tests {
             run_isnumeric(Value::Cell(cell)).unwrap(),
             Value::Bool(false)
         );
-        let object = ObjectInstance::new("runmat.MockObject".into());
+        let object = ObjectInstance::new("runmat.MockObject");
         assert_eq!(
             run_isnumeric(Value::Object(object)).unwrap(),
             Value::Bool(false)

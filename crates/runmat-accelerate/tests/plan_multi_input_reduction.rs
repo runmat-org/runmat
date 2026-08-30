@@ -94,9 +94,7 @@ fn plan_collects_two_parents_for_mul_before_sum_dim1() {
     };
     let sum_node = AccelNode {
         id: 1,
-        label: AccelNodeLabel::Builtin {
-            name: "sum".to_string(),
-        },
+        label: AccelNodeLabel::Builtin { name: "sum".into() },
         category: AccelOpCategory::Reduction,
         inputs: vec![v_mul, v_dim],
         outputs: vec![v_sum],

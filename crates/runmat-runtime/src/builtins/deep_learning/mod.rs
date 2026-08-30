@@ -13,6 +13,26 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 pub(super) const MAX_COMBVEC_COLUMNS: usize = 1_000_000;
 pub(super) const MAX_PAD_ELEMENTS: usize = 10_000_000;
+pub(super) const DLARRAY_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("dlarray");
+pub(super) const LAYER_GRAPH_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.LayerGraph");
+pub(super) const FULLY_CONNECTED_LAYER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.FullyConnectedLayer");
+pub(super) const RELU_LAYER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.ReLULayer");
+pub(super) const ELU_LAYER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.ELULayer");
+pub(super) const SOFTMAX_LAYER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.SoftmaxLayer");
+pub(super) const FEATURE_INPUT_LAYER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.FeatureInputLayer");
+pub(super) const CLASSIFICATION_OUTPUT_LAYER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.ClassificationOutputLayer");
+pub(super) const REGRESSION_OUTPUT_LAYER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.RegressionOutputLayer");
+pub(super) const TRAINING_OPTIONS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptions");
 
 const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEEP_LEARNING.INVALID_INPUT",
@@ -32,7 +52,7 @@ const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_UNSUPPORTED];
 
 static DLARRAY_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new("dlarray");
+    crate::class_registry::ClassRegistration::new(DLARRAY_CLASS);
 
 const OUT_OBJECT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
@@ -266,25 +286,32 @@ fn descriptor_error(
 
 pub(super) fn ensure_dlarray_class_registered() {
     DLARRAY_CLASS_REGISTERED.ensure(|| {
-        let methods = ["plus", "minus", "times", "rdivide", "mtimes", "sum"]
-            .into_iter()
-            .map(|name| {
-                (
-                    name.to_string(),
-                    crate::class_registry::RuntimeMethod {
-                        name: name.to_string(),
-                        is_static: false,
-                        is_abstract: false,
-                        is_sealed: false,
-                        access: MemberAccess::Public,
-                        function_name: format!("dlarray.{name}"),
-                        implicit_class_argument: None,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
+        let methods = [
+            runmat_types::StaticMethodName::new("plus"),
+            runmat_types::StaticMethodName::new("minus"),
+            runmat_types::StaticMethodName::new("times"),
+            runmat_types::StaticMethodName::new("rdivide"),
+            runmat_types::StaticMethodName::new("mtimes"),
+            runmat_types::StaticMethodName::new("sum"),
+        ]
+        .into_iter()
+        .map(|name| {
+            (
+                name.into(),
+                crate::class_registry::RuntimeMethod {
+                    name: name.into(),
+                    is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: MemberAccess::Public,
+                    function_name: format!("dlarray.{name}"),
+                    implicit_class_argument: None,
+                },
+            )
+        })
+        .collect::<HashMap<_, _>>();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: "dlarray".to_string(),
+            name: "dlarray".into(),
             parent: None,
             properties: HashMap::new(),
             methods,
@@ -604,6 +631,21 @@ where
     Value::Object(object)
 }
 
+pub(super) fn object_with_identity<K, I>(
+    class_name: runmat_types::StaticClassIdentity,
+    properties: I,
+) -> Value
+where
+    K: Into<String>,
+    I: IntoIterator<Item = (K, Value)>,
+{
+    let mut object = ObjectInstance::new(class_name);
+    for (name, value) in properties {
+        object.properties.insert(name.into(), value);
+    }
+    Value::Object(object)
+}
+
 pub(super) fn layer_object(
     class_name: &str,
     type_name: &str,
@@ -727,6 +769,7 @@ pub(super) fn layer_names(layers: &[Value], function: &'static str) -> BuiltinRe
 
 pub(crate) mod autodiff;
 pub(crate) mod graph;
+mod layer_identity;
 pub(crate) mod layers;
 pub(crate) mod losses;
 pub(crate) mod model;

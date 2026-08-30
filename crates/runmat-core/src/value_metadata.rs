@@ -30,19 +30,13 @@ pub fn matlab_class_name(value: &Value) -> String {
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_) => "function_handle".to_string(),
-        Value::HandleObject(handle) => {
-            if handle.class_name.is_empty() {
-                "handle".to_string()
-            } else {
-                handle.class_name.clone()
-            }
-        }
+        Value::HandleObject(handle) => handle.class_name.to_string(),
         Value::Listener(_) => "event.listener".to_string(),
         // Internal destructuring helper; shouldn't surface in user-facing values,
         // but handle it defensively for completeness.
         Value::OutputList(_) => "OutputList".to_string(),
         Value::ObjectArray(array) => array.class_name().to_string(),
-        Value::Object(obj) => obj.class_name.clone(),
+        Value::Object(obj) => obj.class_name.to_string(),
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),
         Value::Future(_) => "parallel.Future".to_string(),
@@ -83,11 +77,13 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
             .ok(),
         Value::Composite(_) => Some(vec![1, 1]),
         Value::ObjectArray(array) => Some(array.shape().to_vec()),
-        Value::Object(obj) if obj.is_class("datetime") => match obj.properties.get("__serial") {
-            Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
-            Some(Value::Num(_)) => Some(vec![1, 1]),
-            _ => None,
-        },
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
+            match obj.properties.get("__serial") {
+                Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
+                Some(Value::Num(_)) => Some(vec![1, 1]),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }

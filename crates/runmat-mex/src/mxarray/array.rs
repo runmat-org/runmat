@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 
+use runmat_types::ClassIdentity;
 use runmat_value::{
     AdoptedHostAllocation, HostComplexBuffer, HostIndexBuffer, HostLogicalBuffer,
     HostNumericBuffer, NumericDType, NumericStorage,
@@ -31,7 +32,7 @@ pub enum MxBoundaryInterface {
 pub struct MxHandleToken {
     pub resource: u64,
     pub generation: u64,
-    pub class_name: String,
+    pub class_name: ClassIdentity,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -80,7 +81,7 @@ pub enum MxArrayData {
         values: Vec<Option<Box<MxArray>>>,
     },
     Object {
-        class_name: String,
+        class_name: ClassIdentity,
         /// Property-major values: `property * numel + element`.
         properties: Vec<String>,
         values: Vec<Option<Box<MxArray>>>,
@@ -346,14 +347,11 @@ impl MxArray {
     }
 
     pub fn object(
-        class_name: String,
+        class_name: ClassIdentity,
         properties: Vec<String>,
         values: Vec<Option<Box<Self>>>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        if class_name.is_empty() {
-            return Err("object class name must be non-empty".into());
-        }
         if properties.iter().any(|property| property.is_empty()) {
             return Err("object property names must be non-empty".into());
         }
@@ -471,8 +469,8 @@ impl MxArray {
 
     pub fn class_name(&self) -> &str {
         match &self.data {
-            MxArrayData::Object { class_name, .. } => class_name,
-            MxArrayData::Handle(value) => &value.class_name,
+            MxArrayData::Object { class_name, .. } => class_name.display_name(),
+            MxArrayData::Handle(value) => value.class_name.display_name(),
             MxArrayData::Gpu(_) => "gpuArray",
             _ => super::super::libmx::class_name(self.class_id),
         }

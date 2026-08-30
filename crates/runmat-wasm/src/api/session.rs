@@ -1564,7 +1564,7 @@ impl RunMatWasm {
             .collect::<Vec<_>>()
             .join(", ");
         let response = DataMaterializedVariablePayload {
-            name: array.to_string(),
+            name: array.into(),
             class_name: infer_dataset_class_name(meta.shape.len()).to_string(),
             dtype: Some(meta.dtype.clone()),
             shape: meta.shape.clone(),

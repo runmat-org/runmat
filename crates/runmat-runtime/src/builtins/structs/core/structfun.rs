@@ -966,7 +966,7 @@ mod tests {
         st.insert("a", Value::Num(1.0));
         st.insert("b", Value::Num(2.0));
         let handle = Value::BoundFunctionHandle {
-            name: "two_outputs".to_string(),
+            name: "two_outputs".into(),
             function: 91,
         };
 
@@ -1009,7 +1009,7 @@ mod tests {
         st.insert("a", Value::Num(1.0));
         st.insert("b", Value::Num(2.0));
         let handle = Value::BoundFunctionHandle {
-            name: "two_outputs".to_string(),
+            name: "two_outputs".into(),
             function: 92,
         };
 

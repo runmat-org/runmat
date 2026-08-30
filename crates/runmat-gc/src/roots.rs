@@ -371,15 +371,15 @@ mod tests {
 
             let values = vec![
                 Value::HandleObject(HandleRef {
-                    class_name: "widget".to_string(),
+                    class_name: "widget".into(),
                     target,
                     valid: true,
                 }),
                 Value::Listener(Listener {
                     id: 1,
                     target,
-                    target_class_name: "widget".to_string(),
-                    event_name: "Changed".to_string(),
+                    target_class_name: "widget".into(),
+                    event_name: "Changed".into(),
                     callback,
                     enabled: true,
                     valid: true,
@@ -405,15 +405,15 @@ mod tests {
                 .expect("callback allocation");
 
             let handle = Value::HandleObject(HandleRef {
-                class_name: "nested".to_string(),
+                class_name: "nested".into(),
                 target: handle_target,
                 valid: true,
             });
             let listener = Value::Listener(Listener {
                 id: 7,
                 target: handle_target,
-                target_class_name: "nested".to_string(),
-                event_name: "Changed".to_string(),
+                target_class_name: "nested".into(),
+                event_name: "Changed".into(),
                 callback,
                 enabled: true,
                 valid: true,
@@ -426,7 +426,7 @@ mod tests {
             struct_value.fields.insert(
                 "closure".to_string(),
                 Value::Closure(Closure {
-                    function_name: "f".to_string(),
+                    function_name: "f".into(),
                     bound_function: None,
                     captures: vec![listener],
                 }),

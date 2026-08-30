@@ -589,8 +589,8 @@ fn valid_provider_eig_result(
     let expected_precision =
         runmat_accelerate_api::handle_precision(input).unwrap_or_else(|| provider.precision());
     let expected_class = match expected_precision {
-        runmat_accelerate_api::ProviderPrecision::F32 => "single",
-        runmat_accelerate_api::ProviderPrecision::F64 => "double",
+        runmat_accelerate_api::ProviderPrecision::F32 => runmat_types::standard::SINGLE,
+        runmat_accelerate_api::ProviderPrecision::F64 => runmat_types::standard::DOUBLE,
     };
     let expected_shapes = [vec![order, 1], vec![order, order], vec![order, order]];
     let mut identities = HashSet::new();
@@ -611,8 +611,8 @@ fn valid_provider_eig_result(
                     | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
             )
             || runmat_accelerate_api::handle_precision(handle) != Some(expected_precision)
-            || runmat_accelerate_api::handle_class_name(handle)
-                .is_some_and(|class_name| !class_name.eq_ignore_ascii_case(expected_class))
+            || runmat_accelerate_api::handle_class_identity(handle)
+                .is_some_and(|class_identity| !class_identity.is(expected_class))
             || runmat_accelerate_api::handle_integer_type(handle).is_some()
             || runmat_accelerate_api::handle_is_logical(handle)
         {
@@ -1581,13 +1581,13 @@ pub(crate) mod tests {
             ));
             runmat_accelerate_api::set_handle_logical(&right, false);
 
-            runmat_accelerate_api::set_handle_class_name(&right, "uint8");
+            runmat_accelerate_api::set_handle_class_identity(&right, "uint8");
             assert!(!valid_provider_eig_result(
                 &valid, provider, &input, 2, true
             ));
-            runmat_accelerate_api::set_handle_class_name(&right, "double");
+            runmat_accelerate_api::set_handle_class_identity(&right, "double");
             assert!(valid_provider_eig_result(&valid, provider, &input, 2, true));
-            runmat_accelerate_api::clear_handle_class_name(&right);
+            runmat_accelerate_api::clear_handle_class_identity(&right);
 
             let alias = upload(&[3.0, 4.0], &[2, 1]);
             let cleanup = ProviderEigResult {

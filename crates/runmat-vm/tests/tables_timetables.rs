@@ -11,12 +11,12 @@ fn has_bool(vars: &[Value], expected: bool) -> bool {
 
 fn has_table(vars: &[Value]) -> bool {
     vars.iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name == "table"))
+        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("table"))))
 }
 
 fn has_timetable(vars: &[Value]) -> bool {
     vars.iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name == "timetable"))
+        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("timetable"))))
 }
 
 fn has_tensor(vars: &[Value], expected: &[f64]) -> bool {
@@ -161,10 +161,10 @@ fn categorical_dictionary_and_selector_surface_executes_from_scripts() {
     assert!(has_logical_array(&vars, &[1, 1]));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name == "categorical")));
+        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("categorical")))));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name == "dictionary")));
+        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("dictionary")))));
 }
 
 #[test]
@@ -191,7 +191,13 @@ fn dictionary_compiled_surface_preserves_wide_integer_keys_and_scalar_expansion(
     let dictionary = vars
         .iter()
         .find_map(|value| match value {
-            Value::Object(object) if object.class_name == "dictionary" => Some(object),
+            Value::Object(object)
+                if object
+                    .class_name
+                    .is(runmat_types::StaticClassIdentity::new("dictionary")) =>
+            {
+                Some(object)
+            }
             _ => None,
         })
         .expect("dictionary result");
@@ -215,7 +221,13 @@ fn categorical_compiled_surface_preserves_exact_integer_identity_and_flags() {
     let object = vars
         .iter()
         .find_map(|value| match value {
-            Value::Object(object) if object.class_name == "categorical" => Some(object),
+            Value::Object(object)
+                if object
+                    .class_name
+                    .is(runmat_types::StaticClassIdentity::new("categorical")) =>
+            {
+                Some(object)
+            }
             _ => None,
         })
         .expect("categorical object");

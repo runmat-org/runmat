@@ -14,7 +14,7 @@ use crate::builtins::control::type_resolvers::nyquist_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "nyquist";
-const TF_CLASS: &str = "tf";
+const TF_CLASS: runmat_types::StaticClassIdentity = runmat_types::StaticClassIdentity::new("tf");
 const EPS: f64 = 1.0e-12;
 const DEFAULT_FREQUENCY_POINTS: usize = 200;
 
@@ -116,7 +116,7 @@ impl TfSystem {
                 "nyquist: expected a dynamic system model, got {gathered:?}"
             )));
         };
-        if object.class_name != TF_CLASS {
+        if !object.class_name.is(TF_CLASS) {
             return Err(nyquist_error(format!(
                 "nyquist: unsupported model class '{}'; only SISO tf objects are currently supported",
                 object.class_name

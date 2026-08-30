@@ -9,7 +9,10 @@ use crate::BuiltinResult;
     builtin_path = "crate::builtins::testing::constraints"
 )]
 fn is_equal_to(expected: Value) -> BuiltinResult<Value> {
-    constraint("matlab.unittest.constraints.IsEqualTo", Some(expected))
+    constraint(
+        runmat_types::standard::UNIT_TEST_IS_EQUAL_TO,
+        Some(expected),
+    )
 }
 
 #[runmat_macros::runtime_builtin(
@@ -20,7 +23,7 @@ fn is_equal_to(expected: Value) -> BuiltinResult<Value> {
 )]
 fn is_true(args: Vec<Value>) -> BuiltinResult<Value> {
     no_args("IsTrue", args)?;
-    constraint("matlab.unittest.constraints.IsTrue", None)
+    constraint(runmat_types::standard::UNIT_TEST_IS_TRUE, None)
 }
 
 #[runmat_macros::runtime_builtin(
@@ -31,12 +34,15 @@ fn is_true(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 fn is_false(args: Vec<Value>) -> BuiltinResult<Value> {
     no_args("IsFalse", args)?;
-    constraint("matlab.unittest.constraints.IsFalse", None)
+    constraint(runmat_types::standard::UNIT_TEST_IS_FALSE, None)
 }
 
-fn constraint(class_name: &str, expected: Option<Value>) -> BuiltinResult<Value> {
+fn constraint(
+    class_name: runmat_types::StaticClassIdentity,
+    expected: Option<Value>,
+) -> BuiltinResult<Value> {
     crate::testing::ensure_testing_classes();
-    let mut object = ObjectInstance::new(class_name.into());
+    let mut object = ObjectInstance::new(class_name);
     if let Some(expected) = expected {
         object
             .properties

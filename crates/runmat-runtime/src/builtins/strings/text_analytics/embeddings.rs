@@ -33,7 +33,8 @@ use crate::builtins::strings::text_analytics::encoding::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
-pub const WORD_EMBEDDING_CLASS: &str = "wordEmbedding";
+pub const WORD_EMBEDDING_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("wordEmbedding");
 const VECTOR_PROPERTY: &str = "__Vectors";
 const MAX_EMBEDDING_FILE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_ZIP_ENTRIES: usize = 256;
@@ -1607,10 +1608,10 @@ fn ensure_word_embedding_class_registered() {
     WORD_EMBEDDING_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["Dimension", "Vocabulary", VECTOR_PROPERTY] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: WORD_EMBEDDING_CLASS.to_string(),
+            name: WORD_EMBEDDING_CLASS.into(),
             parent: None,
             properties,
             methods: HashMap::new(),
@@ -1620,7 +1621,7 @@ fn ensure_word_embedding_class_registered() {
 
 fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
     crate::class_registry::RuntimeProperty {
-        name: name.to_string(),
+        name: name.into(),
         is_static: false,
         is_constant: false,
         is_dependent: false,

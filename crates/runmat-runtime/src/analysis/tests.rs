@@ -193,7 +193,7 @@ fn sample_model() -> AnalysisModel {
         frame: ReferenceFrame::Global,
         materials: vec![MaterialModel {
             material_id: "mat_steel".to_string(),
-            name: "Steel".to_string(),
+            name: "Steel".into(),
             mechanical: MaterialMechanicalModel {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
@@ -294,7 +294,7 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     let mut model = sample_model();
     model.materials.push(MaterialModel {
         material_id: "mat_polymer".to_string(),
-        name: "Polymer".to_string(),
+        name: "Polymer".into(),
         mechanical: MaterialMechanicalModel {
             youngs_modulus_pa: 3.2e9,
             poisson_ratio: 0.37,
@@ -583,7 +583,7 @@ fn sample_geometry_asset() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "region_default".to_string(),
-            name: "Default Region".to_string(),
+            name: "Default Region".into(),
             tag: Some("mesh_default".to_string()),
             cad_ownership: None,
         }],
@@ -649,13 +649,13 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
         regions: vec![
             Region {
                 region_id: "root".to_string(),
-                name: "root".to_string(),
+                name: "root".into(),
                 tag: Some("fixed".to_string()),
                 cad_ownership: None,
             },
             Region {
                 region_id: "tip".to_string(),
-                name: "tip".to_string(),
+                name: "tip".into(),
                 tag: Some("load".to_string()),
                 cad_ownership: None,
             },
@@ -695,13 +695,13 @@ fn nested_tetrahedron_shell_study_geometry() -> GeometryAsset {
     geometry.regions.extend([
         Region {
             region_id: "root".to_string(),
-            name: "root".to_string(),
+            name: "root".into(),
             tag: Some("fixed".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "tip".to_string(),
-            name: "tip".to_string(),
+            name: "tip".into(),
             tag: Some("load".to_string()),
             cad_ownership: None,
         },
@@ -727,13 +727,13 @@ fn add_through_hole_study_boundary_regions(geometry: &mut GeometryAsset) {
     geometry.regions.extend([
         Region {
             region_id: "root".to_string(),
-            name: "root".to_string(),
+            name: "root".into(),
             tag: Some("fixed".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "tip".to_string(),
-            name: "tip".to_string(),
+            name: "tip".into(),
             tag: Some("load".to_string()),
             cad_ownership: None,
         },
@@ -781,13 +781,13 @@ fn sample_step_like_geometry_asset() -> GeometryAsset {
     asset.regions = vec![
         Region {
             region_id: "region_root".to_string(),
-            name: "Base_Mount".to_string(),
+            name: "Base_Mount".into(),
             tag: Some("fixed".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "region_tip".to_string(),
-            name: "Tip_Load".to_string(),
+            name: "Tip_Load".into(),
             tag: Some("load".to_string()),
             cad_ownership: None,
         },
@@ -4528,7 +4528,7 @@ fn gpu_run_with_provider_emits_device_refs() {
         fn device_info_struct(&self) -> ApiDeviceInfo {
             ApiDeviceInfo {
                 device_id: 7,
-                name: "analysis-test-provider".to_string(),
+                name: "analysis-test-provider".into(),
                 vendor: "runmat-tests".to_string(),
                 memory_bytes: None,
                 backend: Some("test_gpu".to_string()),
@@ -7099,7 +7099,7 @@ fn solid_mesh_material_coverage_uses_region_assignments() {
     let mut multi_material = sample_model();
     multi_material.materials.push(MaterialModel {
         material_id: "mat_aluminum".to_string(),
-        name: "Aluminum".to_string(),
+        name: "Aluminum".into(),
         mechanical: MaterialMechanicalModel {
             youngs_modulus_pa: 70e9,
             poisson_ratio: 0.33,
@@ -8917,7 +8917,7 @@ fn no_topology_growth_marks_latest_adaptive_iteration_converged() {
             convergence_status: runmat_meshing_core::AdaptiveConvergenceStatus::Pending,
             indicators: vec![runmat_meshing_core::RefinementIndicatorSummary {
                 namespace: "structural".to_string(),
-                name: "stress_gradient".to_string(),
+                name: "stress_gradient".into(),
                 requested_mode: runmat_meshing_core::RefinementIndicatorMode::Auto,
                 status: runmat_meshing_core::RefinementIndicatorStatus::Used,
                 detail: None,
@@ -10341,7 +10341,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     }];
     model.materials.push(MaterialModel {
         material_id: "mat_poly_high_k".to_string(),
-        name: "High K Composite".to_string(),
+        name: "High K Composite".into(),
         mechanical: MaterialMechanicalModel {
             youngs_modulus_pa: 5.0e9,
             poisson_ratio: 0.33,

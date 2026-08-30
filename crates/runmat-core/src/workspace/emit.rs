@@ -332,7 +332,7 @@ pub(crate) fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
         WorkspaceResidency::Cpu
     };
     WorkspaceEntry {
-        name: name.to_string(),
+        name: name.into(),
         class_name: matlab_class_name(value),
         dtype,
         shape: value_shape(value).unwrap_or_default(),

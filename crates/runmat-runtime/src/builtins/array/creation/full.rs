@@ -95,9 +95,9 @@ async fn full_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Symbolic(_) | Value::SymbolicArray(_) => Err(invalid_input("sym")),
         Value::Cell(_) => Err(invalid_input("cell")),
         Value::Struct(_) => Err(invalid_input("struct")),
-        Value::ObjectArray(array) => Err(invalid_input(array.class_name())),
-        Value::Object(obj) => Err(invalid_input(&obj.class_name)),
-        Value::HandleObject(handle) => Err(invalid_input(&handle.class_name)),
+        Value::ObjectArray(array) => Err(invalid_input(array.class_name().display_name())),
+        Value::Object(obj) => Err(invalid_input(obj.class_name.display_name())),
+        Value::HandleObject(handle) => Err(invalid_input(handle.class_name.display_name())),
         Value::Listener(_) => Err(invalid_input("event.listener")),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)

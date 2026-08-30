@@ -105,7 +105,7 @@ impl RunMatSession {
             async_input_handler: None,
             callstack_limit: runmat_runtime::context::DEFAULT_CALLSTACK_LIMIT,
             error_namespace: runmat_runtime::context::DEFAULT_ERROR_NAMESPACE.to_string(),
-            active_source_name: "<repl>".to_string(),
+            active_source_name: "<repl>".into(),
             active_source_fullpath_name: None,
             telemetry_consent: true,
             telemetry_client_id: None,

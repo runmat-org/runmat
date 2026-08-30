@@ -114,12 +114,12 @@ fn requested_outputs_from_slot(vars: &[Value], slot: usize) -> Result<usize, Run
     }
 }
 
-fn initialize_object_with_defaults(class_name: &str) -> ObjectInstance {
+fn initialize_object_with_defaults(class_name: &runmat_types::ClassIdentity) -> ObjectInstance {
     let empty_default = || Value::Tensor(Tensor::new(vec![], vec![0, 0]).expect("empty tensor"));
     if let Some(def) = runmat_runtime::class_registry::get_class(class_name) {
         let mut chain: Vec<runmat_runtime::class_registry::RuntimeClass> = Vec::new();
         let mut visited = HashSet::new();
-        let mut cursor: Option<String> = Some(def.name.clone());
+        let mut cursor = Some(def.name.clone());
         while let Some(name) = cursor {
             if !visited.insert(name.clone()) {
                 break;
@@ -137,7 +137,7 @@ fn initialize_object_with_defaults(class_name: &str) -> ObjectInstance {
             for (property_name, property_def) in class_def.properties {
                 if !property_def.is_static {
                     object.properties.insert(
-                        property_name,
+                        property_name.to_string(),
                         property_def.default_value.unwrap_or_else(empty_default),
                     );
                 }
@@ -145,7 +145,7 @@ fn initialize_object_with_defaults(class_name: &str) -> ObjectInstance {
         }
         object
     } else {
-        ObjectInstance::new(class_name.to_string())
+        ObjectInstance::new(class_name.clone())
     }
 }
 
@@ -1597,7 +1597,7 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadMethod(name) => {
-            handle_load_method(stack, name.clone(), current_function_name)?;
+            handle_load_method(stack, name.0.clone(), current_function_name)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1643,7 +1643,7 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadStaticProperty(class_name, prop) => {
-            handle_load_static_property(stack, class_name, prop)?;
+            handle_load_static_property(stack, class_name, prop.display_name())?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1656,7 +1656,7 @@ pub async fn dispatch_instruction(
             if let Some(value) = crate::runtime::workspace::workspace_lookup(name) {
                 stack.push(value);
             } else {
-                handle_load_static_property(stack, class_name, property)?;
+                handle_load_static_property(stack, class_name, property.display_name())?;
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

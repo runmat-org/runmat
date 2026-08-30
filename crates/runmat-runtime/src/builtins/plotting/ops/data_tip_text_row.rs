@@ -22,10 +22,11 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dataTipTextRow";
-const CLASS_NAME: &str = "matlab.graphics.datatip.DataTipTextRow";
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.graphics.datatip.DataTipTextRow");
 
 static DATA_TIP_TEXT_ROW_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(CLASS_NAME);
+    crate::class_registry::ClassRegistration::new(CLASS_IDENTITY);
 
 const DATA_TIP_OUTPUT_ROW: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "row",
@@ -211,9 +212,9 @@ fn ensure_class_registered() {
         let mut properties = HashMap::new();
         for name in ["Label", "Value", "Format"] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -224,10 +225,11 @@ fn ensure_class_registered() {
             );
         }
 
-        let methods: HashMap<String, crate::class_registry::RuntimeMethod> = HashMap::new();
+        let methods: HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> =
+            HashMap::new();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: CLASS_NAME.to_string(),
-            parent: Some("handle".to_string()),
+            name: CLASS_IDENTITY.into(),
+            parent: Some(runmat_types::standard::HANDLE.into()),
             properties,
             methods,
         });
@@ -297,7 +299,7 @@ pub fn data_tip_text_row_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         None => "auto".to_string(),
     };
 
-    let mut object = ObjectInstance::new(CLASS_NAME.to_string());
+    let mut object = ObjectInstance::new(CLASS_IDENTITY);
     object
         .properties
         .insert("Label".to_string(), Value::String(label));
@@ -312,7 +314,7 @@ pub fn data_tip_text_row_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         )
     })?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: CLASS_NAME.to_string(),
+        class_name: CLASS_IDENTITY.owned(),
         target,
         valid: true,
     }))
@@ -375,7 +377,7 @@ mod tests {
         let Value::HandleObject(handle) = value else {
             panic!("expected handle object");
         };
-        assert_eq!(handle.class_name, CLASS_NAME);
+        assert!(handle.class_name.is(CLASS_IDENTITY));
         let target = runmat_gc::gc_clone_value(&handle.target).expect("clone handle target");
         let Value::Object(object) = target else {
             panic!("expected object handle target");

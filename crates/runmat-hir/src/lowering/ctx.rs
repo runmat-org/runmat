@@ -2,20 +2,20 @@ use crate::hir::FunctionArgumentValidation;
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
-    CallSyntax, CapturedBinding, ClassArgumentBlock, ClassDeclaration, ClassId, ClassKind,
-    ClassPropertyDefault, ClassResolution, CommandArgument, DefPath, DefPathSegment, EntrypointId,
-    EntrypointName, EntrypointOrigin, EntrypointPolicy, EnumerationDeclaration, EventDeclaration,
-    ExprId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName,
-    FunctionOutputArity, FunctionResolution, HirAssembly, HirBinding, HirBlock, HirCall,
-    HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirError, HirExpr, HirExprKind,
-    HirFunction, HirImport, HirIndex, HirModule, HirPlace, HirStmt as HirStmtNode, HirStmtKind,
-    ImportResolution, IndexComponent, IndexKind, IndexResultContext, IndexingSemantics,
-    InheritanceDeclaration, LoweringContext, LoweringResult, MemberAccess, MemberName,
-    MethodDeclaration, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind,
-    PropertyDeclaration, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
-    SourceId, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
-    WorkspaceVisibility, AWAIT_EXTENSION_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
-    SPAWN_EXTENSION_NAME,
+    CallSyntax, CapturedBinding, ClassArgumentBlock, ClassDeclaration, ClassId, ClassIdentity,
+    ClassKind, ClassPropertyDefault, ClassResolution, CommandArgument, DefPath, DefPathSegment,
+    EntrypointId, EntrypointName, EntrypointOrigin, EntrypointPolicy, EnumerationDeclaration,
+    EventDeclaration, ExprId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers,
+    FunctionName, FunctionOutputArity, FunctionResolution, HirAssembly, HirBinding, HirBlock,
+    HirCall, HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirError, HirExpr,
+    HirExprKind, HirFunction, HirImport, HirIndex, HirModule, HirPlace, HirStmt as HirStmtNode,
+    HirStmtKind, ImportResolution, IndexComponent, IndexKind, IndexResultContext,
+    IndexingSemantics, InheritanceDeclaration, LoweringContext, LoweringResult, MemberAccess,
+    MemberName, MethodDeclaration, ModuleId, OperatorKind, PackageName, PlaceMutation,
+    PlaceMutationKind, PropertyDeclaration, QualifiedName, ReferenceKind, ReferenceResolution,
+    RequestedOutputCount, SourceId, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName,
+    WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME, NARGIN_BUILTIN_NAME,
+    NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use runmat_types::{
@@ -153,7 +153,11 @@ impl LoweringCtx {
             .iter()
             .find(|declaration| declaration.name.display_name().as_deref() == Some(name))
             .cloned()
-            .or_else(|| runmat_builtins::standard_class_declaration(name))
+            .or_else(|| {
+                runmat_types::ClassIdentity::new(name)
+                    .ok()
+                    .and_then(|identity| runmat_builtins::standard_class_declaration(&identity))
+            })
     }
 
     fn class_id_for_name(&self, name: &str) -> Option<ClassId> {
@@ -1082,7 +1086,7 @@ impl LoweringCtx {
                                     class_name = None;
                                     parser_validators.push(
                                         runmat_parser::FunctionArgValidatorDecl {
-                                            name: name.to_string(),
+                                            name: name.into(),
                                             args: Vec::new(),
                                         },
                                     );
@@ -2488,7 +2492,7 @@ impl LoweringCtx {
                             property: MemberName(name.clone()),
                         }
                     } else {
-                        let class_ref = self.classref_expr(&class_name, span)?;
+                        let class_ref = self.classref_expr(class_name.display_name(), span)?;
                         HirExprKind::Member(Box::new(class_ref), MemberName(name.clone()))
                     }
                 } else if is_builtin(name)
@@ -3158,7 +3162,7 @@ impl LoweringCtx {
             (
                 HirCallableRef::ExternalFunction {
                     function: *function,
-                    display_name: name.to_string(),
+                    display_name: name.into(),
                 },
                 CallKind::DirectFunction(*function),
             )
@@ -3373,13 +3377,15 @@ impl LoweringCtx {
         &self,
         name: &str,
         span: Span,
-    ) -> Result<Option<String>, HirError> {
+    ) -> Result<Option<ClassIdentity>, HirError> {
         let imports = &self.assembly.modules[self.module.0].imports;
-        let specific_candidates: Vec<String> = imports
+        let specific_candidates: Vec<ClassIdentity> = imports
             .iter()
             .filter(|import| import.wildcard)
-            .map(|import| Self::qualified_name_string(&import.path))
-            .filter(|qualified_class| self.class_has_public_static_property(qualified_class, name))
+            .filter_map(|import| ClassIdentity::new(Self::qualified_name_string(&import.path)).ok())
+            .filter(|qualified_class| {
+                self.class_has_public_static_property(qualified_class.display_name(), name)
+            })
             .collect();
         if specific_candidates.len() == 1 {
             return Ok(specific_candidates.first().cloned());
@@ -3405,7 +3411,7 @@ impl LoweringCtx {
         if let Some(function) = self.external_function_names.get(name) {
             return Ok(crate::FunctionHandleTarget::ExternalFunction {
                 function: *function,
-                display_name: name.to_string(),
+                display_name: name.into(),
             });
         }
         if is_builtin(name) {

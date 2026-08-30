@@ -18,7 +18,8 @@ use runmat_value::{CellArray, HandleRef, ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-pub(crate) const ON_CLEANUP_CLASS: &str = "onCleanup";
+pub(crate) const ON_CLEANUP_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("onCleanup");
 const CALLBACK_PROPERTY: &str = "__oncleanup_callback";
 const ACTIVE_PROPERTY: &str = "__oncleanup_active";
 const ON_CLEANUP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
@@ -183,7 +184,7 @@ pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<Value> 
         .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
 
     Ok(Value::HandleObject(HandleRef {
-        class_name: ON_CLEANUP_CLASS.to_string(),
+        class_name: ON_CLEANUP_CLASS.into(),
         target,
         valid: true,
     }))
@@ -314,38 +315,39 @@ pub(crate) async fn run_cleanup_for_workspace_values(values: &[Value]) -> Builti
 }
 
 fn ensure_on_cleanup_class_registered() {
-    if crate::class_registry::get_class(ON_CLEANUP_CLASS).is_some() {
+    if crate::class_registry::get_class(&ON_CLEANUP_CLASS.owned()).is_some() {
         return;
     }
     let mut methods = HashMap::new();
     methods.insert(
-        "delete".to_string(),
+        "delete".into(),
         crate::class_registry::RuntimeMethod {
-            name: "delete".to_string(),
+            name: "delete".into(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
             access: MemberAccess::Public,
-            function_name: "__runmat_oncleanup_delete".to_string(),
+            function_name: "__runmat_oncleanup_delete".into(),
             implicit_class_argument: None,
         },
     );
     methods.insert(
-        "cancel".to_string(),
+        "cancel".into(),
         crate::class_registry::RuntimeMethod {
-            name: "cancel".to_string(),
+            name: "cancel".into(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
             access: MemberAccess::Public,
-            function_name: "cancel".to_string(),
+            function_name: "cancel".into(),
             implicit_class_argument: None,
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: ON_CLEANUP_CLASS.to_string(),
-        parent: Some("handle".to_string()),
-        properties: HashMap::<String, crate::class_registry::RuntimeProperty>::new(),
+        name: ON_CLEANUP_CLASS.into(),
+        parent: Some(runmat_types::standard::HANDLE.into()),
+        properties:
+            HashMap::<runmat_types::MemberName, crate::class_registry::RuntimeProperty>::new(),
         methods,
     });
 }
@@ -477,7 +479,7 @@ mod tests {
             callback_invoker(Arc::clone(&counter)),
         ));
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanup".to_string(),
+            name: "cleanup".into(),
             function: 7,
         }))
         .expect("create cleanup");
@@ -497,7 +499,7 @@ mod tests {
             callback_invoker(Arc::clone(&counter)),
         ));
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanup".to_string(),
+            name: "cleanup".into(),
             function: 7,
         }))
         .expect("create cleanup");
@@ -523,7 +525,7 @@ mod tests {
             callback_invoker(Arc::clone(&counter)),
         ));
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanup".to_string(),
+            name: "cleanup".into(),
             function: 7,
         }))
         .expect("create cleanup");
@@ -558,7 +560,7 @@ mod tests {
             callback_invoker(Arc::clone(&counter)),
         ));
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanup".to_string(),
+            name: "cleanup".into(),
             function: 7,
         }))
         .expect("create cleanup");
@@ -578,17 +580,17 @@ mod tests {
             callback_invoker(Arc::clone(&counter)),
         ));
         let cleanup_a = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanupA".to_string(),
+            name: "cleanupA".into(),
             function: 7,
         }))
         .expect("create cleanup a");
         let cleanup_b = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanupB".to_string(),
+            name: "cleanupB".into(),
             function: 8,
         }))
         .expect("create cleanup b");
         let cleanup_c = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanupC".to_string(),
+            name: "cleanupC".into(),
             function: 9,
         }))
         .expect("create cleanup c");

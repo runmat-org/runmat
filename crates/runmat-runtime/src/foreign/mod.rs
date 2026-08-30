@@ -357,10 +357,12 @@ fn is_java_qualified_candidate(name: &str) -> bool {
     if !name.contains('.') || name.starts_with("clib.") || name.starts_with("clibgen.") {
         return false;
     }
-    if name
-        .rsplit_once('.')
-        .is_some_and(|(class_name, _)| crate::class_registry::get_class(class_name).is_some())
-    {
+    if name.rsplit_once('.').is_some_and(|(class_name, _)| {
+        runmat_types::ClassIdentity::new(class_name)
+            .ok()
+            .and_then(|identity| crate::class_registry::get_class(&identity))
+            .is_some()
+    }) {
         return false;
     }
     true

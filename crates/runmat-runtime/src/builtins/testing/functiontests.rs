@@ -76,7 +76,7 @@ fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
     let values = tests
         .into_iter()
         .map(|(name, handle)| {
-            let mut object = ObjectInstance::new(crate::testing::TEST_SUITE_CLASS.into());
+            let mut object = ObjectInstance::new(crate::testing::TEST_SUITE_CLASS);
             object
                 .properties
                 .insert("Name".into(), Value::String(format!("{suite_name}/{name}")));
@@ -150,7 +150,7 @@ mod tests {
         let Value::ObjectArray(array) = value else {
             panic!("expected suite object array");
         };
-        assert_eq!(array.class_name(), crate::testing::TEST_SUITE_CLASS);
+        assert!(array.class_name().is(crate::testing::TEST_SUITE_CLASS));
         assert_eq!(array.shape(), &[1, 2]);
         for value in array.data() {
             let Value::Object(object) = value else {

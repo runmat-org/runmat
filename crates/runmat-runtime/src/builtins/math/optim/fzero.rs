@@ -939,7 +939,7 @@ mod tests {
                 .unwrap();
         let root = block_on(fzero_builtin(
             Value::BoundFunctionHandle {
-                name: "single_root".to_string(),
+                name: "single_root".into(),
                 function: 7_709,
             },
             Value::Tensor(bracket),
@@ -976,7 +976,7 @@ mod tests {
         let options = FzeroOptions::from_struct(None).unwrap();
         let bracket = block_on(bracket_from_endpoints(
             &Value::BoundFunctionHandle {
-                name: "single_result".to_string(),
+                name: "single_result".into(),
                 function: 7_710,
             },
             0.0,
@@ -1068,7 +1068,7 @@ mod tests {
 
         let root = block_on(fzero_builtin(
             Value::BoundFunctionHandle {
-                name: "root_function".to_string(),
+                name: "root_function".into(),
                 function: 42,
             },
             Value::Num(0.0),

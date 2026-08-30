@@ -106,7 +106,7 @@ fn legacy_shared_library_calls_use_the_session_foreign_runtime() {
         .workspace
         .values
         .iter()
-        .any(|entry| { entry.name == "header_warnings" && entry.class_name == "string" }));
+        .any(|entry| entry.name == "header_warnings" && entry.class_name == "string"));
     assert!(result.workspace.values.iter().any(|entry| {
         entry.name == "opaque_value" && entry.class_name == "int32" && entry.shape == vec![1, 1]
     }));

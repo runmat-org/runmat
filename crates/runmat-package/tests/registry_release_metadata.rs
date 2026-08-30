@@ -18,7 +18,7 @@ fn golden_metadata() -> RegistryReleaseMetadata {
             package: RegistryPackageReference {
                 registry: RegistryOrigin::new("https://packages.runmat.test").unwrap(),
                 namespace: "acme".to_string(),
-                name: "math".to_string(),
+                name: "math".into(),
             },
             requirement: "^2".to_string(),
             group: DependencyGroup::Runtime,
@@ -108,7 +108,7 @@ fn assert_signed_release_digest_and_signature_match_the_server_cross_host_golden
         schema_version: RELEASE_SUPPLY_CHAIN_SCHEMA_VERSION,
         publication_id: "pub_33333333333333333333333333333333".to_string(),
         publisher_id: "ptp_11111111111111111111111111111111".to_string(),
-        publisher_name: "release workflow".to_string(),
+        publisher_name: "release workflow".into(),
         public_key: STANDARD_NO_PAD.encode(signing_key.verifying_key().as_bytes()),
         key_fingerprint: format!(
             "sha256:{:x}",

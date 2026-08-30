@@ -221,7 +221,7 @@ impl GeometryScene {
         let bounds = bounds_from_vertices(&vertices);
         SceneNode {
             id: stable_node_id(&self.scene_id, self.revision, index, chunk_id),
-            name: name.to_string(),
+            name: name.into(),
             transform: Mat4::IDENTITY,
             visible: true,
             cast_shadows: false,

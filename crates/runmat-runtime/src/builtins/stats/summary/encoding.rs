@@ -1132,7 +1132,7 @@ fn labels_from_value(name: &str, value: Value) -> BuiltinResult<LabelArray> {
                 categories: None,
             })
         }
-        Value::Object(object) if object.is_class("categorical") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             let labels =
                 crate::builtins::table::categorical_labels(&Value::Object(object.clone()))?
                     .into_iter()
@@ -1691,7 +1691,7 @@ fn is_grouping_container(value: &Value) -> bool {
         Value::StringArray(array) => array.data.len() > 1,
         Value::CharArray(array) => array.rows > 1,
         Value::Cell(cell) => cell.data.len() > 1,
-        Value::Object(object) if object.is_class("categorical") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             matches!(
                 object.properties.get("Codes"),
                 Some(Value::Tensor(tensor)) if tensor::tensor_element_len(tensor) > 1
@@ -2331,7 +2331,7 @@ mod tests {
         .unwrap() else {
             panic!("categorical");
         };
-        assert!(out.is_class("categorical"));
+        assert!(out.is_class(runmat_types::standard::CATEGORICAL));
         let labels = crate::builtins::table::categorical_labels(&Value::Object(out)).unwrap();
         assert_eq!(labels, vec!["high", "low"]);
     }

@@ -25,7 +25,8 @@ const FITDIST_NAME: &str = "fitdist";
 const PDF_NAME: &str = "pdf";
 const CDF_NAME: &str = "cdf";
 const RANDOM_NAME: &str = "random";
-const PROBABILITY_DISTRIBUTION_CLASS: &str = "ProbabilityDistribution";
+const PROBABILITY_DISTRIBUTION_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("ProbabilityDistribution");
 const MIN_POSITIVE: f64 = 1.0e-12;
 
 const OUTPUT_PD: BuiltinParamDescriptor = BuiltinParamDescriptor {

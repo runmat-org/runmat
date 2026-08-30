@@ -22,7 +22,7 @@ pub async fn dispatch_object(
             let value = obj_resolve::load_member_with_context(
                 Some(runtime),
                 base,
-                field.clone(),
+                field.0.clone(),
                 false,
                 caller_function_name,
             )
@@ -38,7 +38,7 @@ pub async fn dispatch_object(
             let value = obj_resolve::load_member_with_context(
                 Some(runtime),
                 base,
-                field.clone(),
+                field.0.clone(),
                 true,
                 caller_function_name,
             )
@@ -99,7 +99,7 @@ pub async fn dispatch_object(
             ))?;
             let value = obj_resolve::store_member_traced(
                 base,
-                field.clone(),
+                field.0.clone(),
                 rhs,
                 false,
                 caller_function_name,
@@ -119,7 +119,7 @@ pub async fn dispatch_object(
             ))?;
             let value = obj_resolve::store_member_traced(
                 base,
-                field.clone(),
+                field.0.clone(),
                 rhs,
                 true,
                 caller_function_name,

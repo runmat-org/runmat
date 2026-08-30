@@ -27,7 +27,7 @@ fn source(root: &str, path: &str, name: &str) -> ProjectSourceFile {
     ProjectSourceFile {
         source_root: PathBuf::from(root),
         relative_path: PathBuf::from(path),
-        qualified_name: name.to_string(),
+        qualified_name: name.into(),
         package_path: None,
         class_name: None,
         class_qualified_name: None,

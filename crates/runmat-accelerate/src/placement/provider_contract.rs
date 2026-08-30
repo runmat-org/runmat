@@ -317,7 +317,7 @@ mod tests {
             revision: 1,
             device: runmat_accelerate_api::ApiDeviceInfo {
                 device_id: 1,
-                name: "test".to_string(),
+                name: "test".into(),
                 vendor: "test".to_string(),
                 memory_bytes: Some(1024),
                 backend: None,

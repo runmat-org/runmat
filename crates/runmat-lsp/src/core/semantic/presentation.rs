@@ -54,11 +54,11 @@ fn format_kind(kind: &ValueKindFact) -> String {
         ValueKindFact::Struct(_) => "struct".to_string(),
         ValueKindFact::Object(object) => object.runtime_class.as_ref().map_or_else(
             || "object".to_string(),
-            |class| format!("object<{}>", qualified_name(class)),
+            |class| format!("object<{}>", class.display_name()),
         ),
         ValueKindFact::ClassReference(class) => class.runtime_class.as_ref().map_or_else(
             || format!("class<{:?}>", class.class),
-            |name| format!("class<{}>", qualified_name(name)),
+            |name| format!("class<{}>", name.display_name()),
         ),
         ValueKindFact::Callable(_) => "callable".to_string(),
         ValueKindFact::OutputList(_) => "output-list".to_string(),
@@ -76,10 +76,6 @@ fn format_kind(kind: &ValueKindFact) -> String {
             |name| format!("foreign<{name}>"),
         ),
     }
-}
-
-fn qualified_name(name: &runmat_types::QualifiedName) -> String {
-    name.display_name().unwrap_or_else(|| "unknown".to_string())
 }
 
 fn format_shape(shape: &ShapeFact) -> String {

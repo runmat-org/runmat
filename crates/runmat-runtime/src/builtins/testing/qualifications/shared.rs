@@ -122,7 +122,7 @@ pub fn qualify_that(
     };
     if !crate::class_registry::is_class_or_subclass(
         &constraint.class_name,
-        "matlab.unittest.constraints.Constraint",
+        &runmat_types::standard::UNIT_TEST_CONSTRAINT.owned(),
     ) {
         return Err(build_runtime_error(format!(
             "{builtin}: '{}' is not a compatible Constraint",
@@ -132,22 +132,32 @@ pub fn qualify_that(
         .with_builtin(builtin)
         .build());
     }
-    let passed = match constraint.class_name.as_str() {
-        "matlab.unittest.constraints.IsEqualTo" => constraint
+    let passed = if constraint
+        .class_name
+        .is(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO)
+    {
+        constraint
             .properties
             .get("__runmat_expected")
-            .is_some_and(|expected| values_equal(&actual, expected)),
-        "matlab.unittest.constraints.IsTrue" => logical_scalar(&actual) == Some(true),
-        "matlab.unittest.constraints.IsFalse" => logical_scalar(&actual) == Some(false),
-        _ => {
-            return Err(build_runtime_error(format!(
-                "{builtin}: constraint '{}' requires an unsupported custom satisfaction hook",
-                constraint.class_name
-            ))
-            .with_identifier("RunMat:Testing:UnsupportedConstraint")
-            .with_builtin(builtin)
-            .build())
-        }
+            .is_some_and(|expected| values_equal(&actual, expected))
+    } else if constraint
+        .class_name
+        .is(runmat_types::standard::UNIT_TEST_IS_TRUE)
+    {
+        logical_scalar(&actual) == Some(true)
+    } else if constraint
+        .class_name
+        .is(runmat_types::standard::UNIT_TEST_IS_FALSE)
+    {
+        logical_scalar(&actual) == Some(false)
+    } else {
+        return Err(build_runtime_error(format!(
+            "{builtin}: constraint '{}' requires an unsupported custom satisfaction hook",
+            constraint.class_name
+        ))
+        .with_identifier("RunMat:Testing:UnsupportedConstraint")
+        .with_builtin(builtin)
+        .build());
     };
     finish_qualification(
         builtin,
@@ -203,8 +213,8 @@ fn finish_qualification(
 fn validate_receiver(builtin: &'static str, receiver: &Value) -> BuiltinResult<()> {
     crate::testing::ensure_testing_classes();
     let class_name = match receiver {
-        Value::Object(object) => object.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
+        Value::Object(object) => &object.class_name,
+        Value::HandleObject(handle) => &handle.class_name,
         _ => {
             return Err(build_runtime_error(format!(
                 "{builtin}: first argument must be a matlab.unittest.TestCase"
@@ -214,7 +224,10 @@ fn validate_receiver(builtin: &'static str, receiver: &Value) -> BuiltinResult<(
             .build())
         }
     };
-    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if crate::class_registry::is_class_or_subclass(
+        class_name,
+        &crate::testing::TEST_CASE_CLASS.owned(),
+    ) {
         Ok(())
     } else {
         Err(build_runtime_error(format!(
@@ -273,7 +286,7 @@ fn diagnostic_message(values: &[Value]) -> Option<String> {
             class_name,
             properties,
             ..
-        }) if class_name == "matlab.unittest.diagnostics.Diagnostic" => {
+        }) if class_name.is(runmat_types::standard::UNIT_TEST_DIAGNOSTIC) => {
             properties.get("Message").and_then(|value| match value {
                 Value::String(message) => Some(message.clone()),
                 _ => None,

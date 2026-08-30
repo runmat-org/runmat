@@ -566,7 +566,7 @@ mod tests {
             .expect("target allocation");
         let target_addr = target.addr();
         let handle_value = Value::HandleObject(runmat_value::HandleRef {
-            class_name: "TestHandle".to_string(),
+            class_name: "TestHandle".into(),
             target,
             valid: true,
         });
@@ -601,7 +601,7 @@ mod tests {
             unsafe { GcHandle::from_parts_unchecked(stale_target.as_ptr_unchecked(), stale_epoch) };
 
         let handle_value = Value::HandleObject(runmat_value::HandleRef {
-            class_name: "TestHandle".to_string(),
+            class_name: "TestHandle".into(),
             target: stale_handle,
             valid: true,
         });

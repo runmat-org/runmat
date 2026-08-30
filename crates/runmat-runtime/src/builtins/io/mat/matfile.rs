@@ -24,7 +24,8 @@ use crate::{
 };
 
 const BUILTIN_NAME: &str = "matfile";
-const MATFILE_CLASS: &str = "matlab.io.MatFile";
+const MATFILE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.io.MatFile");
 const MATFILE_SUBSREF: &str = "matlab.io.MatFile.subsref";
 const MATFILE_SUBSASGN: &str = "matlab.io.MatFile.subsasgn";
 const PROPERTIES_FIELD: &str = "Properties";
@@ -360,9 +361,9 @@ pub fn ensure_matfile_class_registered() {
     MATFILE_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         properties.insert(
-            PROPERTIES_FIELD.to_string(),
+            PROPERTIES_FIELD.into(),
             crate::class_registry::RuntimeProperty {
-                name: PROPERTIES_FIELD.to_string(),
+                name: PROPERTIES_FIELD.into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -374,32 +375,32 @@ pub fn ensure_matfile_class_registered() {
 
         let mut methods = HashMap::new();
         methods.insert(
-            OBJECT_SUBSREF_METHOD.to_string(),
+            OBJECT_SUBSREF_METHOD.into(),
             crate::class_registry::RuntimeMethod {
-                name: OBJECT_SUBSREF_METHOD.to_string(),
+                name: OBJECT_SUBSREF_METHOD.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: MATFILE_SUBSREF.to_string(),
+                function_name: MATFILE_SUBSREF.into(),
                 implicit_class_argument: None,
             },
         );
         methods.insert(
-            OBJECT_SUBSASGN_METHOD.to_string(),
+            OBJECT_SUBSASGN_METHOD.into(),
             crate::class_registry::RuntimeMethod {
-                name: OBJECT_SUBSASGN_METHOD.to_string(),
+                name: OBJECT_SUBSASGN_METHOD.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: MATFILE_SUBSASGN.to_string(),
+                function_name: MATFILE_SUBSASGN.into(),
                 implicit_class_argument: None,
             },
         );
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: MATFILE_CLASS.to_string(),
+            name: MATFILE_CLASS.into(),
             parent: None,
             properties,
             methods,

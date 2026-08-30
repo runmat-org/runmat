@@ -1,5 +1,6 @@
 mod builtin;
 mod callable;
+mod class;
 mod definition;
 mod local;
 mod operation;
@@ -8,6 +9,7 @@ mod region;
 
 pub use builtin::*;
 pub use callable::{CallableFallbackPolicy, CallableIdentity};
+pub use class::*;
 pub use definition::*;
 pub use local::*;
 pub use operation::*;

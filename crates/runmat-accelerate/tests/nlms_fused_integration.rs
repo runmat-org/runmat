@@ -145,7 +145,7 @@ fn nlms_two_fused_reductions_integration() {
                     output: Some(v_mul),
                 },
                 FusionOp::Builtin {
-                    name: "sum".to_string(),
+                    name: "sum".into(),
                     inputs: vec![v_mul, v_dim],
                     output: Some(v_sum),
                 },
@@ -292,7 +292,7 @@ fn nlms_two_fused_reductions_integration() {
                     output: Some(v_mul),
                 },
                 FusionOp::Builtin {
-                    name: "sum".to_string(),
+                    name: "sum".into(),
                     inputs: vec![v_mul, v_dim],
                     output: Some(v_sum),
                 },
@@ -479,7 +479,7 @@ fn nlms_two_fused_reductions_integration() {
                     output: Some(v_sq),
                 },
                 FusionOp::Builtin {
-                    name: "mean".to_string(),
+                    name: "mean".into(),
                     inputs: vec![v_sq, v_all],
                     output: Some(v_mean),
                 },

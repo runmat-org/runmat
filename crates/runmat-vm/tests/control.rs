@@ -16,7 +16,7 @@ fn tf_constructs_object_through_vm_dispatch() {
 
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name == "tf")));
+        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("tf")))));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::String(class_name) if class_name == "tf")));
@@ -210,7 +210,7 @@ fn ss_constructs_object_through_vm_dispatch() {
 
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name == "ss")));
+        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("ss")))));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::String(class_name) if class_name == "ss")));

@@ -806,7 +806,7 @@ fn response_outcomes(value: Value, rows: usize) -> BuiltinResult<ResponseOutcome
             text_outcomes(char_rows(&array), shape, rows)
         }
         Value::Cell(cell) => cellstr_outcomes(&cell, rows),
-        Value::Object(object) if object.is_class("categorical") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             let labels = crate::builtins::table::categorical_labels(&Value::Object(object))?;
             text_outcomes(labels, vec![rows, 1], rows)
         }

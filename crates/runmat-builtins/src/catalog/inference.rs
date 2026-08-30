@@ -915,27 +915,19 @@ fn infer_zeros(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInfere
         .unwrap_or_else(default_double_scalar);
 
     if let Some(class) = trailing_class.as_deref() {
-        match class.to_ascii_lowercase().as_str() {
-            "double" => output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real),
-            "single" => output.kind = numeric_kind(NumericClass::Single, NumericDomain::Real),
-            "logical" => output.kind = ValueKindFact::Logical,
-            "int8" => output.kind = numeric_kind(NumericClass::Int8, NumericDomain::Real),
-            "int16" => output.kind = numeric_kind(NumericClass::Int16, NumericDomain::Real),
-            "int32" => output.kind = numeric_kind(NumericClass::Int32, NumericDomain::Real),
-            "int64" => output.kind = numeric_kind(NumericClass::Int64, NumericDomain::Real),
-            "uint8" => output.kind = numeric_kind(NumericClass::UInt8, NumericDomain::Real),
-            "uint16" => output.kind = numeric_kind(NumericClass::UInt16, NumericDomain::Real),
-            "uint32" => output.kind = numeric_kind(NumericClass::UInt32, NumericDomain::Real),
-            "uint64" => output.kind = numeric_kind(NumericClass::UInt64, NumericDomain::Real),
-            "gpuarray" => {
-                output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-                output.residency = ResidencyFact::Device { provider: None };
-            }
-            _ => diagnostics.push(argument_error(
+        if let Some(numeric_class) = NumericClass::from_class_name(class) {
+            output.kind = numeric_kind(numeric_class, NumericDomain::Real);
+        } else if class.eq_ignore_ascii_case("logical") {
+            output.kind = ValueKindFact::Logical;
+        } else if class.eq_ignore_ascii_case("gpuarray") {
+            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
+            output.residency = ResidencyFact::Device { provider: None };
+        } else {
+            diagnostics.push(argument_error(
                 "RM-CATALOG-ZEROS-CLASS",
                 "zeros class specifier is not recognized",
                 literals.len().saturating_sub(1),
-            )),
+            ));
         }
     }
 

@@ -23,7 +23,8 @@ use crate::builtins::table::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-pub(crate) const CLASSIFICATION_LINEAR_CLASS: &str = "ClassificationLinear";
+pub(crate) const CLASSIFICATION_LINEAR_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("ClassificationLinear");
 
 const FITCLINEAR_NAME: &str = "fitclinear";
 const PREDICT_NAME: &str = "predict";

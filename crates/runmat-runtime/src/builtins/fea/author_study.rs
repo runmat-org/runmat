@@ -402,19 +402,19 @@ mod tests {
             regions: vec![
                 Region {
                     region_id: "root".to_string(),
-                    name: "root".to_string(),
+                    name: "root".into(),
                     tag: Some("fixed".to_string()),
                     cad_ownership: None,
                 },
                 Region {
                     region_id: "tip".to_string(),
-                    name: "tip".to_string(),
+                    name: "tip".into(),
                     tag: Some("load".to_string()),
                     cad_ownership: None,
                 },
                 Region {
                     region_id: "solid".to_string(),
-                    name: "solid".to_string(),
+                    name: "solid".into(),
                     tag: Some("material".to_string()),
                     cad_ownership: None,
                 },
@@ -703,7 +703,7 @@ mod tests {
         let Value::Object(study_object) = study.clone() else {
             panic!("expected authored study object");
         };
-        assert_eq!(study_object.class_name, FEA_STUDY_CLASS);
+        assert!(study_object.class_name.is(FEA_STUDY_CLASS));
         let Some(Value::String(payload)) =
             study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY)
         else {
@@ -767,7 +767,7 @@ mod tests {
         let Value::Object(run_object) = run else {
             panic!("expected run result object");
         };
-        assert_eq!(run_object.class_name, FEA_RUN_RESULT_CLASS);
+        assert!(run_object.class_name.is(FEA_RUN_RESULT_CLASS));
         let Some(Value::String(run_payload)) = run_object.properties.get(FEA_PAYLOAD_JSON_PROPERTY)
         else {
             panic!("expected run result payload");
@@ -874,7 +874,7 @@ mod tests {
         let Value::Object(run_object) = run else {
             panic!("expected run result object");
         };
-        assert_eq!(run_object.class_name, FEA_RUN_RESULT_CLASS);
+        assert!(run_object.class_name.is(FEA_RUN_RESULT_CLASS));
         let Some(Value::String(run_payload)) = run_object.properties.get(FEA_PAYLOAD_JSON_PROPERTY)
         else {
             panic!("expected run result payload");

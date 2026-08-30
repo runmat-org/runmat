@@ -1,6 +1,7 @@
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
 use runmat_runtime::call::arguments::ArgumentSpec;
 use runmat_runtime::indexing::EndExpr;
+use runmat_types::{ClassIdentity, MethodName};
 use runmat_value::IntValue;
 use serde::{Deserialize, Serialize};
 
@@ -183,6 +184,27 @@ pub enum PropertyDefaultLiteral {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BytecodeClassProperty {
+    pub name: runmat_types::MemberName,
+    pub is_static: bool,
+    pub is_constant: bool,
+    pub is_dependent: bool,
+    pub default_literal: Option<PropertyDefaultLiteral>,
+    pub get_access: runmat_types::MemberAccess,
+    pub set_access: runmat_types::MemberAccess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BytecodeClassMethod {
+    pub name: MethodName,
+    pub function_name: String,
+    pub is_static: bool,
+    pub is_abstract: bool,
+    pub is_sealed: bool,
+    pub access: runmat_types::MemberAccess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instr {
     // Constant and variable loads.
     LoadConst(f64),
@@ -286,7 +308,7 @@ pub enum Instr {
     CreateCell2D(usize, usize),
     CreateStructLiteral(Vec<String>),
     CreateObjectLiteral {
-        class_name: String,
+        class_name: ClassIdentity,
         fields: Vec<String>,
     },
     IndexCell {
@@ -329,15 +351,15 @@ pub enum Instr {
     StoreSliceDelete(usize, usize, u32, u32),
 
     // Struct, object, and class member access.
-    LoadMember(String),
-    LoadMemberOrInit(String),
+    LoadMember(runmat_types::MemberName),
+    LoadMemberOrInit(runmat_types::MemberName),
     LoadMemberDynamic,
     LoadMemberDynamicOrInit,
-    StoreMember(String),
-    StoreMemberOrInit(String),
+    StoreMember(runmat_types::MemberName),
+    StoreMemberOrInit(runmat_types::MemberName),
     StoreMemberDynamic,
     StoreMemberDynamicOrInit,
-    LoadMethod(String),
+    LoadMethod(runmat_types::MethodName),
 
     // Ambiguous `obj.name(...)` shape resolved at runtime as method call or member indexing.
     CallMethodOrMemberIndexMulti {
@@ -361,28 +383,21 @@ pub enum Instr {
     CreateExternalBoundFunctionHandle(FunctionId, String),
     CreateClosure(String, usize),
     CreateSemanticClosure(FunctionId, String, usize),
-    LoadStaticProperty(String, String),
+    LoadStaticProperty(ClassIdentity, runmat_types::MemberName),
     LoadWorkspaceFirstStaticProperty {
         name: String,
-        class_name: String,
-        property: String,
+        class_name: ClassIdentity,
+        property: runmat_types::MemberName,
     },
 
     // Registers a runtime class definition produced by `classdef` lowering.
     RegisterClass {
-        name: String,
-        super_class: Option<String>,
+        name: ClassIdentity,
+        super_class: Option<ClassIdentity>,
         is_sealed: bool,
         is_abstract: bool,
-        properties: Vec<(
-            String,
-            bool,
-            bool,
-            Option<PropertyDefaultLiteral>,
-            String,
-            String,
-        )>,
-        methods: Vec<(String, String, bool, bool, bool, String)>,
+        properties: Vec<BytecodeClassProperty>,
+        methods: Vec<BytecodeClassMethod>,
         enumerations: Vec<String>,
     },
 
@@ -452,15 +467,15 @@ pub enum Instr {
     CallBuiltinMulti(String, usize, usize),
     CallBuiltinMultiUsingOutputSlot(String, usize, usize),
     CallSuperConstructorMulti {
-        current_class: String,
-        super_class: String,
+        current_class: ClassIdentity,
+        super_class: ClassIdentity,
         arg_count: usize,
         out_count: usize,
     },
     CallSuperMethodMulti {
-        current_class: String,
-        super_class: String,
-        method: String,
+        current_class: ClassIdentity,
+        super_class: ClassIdentity,
+        method: MethodName,
         arg_count: usize,
         out_count: usize,
     },
@@ -540,15 +555,15 @@ pub enum Instr {
     },
     CallBuiltinExpandMultiOutput(String, Vec<ArgumentSpec>, usize),
     CallSuperConstructorExpandMultiOutput {
-        current_class: String,
-        super_class: String,
+        current_class: ClassIdentity,
+        super_class: ClassIdentity,
         specs: Vec<ArgumentSpec>,
         out_count: usize,
     },
     CallSuperMethodExpandMultiOutput {
-        current_class: String,
-        super_class: String,
-        method: String,
+        current_class: ClassIdentity,
+        super_class: ClassIdentity,
+        method: MethodName,
         specs: Vec<ArgumentSpec>,
         out_count: usize,
     },

@@ -47,7 +47,7 @@ fn adaptive_iteration_summary_round_trips() {
         convergence_status: AdaptiveConvergenceStatus::Pending,
         indicators: vec![RefinementIndicatorSummary {
             namespace: "structural".to_string(),
-            name: "stress_gradient".to_string(),
+            name: "stress_gradient".into(),
             requested_mode: RefinementIndicatorMode::Auto,
             status: RefinementIndicatorStatus::Used,
             detail: Some("field available".to_string()),

@@ -15,6 +15,23 @@ pub enum NumericDType {
 }
 
 impl NumericDType {
+    pub fn class_identity(self) -> runmat_types::ClassIdentity {
+        use runmat_types::standard;
+
+        match self {
+            NumericDType::F64 => standard::DOUBLE.owned(),
+            NumericDType::F32 => standard::SINGLE.owned(),
+            NumericDType::I8 => standard::INT8.owned(),
+            NumericDType::I16 => standard::INT16.owned(),
+            NumericDType::I32 => standard::INT32.owned(),
+            NumericDType::I64 => standard::INT64.owned(),
+            NumericDType::U8 => standard::UINT8.owned(),
+            NumericDType::U16 => standard::UINT16.owned(),
+            NumericDType::U32 => standard::UINT32.owned(),
+            NumericDType::U64 => standard::UINT64.owned(),
+        }
+    }
+
     pub fn class_name(self) -> &'static str {
         match self {
             NumericDType::F64 => "double",

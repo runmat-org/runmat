@@ -589,9 +589,9 @@ mod tests {
 
     #[test]
     fn object_array_json_preserves_class_shape_and_items() {
-        let mut first = ObjectInstance::new("matlab.unittest.TestResult".into());
+        let mut first = ObjectInstance::new("matlab.unittest.TestResult");
         first.properties.insert("Passed".into(), Value::Bool(true));
-        let mut second = ObjectInstance::new("matlab.unittest.TestResult".into());
+        let mut second = ObjectInstance::new("matlab.unittest.TestResult");
         second
             .properties
             .insert("Passed".into(), Value::Bool(false));

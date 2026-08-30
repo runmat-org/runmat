@@ -2,10 +2,11 @@ use crate::call::identity::strict_callable_display_name;
 use crate::indexing::EndExpr;
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
+use runmat_types::StaticMethodName;
 use runmat_value::Value;
 
-pub const OBJECT_PROTOCOL_SUBSREF: &str = crate::OBJECT_SUBSREF_METHOD;
-pub const OBJECT_PROTOCOL_SUBSASGN: &str = crate::OBJECT_SUBSASGN_METHOD;
+pub const OBJECT_PROTOCOL_SUBSREF: StaticMethodName = crate::OBJECT_SUBSREF_METHOD;
+pub const OBJECT_PROTOCOL_SUBSASGN: StaticMethodName = crate::OBJECT_SUBSASGN_METHOD;
 pub const OBJECT_PROTOCOL_KIND_PAREN: &str = crate::OBJECT_INDEX_PAREN;
 pub const OBJECT_PROTOCOL_KIND_BRACE: &str = crate::OBJECT_INDEX_BRACE;
 pub const OBJECT_PROTOCOL_KIND_MEMBER: &str = crate::OBJECT_INDEX_MEMBER;
@@ -20,7 +21,7 @@ pub enum ObjectIndexOp {
 }
 
 impl ObjectIndexOp {
-    pub fn protocol_name(self) -> &'static str {
+    pub fn protocol_name(self) -> StaticMethodName {
         match self {
             Self::Subsref => OBJECT_PROTOCOL_SUBSREF,
             Self::Subsasgn => OBJECT_PROTOCOL_SUBSASGN,
@@ -229,11 +230,11 @@ fn matlab_index_type(kind: ObjectIndexKind) -> &'static str {
     }
 }
 
-pub fn class_name_from_base(base: &Value) -> Option<&str> {
+pub fn class_name_from_base(base: &Value) -> Option<&runmat_types::ClassIdentity> {
     match base {
-        Value::Object(obj) => Some(obj.class_name.as_str()),
+        Value::Object(obj) => Some(&obj.class_name),
         Value::ObjectArray(array) => Some(array.class_name()),
-        Value::HandleObject(handle) => Some(handle.class_name.as_str()),
+        Value::HandleObject(handle) => Some(&handle.class_name),
         _ => None,
     }
 }

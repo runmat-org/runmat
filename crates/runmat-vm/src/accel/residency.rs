@@ -330,7 +330,7 @@ mod tests {
         assert!(fusion_residency::is_resident(&handle));
 
         let value = Value::Closure(Closure {
-            function_name: "worker".to_string(),
+            function_name: "worker".into(),
             bound_function: None,
             captures: vec![Value::GpuTensor(handle.clone())],
         });
@@ -412,7 +412,7 @@ mod tests {
         let gc_target =
             runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
         let value = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target: gc_target,
             valid: true,
         });
@@ -450,7 +450,7 @@ mod tests {
         let incoming_gc =
             runmat_gc::gc_allocate(Value::Struct(incoming_payload)).expect("gc allocate incoming");
         let incoming = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target: incoming_gc,
             valid: true,
         });

@@ -34,14 +34,14 @@ pub(in crate::param_tri::tests) fn geometry_with_face_domain_sample(
     let mut geometry = geometry_for_topology();
     geometry.regions = vec![Region {
         region_id: "face_a".to_string(),
-        name: "face".to_string(),
+        name: "face".into(),
         tag: Some("cad_face".to_string()),
         cad_ownership: Some(CadRegionOwnership {
             face_id: Some(7),
             curve_id: None,
             label: Some(CadLabelRef {
                 label_entry: "0:1:7".to_string(),
-                name: "face".to_string(),
+                name: "face".into(),
                 kind: CadSemanticKind::Face,
             }),
             owner_path: Vec::new(),
@@ -62,12 +62,12 @@ pub(in crate::param_tri::tests) fn geometry_with_face_domain_sample(
     geometry.source_geometry.cad_evaluators = vec![CadEvaluatorSet {
         evaluator_id: "cad_evaluator_test".to_string(),
         backend: "test".to_string(),
-        format_name: "step".to_string(),
+        format_name: "step".into(),
         requires_source_geometry: true,
         faces: vec![CadFaceEvaluator {
             evaluator_id: "cad_face_7".to_string(),
             imported_face_id: 7,
-            name: "face".to_string(),
+            name: "face".into(),
             supports_point_evaluation: true,
             supports_projection: true,
             supports_normal: true,

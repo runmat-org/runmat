@@ -262,6 +262,13 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    const DISPLAY_HOOK_OBJECT: runmat_types::StaticClassIdentity =
+        runmat_types::StaticClassIdentity::new("DisplayHookObject");
+    const DISP_FALLBACK_OBJECT: runmat_types::StaticClassIdentity =
+        runmat_types::StaticClassIdentity::new("DispFallbackObject");
+    const DISPLAY_HOOK_CHILD: runmat_types::StaticClassIdentity =
+        runmat_types::StaticClassIdentity::new("DisplayHookChild");
+
     fn span_of(source: &str, needle: &str) -> Span {
         let start = source.find(needle).expect("needle present");
         Span {
@@ -416,18 +423,18 @@ mod tests {
     fn display_dispatches_custom_object_display_method() {
         let class_name = "DisplayHookObject".to_string();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: class_name.clone(),
+            name: class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([(
-                "display".to_string(),
+                "display".into(),
                 crate::class_registry::RuntimeMethod {
-                    name: "display".to_string(),
+                    name: "display".into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
-                    function_name: "DisplayHookObject.customDisplayImpl".to_string(),
+                    function_name: "DisplayHookObject.customDisplayImpl".into(),
                     implicit_class_argument: None,
                 },
             )]),
@@ -443,7 +450,7 @@ mod tests {
                     assert_eq!(function, 771);
                     assert_eq!(requested_outputs, 0);
                     assert!(
-                        matches!(args.first(), Some(Value::Object(object)) if object.class_name == "DisplayHookObject")
+                        matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISPLAY_HOOK_OBJECT))
                     );
                     record_console_line(ConsoleStream::Stdout, "custom display");
                     Ok(empty_return_value())
@@ -465,18 +472,18 @@ mod tests {
     fn display_falls_back_to_overloaded_disp_method() {
         let class_name = "DispFallbackObject".to_string();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: class_name.clone(),
+            name: class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([(
-                "disp".to_string(),
+                "disp".into(),
                 crate::class_registry::RuntimeMethod {
-                    name: "disp".to_string(),
+                    name: "disp".into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
-                    function_name: "DispFallbackObject.renderDisp".to_string(),
+                    function_name: "DispFallbackObject.renderDisp".into(),
                     implicit_class_argument: None,
                 },
             )]),
@@ -492,7 +499,7 @@ mod tests {
                     assert_eq!(function, 773);
                     assert_eq!(requested_outputs, 0);
                     assert!(
-                        matches!(args.first(), Some(Value::Object(object)) if object.class_name == "DispFallbackObject")
+                        matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISP_FALLBACK_OBJECT))
                     );
                     record_console_line(ConsoleStream::Stdout, "custom disp");
                     Ok(empty_return_value())
@@ -513,25 +520,25 @@ mod tests {
         let parent_class_name = "DisplayHookParent".to_string();
         let child_class_name = "DisplayHookChild".to_string();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: parent_class_name.clone(),
+            name: parent_class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([(
-                "display".to_string(),
+                "display".into(),
                 crate::class_registry::RuntimeMethod {
-                    name: "display".to_string(),
+                    name: "display".into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
-                    function_name: "DisplayHookParent.renderDisplay".to_string(),
+                    function_name: "DisplayHookParent.renderDisplay".into(),
                     implicit_class_argument: None,
                 },
             )]),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child_class_name.clone(),
-            parent: Some(parent_class_name),
+            name: child_class_name.clone().into(),
+            parent: Some(parent_class_name.into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });
@@ -546,7 +553,7 @@ mod tests {
                     assert_eq!(function, 772);
                     assert_eq!(requested_outputs, 0);
                     assert!(
-                        matches!(args.first(), Some(Value::Object(object)) if object.class_name == "DisplayHookChild")
+                        matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISPLAY_HOOK_CHILD))
                     );
                     record_console_line(ConsoleStream::Stdout, "inherited display");
                     Ok(empty_return_value())

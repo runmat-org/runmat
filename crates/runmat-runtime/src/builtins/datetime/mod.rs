@@ -20,8 +20,9 @@ use crate::{
 };
 
 const BUILTIN_NAME: &str = "datetime";
-const DATETIME_CLASS: &str = "datetime";
-const CALENDAR_DURATION_CLASS: &str = "calendarDuration";
+const DATETIME_CLASS: runmat_types::StaticClassIdentity = runmat_types::standard::DATETIME;
+const CALENDAR_DURATION_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::standard::CALENDAR_DURATION;
 const SERIAL_FIELD: &str = "__serial";
 const CALENDAR_MONTHS_FIELD: &str = "__months";
 const CALENDAR_DAYS_FIELD: &str = "__days";
@@ -736,9 +737,9 @@ fn ensure_datetime_class_registered() {
     DATETIME_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         properties.insert(
-            FORMAT_FIELD.to_string(),
+            FORMAT_FIELD.into(),
             crate::class_registry::RuntimeProperty {
-                name: FORMAT_FIELD.to_string(),
+                name: FORMAT_FIELD.into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -752,19 +753,19 @@ fn ensure_datetime_class_registered() {
         for name in [
             OBJECT_SUBSREF_METHOD,
             OBJECT_SUBSASGN_METHOD,
-            "plus",
-            "minus",
-            "eq",
-            "ne",
-            "lt",
-            "le",
-            "gt",
-            "ge",
+            runmat_types::StaticMethodName::new("plus"),
+            runmat_types::StaticMethodName::new("minus"),
+            runmat_types::StaticMethodName::new("eq"),
+            runmat_types::StaticMethodName::new("ne"),
+            runmat_types::StaticMethodName::new("lt"),
+            runmat_types::StaticMethodName::new("le"),
+            runmat_types::StaticMethodName::new("gt"),
+            runmat_types::StaticMethodName::new("ge"),
         ] {
             methods.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeMethod {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
@@ -776,7 +777,7 @@ fn ensure_datetime_class_registered() {
         }
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: DATETIME_CLASS.to_string(),
+            name: DATETIME_CLASS.into(),
             parent: None,
             properties,
             methods,
@@ -789,9 +790,9 @@ fn ensure_calendar_duration_class_registered() {
         let mut properties = HashMap::new();
         for name in [CALENDAR_MONTHS_FIELD, CALENDAR_DAYS_FIELD] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -803,11 +804,16 @@ fn ensure_calendar_duration_class_registered() {
         }
 
         let mut methods = HashMap::new();
-        for name in ["plus", "minus", "eq", "ne"] {
+        for name in [
+            runmat_types::StaticMethodName::new("plus"),
+            runmat_types::StaticMethodName::new("minus"),
+            runmat_types::StaticMethodName::new("eq"),
+            runmat_types::StaticMethodName::new("ne"),
+        ] {
             methods.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeMethod {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
@@ -819,7 +825,7 @@ fn ensure_calendar_duration_class_registered() {
         }
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: CALENDAR_DURATION_CLASS.to_string(),
+            name: CALENDAR_DURATION_CLASS.into(),
             parent: None,
             properties,
             methods,
@@ -5117,7 +5123,7 @@ mod tests {
     fn datetime_builds_from_components() {
         let value = run_datetime(vec![Value::Num(2024.0), Value::Num(3.0), Value::Num(14.0)]);
         let object = as_datetime(value);
-        assert_eq!(object.class_name, DATETIME_CLASS);
+        assert!(object.class_name.is(DATETIME_CLASS));
         assert_eq!(format_for_object(&object), DEFAULT_DATE_FORMAT);
         let serials = serial_tensor_for_object(&object).expect("serials");
         assert_eq!(serials.materialize_f64().len(), 1);

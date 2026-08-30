@@ -976,7 +976,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         if model.materials.is_empty() {
             model.materials.push(runmat_analysis_core::MaterialModel {
                 material_id: "mat_acoustic_air".to_string(),
-                name: "Acoustic Air".to_string(),
+                name: "Acoustic Air".into(),
                 mechanical: runmat_analysis_core::MaterialMechanicalModel {
                     youngs_modulus_pa: 1.0,
                     poisson_ratio: 0.0,
@@ -1413,7 +1413,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             let base = model.materials.first().cloned().unwrap_or_else(|| {
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_default".to_string(),
-                    name: "Default".to_string(),
+                    name: "Default".into(),
                     mechanical: runmat_analysis_core::MaterialMechanicalModel {
                         youngs_modulus_pa: 110e9,
                         poisson_ratio: 0.31,
@@ -1428,7 +1428,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             model.materials = vec![
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_em_copper".to_string(),
-                    name: "EM Copper".to_string(),
+                    name: "EM Copper".into(),
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
                         reference_temperature_k: 293.15,
                         conductivity_s_per_m: 5.8e7,
@@ -1463,7 +1463,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 },
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_em_ferrite".to_string(),
-                    name: "EM Ferrite".to_string(),
+                    name: "EM Ferrite".into(),
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
                         reference_temperature_k: 293.15,
                         conductivity_s_per_m: 8.0e4,
@@ -1498,7 +1498,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 },
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_em_polymer".to_string(),
-                    name: "EM Polymer".to_string(),
+                    name: "EM Polymer".into(),
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
                         reference_temperature_k: 293.15,
                         conductivity_s_per_m: 0.2,
@@ -2997,7 +2997,7 @@ fn push_threshold_assertion(
         })
         .unwrap_or(false);
     assertions.push(ThresholdAssertionRecord {
-        name: name.to_string(),
+        name: name.into(),
         source_diagnostic: source_diagnostic.to_string(),
         observed,
         min_allowed,

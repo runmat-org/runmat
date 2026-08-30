@@ -252,9 +252,9 @@ fn collect_listener_fieldnames(_listener: &Listener) -> Vec<String> {
     names
 }
 
-fn class_instance_property_names(class_name: &str) -> BTreeSet<String> {
+fn class_instance_property_names(class_name: &runmat_types::ClassIdentity) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
-    let mut current = Some(class_name.to_string());
+    let mut current = Some(class_name.clone());
     let mut visited = HashSet::new();
     while let Some(name) = current {
         if !visited.insert(name.clone()) {
@@ -265,7 +265,7 @@ fn class_instance_property_names(class_name: &str) -> BTreeSet<String> {
         };
         for (prop_name, prop) in &class_def.properties {
             if !prop.is_static {
-                names.insert(prop_name.clone());
+                names.insert(prop_name.to_string());
             }
         }
         current = class_def.parent.clone();
@@ -425,15 +425,15 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let class_name = "runmat.unittest.FieldnamesObject";
         let mut def = crate::class_registry::RuntimeClass {
-            name: class_name.to_string(),
+            name: class_name.into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
         def.properties.insert(
-            "Value".to_string(),
+            "Value".into(),
             crate::class_registry::RuntimeProperty {
-                name: "Value".to_string(),
+                name: "Value".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -443,9 +443,9 @@ pub(crate) mod tests {
             },
         );
         def.properties.insert(
-            "Version".to_string(),
+            "Version".into(),
             crate::class_registry::RuntimeProperty {
-                name: "Version".to_string(),
+                name: "Version".into(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
@@ -475,15 +475,15 @@ pub(crate) mod tests {
         let child_name = "runmat.unittest.FieldnamesChild";
 
         let mut parent = crate::class_registry::RuntimeClass {
-            name: parent_name.to_string(),
+            name: parent_name.into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
         parent.properties.insert(
-            "ParentValue".to_string(),
+            "ParentValue".into(),
             crate::class_registry::RuntimeProperty {
-                name: "ParentValue".to_string(),
+                name: "ParentValue".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -495,15 +495,15 @@ pub(crate) mod tests {
         crate::class_registry::register_class(parent);
 
         let mut child = crate::class_registry::RuntimeClass {
-            name: child_name.to_string(),
-            parent: Some(parent_name.to_string()),
+            name: child_name.into(),
+            parent: Some(parent_name.into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
         child.properties.insert(
-            "ChildValue".to_string(),
+            "ChildValue".into(),
             crate::class_registry::RuntimeProperty {
-                name: "ChildValue".to_string(),
+                name: "ChildValue".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -532,15 +532,15 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let class_name = "runmat.unittest.FieldnamesHandle";
         let mut def = crate::class_registry::RuntimeClass {
-            name: class_name.to_string(),
+            name: class_name.into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
         def.properties.insert(
-            "Enabled".to_string(),
+            "Enabled".into(),
             crate::class_registry::RuntimeProperty {
-                name: "Enabled".to_string(),
+                name: "Enabled".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -558,7 +558,7 @@ pub(crate) mod tests {
         let target = runmat_gc::gc_allocate(Value::Object(payload)).expect("gc allocate target");
 
         let handle = HandleRef {
-            class_name: class_name.to_string(),
+            class_name: class_name.into(),
             target,
             valid: true,
         };
@@ -580,15 +580,15 @@ pub(crate) mod tests {
         let child_name = "runmat.unittest.FieldnamesHandleChild";
 
         let mut parent = crate::class_registry::RuntimeClass {
-            name: parent_name.to_string(),
+            name: parent_name.into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
         parent.properties.insert(
-            "ParentEnabled".to_string(),
+            "ParentEnabled".into(),
             crate::class_registry::RuntimeProperty {
-                name: "ParentEnabled".to_string(),
+                name: "ParentEnabled".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -600,15 +600,15 @@ pub(crate) mod tests {
         crate::class_registry::register_class(parent);
 
         let mut child = crate::class_registry::RuntimeClass {
-            name: child_name.to_string(),
-            parent: Some(parent_name.to_string()),
+            name: child_name.into(),
+            parent: Some(parent_name.into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         };
         child.properties.insert(
-            "ChildEnabled".to_string(),
+            "ChildEnabled".into(),
             crate::class_registry::RuntimeProperty {
-                name: "ChildEnabled".to_string(),
+                name: "ChildEnabled".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -626,7 +626,7 @@ pub(crate) mod tests {
         let target = runmat_gc::gc_allocate(Value::Object(payload)).expect("gc allocate target");
 
         let handle = HandleRef {
-            class_name: child_name.to_string(),
+            class_name: child_name.into(),
             target,
             valid: true,
         };

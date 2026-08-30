@@ -11,6 +11,7 @@ use runmat_builtins::{
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::standard;
 use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::tensor;
@@ -223,11 +224,11 @@ impl MacdInput {
         .await?;
         let mut resident_declared_double = false;
         if let Value::GpuTensor(handle) = &value {
-            resident_declared_double = runmat_accelerate_api::handle_class_name(handle)
-                .is_some_and(|class| class.eq_ignore_ascii_case("double"));
+            resident_declared_double = runmat_accelerate_api::handle_class_identity(handle)
+                .is_some_and(|class| class.is(standard::DOUBLE));
             let nondouble_numeric = runmat_accelerate_api::handle_integer_type(handle).is_some()
-                || runmat_accelerate_api::handle_class_name(handle)
-                    .is_some_and(|class| class.eq_ignore_ascii_case("single"));
+                || runmat_accelerate_api::handle_class_identity(handle)
+                    .is_some_and(|class| class.is(standard::SINGLE));
             if nondouble_numeric {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &MACD_NONDOUBLE_MATRIX_EXTENSION,
@@ -607,7 +608,7 @@ mod tests {
             let double_handle =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &double)
                     .expect("upload");
-            runmat_accelerate_api::set_handle_class_name(&double_handle, "double");
+            runmat_accelerate_api::set_handle_class_identity(&double_handle, "double");
             call_with_mode(Value::GpuTensor(double_handle), false)
                 .expect("provider precision does not change documented double class");
 
@@ -616,7 +617,7 @@ mod tests {
                     Tensor::from_f32(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("matrix");
                 let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix)
                     .expect("upload");
-                runmat_accelerate_api::set_handle_class_name(&handle, "single");
+                runmat_accelerate_api::set_handle_class_identity(&handle, "single");
                 handle
             };
             let error = call_with_mode(Value::GpuTensor(upload()), false)
@@ -742,7 +743,7 @@ mod tests {
         let Value::Object(object) = out else {
             panic!("expected table output");
         };
-        assert_eq!(object.class_name, "table");
+        assert_eq!(object.class_name.display_name(), "table");
         let variables = table_variables(&object).unwrap();
         assert_eq!(variables.fields.len(), 1);
         let close = expect_tensor(variables.fields.get("Close").cloned().unwrap());

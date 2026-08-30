@@ -852,7 +852,7 @@ fn test_request_host_policy_disables_top_level_await() {
         let mut engine = RunMatSession::new().unwrap();
         let err = block_on(engine.execute_request(abi::ExecutionRequest {
             source: abi::SourceInput::Text {
-                name: "request-await-policy.m".to_string(),
+                name: "request-await-policy.m".into(),
                 text: "y = await(1);".to_string(),
             },
             compatibility: CompatMode::RunMat,

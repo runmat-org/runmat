@@ -94,7 +94,7 @@ fn encode(value: &Value, path: &str) -> Result<ValuePayload, ValueCodecError> {
                 .collect::<Result<Vec<_>, ValueCodecError>>()?;
             fields.sort_by(|left, right| left.name.cmp(&right.name));
             InlineValue::ImmutableValueClass(RegisteredData {
-                type_identity: value.class_name.clone(),
+                type_identity: value.class_name.to_string(),
                 schema_version: 1,
                 fields,
             })

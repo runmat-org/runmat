@@ -91,17 +91,22 @@ pub const GETMETHOD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntege
 pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResult<Value> {
     crate::compatibility::ensure_builtin_extension_enabled(&GETMETHOD_EXTENSION, "getmethod")?;
 
-    fn ensure_method_accessible(class_name: &str, method_name: &str) -> crate::BuiltinResult<()> {
-        let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name)
+    fn ensure_method_accessible(
+        class_name: &runmat_types::ClassIdentity,
+        method_name: &str,
+    ) -> crate::BuiltinResult<()> {
+        let method_identity = runmat_types::MethodName::from(method_name);
+        let Some((method, owner)) =
+            crate::class_registry::lookup_method(class_name, &method_identity)
         else {
             return Ok(());
         };
         let caller_class = crate::class_access_context();
         let access_allowed = match method.access {
             runmat_types::MemberAccess::Public => true,
-            runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(owner.as_str()),
+            runmat_types::MemberAccess::Private => caller_class.as_ref() == Some(&owner),
             runmat_types::MemberAccess::Protected => caller_class
-                .as_deref()
+                .as_ref()
                 .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
         };
         if access_allowed {
@@ -122,14 +127,15 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         ));
     }
     let caller_scope = crate::class_access_context()
-        .map(Value::String)
+        .map(|identity| Value::String(identity.display_name().to_owned()))
         .unwrap_or_else(|| Value::String(String::new()));
     match obj {
         Value::Object(o) => {
             ensure_method_accessible(&o.class_name, method_name)?;
-            if let Some((resolved, _owner)) =
-                crate::class_registry::lookup_method(&o.class_name, method_name)
-            {
+            if let Some((resolved, _owner)) = crate::class_registry::lookup_method(
+                &o.class_name,
+                &runmat_types::MethodName::from(method_name),
+            ) {
                 return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),
                     bound_function: crate::user_functions::resolve_semantic_function_by_name(
@@ -150,9 +156,10 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         }
         Value::HandleObject(h) => {
             ensure_method_accessible(&h.class_name, method_name)?;
-            if let Some((resolved, _owner)) =
-                crate::class_registry::lookup_method(&h.class_name, method_name)
-            {
+            if let Some((resolved, _owner)) = crate::class_registry::lookup_method(
+                &h.class_name,
+                &runmat_types::MethodName::from(method_name),
+            ) {
                 return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),
                     bound_function: crate::user_functions::resolve_semantic_function_by_name(

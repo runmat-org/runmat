@@ -1,4 +1,4 @@
-use crate::bytecode::instr::PropertyDefaultLiteral;
+use crate::bytecode::instr::{BytecodeClassMethod, BytecodeClassProperty, PropertyDefaultLiteral};
 use crate::call::builtins::is_vm_intrinsic_builtin;
 use crate::compiler::CompileError;
 use crate::instr::Instr;
@@ -18,22 +18,16 @@ use runmat_runtime::call::arguments::ArgumentSpec;
 use runmat_runtime::indexing::EndExpr;
 use std::collections::{HashMap, HashSet};
 
-type ClassRegistration = (
-    String,
-    Option<String>,
-    bool,
-    bool,
-    Vec<(
-        String,
-        bool,
-        bool,
-        Option<PropertyDefaultLiteral>,
-        String,
-        String,
-    )>,
-    Vec<(String, String, bool, bool, bool, String)>,
-    Vec<String>,
-);
+#[derive(Clone)]
+pub struct ClassRegistration {
+    name: runmat_types::ClassIdentity,
+    super_class: Option<runmat_types::ClassIdentity>,
+    is_sealed: bool,
+    is_abstract: bool,
+    properties: Vec<BytecodeClassProperty>,
+    methods: Vec<BytecodeClassMethod>,
+    enumerations: Vec<String>,
+}
 type MirCellEndOffsets = Vec<(usize, isize)>;
 type MirCellEndExprs = Vec<(usize, EndExpr)>;
 type MirCellSelectorCompileResult = (usize, bool, MirCellEndOffsets, MirCellEndExprs);
@@ -348,20 +342,18 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
     hir.classes
         .iter()
         .map(|class| {
-            let name = class
-                .declaration
-                .name
-                .0
-                .iter()
-                .map(|part| part.0.clone())
-                .collect::<Vec<_>>()
-                .join(".");
+            let name = runmat_types::ClassIdentity::from_qualified_name(&class.declaration.name)
+                .expect("HIR class declaration must have a canonical identity");
             let mut super_class = class
                 .declaration
                 .inheritance
                 .builtin_super_class
-                .clone()
-                .or_else(|| class.declaration.inheritance.declared_super_class.clone())
+                .as_ref()
+                .or(class.declaration.inheritance.declared_super_class.as_ref())
+                .map(|name| {
+                    runmat_types::ClassIdentity::new(name.clone())
+                        .expect("HIR superclass must have a canonical identity")
+                })
                 .or_else(|| {
                     class
                         .declaration
@@ -372,43 +364,35 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                                 .iter()
                                 .find(|candidate| candidate.declaration.id == class_id)
                                 .map(|super_class| {
-                                    super_class
-                                        .declaration
-                                        .name
-                                        .0
-                                        .iter()
-                                        .map(|part| part.0.clone())
-                                        .collect::<Vec<_>>()
-                                        .join(".")
+                                    runmat_types::ClassIdentity::from_qualified_name(
+                                        &super_class.declaration.name,
+                                    )
+                                    .expect("resolved superclass must have a canonical identity")
                                 })
                         })
                 });
             if super_class.is_none()
                 && matches!(class.declaration.kind, runmat_hir::ClassKind::Handle)
             {
-                super_class = Some("handle".to_string());
+                super_class = Some(runmat_types::standard::HANDLE.owned());
             }
             let properties = class
                 .declaration
                 .properties
                 .iter()
                 .map(|property| {
-                    let name = if property.attributes.is_dependent {
-                        format!("@dep:{}", property.name.0)
-                    } else {
-                        property.name.0.clone()
-                    };
                     let default = class
                         .property_default(&property.name)
                         .and_then(hir_property_default_to_value);
-                    (
-                        name,
-                        property.attributes.is_static,
-                        property.attributes.is_constant,
-                        default,
-                        member_access_name(property.attributes.get_access).to_string(),
-                        member_access_name(property.attributes.set_access).to_string(),
-                    )
+                    BytecodeClassProperty {
+                        name: property.name.clone(),
+                        is_static: property.attributes.is_static,
+                        is_constant: property.attributes.is_constant,
+                        is_dependent: property.attributes.is_dependent,
+                        default_literal: default,
+                        get_access: property.attributes.get_access,
+                        set_access: property.attributes.set_access,
+                    }
                 })
                 .collect();
             let methods = class
@@ -422,14 +406,14 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                         .find(|function| function.id == method.function)
                         .map(|function| function.name.0.clone())
                         .unwrap_or_else(|| method.name.0.clone());
-                    (
-                        method.name.0.clone(),
+                    BytecodeClassMethod {
+                        name: method.name.clone(),
                         function_name,
-                        method.is_static,
-                        method.attributes.is_abstract,
-                        method.attributes.is_sealed,
-                        member_access_name(method.attributes.access).to_string(),
-                    )
+                        is_static: method.is_static,
+                        is_abstract: method.attributes.is_abstract,
+                        is_sealed: method.attributes.is_sealed,
+                        access: method.attributes.access,
+                    }
                 })
                 .collect();
             let enumerations = class
@@ -438,25 +422,17 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                 .iter()
                 .map(|enumeration| enumeration.name.0.clone())
                 .collect();
-            (
+            ClassRegistration {
                 name,
                 super_class,
-                class.declaration.is_sealed,
-                class.declaration.is_abstract,
+                is_sealed: class.declaration.is_sealed,
+                is_abstract: class.declaration.is_abstract,
                 properties,
                 methods,
                 enumerations,
-            )
+            }
         })
         .collect()
-}
-
-fn member_access_name(access: runmat_hir::MemberAccess) -> &'static str {
-    match access {
-        runmat_hir::MemberAccess::Private => "private",
-        runmat_hir::MemberAccess::Protected => "protected",
-        _ => "public",
-    }
 }
 
 fn hir_property_default_to_value(expr: &runmat_hir::HirExpr) -> Option<PropertyDefaultLiteral> {
@@ -655,17 +631,15 @@ impl Compiler {
             .clone()
             .ok_or_else(|| CompileError::new("compiler missing MIR body"))?;
 
-        for (name, super_class, is_sealed, is_abstract, properties, methods, enumerations) in
-            self.class_registrations.clone()
-        {
+        for registration in self.class_registrations.clone() {
             self.emit(Instr::RegisterClass {
-                name,
-                super_class,
-                is_sealed,
-                is_abstract,
-                properties,
-                methods,
-                enumerations,
+                name: registration.name,
+                super_class: registration.super_class,
+                is_sealed: registration.is_sealed,
+                is_abstract: registration.is_abstract,
+                properties: registration.properties,
+                methods: registration.methods,
+                enumerations: registration.enumerations,
             });
         }
         for (path, wildcard) in self.imports.clone() {
@@ -1342,7 +1316,7 @@ impl Compiler {
             MirPlace::Member(base, member) => {
                 self.compile_mir_member_base_for_assignment(base, false)?;
                 self.emit(Instr::LoadVar(value_slot));
-                self.emit(Instr::StoreMemberOrInit(member.0.clone()));
+                self.emit(Instr::StoreMemberOrInit(member.clone()));
                 self.emit_store_back_mir_member_chain(base, false)
             }
             MirPlace::DynamicMember(base, member) => {
@@ -1820,7 +1794,7 @@ impl Compiler {
             MirPlace::Member(base, member) => {
                 self.compile_mir_member_base_for_assignment(base, false)?;
                 self.compile_mir_rvalue(value)?;
-                self.emit(Instr::StoreMemberOrInit(member.0.clone()));
+                self.emit(Instr::StoreMemberOrInit(member.clone()));
                 self.emit_store_back_mir_member_chain(base, false)
             }
             MirPlace::DynamicMember(base, member) => {
@@ -1845,7 +1819,7 @@ impl Compiler {
             }
             MirPlace::Member(parent, field) => {
                 self.compile_mir_member_base_for_assignment(parent, allow_deletion_context)?;
-                self.emit(Instr::LoadMemberOrInit(field.0.clone()));
+                self.emit(Instr::LoadMemberOrInit(field.clone()));
                 Ok(())
             }
             MirPlace::DynamicMember(parent, name) => {
@@ -1998,7 +1972,7 @@ impl Compiler {
             MirPlace::Member(parent, field) => {
                 self.compile_mir_member_base_for_assignment(parent, allow_deletion_context)?;
                 self.emit(Instr::Swap);
-                self.emit(Instr::StoreMemberOrInit(field.0.clone()));
+                self.emit(Instr::StoreMemberOrInit(field.clone()));
                 self.emit_store_back_mir_member_chain(parent, allow_deletion_context)
             }
             MirPlace::DynamicMember(parent, name) => {
@@ -2034,7 +2008,7 @@ impl Compiler {
             }
             MirPlace::Member(base, member) => {
                 self.compile_mir_place_read(base)?;
-                self.emit(Instr::LoadMember(member.0.clone()));
+                self.emit(Instr::LoadMember(member.clone()));
                 Ok(())
             }
             MirPlace::DynamicMember(base, member) => {
@@ -2342,7 +2316,7 @@ impl Compiler {
             MirRvalue::Index { base, indexing } => self.compile_mir_index(base, indexing),
             MirRvalue::Member { base, member } => {
                 self.compile_mir_operand(base)?;
-                self.emit(Instr::LoadMember(member.0.clone()));
+                self.emit(Instr::LoadMember(member.clone()));
                 Ok(())
             }
             MirRvalue::DynamicMember { base, member } => {
@@ -2359,7 +2333,7 @@ impl Compiler {
                 self.emit(Instr::LoadWorkspaceFirstStaticProperty {
                     name: workspace_name.0.clone(),
                     class_name: class_name.clone(),
-                    property: property.0.clone(),
+                    property: property.clone(),
                 });
                 Ok(())
             }
@@ -3433,17 +3407,11 @@ impl Compiler {
         class_name: &runmat_hir::QualifiedName,
         fields: &[(runmat_hir::MemberName, MirOperand)],
     ) -> Result<(), CompileError> {
-        let class_name = class_name
-            .0
-            .iter()
-            .map(|segment| segment.0.as_str())
-            .collect::<Vec<_>>()
-            .join(".");
-        if class_name.trim().is_empty() {
-            return Err(self
-                .compile_error("MIR object literal class name cannot be empty")
-                .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
-        }
+        let class_name =
+            runmat_types::ClassIdentity::from_qualified_name(class_name).map_err(|error| {
+                self.compile_error(format!("invalid MIR object literal class name: {error}"))
+                    .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID)
+            })?;
         let mut names = Vec::with_capacity(fields.len());
         for (name, value) in fields {
             self.compile_mir_operand(value)?;
@@ -4623,7 +4591,7 @@ mod tests {
             function,
             VmFunctionLayout {
                 function,
-                display_name: "test".to_string(),
+                display_name: "test".into(),
                 private_owner_scope: String::new(),
                 frame_abi: VmFrameAbi {
                     fixed_inputs: Vec::new(),

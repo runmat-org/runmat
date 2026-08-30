@@ -4050,7 +4050,7 @@ mod tests {
         let tanh_node = AccelNode {
             id: 0,
             label: AccelNodeLabel::Builtin {
-                name: "tanh".to_string(),
+                name: "tanh".into(),
             },
             category: AccelOpCategory::Elementwise,
             inputs: vec![0],
@@ -4061,7 +4061,7 @@ mod tests {
         let single_node = AccelNode {
             id: 1,
             label: AccelNodeLabel::Builtin {
-                name: "single".to_string(),
+                name: "single".into(),
             },
             category: AccelOpCategory::Elementwise,
             inputs: vec![2],

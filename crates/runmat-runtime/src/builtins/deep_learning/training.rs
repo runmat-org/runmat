@@ -748,7 +748,7 @@ fn normalize_dlupdate_outputs(value: Value, requested_outputs: usize) -> Builtin
 }
 
 fn is_leaf_object(object: &ObjectInstance) -> bool {
-    object.class_name == "dlarray"
+    object.class_name.is(super::DLARRAY_CLASS)
 }
 
 fn is_tree_container(value: &Value) -> bool {
@@ -1098,7 +1098,7 @@ impl NumericPayload {
                     },
                 }
             }
-            Value::Object(object) if object.class_name == "dlarray" => {
+            Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => {
                 let data = object.properties.get("Data").ok_or_else(|| {
                     deep_learning_error("adamupdate", "adamupdate: dlarray is missing Data")
                 })?;

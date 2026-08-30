@@ -120,13 +120,15 @@ fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> 
                     "the immutable value-class schema version is unavailable in this runtime",
                 ));
             }
-            if !crate::parallel::codistributor::is_supported_class(&value.type_identity) {
+            let class_identity = runmat_types::ClassIdentity::new(&value.type_identity)
+                .map_err(|error| ValueCodecError::invalid(path, error.to_string()))?;
+            if !crate::parallel::codistributor::is_supported_class(&class_identity) {
                 return Err(ValueCodecError::unsupported(
                     path,
                     "the immutable value-class codec is not registered in this runtime",
                 ));
             }
-            let mut object = ObjectInstance::new(value.type_identity.clone());
+            let mut object = ObjectInstance::new(class_identity);
             for field in &value.fields {
                 if object
                     .properties

@@ -4435,7 +4435,7 @@ impl AccelProvider for InProcessProvider {
     fn device_info_struct(&self) -> runmat_accelerate_api::ApiDeviceInfo {
         runmat_accelerate_api::ApiDeviceInfo {
             device_id: self.device_id,
-            name: "InProcess".to_string(),
+            name: "InProcess".into(),
             vendor: "RunMat".to_string(),
             memory_bytes: None,
             backend: Some("inprocess".to_string()),
@@ -10444,11 +10444,11 @@ mod tests {
                     .expect("shared native upload");
                 assert_eq!(handle.descriptor.element_type, Some(expected_type));
                 assert_eq!(handle.descriptor.storage, Some(storage));
-                runmat_accelerate_api::clear_handle_class_name(&handle);
+                runmat_accelerate_api::clear_handle_class_identity(&handle);
                 assert_eq!(runmat_accelerate_api::handle_storage(&handle), storage);
                 assert_eq!(
-                    runmat_accelerate_api::handle_class_name(&handle).as_deref(),
-                    Some(expected_type.class_name())
+                    runmat_accelerate_api::handle_class_identity(&handle),
+                    Some(expected_type.class_identity())
                 );
                 assert_eq!(
                     runmat_accelerate_api::handle_precision(&handle),
@@ -11456,7 +11456,7 @@ mod tests {
                 Some(NumericElementType::F32)
             );
             assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
-            runmat_accelerate_api::clear_handle_class_name(output);
+            runmat_accelerate_api::clear_handle_class_identity(output);
         }
         let x_output = block_on(provider.download_numeric(&result.outputs[0]))
             .expect("download native single x grid");

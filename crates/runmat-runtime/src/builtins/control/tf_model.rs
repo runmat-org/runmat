@@ -10,8 +10,10 @@ use runmat_value::{CharArray, ComplexTensor, ObjectInstance, Tensor, Value};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
 
-pub const TF_CLASS: &str = "tf";
-pub const SS_CLASS: &str = "ss";
+pub const TF_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("tf");
+pub const SS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("ss");
 pub const DEFAULT_CONTINUOUS_VARIABLE: &str = "s";
 pub const DEFAULT_DISCRETE_VARIABLE: &str = "z";
 pub const EPS: f64 = 1.0e-12;
@@ -76,9 +78,9 @@ pub fn ensure_tf_class_registered() {
             "OutputDelay",
         ] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -91,13 +93,23 @@ pub fn ensure_tf_class_registered() {
 
         let mut methods = HashMap::new();
         for method_name in [
-            "plus", "minus", "uplus", "uminus", "times", "mtimes", "rdivide", "mrdivide",
-            "ldivide", "mldivide", "power", "mpower",
+            runmat_types::StaticMethodName::new("plus"),
+            runmat_types::StaticMethodName::new("minus"),
+            runmat_types::StaticMethodName::new("uplus"),
+            runmat_types::StaticMethodName::new("uminus"),
+            runmat_types::StaticMethodName::new("times"),
+            runmat_types::StaticMethodName::new("mtimes"),
+            runmat_types::StaticMethodName::new("rdivide"),
+            runmat_types::StaticMethodName::new("mrdivide"),
+            runmat_types::StaticMethodName::new("ldivide"),
+            runmat_types::StaticMethodName::new("mldivide"),
+            runmat_types::StaticMethodName::new("power"),
+            runmat_types::StaticMethodName::new("mpower"),
         ] {
             methods.insert(
-                method_name.to_string(),
+                method_name.into(),
                 crate::class_registry::RuntimeMethod {
-                    name: method_name.to_string(),
+                    name: method_name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
@@ -109,7 +121,7 @@ pub fn ensure_tf_class_registered() {
         }
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: TF_CLASS.to_string(),
+            name: TF_CLASS.into(),
             parent: None,
             properties,
             methods,

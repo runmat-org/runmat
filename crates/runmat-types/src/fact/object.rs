@@ -1,5 +1,5 @@
 use super::ValueFact;
-use crate::{ClassId, QualifiedName};
+use crate::{ClassId, ClassIdentity};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 #[serde(deny_unknown_fields)]
 pub struct ObjectFact {
     pub class: Option<ClassId>,
-    pub runtime_class: Option<QualifiedName>,
+    pub runtime_class: Option<ClassIdentity>,
     pub properties: BTreeMap<String, ValueFact>,
     pub properties_complete: bool,
     /// `None` means the class/value-semantics relationship is not proven.
@@ -18,5 +18,5 @@ pub struct ObjectFact {
 #[serde(deny_unknown_fields)]
 pub struct ClassReferenceFact {
     pub class: Option<ClassId>,
-    pub runtime_class: Option<QualifiedName>,
+    pub runtime_class: Option<ClassIdentity>,
 }

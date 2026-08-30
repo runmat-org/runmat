@@ -3042,7 +3042,7 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
         fn device_info_struct(&self) -> runmat_accelerate_api::ApiDeviceInfo {
             runmat_accelerate_api::ApiDeviceInfo {
                 device_id: 11,
-                name: "contract-test-provider".to_string(),
+                name: "contract-test-provider".into(),
                 vendor: "runmat-tests".to_string(),
                 memory_bytes: None,
                 backend: Some("contract_gpu".to_string()),

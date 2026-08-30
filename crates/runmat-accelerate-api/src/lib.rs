@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use once_cell::sync::{Lazy, OnceCell};
+use runmat_types::{standard, ClassIdentity};
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::Cell;
@@ -58,7 +59,7 @@ static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<GpuHandleIdentity, u64>>> =
 static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<GpuHandleIdentity, TransposeInfo>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
-static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<GpuHandleIdentity, String>>> =
+static HANDLE_CLASS_IDENTITIES: Lazy<RwLock<HashMap<GpuHandleIdentity, ClassIdentity>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 pub const fn handle_identity(handle: &GpuTensorHandle) -> GpuHandleIdentity {
@@ -150,20 +151,23 @@ pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
         .and_then(NumericElementType::precision)
 }
 
-/// Record the MATLAB underlying class associated with a GPU tensor handle.
+/// Record the underlying runtime class associated with a GPU tensor handle.
 ///
 /// Precision alone cannot represent integer gpuArray classes, so runtime
 /// introspection and validation use this metadata when the upload path knows
 /// the exact requested or inferred class.
-pub fn set_handle_class_name(handle: &GpuTensorHandle, class_name: impl Into<String>) {
-    if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
-        guard.insert(handle_identity(handle), class_name.into());
+pub fn set_handle_class_identity(
+    handle: &GpuTensorHandle,
+    class_identity: impl Into<ClassIdentity>,
+) {
+    if let Ok(mut guard) = HANDLE_CLASS_IDENTITIES.write() {
+        guard.insert(handle_identity(handle), class_identity.into());
     }
 }
 
-/// Look up the recorded MATLAB underlying class for a GPU tensor handle.
-pub fn handle_class_name(handle: &GpuTensorHandle) -> Option<String> {
-    HANDLE_CLASS_NAMES
+/// Look up the recorded underlying runtime class for a GPU tensor handle.
+pub fn handle_class_identity(handle: &GpuTensorHandle) -> Option<ClassIdentity> {
+    HANDLE_CLASS_IDENTITIES
         .read()
         .ok()
         .and_then(|guard| guard.get(&handle_identity(handle)).cloned())
@@ -171,13 +175,13 @@ pub fn handle_class_name(handle: &GpuTensorHandle) -> Option<String> {
             handle
                 .descriptor
                 .element_type
-                .map(|element_type| element_type.class_name().to_string())
+                .map(NumericElementType::class_identity)
         })
 }
 
-/// Clear any recorded MATLAB underlying class metadata for a GPU tensor handle.
-pub fn clear_handle_class_name(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_CLASS_NAMES.write() {
+/// Clear any recorded underlying runtime class metadata for a GPU tensor handle.
+pub fn clear_handle_class_identity(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_CLASS_IDENTITIES.write() {
         guard.remove(&handle_identity(handle));
     }
 }
@@ -200,13 +204,13 @@ pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
         }
     }
     if logical {
-        if let Ok(mut classes) = HANDLE_CLASS_NAMES.write() {
-            classes.insert(identity, "logical".into());
+        if let Ok(mut classes) = HANDLE_CLASS_IDENTITIES.write() {
+            classes.insert(identity, standard::LOGICAL.owned());
         }
-    } else if let Ok(mut classes) = HANDLE_CLASS_NAMES.write() {
+    } else if let Ok(mut classes) = HANDLE_CLASS_IDENTITIES.write() {
         if classes
             .get(&identity)
-            .is_some_and(|class| class == "logical")
+            .is_some_and(|class| class.is(standard::LOGICAL))
         {
             classes.remove(&identity);
         }
@@ -419,7 +423,7 @@ pub fn handle_is_explicit(handle: &GpuTensorHandle) -> bool {
 /// available on existing handle values.
 pub fn clear_handle_metadata(handle: &GpuTensorHandle) {
     clear_residency(handle);
-    clear_handle_class_name(handle);
+    clear_handle_class_identity(handle);
     clear_handle_logical(handle);
     clear_handle_transpose(handle);
 }
@@ -4061,6 +4065,21 @@ impl NumericElementType {
         }
     }
 
+    pub fn class_identity(self) -> ClassIdentity {
+        match self {
+            Self::F64 => standard::DOUBLE.owned(),
+            Self::F32 => standard::SINGLE.owned(),
+            Self::I8 => standard::INT8.owned(),
+            Self::I16 => standard::INT16.owned(),
+            Self::I32 => standard::INT32.owned(),
+            Self::I64 => standard::INT64.owned(),
+            Self::U8 => standard::UINT8.owned(),
+            Self::U16 => standard::UINT16.owned(),
+            Self::U32 => standard::UINT32.owned(),
+            Self::U64 => standard::UINT64.owned(),
+        }
+    }
+
     pub const fn precision(self) -> Option<ProviderPrecision> {
         match self {
             Self::F64 => Some(ProviderPrecision::F64),
@@ -4929,7 +4948,10 @@ mod tests {
             handle_provenance(&cloned),
             Some(GpuHandleProvenance::Explicit)
         );
-        assert_eq!(handle_class_name(&cloned).as_deref(), Some("uint64"));
+        assert_eq!(
+            handle_class_identity(&cloned),
+            Some(standard::UINT64.owned())
+        );
 
         let encoded = serde_json::to_string(&cloned).expect("serialize durable handle");
         let decoded: GpuTensorHandle =
@@ -4956,7 +4978,10 @@ mod tests {
             handle_storage(&floating),
             GpuTensorStorage::ComplexInterleaved
         );
-        assert_eq!(handle_class_name(&floating).as_deref(), Some("single"));
+        assert_eq!(
+            handle_class_identity(&floating),
+            Some(standard::SINGLE.owned())
+        );
         clear_handle_metadata(&floating);
 
         let integer = GpuTensorHandle::new(vec![1, 2], 37, 41)
@@ -4964,7 +4989,10 @@ mod tests {
 
         assert_eq!(handle_precision(&integer), None);
         assert_eq!(handle_integer_type(&integer), Some(IntegerElementType::U64));
-        assert_eq!(handle_class_name(&integer).as_deref(), Some("uint64"));
+        assert_eq!(
+            handle_class_identity(&integer),
+            Some(standard::UINT64.owned())
+        );
         clear_handle_metadata(&integer);
     }
 
@@ -5126,8 +5154,8 @@ mod tests {
         clear_handle_metadata(&first);
         clear_handle_metadata(&second);
 
-        set_handle_class_name(&first, "single");
-        set_handle_class_name(&second, "uint64");
+        set_handle_class_identity(&first, standard::SINGLE);
+        set_handle_class_identity(&second, standard::UINT64);
         set_handle_logical(&first, true);
         record_handle_transpose(&first, 2, 3);
         mark_handle_automatic(&mut first);
@@ -5135,8 +5163,14 @@ mod tests {
 
         assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
         assert_eq!(handle_precision(&second), None);
-        assert_eq!(handle_class_name(&first).as_deref(), Some("logical"));
-        assert_eq!(handle_class_name(&second).as_deref(), Some("uint64"));
+        assert_eq!(
+            handle_class_identity(&first),
+            Some(standard::LOGICAL.owned())
+        );
+        assert_eq!(
+            handle_class_identity(&second),
+            Some(standard::UINT64.owned())
+        );
         assert_eq!(handle_integer_type(&first), None);
         assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
         assert!(handle_is_logical(&first));
@@ -5159,7 +5193,10 @@ mod tests {
 
         clear_handle_metadata(&first);
         assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
-        assert_eq!(handle_class_name(&first).as_deref(), Some("single"));
+        assert_eq!(
+            handle_class_identity(&first),
+            Some(standard::SINGLE.owned())
+        );
         assert!(!handle_is_logical(&first));
         assert_eq!(handle_transpose_info(&first), None);
         assert_eq!(

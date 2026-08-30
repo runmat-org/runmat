@@ -127,20 +127,20 @@ mod tests {
     fn runmat_object_variants_report_true() {
         let object = Value::Object(ObjectInstance::new("pkg.Point".to_string()));
         let handle = Value::HandleObject(HandleRef {
-            class_name: "pkg.PointHandle".to_string(),
+            class_name: "pkg.PointHandle".into(),
             target: handle_target(),
             valid: true,
         });
         let listener = Value::Listener(Listener {
             id: 1,
             target: handle_target(),
-            target_class_name: "pkg.Target".to_string(),
-            event_name: "Changed".to_string(),
+            target_class_name: "pkg.Target".into(),
+            event_name: "Changed".into(),
             callback: handle_target(),
             enabled: true,
             valid: true,
         });
-        let class_ref = Value::ClassRef("pkg.Point".to_string());
+        let class_ref = Value::ClassRef("pkg.Point".into());
         let exception = Value::MException(MException::new(
             "RunMat:Test".to_string(),
             "failure".to_string(),
@@ -168,7 +168,7 @@ mod tests {
             Value::Struct(st),
             Value::FunctionHandle("sin".to_string()),
             Value::Closure(Closure {
-                function_name: "anon".to_string(),
+                function_name: "anon".into(),
                 bound_function: None,
                 captures: Vec::new(),
             }),

@@ -37,7 +37,9 @@ use super::pp::{
     PiecewisePolynomial,
 };
 
-const CLASS_NAME: &str = "griddedInterpolant";
+const BUILTIN_NAME: &str = "griddedInterpolant";
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("griddedInterpolant");
 const BUILTIN_SUBSREF: &str = "griddedInterpolant.subsref";
 const GRID_VECTORS: &str = "GridVectors";
 const VALUES: &str = "Values";
@@ -45,7 +47,7 @@ const METHOD: &str = "Method";
 const EXTRAPOLATION_METHOD: &str = "ExtrapolationMethod";
 
 static GRIDDED_INTERPOLANT_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(CLASS_NAME);
+    crate::class_registry::ClassRegistration::new(CLASS_IDENTITY);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InterpMethod {
@@ -353,7 +355,7 @@ pub const GRIDDED_INTERPOLANT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDes
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: CLASS_NAME,
+    name: BUILTIN_NAME,
     op_kind: GpuOpKind::Custom("gridded-interpolation"),
     supported_precisions: &[],
     broadcast: BroadcastSemantics::Matlab,
@@ -371,7 +373,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: CLASS_NAME,
+    name: BUILTIN_NAME,
     shape: ShapeRequirements::Any,
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: None,
@@ -389,7 +391,7 @@ fn gridded_error(
     detail: impl AsRef<str>,
 ) -> RuntimeError {
     let mut builder = build_runtime_error(format!("{}: {}", descriptor.message, detail.as_ref()))
-        .with_builtin(CLASS_NAME);
+        .with_builtin(BUILTIN_NAME);
     if let Some(identifier) = descriptor.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -413,9 +415,9 @@ fn ensure_gridded_interpolant_class_registered() {
         let mut properties = HashMap::new();
         for name in [GRID_VECTORS, VALUES, METHOD, EXTRAPOLATION_METHOD] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -427,19 +429,19 @@ fn ensure_gridded_interpolant_class_registered() {
         }
         let mut methods = HashMap::new();
         methods.insert(
-            OBJECT_SUBSREF_METHOD.to_string(),
+            OBJECT_SUBSREF_METHOD.into(),
             crate::class_registry::RuntimeMethod {
-                name: OBJECT_SUBSREF_METHOD.to_string(),
+                name: OBJECT_SUBSREF_METHOD.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: BUILTIN_SUBSREF.to_string(),
+                function_name: BUILTIN_SUBSREF.into(),
                 implicit_class_argument: None,
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: CLASS_NAME.to_string(),
+            name: CLASS_IDENTITY.into(),
             parent: None,
             properties,
             methods,
@@ -552,7 +554,7 @@ fn ensure_integer_extension(
     role: &str,
 ) -> BuiltinResult<()> {
     if value_contains_typed_integer(value) {
-        crate::compatibility::ensure_builtin_extension_enabled(extension, CLASS_NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
         ensure_exact_integer_value(value, role)?;
     }
     Ok(())
@@ -1014,7 +1016,7 @@ fn validate_method_support(
 }
 
 fn spec_to_object(spec: InterpolantSpec) -> BuiltinResult<ObjectInstance> {
-    let mut object = ObjectInstance::new(CLASS_NAME.to_string());
+    let mut object = ObjectInstance::new(CLASS_IDENTITY);
     let grid_cells = spec
         .grid_vectors
         .iter()
@@ -1049,7 +1051,7 @@ fn object_to_spec(value: &Value) -> BuiltinResult<InterpolantSpec> {
     let Value::Object(object) = value else {
         return Err(invalid("receiver must be a griddedInterpolant object"));
     };
-    if !object.is_class(CLASS_NAME) {
+    if !object.is_class(CLASS_IDENTITY) {
         return Err(invalid("receiver must be a griddedInterpolant object"));
     }
     let grid_vectors = match object.properties.get(GRID_VECTORS) {
@@ -1101,7 +1103,7 @@ fn gridded_member(obj: Value, payload: Value) -> BuiltinResult<Value> {
     let Value::Object(object) = obj else {
         return Err(invalid("receiver must be a griddedInterpolant object"));
     };
-    if !object.is_class(CLASS_NAME) {
+    if !object.is_class(CLASS_IDENTITY) {
         return Err(invalid("receiver must be a griddedInterpolant object"));
     }
     object
@@ -1202,14 +1204,14 @@ fn evaluate_piecewise_interpolant(
             series: 1,
             trailing_shape: Vec::new(),
         };
-        let pp =
-            match spec.method {
-                InterpMethod::Pchip => build_pchip_pp(&series_data, CLASS_NAME)
-                    .map_err(|err| internal(err.message()))?,
-                InterpMethod::Spline => build_spline_pp(&series_data, CLASS_NAME)
-                    .map_err(|err| internal(err.message()))?,
-                _ => unreachable!("piecewise evaluator only handles higher-order methods"),
-            };
+        let pp = match spec.method {
+            InterpMethod::Pchip => {
+                build_pchip_pp(&series_data, BUILTIN_NAME).map_err(|err| internal(err.message()))?
+            }
+            InterpMethod::Spline => build_spline_pp(&series_data, BUILTIN_NAME)
+                .map_err(|err| internal(err.message()))?,
+            _ => unreachable!("piecewise evaluator only handles higher-order methods"),
+        };
         plan.for_each_point(|point| {
             out.push(evaluate_piecewise_scalar(
                 spec,
@@ -1759,7 +1761,7 @@ mod tests {
         let Value::Object(obj) = value else {
             panic!("expected object");
         };
-        assert_eq!(obj.class_name, CLASS_NAME);
+        assert!(obj.class_name.is(CLASS_IDENTITY));
         assert_eq!(
             obj.properties.get(METHOD),
             Some(&Value::String("linear".to_string()))

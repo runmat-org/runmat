@@ -918,7 +918,7 @@ pub(crate) mod tests {
     fn eq_handle_identity() {
         let ptr = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocation");
         let handle = HandleRef {
-            class_name: "Dummy".to_string(),
+            class_name: "Dummy".into(),
             target: ptr,
             valid: true,
         };
@@ -928,7 +928,7 @@ pub(crate) mod tests {
 
         let other_ptr = runmat_gc::gc_allocate(Value::Num(2.0)).expect("gc allocation");
         let other_handle = HandleRef {
-            class_name: "Dummy".to_string(),
+            class_name: "Dummy".into(),
             target: other_ptr,
             valid: true,
         };
@@ -943,15 +943,15 @@ pub(crate) mod tests {
         let callback =
             runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string())).expect("gc callback");
         let handle = HandleRef {
-            class_name: "EventTarget".to_string(),
+            class_name: "EventTarget".into(),
             target,
             valid: true,
         };
         let listener_a = Listener {
             id: 101,
             target,
-            target_class_name: "EventTarget".to_string(),
-            event_name: "Changed".to_string(),
+            target_class_name: "EventTarget".into(),
+            event_name: "Changed".into(),
             callback,
             enabled: true,
             valid: true,
@@ -959,8 +959,8 @@ pub(crate) mod tests {
         let listener_b = Listener {
             id: 102,
             target,
-            target_class_name: "EventTarget".to_string(),
-            event_name: "Changed".to_string(),
+            target_class_name: "EventTarget".into(),
+            event_name: "Changed".into(),
             callback,
             enabled: true,
             valid: true,

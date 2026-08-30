@@ -1300,7 +1300,7 @@ mod tests {
                     shape: &[1, 2],
                 })
                 .expect("upload other");
-            runmat_accelerate_api::set_handle_class_name(&other, "uint64");
+            runmat_accelerate_api::set_handle_class_identity(&other, "uint64");
             assert!(!valid_interp1_gpu_input(
                 &other,
                 &[1, 2],

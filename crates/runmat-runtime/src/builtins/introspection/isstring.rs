@@ -128,11 +128,11 @@ pub(crate) mod tests {
         );
         let object = Value::Object(ObjectInstance::new("ExampleClass".to_string()));
         let closure = Value::Closure(Closure {
-            function_name: "some_func".to_string(),
+            function_name: "some_func".into(),
             bound_function: None,
             captures: Vec::new(),
         });
-        let class_ref = Value::ClassRef("pkg.Type".to_string());
+        let class_ref = Value::ClassRef("pkg.Type".into());
         let exception = Value::MException(MException::new(
             "RunMat:Test".to_string(),
             "example".to_string(),

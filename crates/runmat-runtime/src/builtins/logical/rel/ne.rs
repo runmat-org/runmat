@@ -789,15 +789,15 @@ pub(crate) mod tests {
         let callback =
             runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string())).expect("gc callback");
         let handle = HandleRef {
-            class_name: "EventTarget".to_string(),
+            class_name: "EventTarget".into(),
             target,
             valid: true,
         };
         let listener_a = Listener {
             id: 101,
             target,
-            target_class_name: "EventTarget".to_string(),
-            event_name: "Changed".to_string(),
+            target_class_name: "EventTarget".into(),
+            event_name: "Changed".into(),
             callback,
             enabled: true,
             valid: true,
@@ -805,8 +805,8 @@ pub(crate) mod tests {
         let listener_b = Listener {
             id: 102,
             target,
-            target_class_name: "EventTarget".to_string(),
-            event_name: "Changed".to_string(),
+            target_class_name: "EventTarget".into(),
+            event_name: "Changed".into(),
             callback,
             enabled: true,
             valid: true,

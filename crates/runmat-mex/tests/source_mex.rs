@@ -1060,7 +1060,7 @@ public:
     )
     .unwrap();
 
-    let mut object = runmat_value::ObjectInstance::new("FixtureObject".into());
+    let mut object = runmat_value::ObjectInstance::new("FixtureObject");
     object.properties.insert("Value".into(), Value::Num(4.0));
     object
         .properties
@@ -1082,7 +1082,9 @@ public:
     let Value::ObjectArray(states) = &result.outputs[1] else {
         panic!("C++ enum output must remain a homogeneous object array");
     };
-    assert_eq!(states.class_name(), "FixtureState");
+    assert!(states
+        .class_name()
+        .is(runmat_types::StaticClassIdentity::new("FixtureState")));
     let members = states
         .data()
         .iter()
@@ -1883,7 +1885,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let Value::Object(object) = &result.outputs[2] else {
             panic!("classed struct must become a RunMat object");
         };
-        assert_eq!(object.class_name, "FixtureObject");
+        assert_eq!(object.class_name.display_name(), "FixtureObject");
         assert_eq!(object.properties.get("value"), Some(&Value::Num(9.0)));
         assert_eq!(result.outputs[3], Value::Complex(2.0, 5.0));
     }

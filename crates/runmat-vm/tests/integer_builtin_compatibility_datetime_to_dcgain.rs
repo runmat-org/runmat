@@ -89,7 +89,7 @@ fn compiled_integer_decomposition_dispatches_transpose_and_both_solves() {
         matches!(
             value,
             Value::Object(object)
-                if object.class_name == "decomposition"
+                if object.class_name.is(runmat_types::StaticClassIdentity::new("decomposition"))
                     && matches!(
                         object.properties.get("__matrix"),
                         Some(Value::Tensor(tensor))

@@ -2844,7 +2844,7 @@ mod tests {
         let values = ["first", "second"]
             .into_iter()
             .map(|name| {
-                let mut object = ObjectInstance::new("matlab.unittest.TestResult".into());
+                let mut object = ObjectInstance::new("matlab.unittest.TestResult");
                 object
                     .properties
                     .insert("Name".into(), Value::String(name.into()));
@@ -2880,7 +2880,10 @@ mod tests {
         assert!(matches!(
             slice,
             Value::ObjectArray(array)
-                if array.shape() == [1, 2] && array.class_name() == "matlab.unittest.TestResult"
+                if array.shape() == [1, 2]
+                    && array
+                        .class_name()
+                        .is(runmat_types::StaticClassIdentity::new("matlab.unittest.TestResult"))
         ));
     }
 

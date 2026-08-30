@@ -536,7 +536,7 @@ fn prepare_callable(
 fn handle_for_name(name: &str) -> Option<Value> {
     let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
     Some(Value::BoundFunctionHandle {
-        name: name.to_string(),
+        name: name.into(),
         function,
     })
 }
@@ -765,7 +765,7 @@ pub(crate) mod tests {
         assert_eq!(
             callable.handle,
             Value::BoundFunctionHandle {
-                name: "__timeit_helper_counter_default".to_string(),
+                name: "__timeit_helper_counter_default".into(),
                 function: 188,
             }
         );
@@ -790,7 +790,7 @@ pub(crate) mod tests {
 
         let callable = prepare_callable(
             Value::BoundFunctionHandle {
-                name: "function_target".to_string(),
+                name: "function_target".into(),
                 function: 612,
             },
             Some(3),
@@ -815,7 +815,7 @@ pub(crate) mod tests {
         assert_eq!(
             callable.handle,
             Value::BoundFunctionHandle {
-                name: "__timeit_helper_counter_default".to_string(),
+                name: "__timeit_helper_counter_default".into(),
                 function: 87,
             }
         );
@@ -837,7 +837,7 @@ pub(crate) mod tests {
         assert_eq!(
             callable.handle,
             Value::BoundFunctionHandle {
-                name: "__timeit_helper_counter_default".to_string(),
+                name: "__timeit_helper_counter_default".into(),
                 function: 88,
             }
         );
@@ -857,7 +857,7 @@ pub(crate) mod tests {
         assert_eq!(
             callable.handle,
             Value::BoundFunctionHandle {
-                name: "pkg.callback".to_string(),
+                name: "pkg.callback".into(),
                 function: 86,
             }
         );
@@ -868,7 +868,7 @@ pub(crate) mod tests {
     fn timeit_accepts_semantic_function_handle() {
         let callable = prepare_callable(
             Value::BoundFunctionHandle {
-                name: "function_target".to_string(),
+                name: "function_target".into(),
                 function: 41,
             },
             Some(1),
@@ -877,7 +877,7 @@ pub(crate) mod tests {
         assert_eq!(
             callable.handle,
             Value::BoundFunctionHandle {
-                name: "function_target".to_string(),
+                name: "function_target".into(),
                 function: 41,
             }
         );
@@ -892,7 +892,7 @@ pub(crate) mod tests {
             })));
         let callable = prepare_callable(
             Value::Closure(Closure {
-                function_name: "__timeit_helper_counter_default".to_string(),
+                function_name: "__timeit_helper_counter_default".into(),
                 bound_function: None,
                 captures: vec![Value::Num(9.0)],
             }),
@@ -902,7 +902,7 @@ pub(crate) mod tests {
         assert_eq!(
             callable.handle,
             Value::Closure(Closure {
-                function_name: "__timeit_helper_counter_default".to_string(),
+                function_name: "__timeit_helper_counter_default".into(),
                 bound_function: Some(89),
                 captures: vec![Value::Num(9.0)],
             })
@@ -913,7 +913,7 @@ pub(crate) mod tests {
     fn timeit_name_only_closure_without_resolver_keeps_name_shaped_identity() {
         let callable = prepare_callable(
             Value::Closure(Closure {
-                function_name: "__timeit_helper_counter_default".to_string(),
+                function_name: "__timeit_helper_counter_default".into(),
                 bound_function: None,
                 captures: vec![Value::Num(9.0)],
             }),
@@ -923,7 +923,7 @@ pub(crate) mod tests {
         assert_eq!(
             callable.handle,
             Value::Closure(Closure {
-                function_name: "__timeit_helper_counter_default".to_string(),
+                function_name: "__timeit_helper_counter_default".into(),
                 bound_function: None,
                 captures: vec![Value::Num(9.0)],
             })

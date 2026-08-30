@@ -23,7 +23,10 @@ use crate::builtins::math::optim::common::{call_function, value_to_scalar};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "bayesopt";
-const RESULT_CLASS: &str = "BayesianOptimization";
+const RESULT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("BayesianOptimization");
+const OPTIMIZABLE_VARIABLE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("optimizableVariable");
 const DEFAULT_MAX_EVALS: usize = 30;
 const DEFAULT_SEED_POINTS: usize = 4;
 const MAX_CANDIDATES: usize = 2048;
@@ -218,7 +221,7 @@ enum Transform {
 
 fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
     let raw = match value {
-        Value::Object(object) if object.class_name == "optimizableVariable" => {
+        Value::Object(object) if object.class_name.is(OPTIMIZABLE_VARIABLE_CLASS) => {
             vec![Value::Object(object)]
         }
         Value::Cell(cell) => cell.data,
@@ -245,7 +248,7 @@ fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
                 &ERROR_INVALID_ARGUMENT,
             ));
         };
-        if object.class_name != "optimizableVariable" {
+        if !object.class_name.is(OPTIMIZABLE_VARIABLE_CLASS) {
             return Err(bayesopt_error(
                 format!(
                     "bayesopt: expected optimizableVariable, got {}",
@@ -1452,7 +1455,7 @@ fn variable_descriptions(variables: &[Variable]) -> BuiltinResult<Value> {
     let values = variables
         .iter()
         .map(|var| {
-            let mut object = ObjectInstance::new("optimizableVariable".into());
+            let mut object = ObjectInstance::new("optimizableVariable");
             object
                 .properties
                 .insert("Name".into(), Value::String(var.name.clone()));
@@ -1677,7 +1680,7 @@ mod tests {
     use std::sync::Arc;
 
     fn variable(name: &str, range: Vec<f64>, var_type: Option<&str>) -> Value {
-        let mut object = ObjectInstance::new("optimizableVariable".into());
+        let mut object = ObjectInstance::new("optimizableVariable");
         object
             .properties
             .insert("Name".into(), Value::String(name.into()));
@@ -1699,7 +1702,7 @@ mod tests {
     }
 
     fn variable_with_range(name: &str, range: Value, var_type: Option<&str>) -> Value {
-        let mut object = ObjectInstance::new("optimizableVariable".into());
+        let mut object = ObjectInstance::new("optimizableVariable");
         object
             .properties
             .insert("Name".into(), Value::String(name.into()));
@@ -1746,7 +1749,7 @@ mod tests {
     }
 
     fn categorical_variable(name: &str, categories: Vec<&str>) -> Value {
-        let mut object = ObjectInstance::new("optimizableVariable".into());
+        let mut object = ObjectInstance::new("optimizableVariable");
         object
             .properties
             .insert("Name".into(), Value::String(name.into()));
@@ -1832,14 +1835,14 @@ mod tests {
         let Value::Object(object) = result else {
             panic!("expected BayesianOptimization object");
         };
-        assert_eq!(object.class_name, RESULT_CLASS);
+        assert!(object.class_name.is(RESULT_CLASS));
         let Some(Value::Num(minimum)) = object.properties.get("MinObjective") else {
             panic!("expected minimum");
         };
         assert!(*minimum < 0.08, "minimum was {minimum}");
         assert!(matches!(
             object.properties.get("XTrace"),
-            Some(Value::Object(table)) if table.class_name == "table"
+            Some(Value::Object(table)) if table.class_name.is(runmat_types::standard::TABLE)
         ));
     }
 

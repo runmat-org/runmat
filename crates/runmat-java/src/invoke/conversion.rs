@@ -5,6 +5,49 @@ use jni::objects::{
     JObject, JObjectArray, JShortArray, JString, JValue, JValueOwned,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WellKnownJavaClass {
+    String,
+    BigInteger,
+    Boolean,
+    Byte,
+    Short,
+    Integer,
+    Long,
+    Float,
+    Double,
+    Character,
+    ClassNotFoundException,
+    NoClassDefFoundError,
+}
+
+impl WellKnownJavaClass {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "java.lang.String" => Some(Self::String),
+            "java.math.BigInteger" => Some(Self::BigInteger),
+            "java.lang.Boolean" => Some(Self::Boolean),
+            "java.lang.Byte" => Some(Self::Byte),
+            "java.lang.Short" => Some(Self::Short),
+            "java.lang.Integer" => Some(Self::Integer),
+            "java.lang.Long" => Some(Self::Long),
+            "java.lang.Float" => Some(Self::Float),
+            "java.lang.Double" => Some(Self::Double),
+            "java.lang.Character" => Some(Self::Character),
+            "java.lang.ClassNotFoundException" => Some(Self::ClassNotFoundException),
+            "java.lang.NoClassDefFoundError" => Some(Self::NoClassDefFoundError),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_missing_class_error(self) -> bool {
+        matches!(
+            self,
+            Self::ClassNotFoundException | Self::NoClassDefFoundError
+        )
+    }
+}
+
 impl JavaSession {
     pub(super) fn prepare_arguments<'local>(
         &self,
@@ -149,7 +192,8 @@ impl JavaSession {
             return Ok(JavaValue::Null);
         }
         let class_name = object_class_name(environment, &object)?;
-        if class_name == "java.lang.String" {
+        let known_class = WellKnownJavaClass::from_name(&class_name);
+        if known_class == Some(WellKnownJavaClass::String) {
             let string = JString::from(object);
             return Ok(JavaValue::String(
                 environment
@@ -161,7 +205,7 @@ impl JavaSession {
         if let Some(value) = capture_boxed(environment, &object, &class_name)? {
             return Ok(value);
         }
-        if class_name == "java.math.BigInteger" {
+        if known_class == Some(WellKnownJavaClass::BigInteger) {
             let text = environment
                 .call_method(&object, "toString", "()Ljava/lang/String;", &[])
                 .and_then(JValueOwned::l)
@@ -613,15 +657,15 @@ pub(super) fn capture_boxed(
     object: &JObject<'_>,
     class_name: &str,
 ) -> Result<Option<JavaValue>, JavaInvocationError> {
-    let (method, descriptor) = match class_name {
-        "java.lang.Boolean" => ("booleanValue", "()Z"),
-        "java.lang.Byte" => ("byteValue", "()B"),
-        "java.lang.Short" => ("shortValue", "()S"),
-        "java.lang.Integer" => ("intValue", "()I"),
-        "java.lang.Long" => ("longValue", "()J"),
-        "java.lang.Float" => ("floatValue", "()F"),
-        "java.lang.Double" => ("doubleValue", "()D"),
-        "java.lang.Character" => ("charValue", "()C"),
+    let (method, descriptor) = match WellKnownJavaClass::from_name(class_name) {
+        Some(WellKnownJavaClass::Boolean) => ("booleanValue", "()Z"),
+        Some(WellKnownJavaClass::Byte) => ("byteValue", "()B"),
+        Some(WellKnownJavaClass::Short) => ("shortValue", "()S"),
+        Some(WellKnownJavaClass::Integer) => ("intValue", "()I"),
+        Some(WellKnownJavaClass::Long) => ("longValue", "()J"),
+        Some(WellKnownJavaClass::Float) => ("floatValue", "()F"),
+        Some(WellKnownJavaClass::Double) => ("doubleValue", "()D"),
+        Some(WellKnownJavaClass::Character) => ("charValue", "()C"),
         _ => return Ok(None),
     };
     let value = environment
@@ -681,4 +725,22 @@ pub(super) enum PreparedValue {
     Double(f64),
     Char(u16),
     Object(usize),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WellKnownJavaClass;
+
+    #[test]
+    fn well_known_java_classification_covers_conversion_and_lookup_errors() {
+        assert_eq!(
+            WellKnownJavaClass::from_name("java.lang.String"),
+            Some(WellKnownJavaClass::String)
+        );
+        assert!(
+            WellKnownJavaClass::from_name("java.lang.ClassNotFoundException")
+                .is_some_and(WellKnownJavaClass::is_missing_class_error)
+        );
+        assert_eq!(WellKnownJavaClass::from_name("example.Widget"), None);
+    }
 }

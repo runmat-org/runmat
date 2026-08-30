@@ -154,7 +154,7 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         return Err(error);
     }
     runmat_accelerate_api::set_handle_logical(&handle, prepared.logical);
-    runmat_accelerate_api::set_handle_class_name(&handle, dtype.class_name());
+    runmat_accelerate_api::set_handle_class_identity(&handle, dtype.class_name());
     handle.descriptor.provenance = Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
 
     Ok(Value::GpuTensor(handle))
@@ -217,6 +217,43 @@ impl DataClass {
             "uint64" => Some(Self::UInt64),
             "gpuarray" => None, // compatibility no-op
             _ => None,
+        }
+    }
+
+    fn from_class_identity(identity: &runmat_types::ClassIdentity) -> Option<Self> {
+        use runmat_types::standard;
+
+        if identity.is(standard::DOUBLE) {
+            Some(Self::Double)
+        } else if identity.is(standard::SINGLE) {
+            Some(Self::Single)
+        } else if identity.is(standard::LOGICAL) {
+            Some(Self::Logical)
+        } else if identity.is(standard::INT8) {
+            Some(Self::Int8)
+        } else if identity.is(standard::INT16) {
+            Some(Self::Int16)
+        } else if identity.is(standard::INT32) {
+            Some(Self::Int32)
+        } else if identity.is(standard::INT64) {
+            Some(Self::Int64)
+        } else if identity.is(standard::UINT8) {
+            Some(Self::UInt8)
+        } else if identity.is(standard::UINT16) {
+            Some(Self::UInt16)
+        } else if identity.is(standard::UINT32) {
+            Some(Self::UInt32)
+        } else if identity.is(standard::UINT64) {
+            Some(Self::UInt64)
+        } else {
+            None
+        }
+    }
+
+    fn class_identity(self) -> runmat_types::ClassIdentity {
+        match self {
+            Self::Logical => runmat_types::standard::LOGICAL.owned(),
+            _ => self.numeric_dtype().class_identity(),
         }
     }
 
@@ -523,8 +560,8 @@ fn dtype_from_gpu_handle(handle: &GpuTensorHandle) -> BuiltinResult<DataClass> {
     if runmat_accelerate_api::handle_is_logical(handle) {
         return Ok(DataClass::Logical);
     }
-    if let Some(class_name) = runmat_accelerate_api::handle_class_name(handle) {
-        if let Some(dtype) = DataClass::from_tag(class_name.trim().to_ascii_lowercase().as_str()) {
+    if let Some(class_name) = runmat_accelerate_api::handle_class_identity(handle) {
+        if let Some(dtype) = DataClass::from_class_identity(&class_name) {
             return Ok(dtype);
         }
     }
@@ -907,11 +944,9 @@ fn validate_prepared_handle(
             &GPUARRAY_ERROR_PROVIDER_IO,
         ));
     }
-    let existing_class = runmat_accelerate_api::handle_class_name(handle);
+    let existing_class = runmat_accelerate_api::handle_class_identity(handle);
     if (runmat_accelerate_api::handle_is_logical(handle) && !logical)
-        || existing_class
-            .as_deref()
-            .is_some_and(|class_name| class_name != dtype.class_name())
+        || existing_class.is_some_and(|class_identity| class_identity != dtype.class_identity())
     {
         return Err(gpu_array_error_with_message(
             "gpuArray: provider returned contradictory class metadata",
@@ -1280,8 +1315,8 @@ pub(crate) mod tests {
                 panic!("expected gpu tensor");
             };
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&handle).as_deref(),
-                Some("single")
+                runmat_accelerate_api::handle_class_identity(&handle),
+                Some(runmat_types::standard::SINGLE.owned())
             );
             assert_eq!(
                 runmat_accelerate_api::handle_precision(&handle),
@@ -1307,8 +1342,8 @@ pub(crate) mod tests {
                 panic!("expected like gpu tensor");
             };
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&like_handle).as_deref(),
-                Some("single")
+                runmat_accelerate_api::handle_class_identity(&like_handle),
+                Some(runmat_types::standard::SINGLE.owned())
             );
             assert_eq!(
                 runmat_accelerate_api::handle_precision(&like_handle),
@@ -1395,8 +1430,8 @@ pub(crate) mod tests {
             };
             assert_eq!(rewrapped.buffer_id, handle.buffer_id);
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&rewrapped).as_deref(),
-                Some("uint64")
+                runmat_accelerate_api::handle_class_identity(&rewrapped),
+                Some(runmat_types::standard::UINT64.owned())
             );
 
             let gathered =
@@ -1470,8 +1505,8 @@ pub(crate) mod tests {
                 panic!("expected converted gpu tensor");
             };
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&converted).as_deref(),
-                Some("int16")
+                runmat_accelerate_api::handle_class_identity(&converted),
+                Some(runmat_types::standard::INT16.owned())
             );
             let gathered =
                 test_support::gather(Value::GpuTensor(converted)).expect("gather converted");
@@ -2143,8 +2178,8 @@ pub(crate) mod tests {
                     Some(element_type)
                 );
                 assert_eq!(
-                    runmat_accelerate_api::handle_class_name(&handle).as_deref(),
-                    Some(class_name)
+                    runmat_accelerate_api::handle_class_identity(&handle),
+                    Some(class_name.into())
                 );
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                 assert_eq!(gathered.integer_storage(), Some(&expected));
@@ -2184,8 +2219,8 @@ pub(crate) mod tests {
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&handle).as_deref(),
-                Some("uint64")
+                runmat_accelerate_api::handle_class_identity(&handle),
+                Some(runmat_types::standard::UINT64.owned())
             );
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(

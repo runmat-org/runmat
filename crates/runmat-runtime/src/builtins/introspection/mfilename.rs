@@ -134,7 +134,9 @@ pub(crate) fn dispatch_mfilename(args: Vec<Value>) -> crate::BuiltinResult<Value
                 path_without_extension(path)
             })
             .unwrap_or_default(),
-        MfilenameMode::Class => crate::class_access_context().unwrap_or_default(),
+        MfilenameMode::Class => crate::class_access_context()
+            .map(|identity| identity.display_name().to_owned())
+            .unwrap_or_default(),
     };
     Ok(Value::String(result))
 }

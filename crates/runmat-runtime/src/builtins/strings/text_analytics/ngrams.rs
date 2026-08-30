@@ -25,7 +25,8 @@ use crate::builtins::strings::text_analytics::documents::{
 };
 use crate::{build_runtime_error, BuiltinResult};
 
-pub const BAG_OF_NGRAMS_CLASS: &str = "bagOfNgrams";
+pub const BAG_OF_NGRAMS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("bagOfNgrams");
 
 static BAG_OF_NGRAMS_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(BAG_OF_NGRAMS_CLASS);
@@ -208,10 +209,10 @@ fn ensure_bag_of_ngrams_class_registered() {
             "NumNgrams",
             "NumDocuments",
         ] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: BAG_OF_NGRAMS_CLASS.to_string(),
+            name: BAG_OF_NGRAMS_CLASS.into(),
             parent: None,
             properties,
             methods: HashMap::new(),
@@ -221,7 +222,7 @@ fn ensure_bag_of_ngrams_class_registered() {
 
 fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
     crate::class_registry::RuntimeProperty {
-        name: name.to_string(),
+        name: name.into(),
         is_static: false,
         is_constant: false,
         is_dependent: false,
@@ -944,7 +945,7 @@ mod tests {
             ])])
             .expect("bag"),
         );
-        assert_eq!(bag.class_name, BAG_OF_NGRAMS_CLASS);
+        assert!(bag.class_name.is(BAG_OF_NGRAMS_CLASS));
         assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(3.0)));
 

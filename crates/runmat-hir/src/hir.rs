@@ -3,14 +3,14 @@ use crate::{
 };
 pub use runmat_types::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BuiltinId,
-    CallableFallbackPolicy, CallableIdentity, ClassDeclaration, DefPath, DefPathSegment,
-    EntrypointName, FunctionName, IndexKind, IndexResultContext, MemberName, MethodId, MethodName,
-    OperatorKind, PackageName, PlaceMutationKind, QualifiedName, RequestedOutputCount,
-    SemanticAttribute, SymbolName, ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME,
-    DISCARD_OUTPUT_NAME, EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME,
-    FEVAL_BUILTIN_NAME, NARGINCHK_BUILTIN_NAME, NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME,
-    NARGOUT_BUILTIN_NAME, RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
-    TEST_CLASS_REGISTRATION_BUILTIN_NAME,
+    CallableFallbackPolicy, CallableIdentity, ClassDeclaration, ClassIdentity, DefPath,
+    DefPathSegment, EntrypointName, FunctionName, IndexKind, IndexResultContext, MemberName,
+    MethodId, MethodName, OperatorKind, PackageName, PlaceMutationKind, QualifiedName,
+    RequestedOutputCount, SemanticAttribute, SymbolName, ASSIGNIN_BUILTIN_NAME,
+    AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME, EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME,
+    EVAL_BUILTIN_NAME, FEVAL_BUILTIN_NAME, NARGINCHK_BUILTIN_NAME, NARGIN_BUILTIN_NAME,
+    NARGOUTCHK_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME,
+    SPAWN_EXTENSION_NAME, TEST_CLASS_REGISTRATION_BUILTIN_NAME,
 };
 use runmat_types::{
     FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator, IntegerLiteral,
@@ -315,7 +315,7 @@ pub enum HirExprKind {
     MemberDynamic(Box<HirExpr>, Box<HirExpr>),
     WorkspaceFirstStaticProperty {
         workspace_name: SymbolName,
-        class_name: String,
+        class_name: ClassIdentity,
         property: MemberName,
     },
     Call(HirCall),

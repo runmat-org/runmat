@@ -20,7 +20,8 @@ use crate::builtins::common::tensor as tensor_helpers;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "optimizableVariable";
-const CLASS_NAME: &str = "optimizableVariable";
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("optimizableVariable");
 
 const OUTPUT_VAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "variable",
@@ -199,7 +200,7 @@ async fn optimizable_variable_builtin(
     let var_type = options.var_type.unwrap_or(range.inferred_type());
     range.validate_for(var_type, options.transform)?;
 
-    let mut object = ObjectInstance::new(CLASS_NAME.to_string());
+    let mut object = ObjectInstance::new(CLASS_IDENTITY);
     object
         .properties
         .insert("Name".to_string(), Value::String(variable_name));
@@ -622,7 +623,7 @@ mod tests {
         ))
         .expect("optimizableVariable");
         let object = object(out);
-        assert_eq!(object.class_name, CLASS_NAME);
+        assert!(object.class_name.is(CLASS_IDENTITY));
         assert_eq!(
             object.properties.get("Name"),
             Some(&Value::String("depth".into()))

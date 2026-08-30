@@ -9,9 +9,8 @@ impl MxApi {
         value: *mut MxArray,
         class_name: String,
     ) -> Result<(), String> {
-        if class_name.is_empty() {
-            return Err("object class name must be non-empty".into());
-        }
+        let class_name =
+            runmat_types::ClassIdentity::new(class_name).map_err(|error| error.to_string())?;
         let value = self
             .arena
             .get_mut(value)

@@ -799,27 +799,21 @@ fn call_rvalue(
             current_class,
             super_class,
         } => MirCallee::SuperConstructor {
-            current_class: current_class.0.clone(),
-            super_class: super_class
-                .0
-                .iter()
-                .map(|segment| segment.0.as_str())
-                .collect::<Vec<_>>()
-                .join("."),
+            current_class: runmat_types::ClassIdentity::new(current_class.0.clone())
+                .map_err(|error| HirError::new(error.to_string()))?,
+            super_class: runmat_types::ClassIdentity::from_qualified_name(super_class)
+                .map_err(|error| HirError::new(error.to_string()))?,
         },
         HirCallableRef::SuperMethod {
             current_class,
             super_class,
             method,
         } => MirCallee::SuperMethod {
-            current_class: current_class.0.clone(),
-            super_class: super_class
-                .0
-                .iter()
-                .map(|segment| segment.0.as_str())
-                .collect::<Vec<_>>()
-                .join("."),
-            method: method.0.clone(),
+            current_class: runmat_types::ClassIdentity::new(current_class.0.clone())
+                .map_err(|error| HirError::new(error.to_string()))?,
+            super_class: runmat_types::ClassIdentity::from_qualified_name(super_class)
+                .map_err(|error| HirError::new(error.to_string()))?,
+            method: method.0.clone().into(),
         },
         _ => {
             let Some(identity) = call.callee.identity() else {

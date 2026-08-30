@@ -470,7 +470,11 @@ fn builtin_exists(name: &str) -> bool {
 }
 
 async fn class_exists(name: &str) -> BuiltinResult<bool> {
-    if crate::class_registry::get_class(name).is_some() {
+    if runmat_types::ClassIdentity::new(name)
+        .ok()
+        .and_then(|identity| crate::class_registry::get_class(&identity))
+        .is_some()
+    {
         return Ok(true);
     }
     if class_folder_exists(name).await? {
@@ -499,7 +503,15 @@ async fn class_file_exists(name: &str) -> BuiltinResult<bool> {
 
 fn method_exists(name: &str) -> bool {
     if let Some((class_name, method_name)) = split_method_name(name) {
-        crate::class_registry::lookup_method(&class_name, &method_name).is_some()
+        runmat_types::ClassIdentity::new(class_name)
+            .ok()
+            .and_then(|identity| {
+                crate::class_registry::lookup_method(
+                    &identity,
+                    &runmat_types::MethodName::from(method_name.as_str()),
+                )
+            })
+            .is_some()
     } else {
         false
     }
@@ -870,26 +882,26 @@ pub(crate) mod tests {
         let child_name = unique_class_name("existChild");
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
-            "parentOnly".to_string(),
+            "parentOnly".into(),
             crate::class_registry::RuntimeMethod {
-                name: "parentOnly".to_string(),
+                name: "parentOnly".into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: "parent_only_impl".to_string(),
+                function_name: "parent_only_impl".into(),
                 implicit_class_argument: None,
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: parent_name.clone(),
+            name: parent_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: parent_methods,
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child_name.clone(),
-            parent: Some(parent_name.clone()),
+            name: child_name.clone().into(),
+            parent: Some(parent_name.clone().into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });

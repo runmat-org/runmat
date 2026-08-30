@@ -105,7 +105,10 @@ fn layer_constructors_preserve_core_properties_and_name_values() {
     let Value::Object(object) = &fc else {
         panic!("expected object");
     };
-    assert_eq!(object.class_name, "nnet.cnn.layer.FullyConnectedLayer");
+    assert_eq!(
+        object.class_name.display_name(),
+        "nnet.cnn.layer.FullyConnectedLayer"
+    );
     assert_eq!(object.properties.get("OutputSize"), Some(&Value::Num(10.0)));
     assert_eq!(layer_name(&fc), "fc1");
 
@@ -308,7 +311,7 @@ fn training_options_and_layer_graph_materialize_metadata() {
     let Value::Object(graph) = graph else {
         panic!("expected graph object");
     };
-    assert_eq!(graph.class_name, "nnet.cnn.LayerGraph");
+    assert_eq!(graph.class_name.display_name(), "nnet.cnn.LayerGraph");
     let Value::StringArray(names) = graph.properties.get("LayerNames").unwrap() else {
         panic!("expected names");
     };
@@ -332,7 +335,7 @@ fn dlnetwork_initialize_option_reads_typed_integer_storage_exactly() {
     let Value::Object(object) = net else {
         panic!("expected network object");
     };
-    assert_eq!(object.class_name, "dlnetwork");
+    assert_eq!(object.class_name.display_name(), "dlnetwork");
 }
 
 #[test]
@@ -440,7 +443,7 @@ fn dlnetwork_materializes_metadata_and_learnables() {
     let Value::Object(object) = net else {
         panic!("expected dlnetwork object");
     };
-    assert_eq!(object.class_name, "dlnetwork");
+    assert_eq!(object.class_name.display_name(), "dlnetwork");
     assert_eq!(
         object.properties.get("Initialized"),
         Some(&Value::Bool(true))
@@ -641,7 +644,7 @@ fn forward_preserves_dlarray_wrapper() {
     let Value::Object(object) = out else {
         panic!("expected dlarray output");
     };
-    assert_eq!(object.class_name, "dlarray");
+    assert_eq!(object.class_name.display_name(), "dlarray");
     assert_eq!(
         object.properties.get("Format"),
         Some(&Value::String("CB".into()))
@@ -1267,7 +1270,7 @@ fn train_network_regression_updates_weights_and_predicts() {
     let Value::Object(object) = &net else {
         panic!("expected trained network object");
     };
-    assert_eq!(object.class_name, "SeriesNetwork");
+    assert_eq!(object.class_name.display_name(), "SeriesNetwork");
     assert!(matches!(
         object.properties.get("TrainingInfo"),
         Some(Value::Struct(_))
@@ -1356,7 +1359,7 @@ fn trainnet_crossentropy_supports_categorical_labels() {
     let x = Value::Tensor(
         Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0], vec![4, 2]).unwrap(),
     );
-    let mut categorical = ObjectInstance::new("categorical".into());
+    let mut categorical = ObjectInstance::new(runmat_types::standard::CATEGORICAL);
     categorical.properties.insert(
         "Codes".into(),
         Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![4, 1]).unwrap()),
@@ -1379,7 +1382,7 @@ fn trainnet_crossentropy_supports_categorical_labels() {
     let Value::Object(object) = &trained else {
         panic!("expected dlnetwork");
     };
-    assert_eq!(object.class_name, "dlnetwork");
+    assert_eq!(object.class_name.display_name(), "dlnetwork");
     assert!(matches!(
         object.properties.get("TrainingInfo"),
         Some(Value::Struct(_))
@@ -1565,7 +1568,7 @@ fn dlarray_preserves_data_and_format_labels() {
     let Value::Object(object) = out else {
         panic!("expected object");
     };
-    assert_eq!(object.class_name, "dlarray");
+    assert_eq!(object.class_name.display_name(), "dlarray");
     assert_eq!(object.properties.get("Data"), Some(&data));
     assert_eq!(
         object.properties.get("Format"),
@@ -1610,7 +1613,7 @@ fn dlarray_preserves_gpu_array_residency() {
         let Value::Object(object) = out else {
             panic!("expected object");
         };
-        assert_eq!(object.class_name, "dlarray");
+        assert_eq!(object.class_name.display_name(), "dlarray");
         let Value::GpuTensor(wrapped) = object.properties.get("Data").unwrap() else {
             panic!("expected gpu tensor data");
         };
@@ -2096,7 +2099,7 @@ fn crossentropy_preserves_dlarray_output_for_dlarray_inputs() {
     let Value::Object(object) = out else {
         panic!("expected dlarray object");
     };
-    assert_eq!(object.class_name, "dlarray");
+    assert_eq!(object.class_name.display_name(), "dlarray");
     let Value::Num(loss) = object.properties.get("Data").unwrap() else {
         panic!("expected scalar data");
     };
@@ -2200,7 +2203,7 @@ fn adamupdate_preserves_dlarray_wrapper_for_state_outputs() {
     let Value::Object(updated) = &outputs[0] else {
         panic!("expected dlarray object");
     };
-    assert_eq!(updated.class_name, "dlarray");
+    assert_eq!(updated.class_name.display_name(), "dlarray");
     assert_eq!(
         updated.properties.get("Format"),
         Some(&Value::String("CB".into()))
@@ -2209,7 +2212,7 @@ fn adamupdate_preserves_dlarray_wrapper_for_state_outputs() {
         let Value::Object(state) = value else {
             panic!("expected dlarray state object");
         };
-        assert_eq!(state.class_name, "dlarray");
+        assert_eq!(state.class_name.display_name(), "dlarray");
         assert_eq!(
             state.properties.get("Format"),
             Some(&Value::String("CB".into()))

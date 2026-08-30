@@ -846,7 +846,7 @@ mod tests {
 
     fn test_source_context() -> ExecutionSourceContext {
         ExecutionSourceContext {
-            name: "<test>".to_string(),
+            name: "<test>".into(),
             text: Some(String::new()),
             identity: None,
         }
@@ -944,7 +944,7 @@ mod tests {
             ..ExecutionOutcome::default()
         };
         let source_context = ExecutionSourceContext {
-            name: "path-source.m".to_string(),
+            name: "path-source.m".into(),
             text: Some("x = 1;\ny = x(2);\n".to_string()),
             identity: None,
         };

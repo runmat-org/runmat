@@ -23,7 +23,8 @@ use crate::builtins::table::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-pub(crate) const CLASSIFICATION_TREE_CLASS: &str = "ClassificationTree";
+pub(crate) const CLASSIFICATION_TREE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("ClassificationTree");
 
 const FITCTREE_NAME: &str = "fitctree";
 const PREDICT_NAME: &str = "predict";

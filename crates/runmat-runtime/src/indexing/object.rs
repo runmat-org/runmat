@@ -4,6 +4,7 @@
 //! functions are called. This module owns the ordinary array behavior shared
 //! by the bytecode and native executors.
 
+use runmat_types::ClassIdentity;
 use runmat_value::{ObjectArray, Value};
 
 use crate::indexing::plan::IndexPlan;
@@ -168,7 +169,7 @@ fn delete_linear(array: ObjectArray, index: usize, rhs: &Value) -> Result<Value,
             "Object array index is out of bounds",
         ));
     }
-    let class_name = array.class_name().to_string();
+    let class_name = array.class_name().clone();
     let mut data = array.into_data();
     data.remove(index - 1);
     let shape = if rows == 1 {
@@ -211,7 +212,7 @@ fn delete_with_plan(
         .collect::<Vec<_>>();
     removed.sort_unstable();
     removed.dedup();
-    let class_name = array.class_name().to_string();
+    let class_name = array.class_name().clone();
     let mut data = array.into_data();
     for index in removed.into_iter().rev() {
         if index >= data.len() {
@@ -231,14 +232,14 @@ fn delete_with_plan(
 }
 
 fn finish_array(
-    class_name: &str,
+    class_name: &ClassIdentity,
     mut data: Vec<Value>,
     shape: Vec<usize>,
 ) -> Result<Value, RuntimeError> {
     if data.len() == 1 && shape.as_slice() == [1, 1] {
         return Ok(data.remove(0));
     }
-    ObjectArray::new(class_name, data, shape)
+    ObjectArray::new(class_name.clone(), data, shape)
         .map(Value::ObjectArray)
         .map_err(|error| semantic_error("ObjectArrayAssignment", error))
 }
@@ -261,7 +262,7 @@ fn as_array(value: Value) -> Result<ObjectArray, RuntimeError> {
 
 fn assignment_values(
     rhs: &Value,
-    class_name: &str,
+    class_name: &ClassIdentity,
     count: usize,
 ) -> Result<Vec<Value>, RuntimeError> {
     match rhs {
@@ -272,10 +273,10 @@ fn assignment_values(
     }
 }
 
-fn assignment_scalar(rhs: &Value, class_name: &str) -> Result<Value, RuntimeError> {
+fn assignment_scalar(rhs: &Value, class_name: &ClassIdentity) -> Result<Value, RuntimeError> {
     let rhs_class = match rhs {
-        Value::Object(object) => Some(object.class_name.as_str()),
-        Value::HandleObject(handle) => Some(handle.class_name.as_str()),
+        Value::Object(object) => Some(&object.class_name),
+        Value::HandleObject(handle) => Some(&handle.class_name),
         Value::ObjectArray(array) if array.len() == 1 => Some(array.class_name()),
         _ => None,
     };
@@ -304,7 +305,7 @@ mod tests {
     use super::*;
 
     fn object(name: &str) -> Value {
-        let mut object = ObjectInstance::new("parallel.FevalFuture".into());
+        let mut object = ObjectInstance::new("parallel.FevalFuture");
         object
             .properties
             .insert("Name".into(), Value::String(name.into()));
@@ -324,7 +325,7 @@ mod tests {
 
     #[test]
     fn assignment_rejects_class_drift_and_gap_filling_without_a_constructor() {
-        let mut other = ObjectInstance::new("Other".into());
+        let mut other = ObjectInstance::new("Other");
         other
             .properties
             .insert("Name".into(), Value::String("other".into()));

@@ -228,8 +228,7 @@ fn result_value(
                         coverage.summary(runmat_test::coverage::CoverageMetric::Statement);
                     let functions =
                         coverage.summary(runmat_test::coverage::CoverageMetric::Function);
-                    let mut summary =
-                        runmat_value::ObjectInstance::new("RunMatCoverageResult".into());
+                    let mut summary = runmat_value::ObjectInstance::new("RunMatCoverageResult");
                     summary.properties.insert(
                         "StatementsCovered".into(),
                         Value::Num(statements.covered as f64),
@@ -271,7 +270,10 @@ fn coverage_plugin_selection(value: &Value) -> Option<MatlabCoverageSelection> {
     let Value::Object(object) = value else {
         return None;
     };
-    if object.class_name != "matlab.unittest.plugins.CodeCoveragePlugin" {
+    if !object
+        .class_name
+        .is(runmat_types::standard::UNIT_TEST_CODE_COVERAGE_PLUGIN)
+    {
         return None;
     }
     let folders = match object.properties.get("Folders") {

@@ -15,12 +15,12 @@ pub fn ensure_testing_classes() {
     REGISTERED.ensure(|| {
         register_test_case();
         register_plain_class(
-            TEST_SUITE_CLASS,
+            TEST_SUITE_CLASS.display_name(),
             None,
             &["Name", "ProcedureName", "TestFile", "Tags"],
         );
         register_plain_class(
-            TEST_RESULT_CLASS,
+            TEST_RESULT_CLASS.display_name(),
             None,
             &[
                 "Name",
@@ -89,9 +89,9 @@ fn register_test_case() {
         .chain(["addTeardown", "applyFixture", "log"])
         .map(|name| {
             (
-                name.to_string(),
+                name.into(),
                 RuntimeMethod {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
@@ -149,7 +149,7 @@ fn register_class_with_methods(
 ) {
     crate::class_registry::register_class(RuntimeClass {
         name: name.into(),
-        parent: parent.map(str::to_owned),
+        parent: parent.map(runmat_types::ClassIdentity::from),
         properties: properties(property_names),
         methods: method_names
             .iter()
@@ -171,7 +171,7 @@ fn register_class_with_methods(
     });
 }
 
-fn properties(names: &[&str]) -> HashMap<String, RuntimeProperty> {
+fn properties(names: &[&str]) -> HashMap<runmat_types::MemberName, RuntimeProperty> {
     names
         .iter()
         .map(|name| {
@@ -199,13 +199,17 @@ mod tests {
     fn registers_testing_inheritance_and_qualification_methods() {
         ensure_testing_classes();
         assert!(crate::class_registry::is_class_or_subclass(
-            FUNCTION_TEST_CASE_CLASS,
-            TEST_CASE_CLASS
+            &FUNCTION_TEST_CASE_CLASS.owned(),
+            &TEST_CASE_CLASS.owned()
         ));
         assert!(crate::class_registry::is_class_or_subclass(
-            TEST_CASE_CLASS,
-            "handle"
+            &TEST_CASE_CLASS.owned(),
+            &runmat_types::standard::HANDLE.owned()
         ));
-        assert!(crate::class_registry::lookup_method(TEST_CASE_CLASS, "verifyEqual").is_some());
+        assert!(crate::class_registry::lookup_method(
+            &TEST_CASE_CLASS.owned(),
+            &runmat_types::MethodName::from("verifyEqual"),
+        )
+        .is_some());
     }
 }

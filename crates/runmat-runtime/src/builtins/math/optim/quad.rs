@@ -776,7 +776,7 @@ mod tests {
 
         let result = block_on(quad_builtin(
             Value::BoundFunctionHandle {
-                name: "square".to_string(),
+                name: "square".into(),
                 function: 7,
             },
             Value::Num(0.0),
@@ -943,7 +943,7 @@ mod tests {
 
         let result = block_on(quad_builtin(
             Value::BoundFunctionHandle {
-                name: "parameterized".to_string(),
+                name: "parameterized".into(),
                 function: 902,
             },
             Value::Num(0.0),
@@ -1025,7 +1025,7 @@ mod tests {
 
         let result = block_on(quad_builtin(
             Value::BoundFunctionHandle {
-                name: "scaled_line".to_string(),
+                name: "scaled_line".into(),
                 function: 42,
             },
             Value::Num(0.0),
@@ -1072,7 +1072,7 @@ mod tests {
 
         let result = block_on(quad_builtin(
             Value::BoundFunctionHandle {
-                name: "sqrt_fn".to_string(),
+                name: "sqrt_fn".into(),
                 function: 9,
             },
             Value::Num(0.0),

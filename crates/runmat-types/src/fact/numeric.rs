@@ -17,18 +17,37 @@ pub enum NumericClass {
 impl NumericClass {
     /// Resolve the canonical source-language name of a built-in numeric class.
     pub fn from_class_name(name: &str) -> Option<Self> {
-        match name.to_ascii_lowercase().as_str() {
-            "double" => Some(Self::Double),
-            "single" => Some(Self::Single),
-            "int8" => Some(Self::Int8),
-            "uint8" => Some(Self::UInt8),
-            "int16" => Some(Self::Int16),
-            "uint16" => Some(Self::UInt16),
-            "int32" => Some(Self::Int32),
-            "uint32" => Some(Self::UInt32),
-            "int64" => Some(Self::Int64),
-            "uint64" => Some(Self::UInt64),
-            _ => None,
+        let normalized = name.to_ascii_lowercase();
+        crate::ClassIdentity::new(normalized)
+            .ok()
+            .and_then(|identity| Self::from_class_identity(&identity))
+    }
+
+    pub fn from_class_identity(identity: &crate::ClassIdentity) -> Option<Self> {
+        use crate::standard;
+
+        if identity.is(standard::DOUBLE) {
+            Some(Self::Double)
+        } else if identity.is(standard::SINGLE) {
+            Some(Self::Single)
+        } else if identity.is(standard::INT8) {
+            Some(Self::Int8)
+        } else if identity.is(standard::UINT8) {
+            Some(Self::UInt8)
+        } else if identity.is(standard::INT16) {
+            Some(Self::Int16)
+        } else if identity.is(standard::UINT16) {
+            Some(Self::UInt16)
+        } else if identity.is(standard::INT32) {
+            Some(Self::Int32)
+        } else if identity.is(standard::UINT32) {
+            Some(Self::UInt32)
+        } else if identity.is(standard::INT64) {
+            Some(Self::Int64)
+        } else if identity.is(standard::UINT64) {
+            Some(Self::UInt64)
+        } else {
+            None
         }
     }
 
@@ -59,4 +78,22 @@ pub enum NumericDomain {
 pub struct NumericFact {
     pub class: NumericClass,
     pub domain: NumericDomain,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NumericClass;
+    use crate::{standard, ClassIdentity};
+
+    #[test]
+    fn numeric_classes_resolve_from_typed_class_identity() {
+        assert_eq!(
+            NumericClass::from_class_identity(&standard::UINT64.owned()),
+            Some(NumericClass::UInt64)
+        );
+        assert_eq!(
+            NumericClass::from_class_identity(&ClassIdentity::from("table")),
+            None
+        );
+    }
 }

@@ -307,7 +307,7 @@ pub(crate) fn value_from_mx_in_context(
         MxArrayData::Sparse(value) => sparse_from_mx(value),
         MxArrayData::Gpu(gpu) => {
             let handle = gpu.lease.publish(value.shape());
-            runmat_accelerate_api::set_handle_class_name(&handle, mx_class_name(gpu.class_id));
+            runmat_accelerate_api::set_handle_class_identity(&handle, mx_class_name(gpu.class_id));
             Ok(Value::GpuTensor(handle))
         }
     }
@@ -316,7 +316,7 @@ pub(crate) fn value_from_mx_in_context(
 fn gpu_class_id(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Result<MxClassId, MxConversionError> {
-    if runmat_accelerate_api::handle_class_name(handle).as_deref() == Some("logical") {
+    if runmat_accelerate_api::handle_is_logical(handle) {
         return Ok(MxClassId::Logical);
     }
     let element = handle.descriptor.element_type.ok_or_else(|| {
@@ -554,14 +554,17 @@ fn struct_to_mx(
 }
 
 fn object_to_mx(
-    class_name: &str,
+    class_name: &runmat_types::ClassIdentity,
     objects: &[&ObjectInstance],
     shape: Vec<usize>,
     mode: MxApiMode,
     interface: MxBoundaryInterface,
     context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
-    if objects.iter().any(|object| object.class_name != class_name) {
+    if objects
+        .iter()
+        .any(|object| &object.class_name != class_name)
+    {
         return Err(MxConversionError::new(
             "C Matrix object arrays must contain one concrete class",
         ));
@@ -587,8 +590,7 @@ fn object_to_mx(
             );
         }
     }
-    MxArray::object(class_name.to_string(), properties, values, shape)
-        .map_err(MxConversionError::new)
+    MxArray::object(class_name.clone(), properties, values, shape).map_err(MxConversionError::new)
 }
 
 fn uniform_struct_fields(values: &[Value]) -> Option<Vec<String>> {
@@ -761,7 +763,7 @@ fn struct_from_mx(
 }
 
 fn object_from_mx(
-    class_name: &str,
+    class_name: &runmat_types::ClassIdentity,
     properties: &[String],
     values: &[Option<Box<MxArray>>],
     shape: &[usize],
@@ -770,7 +772,7 @@ fn object_from_mx(
     let numel = shape.iter().product::<usize>();
     let mut objects = Vec::with_capacity(numel);
     for element in 0..numel {
-        let mut object = ObjectInstance::new(class_name.to_string());
+        let mut object = ObjectInstance::new(class_name.clone());
         for (property_index, property) in properties.iter().enumerate() {
             if let Some(value) = values[property_index * numel + element].as_deref() {
                 object
@@ -783,7 +785,7 @@ fn object_from_mx(
     if numel == 1 {
         return Ok(Value::Object(objects.pop().expect("one object element")));
     }
-    ObjectArray::from_objects(class_name, objects, shape.to_vec())
+    ObjectArray::from_objects(class_name.clone(), objects, shape.to_vec())
         .map(Value::ObjectArray)
         .map_err(MxConversionError::new)
 }

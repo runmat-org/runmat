@@ -1309,11 +1309,11 @@ fn readtable_variable_types_coerce_imported_columns() {
         other => panic!("expected logical array, got {other:?}"),
     }
     match table_member_get(&table, &Value::from("When")).unwrap() {
-        Value::Object(object) => assert!(object.is_class("datetime")),
+        Value::Object(object) => assert!(object.is_class(runmat_types::standard::DATETIME)),
         other => panic!("expected datetime object, got {other:?}"),
     }
     match table_member_get(&table, &Value::from("Elapsed")).unwrap() {
-        Value::Object(object) => assert!(object.is_class("duration")),
+        Value::Object(object) => assert!(object.is_class(runmat_types::standard::DURATION)),
         other => panic!("expected duration object, got {other:?}"),
     }
     match table_member_get(&table, &Value::from("Kind")).unwrap() {
@@ -2693,7 +2693,7 @@ fn timetable_conversion_predicates_and_head_work() {
     ));
     let first_two = block_on(head_builtin(timetable.clone(), vec![Value::Num(2.0)])).unwrap();
     let first_two_object = object(first_two);
-    assert_eq!(first_two_object.class_name, TIMETABLE_CLASS);
+    assert!(first_two_object.class_name.is(TIMETABLE_CLASS));
     assert_eq!(table_height(&first_two_object).unwrap(), 2);
     match timetable_row_times(&first_two_object).unwrap().unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]),
@@ -2710,7 +2710,7 @@ fn timetable_conversion_predicates_and_head_work() {
     );
     let converted = block_on(table2timetable_builtin(table, Vec::new())).unwrap();
     let converted_object = object(converted);
-    assert_eq!(converted_object.class_name, TIMETABLE_CLASS);
+    assert!(converted_object.class_name.is(TIMETABLE_CLASS));
     assert_eq!(
         table_variable_names_from_object(&converted_object).unwrap(),
         vec!["Time".to_string(), "X".to_string()]
@@ -3130,7 +3130,7 @@ fn array_datastore_preserves_every_integer_storage_class_and_options() {
         let Value::Object(datastore) = datastore else {
             panic!("expected ArrayDatastore object");
         };
-        assert_eq!(datastore.class_name, ARRAY_DATASTORE_CLASS);
+        assert!(datastore.class_name.is(ARRAY_DATASTORE_CLASS));
         let Some(Value::Tensor(data)) = datastore.properties.get("Data") else {
             panic!("expected typed datastore data");
         };
@@ -3375,7 +3375,7 @@ fn file_datastore_preserves_constructor_metadata() {
     let Value::Object(datastore) = datastore else {
         panic!("expected fileDatastore object");
     };
-    assert_eq!(datastore.class_name, FILE_DATASTORE_CLASS);
+    assert!(datastore.class_name.is(FILE_DATASTORE_CLASS));
     assert_eq!(datastore.properties.get("Files"), Some(&files));
     assert_eq!(
         datastore.properties.get("ReadFcn"),
@@ -4285,7 +4285,7 @@ fn table_selector_objects_filter_rows_and_variables() {
         )
         .unwrap(),
     );
-    assert_eq!(ranged.class_name, TIMETABLE_CLASS);
+    assert!(ranged.class_name.is(TIMETABLE_CLASS));
     assert_eq!(table_height(&ranged).unwrap(), 1);
 
     let open_left = block_on(timerange_builtin(vec![
@@ -4349,7 +4349,7 @@ fn table_selector_objects_filter_rows_and_variables() {
         )
         .unwrap(),
     );
-    assert_eq!(selected.class_name, TIMETABLE_CLASS);
+    assert!(selected.class_name.is(TIMETABLE_CLASS));
     match table_member_get(&selected, &Value::from("X")).unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
         other => panic!("expected datetime row-time selection, got {other:?}"),

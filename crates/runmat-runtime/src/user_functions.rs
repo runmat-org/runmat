@@ -551,7 +551,10 @@ pub async fn try_call_semantic_descriptor(
         }
     }
     if matches!(identity, CallableIdentity::DynamicName(_))
-        && crate::class_registry::get_class(&name).is_some()
+        && runmat_types::ClassIdentity::new(name.clone())
+            .ok()
+            .and_then(|identity| crate::class_registry::get_class(&identity))
+            .is_some()
     {
         // Constructor calls for class names must flow through runtime constructor dispatch,
         // not generic semantic name resolution.
