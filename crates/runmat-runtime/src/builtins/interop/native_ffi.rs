@@ -121,7 +121,14 @@ const ERROR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Arguments do not satisfy the normalized shared-library contract.",
     message: "Invalid shared-library operation.",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_UNAVAILABLE, ERROR_INVALID];
+const ERROR_HOST_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NATIVE_FFI.HOST_UNAVAILABLE",
+    identifier: Some("RunMat:Foreign:HostUnavailable"),
+    when: "A native shared-library operation is invoked without an active runtime context.",
+    message: "Native shared-library operation has no active runtime context.",
+};
+const ERRORS: [BuiltinErrorDescriptor; 3] =
+    [ERROR_UNAVAILABLE, ERROR_INVALID, ERROR_HOST_UNAVAILABLE];
 
 const LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &LOAD_SIGNATURES,
@@ -179,18 +186,20 @@ async fn invoke_native(
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (operation, arguments, requested_outputs);
-        Err(build_runtime_error(ERROR_UNAVAILABLE.message)
-            .with_builtin("native_ffi")
-            .with_identifier("RunMat:Foreign:UnsupportedOnWasm")
-            .build())
+        Err(native_error(
+            &ERROR_UNAVAILABLE,
+            "native_ffi",
+            ERROR_UNAVAILABLE.message,
+        ))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         let context = crate::context::legacy::active().ok_or_else(|| {
-            build_runtime_error("native shared-library operation has no active runtime context")
-                .with_builtin("native_ffi")
-                .with_identifier("RunMat:Foreign:HostUnavailable")
-                .build()
+            native_error(
+                &ERROR_HOST_UNAVAILABLE,
+                "native_ffi",
+                ERROR_HOST_UNAVAILABLE.message,
+            )
         })?;
         let service = context
             .service_ports()
@@ -226,10 +235,11 @@ async fn invoke_native(
 async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
     if arguments.len() == 1 {
         let library = String::try_from(&arguments[0]).map_err(|error| {
-            build_runtime_error(format!("loadlibrary: expected a library name: {error}"))
-                .with_builtin("loadlibrary")
-                .with_identifier("RunMat:Foreign:InvalidCall")
-                .build()
+            native_error(
+                &ERROR_INVALID,
+                "loadlibrary",
+                format!("loadlibrary: expected a library name: {error}"),
+            )
         })?;
         let header = std::path::PathBuf::from(library).with_extension("h");
         arguments.push(Value::String(header.display().to_string()));
@@ -416,8 +426,17 @@ async fn libstruct_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn invalid_builtin_call(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("native_ffi")
-        .with_identifier("RunMat:Foreign:InvalidCall")
-        .build()
+    native_error(&ERROR_INVALID, "native_ffi", message)
+}
+
+fn native_error(
+    descriptor: &'static BuiltinErrorDescriptor,
+    builtin: &'static str,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(builtin);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }

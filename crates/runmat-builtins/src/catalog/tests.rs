@@ -692,18 +692,12 @@ fn exp_contract_preserves_floating_facts_and_marks_conversion_residency_dynamic(
 }
 
 #[test]
-fn uint16_contract_preserves_shape_domain_storage_and_residency_with_typed_output() {
+fn integer_conversion_contracts_preserve_shape_domain_storage_and_residency_with_typed_output() {
     use runmat_types::{
         AliasFact, CallRequest, NumericClass, NumericDomain, NumericFact, OutputSelection,
         RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
         ViewFact,
     };
-
-    let entry = builtin_catalog_entry_by_name("uint16").expect("uint16 catalog entry");
-    assert_eq!(
-        entry.contract.inference_rule,
-        BuiltinInferenceRule::Math(MathInferenceRule::NumericConversion(NumericClass::UInt16))
-    );
 
     let mut source = ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
@@ -716,29 +710,47 @@ fn uint16_contract_preserves_shape_domain_storage_and_residency_with_typed_outpu
     source.residency = ResidencyFact::Device {
         provider: Some("integer-provider".into()),
     };
-    let converted = infer_catalog_call(
-        entry,
-        &CallRequest {
-            arguments: vec![source.clone()],
-            literals: runmat_types::LiteralContext::default(),
-            outputs: OutputSelection::new(RequestedOutputCount::One),
-        },
-    );
+    for (name, class) in [
+        ("int8", NumericClass::Int8),
+        ("int16", NumericClass::Int16),
+        ("int32", NumericClass::Int32),
+        ("int64", NumericClass::Int64),
+        ("uint8", NumericClass::UInt8),
+        ("uint16", NumericClass::UInt16),
+        ("uint32", NumericClass::UInt32),
+        ("uint64", NumericClass::UInt64),
+    ] {
+        let entry = builtin_catalog_entry_by_name(name).expect("integer conversion catalog entry");
+        assert_eq!(
+            entry.contract.inference_rule,
+            BuiltinInferenceRule::Math(MathInferenceRule::NumericConversion(class))
+        );
+        let converted = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![source.clone()],
+                literals: runmat_types::LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
 
-    assert!(converted.diagnostics.is_empty());
-    assert_eq!(
-        converted.outputs[0].kind,
-        ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::UInt16,
-            domain: NumericDomain::Complex,
-        })
-    );
-    assert_eq!(converted.outputs[0].shape, source.shape);
-    assert_eq!(converted.outputs[0].storage, StorageFact::Sparse);
-    assert_eq!(converted.outputs[0].residency, source.residency);
-    assert_eq!(converted.outputs[0].view, ViewFact::Materialized);
-    assert_eq!(converted.outputs[0].alias, AliasFact::Unique);
+        assert!(converted.diagnostics.is_empty(), "{name}");
+        assert_eq!(
+            converted.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class,
+                domain: NumericDomain::Complex,
+            }),
+            "{name}"
+        );
+        assert_eq!(converted.outputs[0].shape, source.shape, "{name}");
+        assert_eq!(converted.outputs[0].storage, StorageFact::Sparse, "{name}");
+        assert_eq!(converted.outputs[0].residency, source.residency, "{name}");
+        assert_eq!(converted.outputs[0].view, ViewFact::Materialized, "{name}");
+        assert_eq!(converted.outputs[0].alias, AliasFact::Unique, "{name}");
+    }
 
+    let entry = builtin_catalog_entry_by_name("uint16").expect("uint16 catalog entry");
     let invalid = infer_catalog_call(
         entry,
         &CallRequest {

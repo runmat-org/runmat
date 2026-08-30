@@ -1439,6 +1439,56 @@ fn analysis_store_carries_typed_integer_exp_through_the_catalog_boundary() {
 }
 
 #[test]
+fn analysis_store_preserves_every_typed_integer_conversion_identity_and_result_class() {
+    for (name, class) in [
+        ("int8", NumericClass::Int8),
+        ("int16", NumericClass::Int16),
+        ("int32", NumericClass::Int32),
+        ("int64", NumericClass::Int64),
+        ("uint8", NumericClass::UInt8),
+        ("uint16", NumericClass::UInt16),
+        ("uint32", NumericClass::UInt32),
+        ("uint64", NumericClass::UInt64),
+    ] {
+        let source = format!("function y = f(); y = {name}([1, 2, 3]); end");
+        let (body, store) = analyze_single_body(&source);
+        let builtin = body
+            .blocks
+            .iter()
+            .flat_map(|block| block.statements.iter())
+            .find_map(|statement| match &statement.kind {
+                MirStmtKind::Assign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } => match &call.callee {
+                    MirCallee::Static(CallableIdentity::Builtin(id)) => Some(id),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("statically resolved integer conversion");
+        assert_eq!(builtin, &runmat_types::BuiltinId(name.into()), "{name}");
+
+        let output = output_fact(&body, &store);
+        assert_eq!(
+            output.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class,
+                domain: NumericDomain::Real,
+            }),
+            "{name}"
+        );
+        assert_eq!(
+            output.shape,
+            ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+            },
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn analysis_store_attaches_catalog_contract_diagnostics_to_source() {
     let mir = lower_mir("function y = f(); y = zeros(2, \"bogus\"); end");
     let store = analyze_assembly(&mir);

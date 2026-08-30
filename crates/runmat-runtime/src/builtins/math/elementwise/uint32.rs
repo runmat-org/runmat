@@ -1,13 +1,9 @@
 //! MATLAB-compatible `uint32` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, UINT32_ERROR_INTERNAL as ERROR_INTERNAL,
+    UINT32_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    UINT32_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -17,83 +13,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::math::elementwise::integer_cast::{cast_value, CastError, IntegerTarget};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "uint32";
-
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "uint32-converted output value.",
-}];
-
-const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar/array value to convert.",
-}];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = uint32(X)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT,
-}];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UINT32.INVALID_ARGUMENT",
-    identifier: Some("RunMat:uint32:InvalidArgument"),
-    when: "Optional arguments are malformed or unsupported.",
-    message: "uint32: invalid argument",
-};
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UINT32.INVALID_INPUT",
-    identifier: Some("RunMat:uint32:InvalidInput"),
-    when: "Input value cannot be converted to uint32.",
-    message: "uint32: invalid input",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UINT32.INTERNAL",
-    identifier: Some("RunMat:uint32:Internal"),
-    when: "Internal conversion, gather, or provider upload failed.",
-    message: "uint32: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 3] =
-    [ERROR_INVALID_ARGUMENT, ERROR_INVALID_INPUT, ERROR_INTERNAL];
-
-pub const UINT32_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const UINT32_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Every native integer class converts directly to authoritative uint32 storage without a floating intermediate.",
-}];
-
-pub const UINT32_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = uint32(integer_X)",
-        inputs: &UINT32_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native uint32 device storage, owner, and residency.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::uint32")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -124,13 +46,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "uint32",
-    category = "math/elementwise",
-    summary = "Convert scalars, arrays, and gpuArray values to uint32 using MATLAB saturating rounding.",
-    keywords = "uint32,cast,integer,conversion,gpuArray",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::uint32::UINT32_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::elementwise::uint32::UINT32_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::uint32"
 )]
 async fn uint32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

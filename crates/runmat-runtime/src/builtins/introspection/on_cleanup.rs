@@ -72,10 +72,29 @@ const ON_CLEANUP_ERROR_GC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "The cleanup object target cannot be allocated, rooted, or mutated.",
     message: "onCleanup: internal object storage failed",
 };
+const CANCEL_ERROR_RUNTIME_CONTEXT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CANCEL.RUNTIME_CONTEXT",
+    identifier: Some("RunMat:parallel:RuntimeContextUnavailable"),
+    when: "A task, future, or job is cancelled without an active runtime context.",
+    message: "cancel: no active runtime context",
+};
+const CANCEL_ERROR_EXECUTION_SERVICE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CANCEL.EXECUTION_SERVICE",
+    identifier: Some("RunMat:cancel:ExecutionService"),
+    when: "The execution service rejects cancellation of a task, future, or job.",
+    message: "cancel: execution service failed",
+};
 const ON_CLEANUP_ERRORS: [BuiltinErrorDescriptor; 3] = [
     ON_CLEANUP_ERROR_INVALID_CALLBACK,
     ON_CLEANUP_ERROR_INVALID_OBJECT,
     ON_CLEANUP_ERROR_GC,
+];
+const CANCEL_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    ON_CLEANUP_ERROR_INVALID_CALLBACK,
+    ON_CLEANUP_ERROR_INVALID_OBJECT,
+    ON_CLEANUP_ERROR_GC,
+    CANCEL_ERROR_RUNTIME_CONTEXT,
+    CANCEL_ERROR_EXECUTION_SERVICE,
 ];
 pub const ON_CLEANUP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ON_CLEANUP_SIGNATURES,
@@ -133,7 +152,7 @@ pub const ON_CLEANUP_CANCEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &CANCEL_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ON_CLEANUP_ERRORS,
+    errors: &CANCEL_ERRORS,
 };
 
 #[runtime_builtin(
@@ -215,10 +234,10 @@ pub(crate) async fn on_cleanup_delete_builtin(value: Value) -> BuiltinResult<Val
 async fn on_cleanup_cancel_builtin(value: Value) -> BuiltinResult<Value> {
     if let Some(tasks) = crate::parallel::future::output_tasks(&value) {
         let context = crate::context::legacy::active().ok_or_else(|| {
-            crate::build_runtime_error("cancel: no active runtime context")
-                .with_builtin("cancel")
-                .with_identifier("RunMat:parallel:RuntimeContextUnavailable")
-                .build()
+            cancel_error(
+                &CANCEL_ERROR_RUNTIME_CONTEXT,
+                CANCEL_ERROR_RUNTIME_CONTEXT.message,
+            )
         })?;
         for task in tasks {
             context
@@ -228,10 +247,7 @@ async fn on_cleanup_cancel_builtin(value: Value) -> BuiltinResult<Value> {
                     runmat_execution::CancellationReason::User,
                 )
                 .map_err(|error| {
-                    crate::build_runtime_error(format!("cancel: {error}"))
-                        .with_builtin("cancel")
-                        .with_identifier("RunMat:cancel:ExecutionService")
-                        .build()
+                    cancel_error(&CANCEL_ERROR_EXECUTION_SERVICE, format!("cancel: {error}"))
                 })?;
         }
         return Ok(Value::Num(0.0));
@@ -240,19 +256,16 @@ async fn on_cleanup_cancel_builtin(value: Value) -> BuiltinResult<Value> {
     match execution_value {
         Value::Future(_) | Value::Task(_) | Value::Job(_) => {
             let context = crate::context::legacy::active().ok_or_else(|| {
-                crate::build_runtime_error("cancel: no active runtime context")
-                    .with_builtin("cancel")
-                    .with_identifier("RunMat:parallel:RuntimeContextUnavailable")
-                    .build()
+                cancel_error(
+                    &CANCEL_ERROR_RUNTIME_CONTEXT,
+                    CANCEL_ERROR_RUNTIME_CONTEXT.message,
+                )
             })?;
             context
                 .execution()
                 .cancel(execution_value, runmat_execution::CancellationReason::User)
                 .map_err(|error| {
-                    crate::build_runtime_error(format!("cancel: {error}"))
-                        .with_builtin("cancel")
-                        .with_identifier("RunMat:cancel:ExecutionService")
-                        .build()
+                    cancel_error(&CANCEL_ERROR_EXECUTION_SERVICE, format!("cancel: {error}"))
                 })?;
         }
         _ => cancel_on_cleanup_value(&value)?,
@@ -420,6 +433,17 @@ fn on_cleanup_error(
     message: impl Into<String>,
 ) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin("onCleanup");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn cancel_error(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("cancel");
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
