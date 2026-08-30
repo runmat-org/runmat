@@ -3,10 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[test]
-fn public_integer_cast_descriptors_are_unique() {
+fn public_numeric_conversion_descriptors_are_unique() {
     let _ = runmat_runtime::object_property_getter_name("__descriptor_registry_probe");
     for name in [
-        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+        "double", "int8", "int16", "int32", "int64", "single", "uint8", "uint16", "uint32",
+        "uint64",
     ] {
         let catalog_count = runmat_builtins::builtin_catalog_entries()
             .iter()

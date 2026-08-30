@@ -3,12 +3,8 @@
 use log::trace;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, DOUBLE_ERROR_GPU_UNSUPPORTED, DOUBLE_ERROR_INTERNAL,
+    DOUBLE_ERROR_INVALID_ARGUMENT, DOUBLE_ERROR_INVALID_INPUT, DOUBLE_LIKE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -26,7 +22,6 @@ use crate::builtins::common::{
     },
     tensor,
 };
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::double")]
@@ -66,131 +61,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "double";
 
-const DOUBLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Double-precision output value.",
-}];
-
-const DOUBLE_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar/array value to convert.",
-}];
-
-const DOUBLE_INPUTS_X_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar/array value to convert.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Literal string \"like\".",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output class/device prototype.",
-    },
-];
-
-const DOUBLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = double(X)",
-        inputs: &DOUBLE_INPUTS_X,
-        outputs: &DOUBLE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = double(X, \"like\", prototype)",
-        inputs: &DOUBLE_INPUTS_X_LIKE,
-        outputs: &DOUBLE_OUTPUT,
-    },
-];
-
-const DOUBLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOUBLE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:double:InvalidArgument"),
-    when: "Optional arguments are malformed or unsupported.",
-    message: "double: invalid argument",
-};
-
-const DOUBLE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOUBLE.INVALID_INPUT",
-    identifier: Some("RunMat:double:InvalidInput"),
-    when: "Input value or prototype cannot be converted to double.",
-    message: "double: invalid input",
-};
-
-const DOUBLE_ERROR_GPU_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOUBLE.GPU_UNSUPPORTED",
-    identifier: Some("RunMat:double:GpuUnsupported"),
-    when: "GPU output via \"like\" is requested but no compatible float64 provider is active.",
-    message: "double: gpu output not supported",
-};
-
-const DOUBLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOUBLE.INTERNAL",
-    identifier: Some("RunMat:double:Internal"),
-    when: "Internal conversion, gather, or provider upload failed.",
-    message: "double: internal error",
-};
-
-const DOUBLE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    DOUBLE_ERROR_INVALID_ARGUMENT,
-    DOUBLE_ERROR_INVALID_INPUT,
-    DOUBLE_ERROR_GPU_UNSUPPORTED,
-    DOUBLE_ERROR_INTERNAL,
-];
-
-const DOUBLE_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "double-like-prototype",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "double(X, 'like', prototype) is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DoubleLikePrototypeExtension"),
-};
-
-const DOUBLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [DOUBLE_LIKE_EXTENSION];
-
-const DOUBLE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents conversion from every built-in integer class; conversion to IEEE binary64 can round wide int64/uint64 values.",
-    }];
-
-pub const DOUBLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = double(integer_X)",
-        inputs: &DOUBLE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "All eight integer classes convert elementwise to double. Host conversion reads authoritative integer storage; resident conversion uses the owning provider when it can produce true F64 and otherwise gathers.",
-    }];
-
-pub const DOUBLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DOUBLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DOUBLE_ERRORS,
-};
-
 fn double_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl std::fmt::Display,
@@ -218,14 +88,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
 
 #[runtime_builtin(
     name = "double",
-    category = "math/elementwise",
-    summary = "Convert values to double precision.",
-    keywords = "double,float64,cast,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::double::DOUBLE_DESCRIPTOR),
-    extensions(DOUBLE_EXTENSIONS),
-    integer_capabilities(DOUBLE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::double"
 )]
 async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -706,7 +569,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::DOUBLE_DESCRIPTOR;
     use runmat_value::{
         IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, SparseTensor, SymbolicArray,
         SymbolicExpr,
@@ -725,33 +588,6 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"Y = double(X)"));
         assert!(labels.contains(&"Y = double(X, \"like\", prototype)"));
-    }
-
-    #[test]
-    fn double_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn double_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

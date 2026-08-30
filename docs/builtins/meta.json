@@ -38614,7 +38614,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar/array value to convert."
+              "description": "Input scalar or array value to convert."
             }
           ],
           "outputs": [
@@ -38635,7 +38635,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar/array value to convert."
+              "description": "Input scalar or array value to convert."
             },
             {
               "name": "like",
@@ -38649,7 +38649,7 @@
               "ty": "LikePrototype",
               "arity": "Required",
               "default": null,
-              "description": "Output class/device prototype."
+              "description": "Output residency prototype; the conversion class remains fixed."
             }
           ],
           "outputs": [
@@ -38679,7 +38679,7 @@
         {
           "code": "RM.DOUBLE.GPU_UNSUPPORTED",
           "identifier": "RunMat:double:GpuUnsupported",
-          "when": "GPU output via \"like\" is requested but no compatible float64 provider is active.",
+          "when": "GPU output via \"like\" is requested but no compatible binary64 storage provider is active.",
           "message": "double: gpu output not supported"
         },
         {
@@ -38715,7 +38715,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "The compatibility target documents conversion from every built-in integer class; conversion to IEEE binary64 can round wide int64/uint64 values."
+              "notes": "Every fixed-width integer class converts directly to IEEE binary64; wide int64 and uint64 values may round."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -38723,7 +38723,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "All eight integer classes convert elementwise to double. Host conversion reads authoritative integer storage; resident conversion uses the owning provider when it can produce true F64 and otherwise gathers."
+          "notes": "Host conversion reads authoritative integer storage. Resident conversion uses the owning provider only when it can produce true F64 and otherwise gathers."
         }
       ]
     },
@@ -141263,7 +141263,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar/array value to convert."
+              "description": "Input scalar or array value to convert."
             }
           ],
           "outputs": [
@@ -141284,7 +141284,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar/array value to convert."
+              "description": "Input scalar or array value to convert."
             },
             {
               "name": "like",
@@ -141298,7 +141298,7 @@
               "ty": "LikePrototype",
               "arity": "Required",
               "default": null,
-              "description": "Output class/device prototype."
+              "description": "Output residency prototype; the conversion class remains fixed."
             }
           ],
           "outputs": [
@@ -141328,7 +141328,7 @@
         {
           "code": "RM.SINGLE.GPU_UNSUPPORTED",
           "identifier": "RunMat:single:GpuUnsupported",
-          "when": "GPU output via \"like\" is requested but no compatible provider is active.",
+          "when": "GPU output via \"like\" is requested but no compatible binary32 storage provider is active.",
           "message": "single: gpu output not supported"
         },
         {
@@ -141364,7 +141364,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "All eight integer classes convert directly from native integer storage to IEEE binary32 without an intermediate binary64 materialization."
+              "notes": "Every fixed-width integer class converts directly from native integer storage to IEEE binary32 without an intermediate binary64 materialization."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -141372,7 +141372,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "The output is native single storage with MATLAB conversion rounding; complex integer storage preserves complexity while converting each component directly."
+          "notes": "The output uses native single storage with conversion rounding; supported complex integer storage converts each component directly."
         }
       ]
     },
