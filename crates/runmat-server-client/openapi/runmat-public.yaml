@@ -8,6 +8,431 @@ info:
 servers:
 - url: https://api.runmat.com
 paths:
+  /v1/academic/activate:
+    post:
+      tags:
+      - academic::applications
+      operationId: activate_academic_offer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateAcademicRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivateAcademicResponse'
+  /v1/academic/applications:
+    post:
+      tags:
+      - academic::applications
+      operationId: create_academic_application
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApplicationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+  /v1/academic/applications/{applicationId}:
+    get:
+      tags:
+      - academic::applications
+      operationId: get_academic_application
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+    patch:
+      tags:
+      - academic::applications
+      operationId: update_academic_application
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateApplicationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+  /v1/academic/applications/{applicationId}/proof:
+    get:
+      tags:
+      - academic::proof
+      operationId: list_academic_proofs
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProofResponse'
+    post:
+      tags:
+      - academic::proof
+      operationId: upload_academic_proof
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofResponse'
+  /v1/academic/applications/{applicationId}/proof/{proofId}:
+    delete:
+      tags:
+      - academic::proof
+      operationId: delete_academic_proof
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: proofId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: ''
+  /v1/academic/applications/{applicationId}/submit:
+    post:
+      tags:
+      - academic::applications
+      operationId: submit_academic_application
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+  /v1/academic/applications/{applicationId}/withdraw:
+    post:
+      tags:
+      - academic::applications
+      operationId: withdraw_academic_application
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+  /v1/academic/course-allocations:
+    get:
+      tags:
+      - academic::applications
+      operationId: list_academic_course_allocations
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CourseAllocationResponse'
+  /v1/academic/course-allocations/{allocationId}/staff:
+    get:
+      tags:
+      - academic::applications
+      operationId: list_academic_staged_staff
+      parameters:
+      - name: allocationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StagedStaffResponse'
+    put:
+      tags:
+      - academic::applications
+      operationId: replace_academic_staged_staff
+      parameters:
+      - name: allocationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceStagedStaffRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StagedStaffResponse'
+  /v1/academic/courses:
+    get:
+      tags:
+      - academic::courses
+      operationId: list_academic_courses
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CourseResponse'
+    post:
+      tags:
+      - academic::courses
+      operationId: create_academic_course
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCourseRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseResponse'
+  /v1/academic/courses/{courseId}:
+    get:
+      tags:
+      - academic::courses
+      operationId: get_academic_course
+      parameters:
+      - name: courseId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseResponse'
+  /v1/academic/courses/{courseId}/archive:
+    post:
+      tags:
+      - academic::courses
+      operationId: archive_academic_course
+      parameters:
+      - name: courseId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseResponse'
+  /v1/academic/courses/{courseId}/students:
+    get:
+      tags:
+      - academic::courses
+      operationId: list_academic_course_students
+      parameters:
+      - name: courseId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseStudentRosterResponse'
+    post:
+      tags:
+      - academic::courses
+      operationId: invite_academic_course_students
+      parameters:
+      - name: courseId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteCourseStudentsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseStudentRosterResponse'
+  /v1/academic/me:
+    get:
+      tags:
+      - academic::applications
+      operationId: get_academic_me
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcademicMeResponse'
+  /v1/admin/academic/applications/{applicationId}:
+    get:
+      tags:
+      - admin::academic::handlers
+      operationId: get_admin_academic_application
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcademicReviewResponse'
+  /v1/admin/academic/applications/{applicationId}/decision:
+    post:
+      tags:
+      - admin::academic::handlers
+      operationId: decide_admin_academic_application
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcademicDecisionRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcademicDecisionResponse'
+  /v1/admin/academic/applications/{applicationId}/proof/{proofId}/download:
+    get:
+      tags:
+      - admin::academic::handlers
+      operationId: get_admin_academic_proof_download
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: proofId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofDownloadResponse'
   /v1/admin/analytics/project:
     post:
       tags:
@@ -137,6 +562,78 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
         '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/auth/feedback/onboarding-goal:
+    post:
+      tags:
+      - auth::feedback
+      operationId: submit_goal_followup
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoalFollowupRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSubmissionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/auth/feedback/trial-extension:
+    post:
+      tags:
+      - auth::feedback
+      operationId: request_trial_extension
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrialExtensionRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSubmissionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
           description: ''
           content:
             application/json:
@@ -1199,6 +1696,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security: []
+  /v1/integrations/slack/academic/actions:
+    post:
+      tags:
+      - integrations::slack_academic
+      operationId: academic_actions
+      requestBody:
+        description: ''
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+        required: true
+      responses:
+        '200':
+          description: ''
   /v1/lifecycle/intake:
     post:
       tags:
@@ -1281,6 +1794,120 @@ paths:
               schema:
                 $ref: '#/components/schemas/server_org.Org'
         '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/resolve/{orgSlug}/projects/{projectSlug}:
+    get:
+      tags:
+      - orgs::projects
+      operationId: resolve_org_project
+      parameters:
+      - name: orgSlug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: projectSlug
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server_org.Project'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/resolve/{slug}:
+    get:
+      tags:
+      - orgs::orgs_crud
+      operationId: resolve_org_profile
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgProfileResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/resolve/{slug}/packages:
+    get:
+      tags:
+      - orgs::packages
+      operationId: list_packages_by_org_slug
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgPackageListResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/resolve/{slug}/projects:
+    get:
+      tags:
+      - orgs::projects
+      operationId: list_projects_by_org_slug
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+        '404':
           description: ''
           content:
             application/json:
@@ -3148,6 +3775,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/trial:
+    get:
+      tags:
+      - orgs::trials
+      operationId: get_trial_state
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrialStateResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - orgs::trials
+      operationId: start_trial
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrialStateResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/orgs/{orgId}/upgrade-request:
     post:
       tags:
@@ -4767,6 +5441,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/export-manifest:
+    get:
+      tags:
+      - filesystem::export
+      operationId: export_manifest
+      parameters:
+      - name: path
+        in: query
+        description: Optional directory to export. Omit it to export the whole project.
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsExportManifestResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/fs/file:
     delete:
       tags:
@@ -6035,6 +6740,482 @@ paths:
       - {}
 components:
   schemas:
+    AcademicApplicationStatusResponse:
+      type: string
+      enum:
+      - draft
+      - submitted
+      - needs_information
+      - approved
+      - denied
+      - withdrawn
+    AcademicCourseStatusResponse:
+      type: string
+      enum:
+      - scheduled
+      - active
+      - ended
+      - archived
+    AcademicDecisionAction:
+      type: string
+      enum:
+      - approve
+      - adjust
+      - request_information
+      - deny
+    AcademicDecisionRequest:
+      type: object
+      required:
+      - action
+      - expectedVersion
+      - reasonCode
+      - idempotencyKey
+      properties:
+        action:
+          $ref: '#/components/schemas/AcademicDecisionAction'
+        applicantMessage:
+          type: string
+          nullable: true
+        durationDays:
+          type: integer
+          format: int32
+          nullable: true
+        expectedVersion:
+          type: integer
+          format: int32
+        idempotencyKey:
+          type: string
+        privateNote:
+          type: string
+          nullable: true
+        reasonCode:
+          type: string
+        seatLimit:
+          type: integer
+          format: int32
+          nullable: true
+        storageLimitGb:
+          type: number
+          format: double
+          nullable: true
+        teachingLimits:
+          allOf:
+          - $ref: '#/components/schemas/TeachingLimitsBody'
+          nullable: true
+    AcademicDecisionResponse:
+      type: object
+      required:
+      - application
+      properties:
+        application:
+          type: object
+          required:
+          - id
+          - targetOrgId
+          - role
+          - status
+          - academicEmail
+          - institution
+          - countryCode
+          - requestedDurationDays
+          - plannedCourses
+          - version
+          - createdAt
+          - updatedAt
+          properties:
+            academicEmail:
+              type: string
+            applicantMessage:
+              type: string
+              nullable: true
+            applicantNotes:
+              type: string
+              nullable: true
+            countryCode:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+            decidedAt:
+              type: string
+              format: date-time
+              nullable: true
+            decisionReasonCode:
+              type: string
+              nullable: true
+            department:
+              type: string
+              nullable: true
+            graduationYear:
+              type: integer
+              format: int32
+              nullable: true
+            id:
+              type: string
+            institution:
+              type: string
+            intendedUse:
+              type: string
+              nullable: true
+            plannedCourses:
+              type: array
+              items:
+                $ref: '#/components/schemas/PlannedCourseBody'
+            program:
+              type: string
+              nullable: true
+            requestedDurationDays:
+              type: integer
+              format: int32
+            role:
+              $ref: '#/components/schemas/AcademicRoleResponse'
+            status:
+              $ref: '#/components/schemas/AcademicApplicationStatusResponse'
+            submittedAt:
+              type: string
+              format: date-time
+              nullable: true
+            targetOrgId:
+              type: string
+            title:
+              type: string
+              nullable: true
+            updatedAt:
+              type: string
+              format: date-time
+            version:
+              type: integer
+              format: int32
+        grant:
+          allOf:
+          - $ref: '#/components/schemas/GrantResponse'
+          nullable: true
+        teachingAuthorization:
+          allOf:
+          - type: object
+            required:
+            - id
+            - startsAt
+            - endsAt
+            - maxActiveCourses
+            - maxEnrollmentPerCourse
+            - maxAggregateEnrollment
+            properties:
+              endsAt:
+                type: string
+                format: date-time
+              id:
+                type: string
+              maxActiveCourses:
+                type: integer
+                format: int32
+              maxAggregateEnrollment:
+                type: integer
+                format: int32
+              maxEnrollmentPerCourse:
+                type: integer
+                format: int32
+              setupExpiresAt:
+                type: string
+                format: date-time
+                nullable: true
+              startsAt:
+                type: string
+                format: date-time
+          nullable: true
+    AcademicGrantStatusResponse:
+      type: string
+      enum:
+      - pending_activation
+      - scheduled
+      - active
+      - expired
+      - revoked
+      - superseded
+    AcademicGrantTypeResponse:
+      type: string
+      enum:
+      - student
+      - instructor
+      - course
+    AcademicMeResponse:
+      type: object
+      required:
+      - applications
+      - activeGrants
+      - canCreateCourse
+      properties:
+        activeGrants:
+          type: array
+          items:
+            $ref: '#/components/schemas/GrantSummaryResponse'
+        applications:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApplicationResponse'
+        canCreateCourse:
+          type: boolean
+        teachingAuthorization:
+          allOf:
+          - $ref: '#/components/schemas/TeachingAuthorizationResponse'
+          nullable: true
+    AcademicProofStatusResponse:
+      type: string
+      enum:
+      - uploaded
+      - quarantined
+      - accepted
+      - deleted
+    AcademicReviewResponse:
+      type: object
+      required:
+      - application
+      - proofs
+      properties:
+        application:
+          type: object
+          required:
+          - id
+          - targetOrgId
+          - role
+          - status
+          - academicEmail
+          - institution
+          - countryCode
+          - requestedDurationDays
+          - plannedCourses
+          - version
+          - createdAt
+          - updatedAt
+          properties:
+            academicEmail:
+              type: string
+            applicantMessage:
+              type: string
+              nullable: true
+            applicantNotes:
+              type: string
+              nullable: true
+            countryCode:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+            decidedAt:
+              type: string
+              format: date-time
+              nullable: true
+            decisionReasonCode:
+              type: string
+              nullable: true
+            department:
+              type: string
+              nullable: true
+            graduationYear:
+              type: integer
+              format: int32
+              nullable: true
+            id:
+              type: string
+            institution:
+              type: string
+            intendedUse:
+              type: string
+              nullable: true
+            plannedCourses:
+              type: array
+              items:
+                $ref: '#/components/schemas/PlannedCourseBody'
+            program:
+              type: string
+              nullable: true
+            requestedDurationDays:
+              type: integer
+              format: int32
+            role:
+              $ref: '#/components/schemas/AcademicRoleResponse'
+            status:
+              $ref: '#/components/schemas/AcademicApplicationStatusResponse'
+            submittedAt:
+              type: string
+              format: date-time
+              nullable: true
+            targetOrgId:
+              type: string
+            title:
+              type: string
+              nullable: true
+            updatedAt:
+              type: string
+              format: date-time
+            version:
+              type: integer
+              format: int32
+        proofs:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - filename
+            - mimeType
+            - sizeBytes
+            - status
+            properties:
+              filename:
+                type: string
+              id:
+                type: string
+              mimeType:
+                type: string
+              sizeBytes:
+                type: integer
+                format: int64
+              status:
+                $ref: '#/components/schemas/AcademicProofStatusResponse'
+    AcademicRoleResponse:
+      type: string
+      enum:
+      - student
+      - instructor
+    AcademicStaffRoleRequest:
+      type: string
+      enum:
+      - teaching_assistant
+      - co_instructor
+      - other_staff
+    AcceleratorAllocationDomainIdBody:
+      type: string
+    AcceleratorClassBody:
+      type: string
+    AcceleratorDeviceBody:
+      type: object
+      required:
+      - id
+      - allocationDomain
+      - class
+      - provider
+      - maxAllocationBytes
+      - features
+      - inventoryEpoch
+      properties:
+        allocationDomain:
+          $ref: '#/components/schemas/AcceleratorAllocationDomainIdBody'
+        class:
+          $ref: '#/components/schemas/AcceleratorClassBody'
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorFeatureBody'
+        id:
+          $ref: '#/components/schemas/AcceleratorDeviceIdBody'
+        inventoryEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        maxAllocationBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        provider:
+          $ref: '#/components/schemas/AcceleratorProviderBody'
+      additionalProperties: false
+    AcceleratorDeviceIdBody:
+      type: string
+    AcceleratorFeatureBody:
+      oneOf:
+      - type: string
+        enum:
+        - compute
+      - type: string
+        enum:
+        - unified_memory
+      - type: string
+        enum:
+        - peer_to_peer
+      - type: string
+        enum:
+        - confidential_compute
+      - type: object
+        required:
+        - custom
+        properties:
+          custom:
+            type: string
+    AcceleratorProviderBody:
+      type: object
+      required:
+      - id
+      - version
+      - abiFingerprint
+      properties:
+        abiFingerprint:
+          $ref: '#/components/schemas/DigestBody'
+        id:
+          $ref: '#/components/schemas/AcceleratorProviderIdBody'
+        version:
+          $ref: '#/components/schemas/AcceleratorProviderVersionBody'
+      additionalProperties: false
+    AcceleratorProviderIdBody:
+      type: string
+    AcceleratorProviderVersionBody:
+      type: string
+    AcceleratorRequestBody:
+      type: object
+      required:
+      - class
+      - count
+      - minimumAllocationBytes
+      - requiredFeatures
+      properties:
+        class:
+          $ref: '#/components/schemas/AcceleratorClassBody'
+        count:
+          type: integer
+          format: int32
+          minimum: 0
+        minimumAllocationBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        provider:
+          allOf:
+          - $ref: '#/components/schemas/AcceleratorProviderBody'
+          nullable: true
+        requiredFeatures:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorFeatureBody'
+      additionalProperties: false
+    ActivateAcademicRequest:
+      type: object
+      required:
+      - token
+      properties:
+        token:
+          type: string
+    ActivateAcademicResponse:
+      type: object
+      required:
+      - orgId
+      - role
+      - endsAt
+      - alreadyActivated
+      - allocations
+      properties:
+        allocations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CourseAllocationResponse'
+        alreadyActivated:
+          type: boolean
+        endsAt:
+          type: string
+          format: date-time
+        orgId:
+          type: string
+        role:
+          $ref: '#/components/schemas/AcademicGrantTypeResponse'
     AdvisoryRequest:
       type: object
       required:
@@ -6097,11 +7278,16 @@ components:
       - projectId
       - queue
       - resources
+      - acceleratorDevices
       - role
       - state
       - fencingToken
       - expiresAt
       properties:
+        acceleratorDevices:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorDeviceBody'
         expiresAt:
           type: string
           format: date-time
@@ -6179,6 +7365,125 @@ components:
         scanned:
           type: integer
           minimum: 0
+    ApplicationFields:
+      type: object
+      properties:
+        academicEmail:
+          type: string
+          nullable: true
+        applicantNotes:
+          type: string
+          nullable: true
+        countryCode:
+          type: string
+          nullable: true
+        department:
+          type: string
+          nullable: true
+        graduationYear:
+          type: integer
+          format: int32
+          nullable: true
+        institution:
+          type: string
+          nullable: true
+        intendedUse:
+          type: string
+          nullable: true
+        plannedCourses:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlannedCourseBody'
+          nullable: true
+        program:
+          type: string
+          nullable: true
+        requestedDurationDays:
+          type: integer
+          format: int32
+          nullable: true
+        title:
+          type: string
+          nullable: true
+    ApplicationResponse:
+      type: object
+      required:
+      - id
+      - targetOrgId
+      - role
+      - status
+      - academicEmail
+      - institution
+      - countryCode
+      - requestedDurationDays
+      - plannedCourses
+      - version
+      - createdAt
+      - updatedAt
+      properties:
+        academicEmail:
+          type: string
+        applicantMessage:
+          type: string
+          nullable: true
+        applicantNotes:
+          type: string
+          nullable: true
+        countryCode:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        decisionReasonCode:
+          type: string
+          nullable: true
+        department:
+          type: string
+          nullable: true
+        graduationYear:
+          type: integer
+          format: int32
+          nullable: true
+        id:
+          type: string
+        institution:
+          type: string
+        intendedUse:
+          type: string
+          nullable: true
+        plannedCourses:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlannedCourseBody'
+        program:
+          type: string
+          nullable: true
+        requestedDurationDays:
+          type: integer
+          format: int32
+        role:
+          $ref: '#/components/schemas/AcademicRoleResponse'
+        status:
+          $ref: '#/components/schemas/AcademicApplicationStatusResponse'
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        targetOrgId:
+          type: string
+        title:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int32
     ApprovePublicationRequest:
       type: object
       properties:
@@ -6528,7 +7833,16 @@ components:
       - orgs
       - orgMemberships
       - preferences
+      - canCreateStandardOrg
+      - canCreateCourse
+      - feedback
       properties:
+        canCreateCourse:
+          type: boolean
+        canCreateStandardOrg:
+          type: boolean
+        feedback:
+          $ref: '#/components/schemas/UserFeedbackStateResponse'
         orgMemberships:
           type: array
           items:
@@ -6739,6 +8053,129 @@ components:
         token:
           type: string
       additionalProperties: false
+    CourseAllocationResponse:
+      type: object
+      required:
+      - id
+      - name
+      - code
+      - term
+      - startsOn
+      - endsOn
+      - studentSeatLimit
+      - staffSeatLimit
+      - status
+      - setupExpiresAt
+      properties:
+        code:
+          type: string
+        courseId:
+          type: string
+          nullable: true
+        endsOn:
+          type: string
+          format: date
+        id:
+          type: string
+        name:
+          type: string
+        setupExpiresAt:
+          type: string
+          format: date-time
+        staffSeatLimit:
+          type: integer
+          format: int32
+        startsOn:
+          type: string
+          format: date
+        status:
+          type: string
+        studentSeatLimit:
+          type: integer
+          format: int32
+        term:
+          type: string
+    CourseResponse:
+      type: object
+      required:
+      - id
+      - orgId
+      - authorizationId
+      - name
+      - code
+      - term
+      - startsAt
+      - endsAt
+      - accessStartsAt
+      - accessEndsAt
+      - expectedEnrollment
+      - status
+      properties:
+        accessEndsAt:
+          type: string
+          format: date-time
+        accessStartsAt:
+          type: string
+          format: date-time
+        authorizationId:
+          type: string
+        code:
+          type: string
+        endsAt:
+          type: string
+          format: date-time
+        expectedEnrollment:
+          type: integer
+          format: int32
+        id:
+          type: string
+        name:
+          type: string
+        orgId:
+          type: string
+        orgSlug:
+          type: string
+          nullable: true
+        startsAt:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/AcademicCourseStatusResponse'
+        term:
+          type: string
+    CourseStudentInvitationResponse:
+      type: object
+      required:
+      - email
+      - status
+      properties:
+        email:
+          type: string
+        status:
+          type: string
+    CourseStudentRosterResponse:
+      type: object
+      required:
+      - studentSeatLimit
+      - invitations
+      properties:
+        invitations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CourseStudentInvitationResponse'
+        studentSeatLimit:
+          type: integer
+          format: int32
+    CreateApplicationRequest:
+      type: object
+      required:
+      - role
+      - academicEmail
+      properties:
+        academicEmail:
+          type: string
+        role:
+          $ref: '#/components/schemas/AcademicRoleResponse'
     CreateArtifactGrantRequest:
       type: object
       required:
@@ -6779,6 +8216,51 @@ components:
           items:
             type: string
       additionalProperties: false
+    CreateCourseRequest:
+      type: object
+      required:
+      - allocationId
+      - authorizationId
+      - name
+      - code
+      - term
+      - startsAt
+      - endsAt
+      - accessStartsAt
+      - accessEndsAt
+      - expectedEnrollment
+      - idempotencyKey
+      properties:
+        accessEndsAt:
+          type: string
+          format: date-time
+        accessStartsAt:
+          type: string
+          format: date-time
+        allocationId:
+          type: string
+        authorizationId:
+          type: string
+        code:
+          type: string
+        copiedFromCourseId:
+          type: string
+          nullable: true
+        endsAt:
+          type: string
+          format: date-time
+        expectedEnrollment:
+          type: integer
+          format: int32
+        idempotencyKey:
+          type: string
+        name:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        term:
+          type: string
     CreateEnrollmentRequest:
       type: object
       required:
@@ -6950,6 +8432,8 @@ components:
           minimum: 0
         updated_at:
           type: string
+    DigestBody:
+      type: string
     DirectQuicEndpointBody:
       type: object
       required:
@@ -7180,8 +8664,14 @@ components:
       - fencingToken
       - state
       - resources
+      - acceleratorDevices
+      - host
       - runKeyEnvelopeAuthorized
       properties:
+        acceleratorDevices:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorDeviceBody'
         allocationLeaseId:
           type: string
         endpointIdentity:
@@ -7192,6 +8682,8 @@ components:
           type: integer
           format: int64
           minimum: 0
+        host:
+          $ref: '#/components/schemas/ExecutionHostInventoryBody'
         resources:
           $ref: '#/components/schemas/ResourceRequestBody'
         runKeyEnvelopeAuthorized:
@@ -7371,6 +8863,80 @@ components:
         traceId:
           type: string
           nullable: true
+    ExecutionCapabilityBody:
+      type: string
+      enum:
+      - host-runtime
+      - filesystem
+      - network
+      - user-interface
+      - accelerator
+      - native-code
+      - foreign-runtime
+      - parallel-runtime
+      - distributed-runtime
+    ExecutionHostInventoryBody:
+      type: object
+      required:
+      - schemaVersion
+      - semanticSchema
+      - compilerSchema
+      - runtimeFingerprint
+      - catalogFingerprint
+      - compatibilityModes
+      - platform
+      - capabilities
+      - adapters
+      - processStackAvailable
+      - hostBridgeAvailable
+      - trustTier
+      properties:
+        adapters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForeignAdapterInventoryBody'
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionCapabilityBody'
+        catalogFingerprint:
+          type: string
+        compatibilityModes:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanguageCompatibilityModeBody'
+        compilerSchema:
+          type: integer
+          format: int32
+          minimum: 0
+        hostBridgeAvailable:
+          type: boolean
+        nativeTarget:
+          allOf:
+          - $ref: '#/components/schemas/NativeTargetIdentityBody'
+          nullable: true
+        platform:
+          $ref: '#/components/schemas/ExecutionHostPlatformBody'
+        processStackAvailable:
+          type: boolean
+        runtimeFingerprint:
+          type: string
+        schemaVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        semanticSchema:
+          type: integer
+          format: int32
+          minimum: 0
+        trustTier:
+          $ref: '#/components/schemas/ExecutionTrustTierBody'
+      additionalProperties: false
+    ExecutionHostPlatformBody:
+      type: string
+      enum:
+      - native
+      - browser-wasm
     ExecutionOrganizationOverviewResponse:
       type: object
       required:
@@ -7484,6 +9050,11 @@ components:
           format: int64
           minimum: 0
       additionalProperties: false
+    ExecutionStackRequirementBody:
+      type: string
+      enum:
+      - any
+      - process
     ExecutionTrustTierBody:
       type: string
       enum:
@@ -7533,6 +9104,13 @@ components:
           format: int64
           minimum: 0
       additionalProperties: false
+    FeedbackSubmissionResponse:
+      type: object
+      required:
+      - accepted
+      properties:
+        accepted:
+          type: boolean
     FinalizePublicationResponse:
       type: object
       required:
@@ -7549,6 +9127,48 @@ components:
           type: string
         version:
           type: string
+    ForeignAdapterInventoryBody:
+      type: object
+      required:
+      - adapter
+      - version
+      - capabilities
+      - foreignCapabilities
+      - executionStack
+      - supportsWasm
+      - supportsHostBridge
+      properties:
+        adapter:
+          type: string
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionCapabilityBody'
+        executionStack:
+          $ref: '#/components/schemas/ExecutionStackRequirementBody'
+        foreignCapabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForeignCapabilityBody'
+        supportsHostBridge:
+          type: boolean
+        supportsWasm:
+          type: boolean
+        version:
+          type: integer
+          format: int32
+          minimum: 0
+      additionalProperties: false
+    ForeignCapabilityBody:
+      type: string
+      enum:
+      - invoke
+      - read
+      - write
+      - callback
+      - transfer
+      - serialize
+      - zero-copy
     FsCommitRequest:
       type: object
       required:
@@ -7603,6 +9223,66 @@ components:
         expiresAt:
           type: string
           format: date-time
+    FsExportManifestEntry:
+      type: object
+      required:
+      - path
+      - sizeBytes
+      - versionId
+      properties:
+        path:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        versionId:
+          type: string
+    FsExportManifestLimits:
+      type: object
+      required:
+      - maxBytes
+      - maxFiles
+      properties:
+        maxBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        maxFiles:
+          type: integer
+          minimum: 0
+    FsExportManifestResponse:
+      type: object
+      required:
+      - eligible
+      - totalBytes
+      - fileCount
+      - directories
+      - files
+      - limits
+      properties:
+        directories:
+          type: array
+          items:
+            type: string
+        eligible:
+          type: boolean
+        fileCount:
+          type: integer
+          minimum: 0
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsExportManifestEntry'
+        limits:
+          $ref: '#/components/schemas/FsExportManifestLimits'
+        reason:
+          type: string
+          nullable: true
+        totalBytes:
+          type: integer
+          format: int64
+          minimum: 0
     FsGitRefEntry:
       type: object
       required:
@@ -8586,6 +10266,74 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/GitInventoryEntryResponse'
+    GoalFollowupRequest:
+      type: object
+      required:
+      - accomplished
+      - comment
+      properties:
+        accomplished:
+          type: boolean
+        comment:
+          type: string
+    GrantResponse:
+      type: object
+      required:
+      - id
+      - orgId
+      - grantType
+      - startsAt
+      - endsAt
+      properties:
+        endsAt:
+          type: string
+          format: date-time
+        grantType:
+          type: string
+          enum:
+          - student
+          - instructor
+          - course
+        id:
+          type: string
+        orgId:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+    GrantSummaryResponse:
+      type: object
+      required:
+      - grantId
+      - orgId
+      - grantType
+      - status
+      - startsAt
+      - endsAt
+      properties:
+        endsAt:
+          type: string
+          format: date-time
+        grantId:
+          type: string
+        grantType:
+          $ref: '#/components/schemas/AcademicGrantTypeResponse'
+        orgId:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/AcademicGrantStatusResponse'
+    InviteCourseStudentsRequest:
+      type: object
+      required:
+      - emails
+      properties:
+        emails:
+          type: array
+          items:
+            type: string
     KeyEnvelopeListResponse:
       type: object
       required:
@@ -8661,6 +10409,12 @@ components:
           minimum: 0
         wrappedKey:
           type: string
+    LanguageCompatibilityModeBody:
+      type: string
+      enum:
+      - runmat
+      - matlab
+      - strict
     MarcomBackfillRequest:
       type: object
       properties:
@@ -8706,6 +10460,51 @@ components:
           minimum: 0
         skippedOnceKey:
           type: boolean
+    MatlabFamiliarity:
+      type: string
+      enum:
+      - low
+      - medium
+      - high
+    NativeTargetIdentityBody:
+      type: object
+      required:
+      - architecture
+      - operatingSystem
+      - pointerWidth
+      - abi
+      - objectFormat
+      properties:
+        abi:
+          type: string
+        architecture:
+          $ref: '#/components/schemas/NativeTargetIdentityBodyArchitecture'
+        objectFormat:
+          $ref: '#/components/schemas/NativeTargetIdentityBodyObjectFormat'
+        operatingSystem:
+          $ref: '#/components/schemas/NativeTargetIdentityBodyOperatingSystem'
+        pointerWidth:
+          type: integer
+          format: int32
+          minimum: 0
+      additionalProperties: false
+    NativeTargetIdentityBodyArchitecture:
+      type: string
+      enum:
+      - x86_64
+      - aarch64
+    NativeTargetIdentityBodyObjectFormat:
+      type: string
+      enum:
+      - mach-o
+      - elf
+      - coff
+    NativeTargetIdentityBodyOperatingSystem:
+      type: string
+      enum:
+      - macos
+      - linux
+      - windows
     NodeCredentialResponse:
       type: object
       required:
@@ -8840,6 +10639,56 @@ components:
       - draining
       - offline
       - revoked
+    OnboardingGoal:
+      type: string
+      enum:
+      - learn_matlab_alternative
+      - migrate_matlab_code
+      - build_simulations
+      - analyze_visualize_data
+      - gpu_acceleration
+      - share_projects
+      - academic_coursework
+      - other
+    OnboardingGoalFollowupStateResponse:
+      type: object
+      required:
+      - status
+      - goals
+      properties:
+        dueAt:
+          type: string
+          format: date-time
+          nullable: true
+        goals:
+          type: array
+          items:
+            $ref: '#/components/schemas/OnboardingGoal'
+        status:
+          type: string
+    OnboardingPlanChoice:
+      type: string
+      enum:
+      - free
+      - pro
+      - academic
+    OnboardingRole:
+      type: string
+      enum:
+      - engineering
+      - data_science
+      - research
+      - product
+      - operations
+      - student
+      - instructor
+      - other
+    OnboardingTheme:
+      type: string
+      enum:
+      - system
+      - light
+      - dark
     OrgCreateRequest:
       type: object
       required:
@@ -8847,6 +10696,11 @@ components:
       properties:
         name:
           type: string
+    OrgKind:
+      type: string
+      enum:
+      - standard
+      - course
     OrgListResponse:
       type: object
       required:
@@ -8859,6 +10713,54 @@ components:
         nextCursor:
           type: string
           nullable: true
+    OrgPackageListResponse:
+      type: object
+      required:
+      - packages
+      properties:
+        packages:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrgPackageSummaryResponse'
+    OrgPackageSummaryResponse:
+      type: object
+      required:
+      - id
+      - namespace
+      - name
+      - visibility
+      - updatedAt
+      properties:
+        description:
+          type: string
+          nullable: true
+        id:
+          type: string
+        name:
+          type: string
+        namespace:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        visibility:
+          type: string
+    OrgProfileResponse:
+      type: object
+      required:
+      - organization
+      properties:
+        organization:
+          $ref: '#/components/schemas/server_org.Org'
+        viewerRole:
+          allOf:
+          - $ref: '#/components/schemas/server_org.OrgRole'
+          nullable: true
+    OrgProfileVisibility:
+      type: string
+      enum:
+      - private
+      - public
     PackageAdvisoryListResponse:
       type: object
       required:
@@ -9138,8 +11040,67 @@ components:
             type: string
             enum:
             - paid
+      - type: object
+        required:
+        - grantType
+        - endsAt
+        - kind
+        properties:
+          endsAt:
+            type: string
+            format: date-time
+          grantType:
+            type: string
+          kind:
+            type: string
+            enum:
+            - academic
+      - type: object
+        required:
+        - grantType
+        - endedAt
+        - kind
+        properties:
+          endedAt:
+            type: string
+            format: date-time
+          grantType:
+            type: string
+          kind:
+            type: string
+            enum:
+            - lapsedAcademic
       discriminator:
         propertyName: kind
+    PlannedCourseBody:
+      type: object
+      required:
+      - name
+      - code
+      - term
+      - startsOn
+      - endsOn
+      - expectedEnrollment
+      - expectedStaffCount
+      properties:
+        code:
+          type: string
+        endsOn:
+          type: string
+          format: date
+        expectedEnrollment:
+          type: integer
+          format: int32
+        expectedStaffCount:
+          type: integer
+          format: int32
+        name:
+          type: string
+        startsOn:
+          type: string
+          format: date
+        term:
+          type: string
     PolicyResponse:
       type: object
       required:
@@ -9391,6 +11352,38 @@ components:
           type: string
         treeDigest:
           type: string
+    ProofDownloadResponse:
+      type: object
+      required:
+      - url
+      - expiresInSeconds
+      properties:
+        expiresInSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+        url:
+          type: string
+    ProofResponse:
+      type: object
+      required:
+      - id
+      - filename
+      - mimeType
+      - sizeBytes
+      - status
+      properties:
+        filename:
+          type: string
+        id:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        status:
+          $ref: '#/components/schemas/AcademicProofStatusResponse'
     PublicPricingPlanResponse:
       type: object
       required:
@@ -9945,6 +11938,7 @@ components:
       - updatedAt
       - releases
       - advisories
+      - publisher
       properties:
         advisories:
           type: array
@@ -9960,6 +11954,8 @@ components:
           type: string
         namespace:
           type: string
+        publisher:
+          $ref: '#/components/schemas/RegistryPublisherResponse'
         registry:
           type: string
         releases:
@@ -10202,6 +12198,7 @@ components:
       - unavailableCount
       - advisoryCount
       - updatedAt
+      - publisher
       properties:
         advisoryCount:
           type: integer
@@ -10219,6 +12216,8 @@ components:
           type: string
         namespace:
           type: string
+        publisher:
+          $ref: '#/components/schemas/RegistryPublisherResponse'
         registry:
           type: string
         releaseCount:
@@ -10235,6 +12234,16 @@ components:
         yankedCount:
           type: integer
           minimum: 0
+    RegistryPublisherResponse:
+      type: object
+      required:
+      - name
+      - slug
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
     RegistryReleaseMetadataResponse:
       type: object
       required:
@@ -10485,6 +12494,15 @@ components:
           type: string
         version:
           type: string
+    ReplaceStagedStaffRequest:
+      type: object
+      required:
+      - staff
+      properties:
+        staff:
+          type: array
+          items:
+            $ref: '#/components/schemas/StagedStaffInputBody'
     ResizeDriverWorkersRequest:
       type: object
       required:
@@ -10510,20 +12528,13 @@ components:
       - cpuMillicores
       - memoryBytes
       - scratchBytes
-      - acceleratorCount
-      - acceleratorMemoryBytes
+      - accelerators
+      - host
       properties:
-        acceleratorClass:
-          type: string
-          nullable: true
-        acceleratorCount:
-          type: integer
-          format: int32
-          minimum: 0
-        acceleratorMemoryBytes:
-          type: integer
-          format: int64
-          minimum: 0
+        accelerators:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorDeviceBody'
         capabilities:
           type: object
           additionalProperties:
@@ -10532,6 +12543,8 @@ components:
           type: integer
           format: int64
           minimum: 0
+        host:
+          $ref: '#/components/schemas/ExecutionHostInventoryBody'
         memoryBytes:
           type: integer
           format: int64
@@ -10547,21 +12560,13 @@ components:
       - cpuMillicores
       - memoryBytes
       - scratchBytes
-      - acceleratorCount
-      - acceleratorMemoryBytes
+      - accelerators
       - maximumWallMillis
       properties:
-        acceleratorClass:
-          type: string
-          nullable: true
-        acceleratorCount:
-          type: integer
-          format: int32
-          minimum: 0
-        acceleratorMemoryBytes:
-          type: integer
-          format: int64
-          minimum: 0
+        accelerators:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorRequestBody'
         cpuMillicores:
           type: integer
           format: int64
@@ -11261,6 +13266,41 @@ components:
           uploadUrl:
             type: string
             nullable: true
+    StagedStaffInputBody:
+      type: object
+      required:
+      - email
+      - participantRole
+      properties:
+        displayName:
+          type: string
+          nullable: true
+        email:
+          type: string
+        participantRole:
+          $ref: '#/components/schemas/AcademicStaffRoleRequest'
+    StagedStaffResponse:
+      type: object
+      required:
+      - id
+      - allocationId
+      - email
+      - participantRole
+      - status
+      properties:
+        allocationId:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        email:
+          type: string
+        id:
+          type: string
+        participantRole:
+          type: string
+        status:
+          type: string
     StoreDriverArtifactRequest:
       type: object
       required:
@@ -11353,6 +13393,53 @@ components:
           - $ref: '#/components/schemas/ResourceRequestBody'
           nullable: true
       additionalProperties: false
+    TeachingAuthorizationResponse:
+      type: object
+      required:
+      - id
+      - startsAt
+      - endsAt
+      - maxActiveCourses
+      - maxEnrollmentPerCourse
+      - maxAggregateEnrollment
+      properties:
+        endsAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        maxActiveCourses:
+          type: integer
+          format: int32
+        maxAggregateEnrollment:
+          type: integer
+          format: int32
+        maxEnrollmentPerCourse:
+          type: integer
+          format: int32
+        setupExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        startsAt:
+          type: string
+          format: date-time
+    TeachingLimitsBody:
+      type: object
+      required:
+      - maxActiveCourses
+      - maxEnrollmentPerCourse
+      - maxAggregateEnrollment
+      properties:
+        maxActiveCourses:
+          type: integer
+          format: int32
+        maxAggregateEnrollment:
+          type: integer
+          format: int32
+        maxEnrollmentPerCourse:
+          type: integer
+          format: int32
     TelemetryIngestRequest:
       type: object
       required:
@@ -11521,6 +13608,35 @@ components:
         orgId:
           type: string
       additionalProperties: false
+    TrialExtensionRequest:
+      type: object
+      required:
+      - comment
+      properties:
+        comment:
+          type: string
+    TrialExtensionStateResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+    TrialStateResponse:
+      type: object
+      required:
+      - state
+      properties:
+        endsAt:
+          type: string
+          format: date-time
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        state:
+          type: string
     TrustTierBody:
       type: string
       enum:
@@ -11603,6 +13719,16 @@ components:
         sourceRepository:
           type: string
           nullable: true
+    UpdateApplicationRequest:
+      allOf:
+      - $ref: '#/components/schemas/ApplicationFields'
+      - type: object
+        required:
+        - expectedVersion
+        properties:
+          expectedVersion:
+            type: integer
+            format: int32
     UpdateExecutionOrganizationPolicyRequest:
       type: object
       required:
@@ -11866,6 +13992,16 @@ components:
         windowStart:
           type: string
           format: date-time
+    UserFeedbackStateResponse:
+      type: object
+      required:
+      - onboardingGoalFollowup
+      - trialExtension
+      properties:
+        onboardingGoalFollowup:
+          $ref: '#/components/schemas/OnboardingGoalFollowupStateResponse'
+        trialExtension:
+          $ref: '#/components/schemas/TrialExtensionStateResponse'
     UserPreferencesRequest:
       type: object
       required:
@@ -11873,14 +14009,77 @@ components:
       properties:
         backgroundRuntimeDiagnosis:
           type: boolean
+        lastActiveOrgId:
+          type: string
+          nullable: true
+        onboardingCompleted:
+          type: boolean
+          nullable: true
+        onboardingGoals:
+          type: array
+          items:
+            $ref: '#/components/schemas/OnboardingGoal'
+          nullable: true
+        onboardingMatlabFamiliarity:
+          allOf:
+          - $ref: '#/components/schemas/MatlabFamiliarity'
+          nullable: true
+        onboardingPlanChoice:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingPlanChoice'
+          nullable: true
+        onboardingRole:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingRole'
+          nullable: true
+        onboardingTheme:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingTheme'
+          nullable: true
       additionalProperties: false
     UserPreferencesResponse:
       type: object
       required:
       - backgroundRuntimeDiagnosis
+      - onboardingGoals
       properties:
         backgroundRuntimeDiagnosis:
           type: boolean
+        lastActiveOrgId:
+          type: string
+          nullable: true
+        onboardingCompletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        onboardingGoals:
+          type: array
+          items:
+            $ref: '#/components/schemas/OnboardingGoal'
+        onboardingMatlabFamiliarity:
+          allOf:
+          - $ref: '#/components/schemas/MatlabFamiliarity'
+          nullable: true
+        onboardingPlanChoice:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingPlanChoice'
+          nullable: true
+        onboardingRole:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingRole'
+          nullable: true
+        onboardingTheme:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingTheme'
+          nullable: true
+    VersionRequest:
+      type: object
+      required:
+      - expectedVersion
+      properties:
+        expectedVersion:
+          type: integer
+          format: int32
     WebAttribution:
       type: object
       properties:
@@ -12162,6 +14361,7 @@ components:
       required:
       - id
       - name
+      - slug
       - created_at
       - updated_at
       properties:
@@ -12176,9 +14376,18 @@ components:
           type: string
           format: date-time
           nullable: true
+        description:
+          type: string
+          nullable: true
         id:
           type: string
+        kind:
+          $ref: '#/components/schemas/OrgKind'
         name:
+          type: string
+        profile_visibility:
+          $ref: '#/components/schemas/OrgProfileVisibility'
+        slug:
           type: string
         updated_at:
           type: string
@@ -12186,6 +14395,9 @@ components:
         updated_by:
           type: string
           format: uuid
+          nullable: true
+        website_url:
+          type: string
           nullable: true
     server_org.OrgRole:
       type: string
@@ -12200,6 +14412,7 @@ components:
       - id
       - org_id
       - name
+      - handle
       - created_at
       - updated_at
       properties:
@@ -12216,7 +14429,6 @@ components:
           nullable: true
         handle:
           type: string
-          nullable: true
         id:
           type: string
         name:

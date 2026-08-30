@@ -10,18 +10,19 @@ use crate::cli::{NodeJoinArgs, NodeJoinCommand, NodeServiceCommand, NodeTrustTie
 pub(super) async fn execute(args: NodeJoinArgs) -> Result<()> {
     match &args.command {
         NodeJoinCommand::Inventory => {
-            let inventory = runmat_node_agent::inventory::collect()?;
+            let inventory = runmat_node_agent::inventory::collect(trust_tier(&args))?;
             println!("{}", serde_json::to_string_pretty(&inventory)?);
             Ok(())
         }
         NodeJoinCommand::Enroll { token } => {
             let config = config(&args, false)?;
+            let inventory = runmat_node_agent::inventory::collect(config.trust_tier)?;
             let control = Arc::new(HttpNodeControlPlane::new(config.server_url.clone())?);
             let credential = runmat_node_agent::enrollment::enroll(
                 control,
                 &CredentialStore::new(&config.state_directory),
                 token.clone(),
-                runmat_node_agent::inventory::collect()?,
+                inventory,
                 config.heartbeat_ttl.as_secs(),
             )
             .await?;
@@ -108,6 +109,17 @@ fn config(args: &NodeJoinArgs, service_defaults: bool) -> Result<AgentConfig> {
     }
     config.validate()?;
     Ok(config)
+}
+
+fn trust_tier(args: &NodeJoinArgs) -> runmat_execution::security::ExecutionTrustTier {
+    match args.trust_tier {
+        Some(NodeTrustTier::HostedOrdinary) => {
+            runmat_execution::security::ExecutionTrustTier::HostedOrdinary
+        }
+        Some(NodeTrustTier::CustomerTrusted) | None => {
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted
+        }
+    }
 }
 
 fn execute_service(args: &NodeJoinArgs, command: &NodeServiceCommand) -> Result<()> {

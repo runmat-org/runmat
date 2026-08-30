@@ -20,6 +20,18 @@ impl SpmdOutputValue {
             Self::Distributed(snapshot) => snapshot.validate(),
         }
     }
+
+    pub fn validate_for_transport(
+        &self,
+        context: crate::value::ValueTransportContext<'_>,
+    ) -> Result<(), crate::ContractError> {
+        match self {
+            Self::Value(value) => {
+                value.validate_for_transport(crate::value::ValueLimits::default(), context)
+            }
+            Self::Distributed(snapshot) => snapshot.validate_for_transport(context),
+        }
+    }
 }
 
 use crate::{ContractError, ExecutionScopeId, GangId, PoolHandle};

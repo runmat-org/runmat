@@ -198,6 +198,7 @@ mod tests {
             (
                 ValueKindFact::Callable(runmat_types::CallableFact {
                     identity: None,
+                    capabilities: Default::default(),
                     parameters: vec![unknown()],
                     parameters_complete: false,
                     outputs: vec![unknown()],

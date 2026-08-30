@@ -14,7 +14,10 @@ pub(crate) mod ops;
 mod program_execution;
 pub(crate) mod runtime;
 
-pub use bytecode::{compile, compile_semantic_function_registry};
+pub use bytecode::{
+    compile, compile_semantic_function_registry, compile_semantic_function_registry_with_analysis,
+    compile_with_analysis,
+};
 pub use bytecode::{
     AsyncMetadata, AwaitSite, Bytecode, BytecodeCodistributedOverload, BytecodeCollectiveOp,
     BytecodeDistributedBuildValidation, BytecodeDistributedOp, BytecodeParallelVariable,

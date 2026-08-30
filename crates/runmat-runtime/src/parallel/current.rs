@@ -95,6 +95,7 @@ mod tests {
             attempt_id: AttemptId::derive(&[b"attempt"]),
             worker_id: WorkerId::derive(&[b"worker"]),
             backend: runmat_execution::PoolBackend::LocalProcesses,
+            resources: Default::default(),
         }
     }
 

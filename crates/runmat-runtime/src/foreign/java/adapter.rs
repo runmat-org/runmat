@@ -102,7 +102,7 @@ impl JavaAdapter {
         let released = Arc::new(ReleaseQueue::default());
         handles.register_host(ForeignHostRegistration {
             identity: host_identity.clone(),
-            adapter: JAVA_ADAPTER_ID.into(),
+            adapter: JAVA_ADAPTER_ID.to_string(),
             session_identity: host_identity.clone(),
             capabilities: BTreeSet::from([
                 ForeignCapability::Invoke,
@@ -809,7 +809,8 @@ fn classpath_paths<'a>(
 impl ForeignAdapter for JavaAdapter {
     fn descriptor(&self) -> ForeignAdapterDescriptor {
         ForeignAdapterDescriptor {
-            adapter: JAVA_ADAPTER_ID.into(),
+            adapter: runmat_types::ForeignAdapterId::new(JAVA_ADAPTER_ID)
+                .expect("the built-in Java adapter identity is valid"),
             version: JAVA_ADAPTER_VERSION,
             capabilities: BTreeSet::from([CapabilityRequirement::ForeignRuntime]),
             foreign_capabilities: BTreeSet::from([
@@ -819,7 +820,15 @@ impl ForeignAdapter for JavaAdapter {
                 ForeignCapability::Callback,
                 ForeignCapability::Transfer,
             ]),
-            artifact_identities: self.artifact_identities.borrow().clone(),
+            artifact_identities: self
+                .artifact_identities
+                .borrow()
+                .iter()
+                .map(|identity| {
+                    runmat_types::ForeignArtifactIdentity::new(identity.clone())
+                        .expect("installed Java artifact identities are canonical")
+                })
+                .collect(),
             supports_wasm: false,
             supports_host_bridge: false,
             execution_stack: runmat_types::ExecutionStackRequirement::Process,

@@ -9,9 +9,8 @@ pub struct NodeInventory {
     pub cpu_millicores: u64,
     pub memory_bytes: u64,
     pub scratch_bytes: u64,
-    pub accelerator_count: u32,
-    pub accelerator_class: Option<String>,
-    pub accelerator_memory_bytes: u64,
+    pub accelerators: Vec<runmat_execution::resource::AcceleratorDevice>,
+    pub host: runmat_execution::host::ExecutionHostInventory,
     pub capabilities: std::collections::BTreeMap<String, String>,
 }
 
@@ -58,6 +57,7 @@ pub struct NodeAllocation {
     pub project_id: String,
     pub queue: String,
     pub resources: ResourceRequest,
+    pub accelerator_devices: Vec<runmat_execution::resource::AcceleratorDevice>,
     pub role: AllocationRole,
     pub state: String,
     pub fencing_token: u64,
@@ -76,10 +76,16 @@ pub struct ResourceRequest {
     pub cpu_millicores: u64,
     pub memory_bytes: u64,
     pub scratch_bytes: u64,
-    pub accelerator_count: u32,
-    pub accelerator_class: Option<String>,
-    pub accelerator_memory_bytes: u64,
+    pub accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
     pub maximum_wall_millis: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AllocatedResources {
+    pub request: ResourceRequest,
+    pub accelerator_devices: Vec<runmat_execution::resource::AcceleratorDevice>,
+    pub host: runmat_execution::host::ExecutionHostInventory,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

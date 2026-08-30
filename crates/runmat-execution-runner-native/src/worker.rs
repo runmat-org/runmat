@@ -6,6 +6,7 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 mod collective;
 
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
+    runmat_accelerate::initialize_acceleration_provider();
     let (reader, writer) = runmat_process_host::ipc::stdio::endpoint();
     let limits = FrameLimits {
         max_message_bytes: 64 * 1024 * 1024,
@@ -71,6 +72,8 @@ mod tests {
             target: runmat_execution_artifact::ProgramTarget::portable(
                 "test-interpreter-bytecode-v1",
             ),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),

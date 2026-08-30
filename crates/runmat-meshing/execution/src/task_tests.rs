@@ -24,6 +24,43 @@ use crate::{
     MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
+pub(crate) fn host_requirement() -> runmat_execution::host::ExecutionHostRequirement {
+    runmat_execution::host::ExecutionHostRequirement::portable(
+        runmat_execution::ProgramEnvironment::new(
+            1,
+            1,
+            Digest::sha256(b"meshing-test-runtime"),
+            Digest::sha256(b"meshing-test-catalog"),
+            "runmat",
+        )
+        .unwrap(),
+        runmat_types::CapabilitySet(BTreeSet::from([
+            runmat_types::CapabilityRequirement::HostRuntime,
+        ])),
+        runmat_types::InteropManifest::empty(),
+        BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
+    )
+    .unwrap()
+}
+
+pub(crate) fn host_inventory() -> runmat_execution::host::ExecutionHostInventory {
+    let requirement = host_requirement();
+    runmat_execution::host::ExecutionHostInventory {
+        schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+        semantic_schema: requirement.environment.semantic_schema,
+        compiler_schema: requirement.environment.compiler_schema,
+        runtime_fingerprint: requirement.environment.runtime_fingerprint,
+        catalog_fingerprint: requirement.environment.catalog_fingerprint,
+        compatibility_modes: BTreeSet::from([requirement.environment.compatibility_mode]),
+        target: runmat_execution::host::ExecutionHostTarget::BrowserWasm,
+        capabilities: requirement.capabilities,
+        adapters: Vec::new(),
+        process_stack_available: false,
+        host_bridge_available: false,
+        trust_tier: runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+    }
+}
+
 #[test]
 fn task_projection_binds_identity_inputs_resources_and_capabilities() {
     let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
@@ -283,6 +320,7 @@ fn unchanged_scheduler_admits_only_a_capable_worker() {
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
             id: WorkerId::derive(&[b"incapable"]),
             pool_id: pool,
+            host: host_inventory(),
             resources: ResourceInventory {
                 cpu_millicores: 4_000,
                 memory_bytes: 8_000_000,
@@ -302,6 +340,7 @@ fn unchanged_scheduler_admits_only_a_capable_worker() {
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
             id: WorkerId::derive(&[b"capable"]),
             pool_id: pool,
+            host: host_inventory(),
             resources: ResourceInventory {
                 cpu_millicores: 4_000,
                 memory_bytes: 8_000_000,
@@ -392,6 +431,7 @@ impl Fixture {
             scope_id: ExecutionScopeId::derive(&[b"scope"]),
             pool_id: PoolId::derive(&[b"pool"]),
             program_artifact_id: ArtifactId::derive(&[b"meshing-host-v2"]),
+            host: host_requirement(),
             artifact_access: access,
             cpu_millicores: 2_000,
             maximum_egress_bytes: 4_000_000,

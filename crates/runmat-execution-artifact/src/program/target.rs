@@ -2,40 +2,15 @@ use serde::{Deserialize, Serialize};
 
 use super::ExecutableForm;
 use crate::{ArtifactError, ArtifactResult};
+pub use runmat_execution::host::NativeTargetIdentity;
 
-pub const PROGRAM_TARGET_SCHEMA_VERSION: u16 = 1;
+pub const PROGRAM_TARGET_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProgramTargetCohort {
     Portable,
     Native,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NativeTargetIdentity {
-    pub architecture: String,
-    pub operating_system: String,
-    pub pointer_width: u16,
-    pub abi: String,
-    pub object_format: String,
-}
-
-impl NativeTargetIdentity {
-    pub fn validate(&self) -> ArtifactResult<()> {
-        if !valid_token(&self.architecture, 64)
-            || !valid_token(&self.operating_system, 64)
-            || !valid_token(&self.abi, 256)
-            || !valid_token(&self.object_format, 32)
-            || !matches!(self.pointer_width, 32 | 64)
-        {
-            return Err(ArtifactError::Invalid(
-                "native artifact target is not canonical".into(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -75,7 +50,9 @@ impl ProgramTarget {
         }
         match (self.cohort, self.native.as_ref()) {
             (ProgramTargetCohort::Portable, None) => Ok(()),
-            (ProgramTargetCohort::Native, Some(native)) => native.validate(),
+            (ProgramTargetCohort::Native, Some(native)) => native
+                .validate()
+                .map_err(|error| ArtifactError::Invalid(error.to_string())),
             _ => Err(ArtifactError::Invalid(
                 "program target cohort has inconsistent native identity".into(),
             )),
@@ -114,7 +91,8 @@ impl ProgramTarget {
 
     pub fn validate_for_native_host(&self, host: &NativeTargetIdentity) -> ArtifactResult<()> {
         self.validate()?;
-        host.validate()?;
+        host.validate()
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         match self.cohort {
             ProgramTargetCohort::Portable => Ok(()),
             ProgramTargetCohort::Native if self.native.as_ref() == Some(host) => Ok(()),
@@ -155,11 +133,11 @@ mod tests {
 
     fn native() -> NativeTargetIdentity {
         NativeTargetIdentity {
-            architecture: "aarch64".into(),
-            operating_system: "macos".into(),
+            architecture: runmat_execution::host::NativeArchitecture::Aarch64,
+            operating_system: runmat_execution::host::NativeOperatingSystem::Macos,
             pointer_width: 64,
-            abi: "runmat-native-abi-v1".into(),
-            object_format: "mach-o".into(),
+            abi: runmat_execution::host::NativeAbi::new("runmat-native-abi-v1").unwrap(),
+            object_format: runmat_execution::host::NativeObjectFormat::MachO,
         }
     }
 
@@ -182,7 +160,7 @@ mod tests {
         native_program.validate_for_native_host(&target).unwrap();
 
         let mut different_host = target.clone();
-        different_host.architecture = "x86_64".into();
+        different_host.architecture = runmat_execution::host::NativeArchitecture::X86_64;
         assert!(native_program
             .validate_for_native_host(&different_host)
             .is_err());

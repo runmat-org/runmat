@@ -16,18 +16,6 @@ pub fn arrayfun_type(args: &[Type], _context: &ResolveContext) -> Type {
     arrayfun_output_type(returns)
 }
 
-pub fn gpuarray_type(args: &[Type], _context: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::Logical { shape }) => logical_type_from_shape(shape.as_ref()),
-        Some(Type::Bool) => Type::logical_with_shape(vec![1, 1]),
-        Some(Type::Unknown) | None => Type::Unknown,
-        Some(Type::Cell { .. }) => Type::Unknown,
-        Some(Type::Tensor { shape }) => tensor_type_from_shape(shape.as_ref()),
-        Some(Type::Num) | Some(Type::Int) => Type::tensor_with_shape(vec![1, 1]),
-        _ => Type::tensor(),
-    }
-}
-
 pub fn gpudevice_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Struct {
         known_fields: Some(vec![
@@ -63,23 +51,5 @@ fn arrayfun_output_type(returns: &Type) -> Type {
         | Type::Symbolic
         | Type::SymbolicArray { .. } => Type::Unknown,
         Type::Function { .. } | Type::Void | Type::Union(_) | Type::OutputList(_) => Type::Unknown,
-    }
-}
-
-fn tensor_type_from_shape(shape: Option<&Vec<Option<usize>>>) -> Type {
-    match shape {
-        Some(shape) => Type::Tensor {
-            shape: Some(shape.clone()),
-        },
-        None => Type::tensor(),
-    }
-}
-
-fn logical_type_from_shape(shape: Option<&Vec<Option<usize>>>) -> Type {
-    match shape {
-        Some(shape) => Type::Logical {
-            shape: Some(shape.clone()),
-        },
-        None => Type::logical(),
     }
 }

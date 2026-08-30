@@ -20,10 +20,11 @@ pub fn print_native_ir(assembly: &NativeAssembly) -> String {
     for function in &assembly.functions {
         let _ = writeln!(
             output,
-            "function f{} {} source={} locals={} entry=b{}",
+            "function f{} {} source={} capabilities={:?} locals={} entry=b{}",
             function.id.0,
             function.name,
             function.source.0,
+            function.capabilities,
             function.local_count(),
             function.entry.0
         );

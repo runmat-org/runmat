@@ -17,4 +17,4 @@ pub use ir::*;
 pub use lowering::*;
 pub use target::*;
 
-pub const NATIVE_IR_SCHEMA_VERSION: u16 = 4;
+pub const NATIVE_IR_SCHEMA_VERSION: u16 = 5;

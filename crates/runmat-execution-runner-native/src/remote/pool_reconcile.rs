@@ -81,7 +81,8 @@ pub(super) async fn reconcile_workers(
                 worker: WorkerSpec {
                     id: worker_id,
                     pool_id,
-                    resources: inventory(&worker.resources)?,
+                    resources: inventory(&worker.resources, &worker.accelerator_devices)?,
+                    host: worker.host.clone(),
                 },
                 driver_fence: authority.fencing_token,
                 session_id: session_id(&authority.run_id, &worker.allocation_lease_id),

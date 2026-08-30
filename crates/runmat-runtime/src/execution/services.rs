@@ -49,6 +49,10 @@ pub struct DeferredCall {
     /// adapters must carry this value unchanged into their task request.
     pub retry: runmat_execution::RetryPolicy,
     pub program_revision: Option<runmat_execution::ProgramRevision>,
+    /// Whole-call semantic capabilities emitted by analysis and retained in
+    /// bytecode. Execution adapters translate these facts into leases; they do
+    /// not rediscover requirements from source or builtin spelling.
+    pub capabilities: runmat_types::CapabilitySet,
     /// Exact, runtime-opaque program description supplied by the VM.
     ///
     /// The serial service does not inspect this payload. Execution adapters may
@@ -66,6 +70,7 @@ pub struct SpmdGangCall {
     pub captures: Vec<Value>,
     pub requested_outputs: usize,
     pub program_revision: Option<runmat_execution::ProgramRevision>,
+    pub capabilities: runmat_types::CapabilitySet,
     pub program: Vec<u8>,
 }
 
@@ -692,6 +697,7 @@ mod tests {
             ),
             retry: runmat_execution::RetryPolicy::Never,
             program_revision: None,
+            capabilities: Default::default(),
             program: None,
         }
     }

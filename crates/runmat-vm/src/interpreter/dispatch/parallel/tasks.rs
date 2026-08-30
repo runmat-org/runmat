@@ -122,6 +122,7 @@ pub(super) fn create_future(
             })
         })
         .transpose()?;
+    let capabilities = callable_capabilities(&descriptor, function_registry)?;
     context
         .runtime
         .execution()
@@ -129,9 +130,50 @@ pub(super) fn create_future(
             invocation: runmat_runtime::execution::DeferredInvocation::Callable(descriptor),
             retry: runmat_execution::RetryPolicy::Never,
             program_revision: context.runtime.program_revision().cloned(),
+            capabilities,
             program,
         })
         .map_err(execution_error)
+}
+
+fn callable_capabilities(
+    descriptor: &runmat_runtime::call::descriptor::CallableDescriptor,
+    registry: &FunctionRegistry,
+) -> Result<runmat_types::CapabilitySet, RuntimeError> {
+    use runmat_hir::CallableIdentity;
+
+    let runmat_runtime::call::descriptor::CallableTarget::Resolved { identity, .. } =
+        &descriptor.target
+    else {
+        return Err(crate::interpreter::errors::mex(
+            "ExecutionProgram",
+            "async execution requires an exact resolved callable before capability binding",
+        ));
+    };
+    match identity {
+        CallableIdentity::BoundFunction(function)
+        | CallableIdentity::AnonymousFunction(function)
+        | CallableIdentity::ExternalFunction { function, .. } => registry
+            .get(*function)
+            .map(|function| function.capabilities.clone())
+            .ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "ExecutionProgram",
+                    "async callable is absent from the exact function registry",
+                )
+            }),
+        CallableIdentity::Builtin(name) if runmat_builtins::builtin_name_is_known(&name.0) => {
+            Ok(runmat_builtins::builtin_required_capabilities(&name.0))
+        }
+        CallableIdentity::Builtin(_) => Err(crate::interpreter::errors::mex(
+            "ExecutionProgram",
+            "async builtin is absent from the exact builtin registry",
+        )),
+        _ => Err(crate::interpreter::errors::mex(
+            "ExecutionProgram",
+            "async callable kind has no portable execution identity",
+        )),
+    }
 }
 
 pub(super) fn semantic_descriptor(

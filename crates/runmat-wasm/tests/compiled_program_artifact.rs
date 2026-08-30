@@ -24,9 +24,13 @@ async fn request_with_contract(
         .await
         .unwrap();
     let mut envelope = unit
-        .portable_envelope_for_with_interop(None, interop)
+        .portable_envelope_for_with_interop(None, interop.clone())
         .unwrap();
     envelope.manifest.capabilities.0.extend(capabilities);
+    let accelerators = runmat_execution::resource::accelerator_requirements_for_capabilities(
+        &envelope.manifest.capabilities,
+    )
+    .unwrap();
     let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
@@ -37,6 +41,8 @@ async fn request_with_contract(
         },
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("portable-executable-unit-v3"),
+        interop,
+        accelerators,
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
@@ -74,7 +80,6 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
             runmat_types::CapabilityRequirement::HostRuntime,
             runmat_types::CapabilityRequirement::Filesystem,
             runmat_types::CapabilityRequirement::UserInterface,
-            runmat_types::CapabilityRequirement::Accelerator,
             runmat_types::CapabilityRequirement::ParallelRuntime,
         ]),
     )
@@ -100,13 +105,17 @@ async fn browser_rejects_native_mex_artifact_before_program_execution() {
         schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
         foreign_types: Vec::new(),
         adapters: vec![runmat_types::ForeignAdapterRequirement {
-            adapter: "mex-c".into(),
+            adapter: runmat_types::ForeignAdapterId::new("mex-c").unwrap(),
             minimum_version: 1,
             capabilities: runmat_types::CapabilitySet(BTreeSet::from([
                 runmat_types::CapabilityRequirement::NativeCode,
                 runmat_types::CapabilityRequirement::ForeignRuntime,
             ])),
-            artifact_identities: vec!["mex:v1:sha256:fixture".into()],
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
+            artifact_identities: vec![runmat_types::ForeignArtifactIdentity::new(
+                "mex:v1:sha256:fixture",
+            )
+            .unwrap()],
         }],
         adapter_contracts: Vec::new(),
     };
@@ -121,4 +130,42 @@ async fn browser_rejects_native_mex_artifact_before_program_execution() {
     };
     assert!(message.contains("browser host rejected unavailable executable capabilities"));
     assert!(message.contains("mex-c [mex:v1:sha256:fixture]"));
+}
+
+#[wasm_bindgen_test]
+async fn browser_rejects_an_unavailable_accelerator_recipe_before_execution() {
+    use runmat_execution::resource::{
+        AcceleratorClass, AcceleratorFeature, AcceleratorProvider, AcceleratorProviderId,
+        AcceleratorProviderVersion, AcceleratorRequest,
+    };
+
+    let mut request =
+        request_with_contract(runmat_types::InteropManifest::empty(), BTreeSet::new()).await;
+    request.recipe.accelerators = vec![AcceleratorRequest {
+        class: AcceleratorClass::new("gpu").unwrap(),
+        count: 1,
+        minimum_allocation_bytes: 1 << 20,
+        provider: Some(AcceleratorProvider {
+            id: AcceleratorProviderId::new("runmat.cuda").unwrap(),
+            version: AcceleratorProviderVersion::new("1.0.0").unwrap(),
+            abi_fingerprint: runmat_execution::Digest::sha256(b"cuda-native-v1"),
+        }),
+        required_features: [AcceleratorFeature::Compute].into_iter().collect(),
+    }];
+    request.artifact = ProgramArtifact::materialize(
+        &request.recipe,
+        ExecutableForm::ExecutableUnitV3,
+        request.artifact.executable_bytes.clone(),
+    )
+    .unwrap();
+
+    let response =
+        runmat_wasm::execute_program_artifact(serde_wasm_bindgen::to_value(&request).unwrap())
+            .await
+            .unwrap();
+    let response: ProgramExecutionResponse = serde_wasm_bindgen::from_value(response).unwrap();
+    let ProgramExecutionResponse::Failure { message } = response else {
+        panic!("browser admitted an unavailable accelerator recipe");
+    };
+    assert!(message.contains("unavailable execution resources"));
 }

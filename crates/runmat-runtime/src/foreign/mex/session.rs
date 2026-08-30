@@ -598,7 +598,8 @@ impl super::super::ForeignAdapter for MexRuntimeSession {
             capabilities.insert(CapabilityRequirement::Accelerator);
         }
         super::super::ForeignAdapterDescriptor {
-            adapter: runmat_mex::MEX_ADAPTER_ID.into(),
+            adapter: runmat_types::ForeignAdapterId::new(runmat_mex::MEX_ADAPTER_ID)
+                .expect("the built-in MEX adapter identity is valid"),
             version: runmat_mex::MEX_ADAPTER_VERSION,
             capabilities,
             foreign_capabilities: BTreeSet::from([
@@ -610,7 +611,10 @@ impl super::super::ForeignAdapter for MexRuntimeSession {
                 .installed_modules
                 .borrow()
                 .values()
-                .map(|artifact| artifact.identity.clone())
+                .map(|artifact| {
+                    runmat_types::ForeignArtifactIdentity::new(artifact.identity.clone())
+                        .expect("installed MEX artifact identities are canonical")
+                })
                 .collect(),
             supports_wasm: false,
             supports_host_bridge: false,

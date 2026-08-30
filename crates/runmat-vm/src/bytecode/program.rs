@@ -59,6 +59,10 @@ pub struct FunctionBytecode {
     pub private_owner_scope: String,
     #[serde(default)]
     pub source_id: Option<runmat_hir::SourceId>,
+    /// Whole-function semantic requirements, including reachable static
+    /// callees, captured by MIR analysis before bytecode serialization.
+    #[serde(default)]
+    pub capabilities: runmat_types::CapabilitySet,
     pub instructions: Vec<Instr>,
     #[serde(default)]
     pub instr_spans: Vec<runmat_hir::Span>,
@@ -105,6 +109,7 @@ impl Default for FunctionBytecode {
             display_name: String::new(),
             private_owner_scope: String::new(),
             source_id: None,
+            capabilities: Default::default(),
             instructions: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
@@ -972,6 +977,7 @@ mod function_registry_tests {
             display_name: display_name.to_string(),
             private_owner_scope: private_owner_scope.to_string(),
             source_id: None,
+            capabilities: Default::default(),
             instructions: vec![Instr::Return],
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),

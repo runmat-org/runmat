@@ -83,6 +83,19 @@ impl RemotePoolDriver {
                 &program.gang.generation.to_be_bytes(),
                 &rank.0.to_be_bytes(),
             ]);
+            let host = program
+                .artifact
+                .execution_host_requirement(
+                    &program.recipe,
+                    [
+                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                        runmat_execution::security::ExecutionTrustTier::HostedOrdinary,
+                        runmat_execution::security::ExecutionTrustTier::AttestedConfidential,
+                    ]
+                    .into_iter()
+                    .collect(),
+                )
+                .map_err(protocol)?;
             submissions.push(TaskSubmission {
                 request: TaskRequest {
                     id: task_id,
@@ -90,6 +103,7 @@ impl RemotePoolDriver {
                     pool_id: program.gang.pool.id,
                     program_artifact_id: artifact_id,
                     callable: Callable::for_program("remote-spmd", &callable),
+                    host,
                     invocation_context: context,
                     inputs: program.captures.clone(),
                     outputs: OutputContract {
@@ -226,6 +240,10 @@ fn validate_gang_program(
 ) -> NativeExecutionResult<()> {
     program.gang.validate().map_err(protocol)?;
     program.resources.validate().map_err(protocol)?;
+    program
+        .recipe
+        .validate_resource_request(&program.resources)
+        .map_err(protocol)?;
     if program.gang.scope_id != pool.scope_id
         || program.gang.pool.id != pool.pool_id
         || program.gang.labs.0 == 0

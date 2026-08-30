@@ -79,6 +79,7 @@ pub(super) async fn execute(
                         captures: captures.clone(),
                         requested_outputs: executable.outputs.len(),
                         program_revision: execution.runtime.program_revision().cloned(),
+                        capabilities: executable.contract.capabilities.clone(),
                         program,
                     })
                     .await

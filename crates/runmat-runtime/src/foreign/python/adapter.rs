@@ -132,7 +132,7 @@ impl PythonAdapter {
         let released = Arc::new(ReleaseQueue::default());
         handles.register_host(ForeignHostRegistration {
             identity: host_identity.clone(),
-            adapter: PYTHON_ADAPTER_ID.into(),
+            adapter: PYTHON_ADAPTER_ID.to_string(),
             session_identity: host_identity.clone(),
             capabilities: BTreeSet::from([
                 ForeignCapability::Invoke,
@@ -854,7 +854,8 @@ fn take_releases(released: &ReleaseQueue) -> Result<Vec<u64>, RuntimeError> {
 impl ForeignAdapter for PythonAdapter {
     fn descriptor(&self) -> ForeignAdapterDescriptor {
         ForeignAdapterDescriptor {
-            adapter: PYTHON_ADAPTER_ID.into(),
+            adapter: runmat_types::ForeignAdapterId::new(PYTHON_ADAPTER_ID)
+                .expect("the built-in Python adapter identity is valid"),
             version: PYTHON_ADAPTER_VERSION,
             capabilities: BTreeSet::from([CapabilityRequirement::ForeignRuntime]),
             foreign_capabilities: BTreeSet::from([
@@ -865,7 +866,16 @@ impl ForeignAdapter for PythonAdapter {
                 ForeignCapability::Transfer,
                 ForeignCapability::ZeroCopy,
             ]),
-            artifact_identities: self.configuration.borrow().artifact_identities.clone(),
+            artifact_identities: self
+                .configuration
+                .borrow()
+                .artifact_identities
+                .iter()
+                .map(|identity| {
+                    runmat_types::ForeignArtifactIdentity::new(identity.clone())
+                        .expect("installed Python artifact identities are canonical")
+                })
+                .collect(),
             supports_wasm: false,
             supports_host_bridge: false,
             execution_stack: runmat_types::ExecutionStackRequirement::Process,

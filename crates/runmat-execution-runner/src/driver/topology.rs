@@ -93,6 +93,9 @@ impl Driver {
     }
 
     pub(super) fn register_worker(&mut self, spec: WorkerSpec) -> RunnerResult<()> {
+        spec.host.validate().map_err(|error| {
+            RunnerError::Invalid(format!("worker host inventory is invalid: {error}"))
+        })?;
         let pool = self.pool_mut(spec.pool_id)?;
         if pool.workers.len() >= pool.spec.max_workers as usize {
             return Err(RunnerError::Invalid(format!(
@@ -164,6 +167,19 @@ impl Driver {
         submission.request.resources.validate().map_err(|error| {
             RunnerError::Invalid(format!("task resource request is invalid: {error}"))
         })?;
+        submission.request.host.validate().map_err(|error| {
+            RunnerError::Invalid(format!("task host requirement is invalid: {error}"))
+        })?;
+        for input in &submission.request.inputs {
+            input
+                .validate_for_transport(
+                    runmat_execution::value::ValueLimits::default(),
+                    runmat_execution::value::ValueTransportContext::Portable,
+                )
+                .map_err(|error| {
+                    RunnerError::Invalid(format!("task input is not portable: {error}"))
+                })?;
+        }
         if !self
             .snapshot
             .cancellation
@@ -188,11 +204,24 @@ impl Driver {
             .pools
             .get(&submission.request.pool_id)
             .ok_or(RunnerError::UnknownPool(submission.request.pool_id))?;
-        if !crate::scheduler::fits(
+        if !crate::scheduler::scalar_resources_fit(
             &pool.spec.resource_limit,
             &Default::default(),
             &submission.request.resources,
-        ) {
+        ) || (!pool.workers.is_empty()
+            && !pool.workers.values().any(|worker| {
+                submission
+                    .request
+                    .host
+                    .is_satisfied_by(&worker.spec.host)
+                    .is_ok()
+                    && crate::scheduler::fits(
+                        &worker.spec.resources,
+                        &Default::default(),
+                        &submission.request.resources,
+                    )
+            }))
+        {
             return Err(RunnerError::Invalid(
                 "task resource request cannot be satisfied by the target pool".into(),
             ));

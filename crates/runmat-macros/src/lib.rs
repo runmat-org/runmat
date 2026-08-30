@@ -52,6 +52,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     let mut process_execution_stack = false;
+    let mut required_capabilities: Vec<String> = Vec::new();
     for arg in args {
         match arg {
             NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) => {
@@ -101,6 +102,22 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                         }
                     } else {
                         panic!("execution_stack must be a string literal");
+                    }
+                } else if path.is_ident("capabilities") {
+                    if let Lit::Str(value) = lit {
+                        required_capabilities.extend(
+                            value
+                                .value()
+                                .split(|character: char| {
+                                    character == ','
+                                        || character == '|'
+                                        || character.is_ascii_whitespace()
+                                })
+                                .filter(|value| !value.is_empty())
+                                .map(str::to_ascii_lowercase),
+                        );
+                    } else {
+                        panic!("capabilities must be a string literal");
                     }
                 } else if path.is_ident("builtin_path") {
                     if let Lit::Str(ls) = lit {
@@ -409,6 +426,25 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote! { runmat_builtins::ExecutionStackRequirement::Any }
     };
+    let required_capability_tokens =
+        required_capabilities
+            .iter()
+            .map(|capability| match capability.as_str() {
+                "host_runtime" => quote! { runmat_types::CapabilityRequirement::HostRuntime },
+                "filesystem" => quote! { runmat_types::CapabilityRequirement::Filesystem },
+                "network" => quote! { runmat_types::CapabilityRequirement::Network },
+                "user_interface" => quote! { runmat_types::CapabilityRequirement::UserInterface },
+                "accelerator" => quote! { runmat_types::CapabilityRequirement::Accelerator },
+                "native_code" => quote! { runmat_types::CapabilityRequirement::NativeCode },
+                "foreign_runtime" => quote! { runmat_types::CapabilityRequirement::ForeignRuntime },
+                "parallel_runtime" => {
+                    quote! { runmat_types::CapabilityRequirement::ParallelRuntime }
+                }
+                "distributed_runtime" => {
+                    quote! { runmat_types::CapabilityRequirement::DistributedRuntime }
+                }
+                other => panic!("unknown builtin capability {other:?}"),
+            });
     let descriptor_expr = if let Some(path) = descriptor_path.as_ref() {
         quote! { Some(&#path) }
     } else {
@@ -446,6 +482,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #suppress_auto_output_bool,
         )
         .with_execution_stack(#execution_stack_expr)
+        .with_required_capabilities(&[#(#required_capability_tokens),*])
         .with_descriptor_option(#descriptor_expr)
         .with_extensions(#extensions_expr)
         .with_integer_capabilities(#integer_capabilities_expr)

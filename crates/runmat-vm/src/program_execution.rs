@@ -72,6 +72,9 @@ pub fn materialize_deferred_call(
         .program_revision
         .clone()
         .unwrap_or_else(|| captured_program_revision(program));
+    let accelerators =
+        runmat_execution::resource::accelerator_requirements_for_capabilities(&call.capabilities)
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
     let recipe = ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision,
@@ -79,6 +82,8 @@ pub fn materialize_deferred_call(
         outputs,
         execution_mode: "interpreter".into(),
         target,
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators,
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
@@ -227,7 +232,72 @@ async fn execute_program_request_in_context(
                 }
             }
         };
+    let capabilities = match callable_capabilities(&registry, &request.callable) {
+        Ok(capabilities) => capabilities,
+        Err(message) => return ProgramExecutionResponse::Failure { message },
+    };
+    if !recipe_supports_capabilities(&request.recipe, &capabilities) {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected a recipe that weakens callable accelerator requirements"
+                .into(),
+        };
+    }
     execute_function_request(&request, &registry, &runtime).await
+}
+
+fn recipe_supports_capabilities(
+    recipe: &ProgramBuildRecipe,
+    capabilities: &runmat_types::CapabilitySet,
+) -> bool {
+    runmat_execution::resource::accelerator_requirements_for_capabilities(capabilities).is_ok_and(
+        |required| {
+            runmat_execution::resource::accelerator_requests_satisfy_requirements(
+                &recipe.accelerators,
+                &required,
+            )
+        },
+    )
+}
+
+fn callable_capabilities(
+    registry: &crate::FunctionRegistry,
+    callable: &ProgramCallable,
+) -> Result<runmat_types::CapabilitySet, String> {
+    let function = |id: ProgramFunctionId| {
+        usize::try_from(id.0)
+            .ok()
+            .map(runmat_hir::FunctionId)
+            .and_then(|id| registry.get(id))
+    };
+    match callable {
+        ProgramCallable::Semantic { function: id, .. } => function(*id)
+            .map(|function| function.capabilities.clone())
+            .ok_or_else(|| "worker could not resolve callable requirements".into()),
+        ProgramCallable::Builtin { name } if runmat_builtins::builtin_name_is_known(name) => {
+            Ok(runmat_builtins::builtin_required_capabilities(name))
+        }
+        ProgramCallable::Builtin { .. } => {
+            Err("worker could not resolve builtin requirements".into())
+        }
+        ProgramCallable::ParallelRegion { region } => function(region.0.function)
+            .and_then(|function| {
+                function
+                    .parfor_regions
+                    .iter()
+                    .find(|candidate| candidate.contract.id == *region)
+            })
+            .map(|region| region.contract.capabilities.clone())
+            .ok_or_else(|| "worker could not resolve parfor region requirements".into()),
+        ProgramCallable::SpmdRegion { region } => function(region.0.function)
+            .and_then(|function| {
+                function
+                    .spmd_regions
+                    .iter()
+                    .find(|candidate| candidate.contract.id == *region)
+            })
+            .map(|region| region.contract.capabilities.clone())
+            .ok_or_else(|| "worker could not resolve SPMD region requirements".into()),
+    }
 }
 
 async fn execute_spmd_region_request(
@@ -279,6 +349,11 @@ async fn execute_spmd_region_request(
             message: "worker could not find the requested SPMD region in its exact program".into(),
         };
     };
+    if !recipe_supports_capabilities(&request.recipe, &executable.contract.capabilities) {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected a recipe that weakens SPMD accelerator requirements".into(),
+        };
+    }
     if usize::from(request.requested_outputs) != executable.outputs.len() {
         return ProgramExecutionResponse::Failure {
             message: "SPMD task output count differs from its compiler-bound region".into(),
@@ -410,6 +485,11 @@ async fn execute_parallel_region_request(
                 .into(),
         };
     };
+    if !recipe_supports_capabilities(&request.recipe, &executable.contract.capabilities) {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected a recipe that weakens parfor accelerator requirements".into(),
+        };
+    }
     let mut arguments = match request
         .arguments
         .iter()
@@ -695,7 +775,7 @@ mod tests {
         ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
     };
 
-    use super::execute_program_request;
+    use super::{execute_program_request, recipe_supports_capabilities};
     use crate::{Bytecode, Instr};
 
     #[test]
@@ -727,6 +807,8 @@ mod tests {
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("portable-script-test"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
@@ -777,6 +859,8 @@ mod tests {
             },
             execution_mode: "meshing".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("portable-meshing-host-v2"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
@@ -806,5 +890,46 @@ mod tests {
                 message: "meshing workloads require a meshing-capable execution host".into(),
             }
         );
+    }
+
+    #[test]
+    fn worker_requires_the_recipe_to_cover_typed_callable_capabilities() {
+        let revision = ProgramRevision::new(
+            Digest::sha256(b"capability-graph"),
+            Digest::sha256(b"capability-source"),
+            ProgramEnvironment::new(
+                1,
+                1,
+                Digest::sha256(b"runtime"),
+                Digest::sha256(b"catalog"),
+                "matlab",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut recipe = ProgramBuildRecipe {
+            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+            program_revision: revision,
+            entrypoint: "accelerated".into(),
+            outputs: OutputContract {
+                requested_outputs: 1,
+            },
+            execution_mode: "interpreter".into(),
+            target: runmat_execution_artifact::ProgramTarget::portable("capability-test"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
+            features: Default::default(),
+            compile_options: Default::default(),
+            source_objects: Vec::new(),
+            expected_artifact_id: None,
+        };
+        let capabilities = runmat_types::CapabilitySet(std::collections::BTreeSet::from([
+            runmat_types::CapabilityRequirement::Accelerator,
+        ]));
+
+        assert!(!recipe_supports_capabilities(&recipe, &capabilities));
+        recipe.accelerators =
+            vec![runmat_execution::resource::AcceleratorRequest::generic_compute(1).unwrap()];
+        assert!(recipe_supports_capabilities(&recipe, &capabilities));
     }
 }

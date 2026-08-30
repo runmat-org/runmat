@@ -270,6 +270,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 },
                 retry: runmat_execution::RetryPolicy::Never,
                 program_revision: call.program_revision.clone(),
+                capabilities: call.capabilities.clone(),
                 program: Some(call.program.clone()),
             };
             let (callable, invocation_context, recipe, artifact, inputs) =

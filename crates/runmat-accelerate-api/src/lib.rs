@@ -23,11 +23,31 @@ type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(&GpuTensorHandle);
 type SequenceThresholdFn = fn() -> Option<usize>;
 type WorkgroupSizeHintFn = fn() -> Option<u32>;
+type ExecutionProviderAuthorizer = fn(&dyn AccelProvider) -> ExecutionProviderAuthorization;
 
 static RESIDENCY_MARK: OnceCell<ResidencyMarkFn> = OnceCell::new();
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
 static WORKGROUP_SIZE_HINT_PROVIDER: OnceCell<WorkgroupSizeHintFn> = OnceCell::new();
+static EXECUTION_PROVIDER_AUTHORIZER: OnceCell<ExecutionProviderAuthorizer> = OnceCell::new();
+
+/// Scheduler authorization state for one process-local acceleration provider.
+/// Direct sessions are unrestricted. Scheduled invocations explicitly allow
+/// or deny providers from their fenced device assignment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExecutionProviderAuthorization {
+    Unrestricted,
+    Allowed,
+    Denied,
+}
+
+/// Installs the runtime-owned provider authorization policy. Provider
+/// discovery remains in this crate; invocation and lease authority remain in
+/// the runtime. The callback connects those domains without a dependency
+/// cycle.
+pub fn register_execution_provider_authorizer(authorizer: ExecutionProviderAuthorizer) {
+    let _ = EXECUTION_PROVIDER_AUTHORIZER.set(authorizer);
+}
 
 pub type GpuHandleIdentity = (u32, u64);
 
@@ -1757,6 +1777,17 @@ pub trait AccelProvider: Send + Sync {
     /// mandatory floating-point transfer boundary.
     fn capability_snapshot(&self) -> ProviderCapabilitySnapshot {
         ProviderCapabilitySnapshot::conservative(self)
+    }
+
+    /// Returns a validated cluster-facing device description when this
+    /// provider can execute remotely scheduled accelerator work. Providers
+    /// opt in explicitly, so host-only compatibility providers are never
+    /// advertised as hardware accelerators.
+    fn execution_accelerator_device(
+        &self,
+        _inventory_epoch: u64,
+    ) -> anyhow::Result<Option<runmat_execution::resource::AcceleratorDevice>> {
+        Ok(None)
     }
 
     /// Determines whether a representation-specific operation can execute
@@ -3768,13 +3799,34 @@ pub unsafe fn register_device_provider(provider: &'static dyn AccelProvider) {
 }
 
 pub fn provider() -> Option<&'static dyn AccelProvider> {
-    if let Some(p) = current_thread_provider() {
+    if let Some(p) = current_thread_provider().filter(|provider| provider_is_authorized(*provider))
+    {
         return Some(p);
     }
-    GLOBAL_PROVIDER
+    if let Some(provider) = GLOBAL_PROVIDER
         .read()
         .ok()
         .and_then(|guard| guard.as_ref().copied())
+        .filter(|provider| provider_is_authorized(*provider))
+    {
+        return Some(provider);
+    }
+    PROVIDER_REGISTRY.read().ok().and_then(|providers| {
+        providers
+            .iter()
+            // Registry-only providers (for example a native CUDA extension
+            // provider beside ambient WGPU) become the default only when a
+            // scheduled assignment names them. Direct sessions retain the
+            // established ambient-provider policy.
+            .filter(|(_, provider)| {
+                matches!(
+                    provider_authorization(**provider),
+                    ExecutionProviderAuthorization::Allowed
+                )
+            })
+            .min_by_key(|(device_id, _)| **device_id)
+            .map(|(_, provider)| *provider)
+    })
 }
 
 /// Clear the active provider selection without invalidating providers that own live handles.
@@ -3796,19 +3848,35 @@ pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider>
         .ok()
         .and_then(|guard| guard.get(&device_id).copied())
     {
-        return Some(registered);
+        return provider_is_authorized(registered).then_some(registered);
     }
     if let Some(thread_provider) = current_thread_provider() {
         if thread_provider.device_id() == device_id {
-            return Some(thread_provider);
+            return provider_is_authorized(thread_provider).then_some(thread_provider);
         }
     }
     // Preserve legacy behavior: when no explicit per-device registration exists,
     // fall back to the globally active provider regardless of handle device id.
-    GLOBAL_PROVIDER
+    let fallback = GLOBAL_PROVIDER
         .read()
         .ok()
-        .and_then(|guard| guard.as_ref().copied())
+        .and_then(|guard| guard.as_ref().copied());
+    fallback.filter(|provider| {
+        matches!(
+            provider_authorization(*provider),
+            ExecutionProviderAuthorization::Unrestricted
+        )
+    })
+}
+
+/// Returns every addressable provider in deterministic process-local order.
+/// Provider registration guarantees that these references remain valid for
+/// the process lifetime.
+pub fn registered_providers() -> Vec<&'static dyn AccelProvider> {
+    PROVIDER_REGISTRY
+        .read()
+        .map(|providers| providers.values().copied().collect())
+        .unwrap_or_default()
 }
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
@@ -3821,18 +3889,47 @@ pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn Acce
 /// deterministic by provider device id, allowing a native extension backend
 /// to coexist with a different ambient placement provider.
 pub fn provider_for_native_device(api: NativeDeviceApi) -> Option<&'static dyn AccelProvider> {
-    if let Some(selected) =
-        current_thread_provider().filter(|provider| provider.native_device_api() == Some(api))
-    {
+    if let Some(selected) = current_thread_provider().filter(|provider| {
+        provider.native_device_api() == Some(api) && provider_is_authorized(*provider)
+    }) {
         return Some(selected);
     }
     PROVIDER_REGISTRY.read().ok().and_then(|providers| {
         providers
             .iter()
-            .filter(|(_, provider)| provider.native_device_api() == Some(api))
+            .filter(|(_, provider)| {
+                provider.native_device_api() == Some(api) && provider_is_authorized(**provider)
+            })
             .min_by_key(|(device_id, _)| **device_id)
             .map(|(_, provider)| *provider)
     })
+}
+
+/// Returns whether a process-local provider advertises the exact device
+/// contract named by a scheduler lease.
+pub fn provider_matches_execution_lease(
+    provider: &(impl AccelProvider + ?Sized),
+    lease: &runmat_execution::resource::AcceleratorDeviceLease,
+) -> bool {
+    provider
+        .execution_accelerator_device(lease.inventory_epoch)
+        .ok()
+        .flatten()
+        .is_some_and(|device| lease.matches_device(&device))
+}
+
+fn provider_authorization(provider: &dyn AccelProvider) -> ExecutionProviderAuthorization {
+    EXECUTION_PROVIDER_AUTHORIZER
+        .get()
+        .map(|authorizer| authorizer(provider))
+        .unwrap_or(ExecutionProviderAuthorization::Unrestricted)
+}
+
+fn provider_is_authorized(provider: &dyn AccelProvider) -> bool {
+    !matches!(
+        provider_authorization(provider),
+        ExecutionProviderAuthorization::Denied
+    )
 }
 
 pub fn spawn_handle_concurrency_for(handle: &GpuTensorHandle) -> Option<SpawnHandleConcurrency> {

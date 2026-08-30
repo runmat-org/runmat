@@ -1,8 +1,8 @@
-use runmat_execution::identity::{AttemptId, WorkerId};
+use runmat_execution::identity::AttemptId;
 use runmat_execution::state::{AttemptState, TaskState};
 use runmat_execution::TaskId;
 
-use crate::scheduler::{self, QueueEntry};
+use crate::scheduler::{self, PlacementCandidate, QueueEntry};
 use crate::task::{AttemptRecord, AttemptRequest};
 use crate::{RunnerError, RunnerResult};
 
@@ -41,7 +41,7 @@ impl Driver {
                         .map(|worker| (*entry, worker))
                 })
             });
-            let Some((entry, worker_id)) = placement else {
+            let Some((entry, placement)) = placement else {
                 return Ok(());
             };
             if entry.priority == priority {
@@ -49,24 +49,23 @@ impl Driver {
             } else {
                 self.snapshot.fairness.record(entry.priority);
             }
-            self.assign(entry, worker_id, actions)?;
+            self.assign(entry, placement, actions)?;
         }
     }
 
-    fn placement_for(&self, task_id: TaskId) -> Option<WorkerId> {
+    fn placement_for(&self, task_id: TaskId) -> Option<PlacementCandidate> {
         let task = self.snapshot.tasks.get(&task_id)?;
         let pool = self.snapshot.pools.get(&task.submission.request.pool_id)?;
         if !pool.accepts_work() || !pool.fits(&task.submission.request.resources) {
             return None;
         }
-        scheduler::choose_worker(pool.workers.values(), &task.submission.request.resources)
-            .map(|candidate| candidate.worker_id)
+        scheduler::choose_worker(pool.workers.values(), &task.submission.request)
     }
 
     fn assign(
         &mut self,
         entry: QueueEntry,
-        worker_id: WorkerId,
+        placement: PlacementCandidate,
         actions: &mut Vec<DriverAction>,
     ) -> RunnerResult<()> {
         let task = self
@@ -86,25 +85,36 @@ impl Driver {
             ordinal_bytes.as_slice(),
             fence.as_slice(),
         ]);
+        let resource_assignment = scheduler::assignment_for(
+            attempt_id,
+            self.snapshot.driver_fence,
+            &placement.accelerator_devices,
+        )?;
         let request = AttemptRequest {
             id: attempt_id,
             task_id: entry.task_id,
             scope_id: task.submission.request.scope_id,
-            worker_id,
+            worker_id: placement.worker_id,
             ordinal,
             driver_fence: self.snapshot.driver_fence,
+            resource_assignment,
             task: task.submission.request.clone(),
         };
+        request.validate()?;
         task.state = TaskState::Assigned;
         task.active_attempt = Some(attempt_id);
         self.snapshot.ready.remove_task(entry.task_id);
         let pool = self.pool_mut(request.task.pool_id)?;
-        scheduler::reserve(&mut pool.allocated, &request.task.resources)?;
+        scheduler::reserve_scalar(&mut pool.allocated, &request.task.resources)?;
         let worker = pool
             .workers
-            .get_mut(&worker_id)
-            .ok_or(RunnerError::UnknownWorker(worker_id))?;
-        scheduler::reserve(&mut worker.allocated, &request.task.resources)?;
+            .get_mut(&placement.worker_id)
+            .ok_or(RunnerError::UnknownWorker(placement.worker_id))?;
+        scheduler::reserve(
+            &mut worker.allocated,
+            &request.task.resources,
+            &request.resource_assignment,
+        )?;
         worker.active_attempts = worker.active_attempts.saturating_add(1);
         pool.active_attempts = pool.active_attempts.saturating_add(1);
         self.snapshot.attempts.insert(
@@ -120,7 +130,7 @@ impl Driver {
         self.emit(DriverEventKind::AttemptAssigned {
             task_id: entry.task_id,
             attempt_id,
-            worker_id,
+            worker_id: placement.worker_id,
         });
         actions.push(DriverAction::Launch(request));
         Ok(())

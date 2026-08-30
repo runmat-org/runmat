@@ -29,7 +29,7 @@ pub trait ForeignAdapter {
 #[derive(Clone)]
 pub struct ForeignRuntime {
     handles: ForeignHandleRegistry,
-    adapters: Rc<RefCell<BTreeMap<String, Rc<dyn ForeignAdapter>>>>,
+    adapters: Rc<RefCell<BTreeMap<runmat_types::ForeignAdapterId, Rc<dyn ForeignAdapter>>>>,
     platform: ForeignPlatform,
     telemetry: Rc<dyn ForeignTelemetrySink>,
 }
@@ -66,9 +66,28 @@ impl ForeignRuntime {
         &self.handles
     }
 
+    pub fn execution_host_inventory(&self) -> Vec<runmat_execution::host::ForeignAdapterInventory> {
+        self.adapters
+            .borrow()
+            .values()
+            .map(|adapter| {
+                let descriptor = adapter.descriptor();
+                runmat_execution::host::ForeignAdapterInventory {
+                    adapter: descriptor.adapter,
+                    version: descriptor.version,
+                    capabilities: runmat_types::CapabilitySet(descriptor.capabilities),
+                    foreign_capabilities: descriptor.foreign_capabilities,
+                    execution_stack: descriptor.execution_stack,
+                    supports_wasm: descriptor.supports_wasm,
+                    supports_host_bridge: descriptor.supports_host_bridge,
+                }
+            })
+            .collect()
+    }
+
     pub fn register_adapter(&self, adapter: Rc<dyn ForeignAdapter>) -> Result<(), RuntimeError> {
         let descriptor = adapter.descriptor();
-        if descriptor.adapter.trim().is_empty() || descriptor.version == 0 {
+        if descriptor.version == 0 {
             return Err(foreign_error(
                 ForeignErrorKind::AdapterUnavailable,
                 "foreign adapter identity must be non-empty and its version must be non-zero",
@@ -106,7 +125,7 @@ impl ForeignRuntime {
                 .get(adapter)
                 .is_some_and(|adapter| adapter.is_isolated());
             self.telemetry.record(ForeignTelemetryEvent {
-                adapter: adapter.clone(),
+                adapter: adapter.to_string(),
                 operation: "manifest_admission".into(),
                 capability: None,
                 isolated,
@@ -129,7 +148,7 @@ impl RuntimeForeignService for ForeignRuntime {
     }
 
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
-        let adapter = self.adapters.borrow().get(&call.adapter).cloned();
+        let adapter = self.adapters.borrow().get(call.adapter.as_str()).cloned();
         let telemetry = Rc::clone(&self.telemetry);
         Box::pin(async move {
             let adapter = adapter.ok_or_else(|| {
@@ -163,7 +182,7 @@ impl RuntimeForeignService for ForeignRuntime {
             let operation = call.symbol.clone();
             let result = context.scope(adapter.invoke(context.clone(), call)).await;
             telemetry.record(ForeignTelemetryEvent {
-                adapter: descriptor.adapter,
+                adapter: descriptor.adapter.to_string(),
                 operation,
                 capability: Some(runmat_types::ForeignCapability::Invoke),
                 isolated,
@@ -195,7 +214,7 @@ mod tests {
     impl ForeignAdapter for ProcessStackAdapter {
         fn descriptor(&self) -> ForeignAdapterDescriptor {
             ForeignAdapterDescriptor {
-                adapter: "process-stack-test".into(),
+                adapter: runmat_types::ForeignAdapterId::new("process-stack-test").unwrap(),
                 version: 1,
                 capabilities: BTreeSet::from([CapabilityRequirement::ForeignRuntime]),
                 foreign_capabilities: BTreeSet::from([ForeignCapability::Invoke]),

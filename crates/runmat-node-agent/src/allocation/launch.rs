@@ -35,6 +35,7 @@ impl AllocationProcesses {
         sandbox: &Sandbox,
         server_url: &str,
         bootstrap: &WorkerBootstrapCredential,
+        host: &runmat_execution::host::ExecutionHostInventory,
     ) -> AgentResult<u32> {
         use base64::Engine as _;
 
@@ -91,7 +92,13 @@ impl AllocationProcesses {
             ),
             (
                 "RUNMAT_EXECUTION_WORKER_RESOURCES",
-                serde_json::to_string(&allocation.resources)?,
+                serde_json::to_string(
+                    &runmat_execution_transport_native::control::AllocatedResources {
+                        request: allocation.resources.clone(),
+                        accelerator_devices: allocation.accelerator_devices.clone(),
+                        host: host.clone(),
+                    },
+                )?,
             ),
             (
                 "RUNMAT_EXECUTION_ENDPOINT_IDENTITY_FILE",

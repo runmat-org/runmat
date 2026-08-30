@@ -56,6 +56,19 @@ pub(crate) fn infer_mir_call(
 
     if let Some(name) = static_name(call) {
         if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&name) {
+            if matches!(
+                entry.contract.maturity,
+                runmat_builtins::BuiltinContractMaturity::LegacyResolver
+            ) {
+                if let Some(mut inference) = super::infer_legacy_builtin(&name, &request) {
+                    inference.effects.0.extend(entry.contract.effect_set().0);
+                    inference
+                        .capabilities
+                        .0
+                        .extend(entry.contract.capability_set().0);
+                    return inference;
+                }
+            }
             return runmat_builtins::infer_catalog_call(entry, &request);
         }
         if let Some(inference) = super::infer_legacy_builtin(&name, &request) {
@@ -74,7 +87,7 @@ pub(crate) fn infer_mir_call(
                     maximum_outputs: (callable.outputs_complete && !callable.variadic_outputs)
                         .then_some(output_count),
                     effects: Default::default(),
-                    capabilities: Default::default(),
+                    capabilities: callable.capabilities,
                     dynamic_reason: (!callable.outputs_complete || callable.variadic_outputs)
                         .then_some(DynamicReason::RuntimeValue),
                 },
@@ -129,6 +142,8 @@ fn operand_fact(
             };
             ValueFact::scalar(ValueKindFact::Callable(runmat_types::CallableFact {
                 identity: Some(identity.clone()),
+                capabilities: summary
+                    .map_or_else(Default::default, |summary| summary.capabilities.clone()),
                 parameters: Vec::new(),
                 parameters_complete: false,
                 outputs: summary.map_or_else(Vec::new, |summary| summary.outputs.clone()),

@@ -266,7 +266,8 @@ mod tests {
 
     use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::{
-        ExecutableForm, ExecutionBundleBuilder, LogicalObject, ObjectNamespace, ProgramBuildRecipe,
+        ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, LogicalObject,
+        ObjectNamespace, ProgramBuildRecipe,
     };
     use runmat_mex::{
         MexArtifactManifest, MexBuild, MEX_ARTIFACT_MANIFEST_MEDIA_TYPE, MEX_MODULE_MEDIA_TYPE,
@@ -318,6 +319,8 @@ mod tests {
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("portable"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),
@@ -418,7 +421,21 @@ mod tests {
             java_bytes.clone(),
         )
         .unwrap();
-        let python_bundle = runmat_python::PythonArtifactBundle::empty();
+        let python_bundle = runmat_python::PythonArtifactBundle::new(
+            runmat_python::PythonEnvironmentIdentity {
+                implementation: "cpython".into(),
+                version: runmat_python::PythonVersion {
+                    major: 3,
+                    minor: 12,
+                    patch: 0,
+                },
+                abi_tag: "cp312".into(),
+                platform_tag: "fixture".into(),
+                execution_mode: runmat_python::PythonExecutionMode::OutOfProcess,
+            },
+            Vec::new(),
+        )
+        .unwrap();
         let python = LogicalObject::new(
             ObjectNamespace::ForeignArtifact,
             "python/artifacts.json",
@@ -443,6 +460,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let mex_module_bytes = std::fs::read(&mex_output.module).unwrap();
         let mex_manifest = MexArtifactManifest::from_canonical_bytes(&mex_manifest_bytes).unwrap();
         let mex_identity = mex_manifest.identity.to_string();
+        let native_target = runmat_native_codegen::NativeTarget::current()
+            .execution_identity()
+            .unwrap();
+        let native_object_format = native_target.object_format;
         let mex_root = format!("mex/{mex_identity}");
         let mex_filename = mex_output.module.file_name().unwrap().to_string_lossy();
         let mex_sidecar = LogicalObject::new(
@@ -459,6 +480,78 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             mex_module_bytes.clone(),
         )
         .unwrap();
+        let java_adapter =
+            runmat_types::ForeignAdapterId::new(runmat_java::JAVA_ADAPTER_ID).unwrap();
+        let java_artifact =
+            runmat_types::ForeignArtifactIdentity::new(java_identity.to_string()).unwrap();
+        let java_interop = runmat_types::InteropManifest {
+            schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+            foreign_types: Vec::new(),
+            adapters: vec![runmat_types::ForeignAdapterRequirement {
+                adapter: java_adapter.clone(),
+                minimum_version: runmat_java::JAVA_ADAPTER_VERSION,
+                capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+                    runmat_types::CapabilityRequirement::ForeignRuntime,
+                ])),
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                artifact_identities: vec![java_artifact.clone()],
+            }],
+            adapter_contracts: Vec::new(),
+        };
+        let python_adapter =
+            runmat_types::ForeignAdapterId::new(runmat_python::PYTHON_ADAPTER_ID).unwrap();
+        let python_artifacts = python_bundle
+            .artifact_identities()
+            .into_iter()
+            .map(runmat_types::ForeignArtifactIdentity::new)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let python_interop = runmat_types::InteropManifest {
+            schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+            foreign_types: Vec::new(),
+            adapters: vec![runmat_types::ForeignAdapterRequirement {
+                adapter: python_adapter.clone(),
+                minimum_version: runmat_python::PYTHON_ADAPTER_VERSION,
+                capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+                    runmat_types::CapabilityRequirement::ForeignRuntime,
+                ])),
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                artifact_identities: python_artifacts.clone(),
+            }],
+            adapter_contracts: Vec::new(),
+        };
+        let interop = runmat_types::InteropManifest::merge([
+            manifest.interop_manifest(),
+            mex_manifest.interop_manifest(),
+            java_interop,
+            python_interop,
+        ])
+        .unwrap();
+        let mut closures = vec![
+            ForeignArtifactClosure::new(
+                runmat_types::ForeignAdapterId::new(runmat_native_ffi::NATIVE_FFI_ADAPTER_ID)
+                    .unwrap(),
+                runmat_types::ForeignArtifactIdentity::new(identity.as_str()).unwrap(),
+                vec![sidecar.descriptor.digest, library.descriptor.digest],
+            )
+            .unwrap(),
+            ForeignArtifactClosure::new(java_adapter, java_artifact, vec![java.descriptor.digest])
+                .unwrap(),
+            ForeignArtifactClosure::new(
+                runmat_types::ForeignAdapterId::new(runmat_mex::MEX_ADAPTER_ID).unwrap(),
+                runmat_types::ForeignArtifactIdentity::new(mex_identity.as_str()).unwrap(),
+                vec![mex_sidecar.descriptor.digest, mex_module.descriptor.digest],
+            )
+            .unwrap(),
+        ];
+        closures.extend(python_artifacts.into_iter().map(|artifact| {
+            ForeignArtifactClosure::new(
+                python_adapter.clone(),
+                artifact,
+                vec![python.descriptor.digest],
+            )
+            .unwrap()
+        }));
         let recipe = ProgramBuildRecipe {
             schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision.clone(),
@@ -467,54 +560,29 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 requested_outputs: 1,
             },
             execution_mode: "compiled".into(),
-            target: runmat_execution_artifact::ProgramTarget::native(
-                "host",
-                runmat_execution_artifact::NativeTargetIdentity {
-                    architecture: std::env::consts::ARCH.into(),
-                    operating_system: std::env::consts::OS.into(),
-                    pointer_width: usize::BITS as u16,
-                    abi: std::env::consts::FAMILY.into(),
-                    object_format: if cfg!(target_os = "macos") {
-                        "mach-o"
-                    } else if cfg!(windows) {
-                        "coff"
-                    } else {
-                        "elf"
-                    }
-                    .into(),
-                },
-            ),
+            target: runmat_execution_artifact::ProgramTarget::native("host", native_target),
+            interop,
+            accelerators: Vec::new(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),
             expected_artifact_id: None,
         };
-        let bundle = ExecutionBundleBuilder::native(&project, revision)
+        let mut builder = ExecutionBundleBuilder::native(&project, revision)
             .unwrap()
-            .with_compiled_package_closure()
-            .with_foreign_artifact(sidecar)
-            .unwrap()
-            .with_foreign_artifact(library)
-            .unwrap()
-            .with_foreign_artifact(java)
-            .unwrap()
-            .with_foreign_artifact(python)
-            .unwrap()
-            .with_foreign_artifact(mex_sidecar)
-            .unwrap()
-            .with_foreign_artifact(mex_module)
-            .unwrap()
+            .with_compiled_package_closure();
+        for object in [sidecar, library, java, python, mex_sidecar, mex_module] {
+            builder = builder.with_foreign_object(object).unwrap();
+        }
+        for closure in closures {
+            builder = builder.with_foreign_artifact_closure(closure).unwrap();
+        }
+        let bundle = builder
             .with_materialized_program(
                 recipe,
                 ExecutableForm::NativeObjectV1,
                 runmat_execution_artifact::NativeObjectPayload::new(
-                    if cfg!(target_os = "macos") {
-                        "mach-o"
-                    } else if cfg!(windows) {
-                        "coff"
-                    } else {
-                        "elf"
-                    },
+                    native_object_format,
                     br#"{"schema_version":1}"#.to_vec(),
                     b"native object".to_vec(),
                 )

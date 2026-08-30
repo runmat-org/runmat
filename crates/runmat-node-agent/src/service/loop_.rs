@@ -7,8 +7,8 @@ use runmat_execution_transport_native::control::{
 };
 
 use crate::allocation::{
-    prepare, prepare_endpoint_identity, validate_active, validate_offer, AllocationProcesses,
-    DrainState,
+    prepare, prepare_endpoint_identity, validate_active, validate_allocation_set, validate_offer,
+    AllocationProcesses, DrainState,
 };
 use crate::enrollment::{CredentialStore, NodeCredential};
 use crate::{inventory, AgentConfig, AgentError, AgentResult};
@@ -83,7 +83,7 @@ impl NodeAgentService {
     }
 
     pub async fn reconcile_once(&mut self) -> AgentResult<()> {
-        let inventory = inventory::collect()?;
+        let inventory = inventory::collect(self.config.trust_tier)?;
         let heartbeat = self.heartbeat(inventory.clone())?;
         let status = self.control.heartbeat(heartbeat.clone()).await?;
         if status.credential_epoch != self.credential.credential_epoch {
@@ -105,6 +105,7 @@ impl NodeAgentService {
         let allocations = self.control.allocations(&heartbeat).await?;
         let now_millis = Utc::now().timestamp_millis();
         self.processes.fence_stale(&allocations, now_millis).await?;
+        validate_allocation_set(&allocations, &inventory, now_millis)?;
         let mut released_this_pass = BTreeSet::new();
         let pending = self.pending_release.iter().cloned().collect::<Vec<_>>();
         for allocation_id in pending {
@@ -189,6 +190,7 @@ impl NodeAgentService {
                             &sandbox,
                             &self.config.server_url,
                             &bootstrap,
+                            &inventory.host,
                         )
                         .await
                 }
@@ -225,7 +227,7 @@ impl NodeAgentService {
     }
 
     pub async fn rotate_credential(&mut self) -> AgentResult<()> {
-        let heartbeat = self.heartbeat(inventory::collect()?)?;
+        let heartbeat = self.heartbeat(inventory::collect(self.config.trust_tier)?)?;
         crate::enrollment::rotate(
             Arc::clone(&self.control),
             &self.store,

@@ -2612,6 +2612,41 @@ fn parfor_analysis_classifies_loop_broadcast_sliced_reduction_and_private_values
 }
 
 #[test]
+fn parallel_region_contracts_preserve_indirect_callable_capabilities() {
+    use runmat_types::CapabilityRequirement;
+
+    let parfor = analyze_assembly(&lower_mir(
+        "function output = onDevice(input); output = gpuArray(input); end; target = @onDevice; y = zeros(1, 2); parfor i = 1:2; y(i) = target(i); end;",
+    ));
+    let parfor_contract = parfor
+        .parallel
+        .parfor_regions
+        .first()
+        .expect("parfor contract");
+    assert!(parfor_contract
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::ParallelRuntime));
+    assert!(parfor_contract
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Accelerator));
+
+    let spmd = analyze_assembly(&lower_mir(
+        "function output = onDevice(input); output = gpuArray(input); end; target = @onDevice; spmd (2); y = target(1); end;",
+    ));
+    let spmd_contract = spmd.parallel.spmd_regions.first().expect("SPMD contract");
+    assert!(spmd_contract
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::ParallelRuntime));
+    assert!(spmd_contract
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Accelerator));
+}
+
+#[test]
 fn parfor_analysis_distinguishes_linear_and_dimensional_slices() {
     use runmat_types::{ParallelSliceAccess, ParallelVariableRole};
 

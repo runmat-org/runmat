@@ -81,6 +81,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             function: program_function,
             callable: CallableFact {
                 identity: Some(CallableIdentity::BoundFunction(*function)),
+                capabilities: summary.capabilities.clone(),
                 parameters: program
                     .parameters
                     .get(function)

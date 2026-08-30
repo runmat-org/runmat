@@ -10,8 +10,8 @@ pub mod program;
 
 pub use bundle::{
     BuildResourceDeclaration, BundleCallable, BundleCodeClosure, BundleManifest,
-    CompiledPackageClosure, ExecutionBundle, ExecutionBundleBuilder, ProjectRevisionRecord,
-    SourceReader, EXECUTION_BUNDLE_SCHEMA_VERSION,
+    CompiledPackageClosure, ExecutionBundle, ExecutionBundleBuilder, ForeignArtifactClosure,
+    ProjectRevisionRecord, SourceReader, EXECUTION_BUNDLE_SCHEMA_VERSION,
 };
 pub use error::{ArtifactError, ArtifactResult};
 pub use object::{LogicalObject, ObjectDescriptor, ObjectNamespace};

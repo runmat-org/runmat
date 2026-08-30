@@ -6,6 +6,7 @@ mod error;
 pub mod executable;
 pub mod gang;
 pub mod handle;
+pub mod host;
 pub mod identity;
 pub mod placement;
 pub mod protocol;
@@ -42,7 +43,9 @@ pub use identity::{
     CompositeId, DistributedObjectId, ExecutionScopeId, FutureId, GangId, JobId, PoolId, RunId,
     TaskId,
 };
-pub use identity::{Digest, DomainContribution, ProgramEnvironment, ProgramRevision};
+pub use identity::{
+    Digest, DomainContribution, LanguageCompatibilityMode, ProgramEnvironment, ProgramRevision,
+};
 pub use placement::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor,

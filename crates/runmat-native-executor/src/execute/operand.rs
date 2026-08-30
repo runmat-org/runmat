@@ -201,6 +201,7 @@ pub(super) fn evaluate_rvalue(
                     ),
                     retry: runmat_execution::RetryPolicy::Never,
                     program_revision: state.runtime.program_revision().cloned(),
+                    capabilities: native_function_capabilities(state, *function)?,
                     program,
                 })
                 .map_err(execution_service_error)?;
@@ -226,6 +227,30 @@ pub(super) fn evaluate_rvalue(
             "predeclared distributed capability rejection reached native execution".into(),
         )),
     }
+}
+
+fn native_function_capabilities(
+    state: &super::state::HostState,
+    function: runmat_hir::FunctionId,
+) -> NativeExecutorResult<runmat_types::CapabilitySet> {
+    let Some(function) = u32::try_from(function.0)
+        .ok()
+        .map(runmat_types::ProgramFunctionId)
+    else {
+        return Err(NativeExecutorError::Host(
+            "async function identity exceeds its portable representation".into(),
+        ));
+    };
+    state
+        .functions
+        .iter()
+        .find(|candidate| candidate.id == function)
+        .map(|function| function.capabilities.clone())
+        .ok_or_else(|| {
+            NativeExecutorError::Host(
+                "async callable is absent from the exact Native IR function set".into(),
+            )
+        })
 }
 
 fn execution_service_error(

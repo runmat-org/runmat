@@ -120,8 +120,21 @@ pub(super) fn classify_body(
             .filter(|block| blocks.contains(&block.id))
         {
             for (position, statement) in block.statements.iter().enumerate() {
+                let (Ok(block_id), Ok(position_id)) =
+                    (u32::try_from(block.id.0), u32::try_from(position))
+                else {
+                    continue;
+                };
+                let point = runmat_types::ProgramPointId {
+                    function,
+                    block: block_id,
+                    position: position_id,
+                };
+                let facts = store.local_facts_at(point, body.locals.len());
                 let (statement_effects, statement_capabilities) =
-                    super::super::inference::statement_contract(statement, summaries);
+                    super::super::inference::statement_contract_with_facts(
+                        statement, summaries, &facts,
+                    );
                 effects.0.extend(statement_effects.0);
                 capabilities.0.extend(statement_capabilities.0);
                 visit_statement_rvalues(statement, &mut |value| {

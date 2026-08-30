@@ -184,7 +184,9 @@ fn remote_workload_preserves_revision_result_events_and_coverage_payload() {
     let submission = submission();
     let test_id = submission.plan.tests().next().unwrap().id.clone();
     let workload = TestAttemptWorkload::new(submission, test_id.clone(), 1).unwrap();
-    let program = workload.program_request().unwrap();
+    let program = workload
+        .program_request(runmat_types::InteropManifest::empty())
+        .unwrap();
     let decoded = TestAttemptWorkload::from_program_request(&program).unwrap();
     assert_eq!(
         decoded.submission.plan.program_revision,

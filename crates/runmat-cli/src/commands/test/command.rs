@@ -182,8 +182,7 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
             runtime,
             false,
         )
-        .context("failed to prepare project foreign artifacts for remote tests")?
-        .objects;
+        .context("failed to prepare project foreign artifacts for remote tests")?;
         let backend = RemoteTestBackend::new(RemoteTestBackendConfig {
             project: args.project,
             cluster: cluster.clone(),
@@ -191,7 +190,9 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
             trust_identity,
             max_workers: jobs,
             project_handoff,
-            foreign_artifacts,
+            interop: foreign_artifacts.interop,
+            foreign_artifacts: foreign_artifacts.objects,
+            foreign_artifact_closures: foreign_artifacts.closures,
         })
         .map_err(|error| anyhow::anyhow!("failed to configure remote tests: {error}"))?;
         run_coordinator(

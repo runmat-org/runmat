@@ -2,7 +2,7 @@ use runmat_execution::{Digest, ProgramEnvironment};
 
 use crate::CompatMode;
 
-pub const PROGRAM_SEMANTIC_SCHEMA: u32 = 1;
+pub const PROGRAM_SEMANTIC_SCHEMA: u32 = 2;
 pub const PROGRAM_COMPILER_SCHEMA: u32 = 1;
 pub const PROGRAM_RUNTIME_ABI_SCHEMA: u32 = 1;
 
@@ -25,16 +25,16 @@ pub fn program_environment(compatibility_mode: CompatMode) -> ProgramEnvironment
         PROGRAM_COMPILER_SCHEMA,
         runtime_fingerprint,
         catalog_fingerprint,
-        compatibility_mode_name(compatibility_mode),
+        execution_compatibility_mode(compatibility_mode),
     )
     .expect("Core program compatibility constants are valid")
 }
 
-fn compatibility_mode_name(mode: CompatMode) -> &'static str {
+fn execution_compatibility_mode(mode: CompatMode) -> runmat_execution::LanguageCompatibilityMode {
     match mode {
-        CompatMode::RunMat => "runmat",
-        CompatMode::Matlab => "matlab",
-        CompatMode::Strict => "strict",
+        CompatMode::RunMat => runmat_execution::LanguageCompatibilityMode::RunMat,
+        CompatMode::Matlab => runmat_execution::LanguageCompatibilityMode::Matlab,
+        CompatMode::Strict => runmat_execution::LanguageCompatibilityMode::Strict,
     }
 }
 
@@ -47,7 +47,10 @@ mod tests {
         let first = program_environment(CompatMode::Matlab);
         let second = program_environment(CompatMode::Matlab);
         assert_eq!(first, second);
-        assert_eq!(first.compatibility_mode, "matlab");
+        assert_eq!(
+            first.compatibility_mode,
+            runmat_execution::LanguageCompatibilityMode::Matlab
+        );
         assert_ne!(first.runtime_fingerprint, first.catalog_fingerprint);
     }
 }

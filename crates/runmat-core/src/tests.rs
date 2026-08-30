@@ -14455,12 +14455,16 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
         foreign_types: Vec::new(),
         adapters: vec![runmat_types::ForeignAdapterRequirement {
-            adapter: "native-test".into(),
+            adapter: runmat_types::ForeignAdapterId::new("native-test").unwrap(),
             minimum_version: 1,
             capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
                 runmat_types::CapabilityRequirement::NativeCode,
             ])),
-            artifact_identities: vec!["native-test:fixture".into()],
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
+            artifact_identities: vec![runmat_types::ForeignArtifactIdentity::new(
+                "native-test:fixture",
+            )
+            .unwrap()],
         }],
         adapter_contracts: Vec::new(),
     };
@@ -14497,6 +14501,46 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         .portable_envelope_for_with_interop(None, invalid)
         .unwrap_err()
         .contains("interop.schema_version"));
+}
+
+#[test]
+fn portable_product_binds_explicit_accelerator_requirements_from_analysis() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-accelerator-manifest-test@1",
+            "accelerator_manifest.m",
+            "function output = onDevice(input)\noutput = gpuArray(input);\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile accelerator unit");
+
+    let envelope = unit
+        .portable_envelope_for(Some("onDevice"))
+        .expect("portable accelerator product");
+    assert!(envelope
+        .manifest
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::Accelerator));
+    let function = unit
+        .functions()
+        .resolve_name("onDevice")
+        .and_then(|function| unit.functions().get(function))
+        .expect("compiled function");
+    assert!(function
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::Accelerator));
+    let requests = runmat_execution::resource::accelerator_requirements_for_capabilities(
+        &envelope.manifest.capabilities,
+    )
+    .expect("typed accelerator requirements");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].class.as_str(), "gpu");
+    assert_eq!(requests[0].count, 1);
+    assert!(requests[0].provider.is_none());
 }
 
 #[test]
@@ -15452,7 +15496,7 @@ fn portable_product_derives_python_runtime_and_browser_rejection_contracts() {
         .interop
         .adapters
         .iter()
-        .any(|requirement| requirement.adapter == "python"));
+        .any(|requirement| requirement.adapter.as_str() == "python"));
 
     let error = runmat_runtime::foreign::admit_interop_manifest(
         &envelope.manifest.interop,

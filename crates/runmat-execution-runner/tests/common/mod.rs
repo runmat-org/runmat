@@ -65,6 +65,7 @@ pub fn fixture(worker_count: usize, max_in_flight: u32) -> Fixture {
                 id: worker,
                 pool_id: pool,
                 resources: inventory(),
+                host: host_inventory(),
             }))
             .unwrap();
         workers.push(worker);
@@ -106,6 +107,7 @@ pub fn task(
                     None,
                 ),
             ),
+            host: host_requirement(),
             invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: Vec::new(),
             outputs: OutputContract {
@@ -127,6 +129,53 @@ pub fn task(
         },
         dependencies: BTreeSet::new(),
         priority: 0,
+    }
+}
+
+fn host_environment() -> runmat_execution::ProgramEnvironment {
+    runmat_execution::ProgramEnvironment::new(
+        1,
+        1,
+        runmat_execution::Digest::sha256(b"runtime"),
+        runmat_execution::Digest::sha256(b"catalog"),
+        "runmat",
+    )
+    .unwrap()
+}
+
+fn host_inventory() -> runmat_execution::host::ExecutionHostInventory {
+    let environment = host_environment();
+    runmat_execution::host::ExecutionHostInventory {
+        schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+        semantic_schema: environment.semantic_schema,
+        compiler_schema: environment.compiler_schema,
+        runtime_fingerprint: environment.runtime_fingerprint,
+        catalog_fingerprint: environment.catalog_fingerprint,
+        compatibility_modes: BTreeSet::from([runmat_execution::LanguageCompatibilityMode::RunMat]),
+        target: runmat_execution::host::ExecutionHostTarget::BrowserWasm,
+        capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+            runmat_types::CapabilityRequirement::HostRuntime,
+        ])),
+        adapters: Vec::new(),
+        process_stack_available: false,
+        host_bridge_available: false,
+        trust_tier: runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+    }
+}
+
+fn host_requirement() -> runmat_execution::host::ExecutionHostRequirement {
+    runmat_execution::host::ExecutionHostRequirement {
+        schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+        environment: host_environment(),
+        native_target: None,
+        capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+            runmat_types::CapabilityRequirement::HostRuntime,
+        ])),
+        interop: runmat_types::InteropManifest::empty(),
+        execution_stack: runmat_types::ExecutionStackRequirement::Any,
+        permitted_trust_tiers: BTreeSet::from([
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+        ]),
     }
 }
 

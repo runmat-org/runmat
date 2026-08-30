@@ -35,6 +35,7 @@ pub struct MeshingExecutionContext {
     pub scope_id: ExecutionScopeId,
     pub pool_id: PoolId,
     pub program_artifact_id: ArtifactId,
+    pub host: runmat_execution::host::ExecutionHostRequirement,
     pub artifact_access: MeshingArtifactAccess,
     pub cpu_millicores: u32,
     pub maximum_egress_bytes: u64,
@@ -111,6 +112,7 @@ pub fn build_task_submission(
                     None,
                 ),
             ),
+            host: context.host.clone(),
             invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: input_roots
                 .iter()

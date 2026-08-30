@@ -108,7 +108,7 @@ impl NativeFfiAdapter {
         let released = Arc::new(ReleaseQueue::default());
         handles.register_host(ForeignHostRegistration {
             identity: host_identity.clone(),
-            adapter: NATIVE_FFI_ADAPTER_ID.into(),
+            adapter: NATIVE_FFI_ADAPTER_ID.to_string(),
             session_identity: host_identity.clone(),
             capabilities: BTreeSet::from([
                 ForeignCapability::Invoke,
@@ -1287,7 +1287,8 @@ impl ForeignAdapter for NativeFfiAdapter {
             .collect::<BTreeSet<_>>();
         artifact_identities.extend(self.prepared_artifact_identities.borrow().iter().cloned());
         ForeignAdapterDescriptor {
-            adapter: NATIVE_FFI_ADAPTER_ID.into(),
+            adapter: runmat_types::ForeignAdapterId::new(NATIVE_FFI_ADAPTER_ID)
+                .expect("the built-in native FFI adapter identity is valid"),
             version: NATIVE_FFI_ADAPTER_VERSION,
             capabilities: BTreeSet::from([
                 CapabilityRequirement::ForeignRuntime,
@@ -1300,7 +1301,13 @@ impl ForeignAdapter for NativeFfiAdapter {
                 ForeignCapability::Callback,
                 ForeignCapability::Transfer,
             ]),
-            artifact_identities,
+            artifact_identities: artifact_identities
+                .into_iter()
+                .map(|identity| {
+                    runmat_types::ForeignArtifactIdentity::new(identity)
+                        .expect("installed native interface identities are canonical")
+                })
+                .collect(),
             supports_wasm: false,
             supports_host_bridge: false,
             execution_stack: runmat_types::ExecutionStackRequirement::Process,

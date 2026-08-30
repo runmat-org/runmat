@@ -182,6 +182,14 @@ impl RemotePoolDriver {
         program.validate().map_err(|error| {
             NativeExecutionError::Protocol(format!("remote program request is invalid: {error}"))
         })?;
+        program
+            .recipe
+            .validate_resource_request(&submission.request.resources)
+            .map_err(|error| {
+                NativeExecutionError::Protocol(format!(
+                    "remote scheduler resources do not satisfy the program: {error}"
+                ))
+            })?;
         let task_id = submission.request.id;
         let (sender, receiver) = oneshot::channel();
         let progress = Arc::new(super::pool_progress::RemoteProgressBuffer::default());
@@ -339,6 +347,7 @@ impl RemotePoolDriver {
                         attempt_id: request.id,
                         worker_id: request.worker_id,
                         backend: runmat_execution::PoolBackend::Remote,
+                        resources: request.resource_assignment.clone(),
                     });
                     let transfer = this
                         .execution_objects

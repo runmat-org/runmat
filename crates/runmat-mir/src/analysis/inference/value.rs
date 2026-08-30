@@ -76,6 +76,17 @@ pub(crate) fn infer_rvalue(
                 .next()
                 .unwrap_or_else(dynamic_value)
         }
+        MirRvalue::Index { base, .. }
+            if matches!(
+                operand_fact_with_summaries(base, state, summaries).kind,
+                ValueKindFact::Callable(_)
+            ) =>
+        {
+            infer_rvalue_outputs(value, state, summaries, None, span, diagnostics)
+                .into_iter()
+                .next()
+                .unwrap_or_else(dynamic_value)
+        }
         MirRvalue::Distributed(operation) => distributed_fact(operation, state),
         MirRvalue::Collective(operation) => collective_fact(operation, state),
         MirRvalue::Range { start, step, end } => {
@@ -116,6 +127,48 @@ pub(crate) fn infer_rvalue_outputs(
     span: Span,
     diagnostics: &mut Vec<crate::MirDiagnostic>,
 ) -> Vec<ValueFact> {
+    if let MirRvalue::Index { base, .. } = value {
+        if let ValueKindFact::Callable(callable) =
+            operand_fact_with_summaries(base, state, summaries).kind
+        {
+            let requested = targets.map_or(runmat_types::RequestedOutputCount::One, |targets| {
+                runmat_types::RequestedOutputCount::Exactly(targets.targets.len())
+            });
+            let mut selection = runmat_types::OutputSelection::new(requested);
+            if let Some(targets) = targets {
+                for (index, target) in targets.targets.iter().enumerate() {
+                    if matches!(target, MirOutputTarget::Discard) {
+                        selection.discarded.insert(index);
+                    }
+                }
+            }
+            let output_count = callable.outputs.len();
+            let inference = runmat_types::infer_call(
+                &runmat_types::CallContract {
+                    outputs: callable.outputs,
+                    variadic_output: (callable.variadic_outputs || !callable.outputs_complete)
+                        .then(|| Box::new(ValueFact::unknown(DynamicReason::RuntimeValue))),
+                    maximum_outputs: (callable.outputs_complete && !callable.variadic_outputs)
+                        .then_some(output_count),
+                    effects: Default::default(),
+                    capabilities: callable.capabilities,
+                    dynamic_reason: None,
+                },
+                &runmat_types::CallRequest {
+                    arguments: Vec::new(),
+                    literals: Default::default(),
+                    outputs: selection,
+                },
+            );
+            append_inference_diagnostics(
+                &inference.diagnostics,
+                span,
+                "callable-index-contract",
+                diagnostics,
+            );
+            return inference.outputs;
+        }
+    }
     let MirRvalue::Call(call) = value else {
         let inference =
             crate::analysis::dataflow::simple_rvalue_inference(value, &state.value_facts());
@@ -175,9 +228,21 @@ fn operand_fact_with_summaries(
     state: &FlowState,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) -> ValueFact {
+    operand_fact_from_values(operand, &state.value_facts(), summaries)
+}
+
+pub(super) fn operand_fact_from_values(
+    operand: &MirOperand,
+    facts: &[Option<ValueFact>],
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> ValueFact {
     match operand {
+        MirOperand::Local(local) => facts
+            .get(local.0)
+            .and_then(Clone::clone)
+            .unwrap_or_else(dynamic_value),
+        MirOperand::Constant(constant) => crate::analysis::dataflow::constant_fact(constant),
         MirOperand::FunctionHandle(identity) => function_handle_fact(identity, summaries),
-        _ => operand_fact(operand, state),
     }
 }
 
@@ -195,6 +260,7 @@ fn function_handle_fact(
     };
     ValueFact::scalar(ValueKindFact::Callable(runmat_types::CallableFact {
         identity: Some(identity.clone()),
+        capabilities: summary.map_or_else(Default::default, |summary| summary.capabilities.clone()),
         parameters: Vec::new(),
         parameters_complete: false,
         outputs: summary.map_or_else(Vec::new, |summary| summary.outputs.clone()),

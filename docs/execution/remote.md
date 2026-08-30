@@ -36,6 +36,14 @@ The agent uses systemd on Linux, launchd on macOS, and the Windows Service Contr
 
 Use `runmat cluster nodes CLUSTER_ID` to wait for the node to become active. Hosted-node clusters use the same submission and scheduling contract; RunMat operates enrollment and service lifecycle for those nodes.
 
+## Native and Accelerator Requirements
+
+Compiled programs and packaged extensions carry their host requirements with the artifact. Native target, runtime and catalog identity, adapter ABI, process isolation, trust policy, and accelerator requirements are checked before a worker starts the program. A CUDA MEX module, for example, is admitted only when the selected worker reports a compatible CUDA provider and an available device that satisfies the module's memory and feature requirements.
+
+The scheduler leases specific devices to a worker attempt. Runtime provider selection is restricted to those leases, while kernel selection remains the responsibility of the provider on that worker. A provider with the right name but a different version or ABI does not satisfy the requirement. When CUDA and WGPU expose separate views of the same physical GPU, those views share one allocation identity, so the scheduler cannot assign the hardware to two concurrent exclusive leases.
+
+Device-resident values remain local to their node, process generation, worker attempt, provider, and device lease. Portable job inputs and results cannot contain those references. RunMat materializes or transfers a value through an explicit supported boundary instead of sending a process-local handle to another worker. Browser workers reject native-code and unsupported accelerator artifacts during admission.
+
 ## Submit Jobs and Tests
 
 Pin the endpoint identity shown for the admitted node. RunMat confirms the signed endpoint evidence before encrypting the package, program, inputs, results, detailed events, or diagnostics:

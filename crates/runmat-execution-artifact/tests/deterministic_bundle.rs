@@ -4,7 +4,7 @@ mod support;
 
 use runmat_execution_artifact::{
     archive::{read_bundle, write_bundle, ArchiveLimits},
-    ExecutableForm, ExecutionBundleBuilder, LogicalObject, ObjectNamespace,
+    ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, LogicalObject, ObjectNamespace,
 };
 
 #[test]
@@ -87,6 +87,46 @@ fn complete_executable_unit_survives_package_archive_round_trip() {
     assert_eq!(envelope.manifest.parallel.spmd_regions.len(), 1);
     assert_eq!(envelope.manifest.parallel.distributed_values.len(), 1);
     assert_eq!(envelope.manifest.parallel.collectives.len(), 1);
+}
+
+#[test]
+fn accelerator_requirements_survive_package_archive_round_trip() {
+    use runmat_execution::resource::{
+        AcceleratorClass, AcceleratorFeature, AcceleratorProvider, AcceleratorProviderId,
+        AcceleratorProviderVersion, AcceleratorRequest,
+    };
+
+    let (_temp, project, revision) = support::frozen_project();
+    let mut recipe = support::recipe(revision.clone());
+    recipe.accelerators = vec![AcceleratorRequest {
+        class: AcceleratorClass::new("gpu").unwrap(),
+        count: 1,
+        minimum_allocation_bytes: 1 << 20,
+        provider: Some(AcceleratorProvider {
+            id: AcceleratorProviderId::new("runmat.cuda").unwrap(),
+            version: AcceleratorProviderVersion::new("1.0.0").unwrap(),
+            abi_fingerprint: runmat_execution::Digest::sha256(b"cuda-native-v1"),
+        }),
+        required_features: [AcceleratorFeature::Compute].into_iter().collect(),
+    }];
+    let bundle = ExecutionBundleBuilder::native(&project, revision)
+        .unwrap()
+        .with_materialized_program(
+            recipe.clone(),
+            ExecutableForm::InterpreterBytecodeV1,
+            b"accelerated-bytecode".to_vec(),
+        )
+        .build()
+        .unwrap();
+    let mut archive = Vec::new();
+    write_bundle(&bundle, &mut archive, ArchiveLimits::default()).unwrap();
+    let decoded = read_bundle(archive.as_slice(), ArchiveLimits::default()).unwrap();
+
+    assert_eq!(
+        decoded.manifest.recipes[0].accelerators,
+        recipe.accelerators
+    );
+    assert_eq!(decoded, bundle);
 }
 
 #[test]
@@ -176,14 +216,36 @@ fn foreign_artifacts_are_exact_first_class_bundle_objects() {
         b"synthetic native library".to_vec(),
     )
     .unwrap();
+    let adapter = runmat_types::ForeignAdapterId::new("native-ffi").unwrap();
+    let identity = runmat_types::ForeignArtifactIdentity::new("native-ffi:v1:fixture").unwrap();
+    let mut recipe = support::recipe(revision.clone());
+    recipe
+        .interop
+        .adapters
+        .push(runmat_types::ForeignAdapterRequirement {
+            adapter: adapter.clone(),
+            minimum_version: 1,
+            capabilities: runmat_types::CapabilitySet::default(),
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
+            artifact_identities: vec![identity.clone()],
+        });
+    recipe.interop.validate().unwrap();
+    let closure = ForeignArtifactClosure::new(
+        adapter,
+        identity,
+        vec![sidecar.descriptor.digest, library.descriptor.digest],
+    )
+    .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
         .unwrap()
-        .with_foreign_artifact(sidecar)
+        .with_foreign_object(sidecar)
         .unwrap()
-        .with_foreign_artifact(library)
+        .with_foreign_object(library)
+        .unwrap()
+        .with_foreign_artifact_closure(closure)
         .unwrap()
         .with_materialized_program(
-            support::recipe(revision),
+            recipe,
             ExecutableForm::InterpreterBytecodeV1,
             b"canonical-bytecode".to_vec(),
         )
@@ -205,6 +267,18 @@ fn foreign_artifacts_are_exact_first_class_bundle_objects() {
         read_bundle(archive.as_slice(), ArchiveLimits::default()).unwrap(),
         bundle
     );
+
+    let mut missing_binding = bundle.clone();
+    missing_binding.manifest.foreign_artifact_closures.clear();
+    assert!(missing_binding.validate().is_err());
+
+    let mut absent_object = bundle.clone();
+    absent_object.manifest.foreign_artifact_closures[0].object_digests[0] =
+        runmat_execution::Digest::sha256(b"absent foreign object");
+    absent_object.manifest.foreign_artifact_closures[0]
+        .object_digests
+        .sort();
+    assert!(absent_object.validate().is_err());
 
     let mut tampered = bundle;
     let foreign = tampered

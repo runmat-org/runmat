@@ -1,7 +1,8 @@
 use runmat_execution::identity::{Digest, NodeLeaseId, ValueId, WorkerId};
 use runmat_execution::value::{
     DenseValue, ElementType, InlineValue, RegisteredData, RegisteredField, ResidentFence,
-    SparseValue, ValueLimits, ValuePayload, ValueRef, ValueRefKind,
+    ResidentValueAuthority, SparseValue, ValueLimits, ValuePayload, ValueRef, ValueRefKind,
+    ValueTransportContext,
 };
 
 #[test]
@@ -97,15 +98,74 @@ fn resident_values_require_and_bind_a_worker_fence() {
         .validate(ValueLimits::default())
         .is_err());
 
+    let attempt_id = runmat_execution::identity::AttemptId::derive(&[b"attempt"]);
+    let device_id = runmat_execution::resource::AcceleratorDeviceId::new("gpu-0").unwrap();
+    let inventory_epoch = 1;
+    let fencing_token = 2;
+    let worker_id = WorkerId::derive(&[b"worker"]);
+    let node_lease_id = NodeLeaseId::derive(&[b"lease"]);
+    let accelerator_lease = runmat_execution::resource::AcceleratorDeviceLease::for_attempt(
+        attempt_id,
+        fencing_token,
+        &runmat_execution::resource::AcceleratorDevice {
+            id: device_id.clone(),
+            allocation_domain: runmat_execution::resource::AcceleratorAllocationDomainId::new(
+                "allocation:test",
+            )
+            .unwrap(),
+            class: runmat_execution::resource::AcceleratorClass::new("gpu").unwrap(),
+            provider: runmat_execution::resource::AcceleratorProvider {
+                id: runmat_execution::resource::AcceleratorProviderId::new("wgpu").unwrap(),
+                version: runmat_execution::resource::AcceleratorProviderVersion::new("1").unwrap(),
+                abi_fingerprint: Digest::sha256(b"provider"),
+            },
+            max_allocation_bytes: 1024,
+            features: std::collections::BTreeSet::from([
+                runmat_execution::resource::AcceleratorFeature::Compute,
+            ]),
+            inventory_epoch,
+        },
+    )
+    .unwrap();
     reference.resident_fence = Some(ResidentFence {
-        worker_id: WorkerId::derive(&[b"worker"]),
-        node_lease_id: NodeLeaseId::derive(&[b"lease"]),
+        worker_id,
+        node_lease_id,
         process_generation: 2,
-        device_identity: Some("gpu-0".into()),
+        accelerator: Some(runmat_execution::value::ResidentAcceleratorFence {
+            attempt_id,
+            lease: accelerator_lease.clone(),
+        }),
     });
-    assert!(ValuePayload::Object(Box::new(reference.clone()))
-        .validate(ValueLimits::default())
+    let resident = ValuePayload::Object(Box::new(reference.clone()));
+    assert!(resident.validate(ValueLimits::default()).is_ok());
+    assert!(resident
+        .validate_for_transport(ValueLimits::default(), ValueTransportContext::Portable)
+        .is_err());
+    let accelerator_leases = [accelerator_lease];
+    assert!(resident
+        .validate_for_transport(
+            ValueLimits::default(),
+            ValueTransportContext::Resident(ResidentValueAuthority {
+                worker_id,
+                node_lease_id,
+                process_generation: 2,
+                attempt_id,
+                accelerator_leases: &accelerator_leases,
+            }),
+        )
         .is_ok());
+    assert!(resident
+        .validate_for_transport(
+            ValueLimits::default(),
+            ValueTransportContext::Resident(ResidentValueAuthority {
+                worker_id,
+                node_lease_id,
+                process_generation: 3,
+                attempt_id,
+                accelerator_leases: &accelerator_leases,
+            }),
+        )
+        .is_err());
 
     reference.kind = ValueRefKind::ResultObject;
     assert!(ValuePayload::Object(Box::new(reference))

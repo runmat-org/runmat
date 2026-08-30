@@ -26,7 +26,8 @@ use runmat_value::Value;
 use super::host::BrowserExecutionHost;
 use super::model::BrowserExecutionCapabilities;
 use super::resources::{
-    browser_inventory, browser_request, browser_worker_inventory, driver_error,
+    browser_accelerators, browser_execution_host_inventory, browser_inventory, browser_request,
+    browser_worker_inventory, driver_error,
 };
 use super::state::{FutureState, State, TaskRecord};
 
@@ -50,7 +51,9 @@ impl BrowserExecutionService {
         let session_nonce = uuid::Uuid::new_v4();
         let scope_id = ExecutionScopeId::derive(&[b"browser-session", session_nonce.as_bytes()]);
         let pool_id = PoolId::derive(&[scope_id.bytes(), b"browser"]);
-        let resources = browser_inventory(capabilities);
+        let accelerators = browser_accelerators()?;
+        let resources = browser_inventory(capabilities, accelerators.clone());
+        let execution_host = browser_execution_host_inventory(&accelerators)?;
         let mut driver = Driver::new(DriverConfig::default(), 1)
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         driver
@@ -76,11 +79,20 @@ impl BrowserExecutionService {
             .map_err(driver_error)?;
         for index in 0..capabilities.max_workers {
             let worker_id = WorkerId::derive(&[pool_id.bytes(), &index.to_be_bytes()]);
+            // Browser workers share one process-local WebGPU device. A single
+            // scheduler worker owns its physical allocation domain so the
+            // pool cannot lease provider views of that device concurrently.
+            let worker_accelerators = if index == 0 {
+                accelerators.clone()
+            } else {
+                Vec::new()
+            };
             driver
                 .handle(DriverCommand::RegisterWorker(WorkerSpec {
                     id: worker_id,
                     pool_id,
-                    resources: browser_worker_inventory(capabilities),
+                    resources: browser_worker_inventory(capabilities, worker_accelerators),
+                    host: execution_host.clone(),
                 }))
                 .map_err(driver_error)?;
         }
@@ -216,6 +228,7 @@ impl BrowserExecutionService {
             attempt_id: attempt.id,
             worker_id: attempt.worker_id,
             backend: self.pool_backend(),
+            resources: attempt.resource_assignment.clone(),
         });
         let weak = self.self_weak.borrow().clone();
         let host = self.host.clone();
@@ -487,6 +500,20 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             },
         );
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
+        let resources = browser_request(self.capabilities, recipe.accelerators.clone());
+        recipe
+            .validate_resource_request(&resources)
+            .map_err(|error| {
+                ExecutionServiceError::Failed(format!(
+                    "browser scheduler resources do not satisfy the program: {error}"
+                ))
+            })?;
+        let host = artifact
+            .execution_host_requirement(
+                &recipe,
+                BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
+            )
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         let actions = state
             .driver
             .handle(DriverCommand::Submit(Box::new(TaskSubmission {
@@ -499,7 +526,8 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                     invocation_context,
                     inputs: arguments,
                     outputs: future.outputs.clone(),
-                    resources: browser_request(self.capabilities),
+                    resources,
+                    host,
                     retry: call.retry,
                     deadline_unix_millis: None,
                 },
@@ -820,6 +848,7 @@ mod tests {
             ),
             retry: RetryPolicy::Never,
             program_revision: None,
+            capabilities: Default::default(),
             program: Some(program),
         }
     }

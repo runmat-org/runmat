@@ -95,9 +95,26 @@ impl ProgramArtifact {
         }
         self.target.validate_form(self.form)?;
         if let Some(envelope) = self.executable_unit()? {
-            if envelope.manifest.identity.program != recipe.program_revision {
+            if envelope.manifest.identity.program != recipe.program_revision
+                || envelope.manifest.interop != recipe.interop
+            {
                 return Err(ArtifactError::Identity(
-                    "executable unit does not match its exact program revision".into(),
+                    "executable unit does not match its exact program revision and interop manifest"
+                        .into(),
+                ));
+            }
+            let semantic_accelerators =
+                runmat_execution::resource::accelerator_requirements_for_capabilities(
+                    &envelope.manifest.capabilities,
+                )
+                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+            if !runmat_execution::resource::accelerator_requests_satisfy_requirements(
+                &recipe.accelerators,
+                &semantic_accelerators,
+            ) {
+                return Err(ArtifactError::Identity(
+                    "program recipe omits accelerator requirements declared by its executable"
+                        .into(),
                 ));
             }
         }

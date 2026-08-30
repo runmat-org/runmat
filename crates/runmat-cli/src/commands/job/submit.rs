@@ -105,9 +105,18 @@ pub async fn submit(
     let python_required = unit.requires_python_runtime();
     let foreign_artifacts =
         crate::commands::package::prepare_foreign_artifacts(frozen, config, python_required)?;
+    let interop = foreign_artifacts.interop.clone();
+    let foreign_accelerators = foreign_artifacts.accelerators.clone();
     let executable = unit
-        .portable_envelope_for_with_interop(function.as_deref(), foreign_artifacts.interop)
+        .portable_envelope_for_with_interop(function.as_deref(), interop.clone())
         .map_err(anyhow::Error::msg)?;
+    let accelerators = runmat_execution::resource::merge_accelerator_requirements(
+        runmat_execution::resource::accelerator_requirements_for_capabilities(
+            &executable.manifest.capabilities,
+        )?
+        .into_iter()
+        .chain(foreign_accelerators),
+    )?;
     let identity = &executable.manifest.identity;
     if identity.entrypoint_kind == runmat_execution::ExecutableEntrypointKind::Script
         && !args.is_empty()
@@ -127,6 +136,8 @@ pub async fn submit(
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3"),
+        interop,
+        accelerators,
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
@@ -136,7 +147,10 @@ pub async fn submit(
         .with_compiled_package_closure()
         .with_materialized_program(recipe, form, executable_bytes);
     for object in foreign_artifacts.objects {
-        builder = builder.with_foreign_artifact(object)?;
+        builder = builder.with_foreign_object(object)?;
+    }
+    for closure in foreign_artifacts.closures {
+        builder = builder.with_foreign_artifact_closure(closure)?;
     }
     let bundle = builder.build()?;
     let recipe = bundle
@@ -213,6 +227,22 @@ pub(crate) async fn submit_prepared(
     prepared: PreparedRemoteExecution,
     options: RemoteSubmissionOptions,
 ) -> Result<types::RunResponse> {
+    let program_descriptor: ProgramExecutionDescriptor =
+        serde_json::from_slice(&prepared.descriptor)
+            .context("decode prepared program descriptor")?;
+    program_descriptor
+        .validate()
+        .context("validate prepared program descriptor")?;
+    if options.workers == 0 && !program_descriptor.recipe.accelerators.is_empty() {
+        bail!("remote accelerator workloads require at least one worker");
+    }
+    let worker_accelerators = program_descriptor
+        .recipe
+        .accelerators
+        .clone()
+        .into_iter()
+        .map(runmat_server_client::execution::accelerator_request_to_api)
+        .collect::<Result<Vec<_>>>()?;
     let (client, server_url, project_id) = super::client(options.project).await?;
     let recovery_recipient = client
         .api()
@@ -271,9 +301,7 @@ pub(crate) async fn submit_prepared(
                     cpu_millicores: 1_000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
-                    accelerator_count: 0,
-                    accelerator_memory_bytes: 0,
-                    accelerator_class: None,
+                    accelerators: Vec::new(),
                     maximum_wall_millis: 60 * 60 * 1_000,
                 },
                 worker_count: Some(
@@ -283,9 +311,7 @@ pub(crate) async fn submit_prepared(
                     cpu_millicores: 1_000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
-                    accelerator_count: 0,
-                    accelerator_memory_bytes: 0,
-                    accelerator_class: None,
+                    accelerators: worker_accelerators,
                     maximum_wall_millis: 60 * 60 * 1_000,
                 }),
             },

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, Context, Result};
-use runmat_execution_artifact::{LogicalObject, ObjectNamespace};
+use runmat_execution_artifact::{ForeignArtifactClosure, LogicalObject, ObjectNamespace};
 use runmat_package::{ContentDigest, FrozenProject};
 use runmat_python::{
     discover_python, PythonArtifactBundle, PythonArtifactBundleEntry, PythonDiscoveryRequest,
@@ -16,6 +16,7 @@ use runmat_types::{
 pub(super) struct PreparedPythonArtifacts {
     pub(super) interop: InteropManifest,
     pub(super) objects: Vec<LogicalObject>,
+    pub(super) closures: Vec<ForeignArtifactClosure>,
     pub(super) bundle: PythonArtifactBundle,
 }
 
@@ -31,6 +32,7 @@ pub(super) fn prepare(
         return Ok(PreparedPythonArtifacts {
             interop: InteropManifest::empty(),
             objects: Vec::new(),
+            closures: Vec::new(),
             bundle: PythonArtifactBundle::empty(),
         });
     }
@@ -94,14 +96,32 @@ pub(super) fn prepare(
         PYTHON_ARTIFACT_BUNDLE_MEDIA_TYPE,
         bundle.canonical_bytes()?,
     )?];
+    let adapter = runmat_types::ForeignAdapterId::new(PYTHON_ADAPTER_ID)?;
+    let artifact_identities = bundle
+        .artifact_identities()
+        .into_iter()
+        .map(runmat_types::ForeignArtifactIdentity::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    let closures = artifact_identities
+        .iter()
+        .cloned()
+        .map(|identity| {
+            ForeignArtifactClosure::new(
+                adapter.clone(),
+                identity,
+                vec![objects[0].descriptor.digest],
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let interop = InteropManifest {
         schema_version: INTEROP_MANIFEST_SCHEMA_VERSION,
         foreign_types: Vec::new(),
         adapters: vec![ForeignAdapterRequirement {
-            adapter: PYTHON_ADAPTER_ID.into(),
+            adapter,
             minimum_version: PYTHON_ADAPTER_VERSION,
             capabilities: CapabilitySet(BTreeSet::from([CapabilityRequirement::ForeignRuntime])),
-            artifact_identities: bundle.artifact_identities().into_iter().collect(),
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
+            artifact_identities,
         }],
         adapter_contracts: Vec::new(),
     };
@@ -111,6 +131,7 @@ pub(super) fn prepare(
     Ok(PreparedPythonArtifacts {
         interop,
         objects,
+        closures,
         bundle,
     })
 }

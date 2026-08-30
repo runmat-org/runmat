@@ -101,7 +101,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .unwrap();
         let session = Rc::new(runmat_runtime::foreign::MexRuntimeSession::new());
         let installed = install(&bundle, &session).unwrap();
-        assert!(session.descriptor().artifact_identities.contains(&identity));
+        assert!(session
+            .descriptor()
+            .artifact_identities
+            .contains(identity.as_str()));
         std::fs::remove_file(&artifact.manifest).unwrap();
         std::fs::remove_file(&artifact.module).unwrap();
         let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(

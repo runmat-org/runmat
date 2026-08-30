@@ -20,12 +20,38 @@ pub fn compile(
     mir: &MirAssembly,
     entrypoint: EntrypointId,
 ) -> Result<Bytecode, CompileError> {
+    let analysis = runmat_mir::analysis::analyze_assembly(mir);
+    compile_with_bound_analysis(hir, mir, entrypoint, &analysis)
+}
+
+/// Compile bytecode while binding the authoritative whole-function semantic
+/// requirements produced by MIR analysis into every serialized function.
+pub fn compile_with_analysis(
+    hir: &HirAssembly,
+    mir: &MirAssembly,
+    entrypoint: EntrypointId,
+    analysis: &runmat_mir::analysis::AnalysisStore,
+) -> Result<Bytecode, CompileError> {
+    compile_with_bound_analysis(hir, mir, entrypoint, analysis)
+}
+
+fn compile_with_bound_analysis(
+    hir: &HirAssembly,
+    mir: &MirAssembly,
+    entrypoint: EntrypointId,
+    analysis: &runmat_mir::analysis::AnalysisStore,
+) -> Result<Bytecode, CompileError> {
     let layout = derive_layout(hir, mir)
         .map_err(|err| CompileError::new(format!("failed to derive VM layout: {err:?}")))?;
     let mut c = Compiler::new(hir, mir, layout, entrypoint)?;
     c.compile()?;
-    let bound_functions =
-        compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), Some(entrypoint))?;
+    let bound_functions = compile_semantic_functions(
+        hir,
+        mir,
+        c.layout.as_ref().unwrap(),
+        Some(entrypoint),
+        analysis,
+    )?;
     let function_registry = FunctionRegistry::new(bound_functions.clone());
     let (var_names, initially_unassigned_slots) = c
         .layout
@@ -767,9 +793,20 @@ pub fn compile_semantic_function_registry(
     hir: &HirAssembly,
     mir: &MirAssembly,
 ) -> Result<HashMap<FunctionId, FunctionBytecode>, CompileError> {
+    let analysis = runmat_mir::analysis::analyze_assembly(mir);
     let layout = derive_layout(hir, mir)
         .map_err(|err| CompileError::new(format!("failed to derive VM layout: {err:?}")))?;
-    compile_semantic_functions(hir, mir, &layout, None)
+    compile_semantic_functions(hir, mir, &layout, None, &analysis)
+}
+
+pub fn compile_semantic_function_registry_with_analysis(
+    hir: &HirAssembly,
+    mir: &MirAssembly,
+    analysis: &runmat_mir::analysis::AnalysisStore,
+) -> Result<HashMap<FunctionId, FunctionBytecode>, CompileError> {
+    let layout = derive_layout(hir, mir)
+        .map_err(|err| CompileError::new(format!("failed to derive VM layout: {err:?}")))?;
+    compile_semantic_functions(hir, mir, &layout, None, analysis)
 }
 
 fn compile_semantic_functions(
@@ -777,6 +814,7 @@ fn compile_semantic_functions(
     mir: &MirAssembly,
     layout: &crate::layout::VmAssemblyLayout,
     entrypoint: Option<EntrypointId>,
+    analysis: &runmat_mir::analysis::AnalysisStore,
 ) -> Result<HashMap<FunctionId, FunctionBytecode>, CompileError> {
     let entry_target = entrypoint
         .and_then(|entrypoint| layout.entrypoints.get(&entrypoint))
@@ -808,6 +846,17 @@ fn compile_semantic_functions(
                 display_name: function_layout.display_name.clone(),
                 private_owner_scope: function_layout.private_owner_scope.clone(),
                 source_id,
+                capabilities: u32::try_from(function.id.0)
+                    .ok()
+                    .map(runmat_types::ProgramFunctionId)
+                    .and_then(|function| analysis.function(function))
+                    .map(|analysis| analysis.capabilities.clone())
+                    .ok_or_else(|| {
+                        CompileError::new(format!(
+                            "missing canonical analysis summary for function {:?}",
+                            function.id
+                        ))
+                    })?,
                 instructions: compiler.instructions,
                 instr_spans: compiler.instr_spans,
                 call_arg_spans: compiler.call_arg_spans,
@@ -954,6 +1003,76 @@ mod tests {
         let function_layout = &layout.functions[&entrypoint_layout.target];
         assert_eq!(bytecode.var_count, function_layout.local_count);
         assert_eq!(bytecode.var_types.len(), function_layout.local_count);
+    }
+
+    #[test]
+    fn default_compile_binds_function_capabilities_from_mir_analysis() {
+        let ast = runmat_parser::parse(
+            "function output = onDevice(input); output = gpuArray(input); end; y = onDevice(1);",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let function = bytecode
+            .bound_functions
+            .values()
+            .find(|function| function.display_name == "onDevice")
+            .expect("compiled semantic function");
+        assert!(function
+            .capabilities
+            .0
+            .contains(&runmat_types::CapabilityRequirement::Accelerator));
+    }
+
+    #[test]
+    fn default_compile_preserves_capabilities_through_function_handle_flow() {
+        let ast = runmat_parser::parse(
+            "function output = onDevice(input); output = gpuArray(input); end; \
+             function output = throughHandle(input); target = @onDevice; output = target(input); end; \
+             y = throughHandle(1);",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        let function_analysis = |name: &str| {
+            let id = mir
+                .functions
+                .iter()
+                .find_map(|(id, metadata)| (metadata.name.0 == name).then_some(*id))
+                .expect("semantic function");
+            analysis
+                .function(runmat_types::ProgramFunctionId(
+                    u32::try_from(id.0).expect("portable function id"),
+                ))
+                .expect("function analysis")
+        };
+        assert_eq!(
+            function_analysis("throughHandle").outputs,
+            function_analysis("onDevice").outputs,
+            "callable invocation must preserve its semantic output facts"
+        );
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        for name in ["onDevice", "throughHandle"] {
+            let function = bytecode
+                .bound_functions
+                .values()
+                .find(|function| function.display_name == name)
+                .expect("compiled semantic function");
+            assert!(
+                function
+                    .capabilities
+                    .0
+                    .contains(&runmat_types::CapabilityRequirement::Accelerator),
+                "{name} must retain the accelerator requirement"
+            );
+        }
     }
 
     #[test]

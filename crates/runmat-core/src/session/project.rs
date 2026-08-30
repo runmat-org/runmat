@@ -103,15 +103,20 @@ impl RunMatSession {
                 schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
                 foreign_types: Vec::new(),
                 adapters: vec![runmat_types::ForeignAdapterRequirement {
-                    adapter: runmat_java::JAVA_ADAPTER_ID.into(),
+                    adapter: runmat_types::ForeignAdapterId::new(runmat_java::JAVA_ADAPTER_ID)
+                        .map_err(project_artifact_error)?,
                     minimum_version: runmat_java::JAVA_ADAPTER_VERSION,
                     capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
                         runmat_types::CapabilityRequirement::ForeignRuntime,
                     ])),
+                    execution_stack: runmat_types::ExecutionStackRequirement::Process,
                     artifact_identities: java
                         .iter()
-                        .map(|(identity, _)| identity.to_string())
-                        .collect(),
+                        .map(|(identity, _)| {
+                            runmat_types::ForeignArtifactIdentity::new(identity.to_string())
+                                .map_err(project_artifact_error)
+                        })
+                        .collect::<Result<_, _>>()?,
                 }],
                 adapter_contracts: Vec::new(),
             });
@@ -154,12 +159,21 @@ impl RunMatSession {
                 schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
                 foreign_types: Vec::new(),
                 adapters: vec![runmat_types::ForeignAdapterRequirement {
-                    adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
+                    adapter: runmat_types::ForeignAdapterId::new(runmat_python::PYTHON_ADAPTER_ID)
+                        .map_err(project_artifact_error)?,
                     minimum_version: runmat_python::PYTHON_ADAPTER_VERSION,
                     capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
                         runmat_types::CapabilityRequirement::ForeignRuntime,
                     ])),
-                    artifact_identities: bundle.artifact_identities().into_iter().collect(),
+                    execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                    artifact_identities: bundle
+                        .artifact_identities()
+                        .into_iter()
+                        .map(|identity| {
+                            runmat_types::ForeignArtifactIdentity::new(identity)
+                                .map_err(project_artifact_error)
+                        })
+                        .collect::<Result<_, _>>()?,
                 }],
                 adapter_contracts: Vec::new(),
             });

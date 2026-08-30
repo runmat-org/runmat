@@ -102,6 +102,7 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                     id: worker_id,
                     pool_id,
                     resources: self.config.worker_resources.clone(),
+                    host: crate::capability::host_inventory(&revision),
                 }))
                 .map_err(runner_error)?;
             Ok(ExecutionWorkerSession {

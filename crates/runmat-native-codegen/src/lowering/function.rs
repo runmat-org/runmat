@@ -213,10 +213,22 @@ pub(super) fn lower_function(
     })?;
     let abi = lower_abi(body, function)?;
     let argument_validations = lower_argument_validations(metadata, &locals, &abi, function)?;
+    let capabilities = analysis
+        .function(function)
+        .ok_or_else(|| {
+            NativeCodegenError::new(
+                "native.lowering.function_analysis",
+                "MIR function has no canonical analysis summary",
+            )
+            .at_function(function)
+        })?
+        .capabilities
+        .clone();
     Ok(NativeFunction {
         id: function,
         source: metadata.source,
         name: metadata.name.0.clone(),
+        capabilities,
         abi,
         argument_validations,
         locals,
