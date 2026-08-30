@@ -71,3 +71,43 @@ fn default_request() -> ResourceRequest {
 fn rejected(message: impl Into<String>) -> BackendError {
     BackendError::new(BackendErrorKind::Rejected, message)
 }
+
+pub(crate) fn host_inventory(
+    revision: &runmat_execution::ProgramRevision,
+) -> runmat_execution::host::ExecutionHostInventory {
+    let environment = revision.environment();
+    runmat_execution::host::ExecutionHostInventory {
+        schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+        semantic_schema: environment.semantic_schema,
+        compiler_schema: environment.compiler_schema,
+        runtime_fingerprint: environment.runtime_fingerprint,
+        catalog_fingerprint: environment.catalog_fingerprint,
+        compatibility_modes: BTreeSet::from([environment.compatibility_mode]),
+        target: runmat_execution::host::ExecutionHostTarget::BrowserWasm,
+        capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+            runmat_types::CapabilityRequirement::HostRuntime,
+        ])),
+        adapters: Vec::new(),
+        process_stack_available: false,
+        host_bridge_available: false,
+        trust_tier: runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+    }
+}
+
+pub(crate) fn host_requirement(
+    revision: &runmat_execution::ProgramRevision,
+) -> runmat_execution::host::ExecutionHostRequirement {
+    runmat_execution::host::ExecutionHostRequirement {
+        schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+        environment: revision.environment(),
+        native_target: None,
+        capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+            runmat_types::CapabilityRequirement::HostRuntime,
+        ])),
+        interop: runmat_types::InteropManifest::empty(),
+        execution_stack: runmat_types::ExecutionStackRequirement::Any,
+        permitted_trust_tiers: BTreeSet::from([
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+        ]),
+    }
+}

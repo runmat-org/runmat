@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::{
-    ExecutableForm, ExecutionBundleBuilder, LogicalObject, ProgramExecutionDescriptor,
-    ProgramExecutionInputs, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, LogicalObject,
+    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionResponse,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
 };
 use runmat_package::FrozenProjectHandoff;
 use runmat_test::protocol::{ProtocolHandshake, WorkerCapability};
@@ -33,7 +34,9 @@ pub(super) struct RemoteTestBackendConfig {
     pub trust_identity: String,
     pub max_workers: usize,
     pub project_handoff: FrozenProjectHandoff,
+    pub interop: runmat_types::InteropManifest,
     pub foreign_artifacts: Vec<LogicalObject>,
+    pub foreign_artifact_closures: Vec<ForeignArtifactClosure>,
 }
 
 impl RemoteTestBackend {
@@ -136,7 +139,9 @@ impl WorkerBackend for RemoteTestBackend {
                 request.attempt,
             )
             .map_err(protocol)?;
-            let program = workload.program_request().map_err(protocol)?;
+            let program = workload
+                .program_request(self.config.interop.clone())
+                .map_err(protocol)?;
             let mut builder = ExecutionBundleBuilder::native(
                 &self.config.project_handoff.project,
                 program.recipe.program_revision.clone(),
@@ -149,7 +154,12 @@ impl WorkerBackend for RemoteTestBackend {
             );
             for artifact in &self.config.foreign_artifacts {
                 builder = builder
-                    .with_foreign_artifact(artifact.clone())
+                    .with_foreign_object(artifact.clone())
+                    .map_err(protocol)?;
+            }
+            for closure in &self.config.foreign_artifact_closures {
+                builder = builder
+                    .with_foreign_artifact_closure(closure.clone())
                     .map_err(protocol)?;
             }
             let bundle = builder.build().map_err(protocol)?;

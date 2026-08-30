@@ -322,8 +322,13 @@ fn callable(identity: CallableIdentity) -> ValueFact {
 }
 
 fn callable_kind(identity: CallableIdentity) -> CallableFact {
+    let capabilities = match &identity {
+        CallableIdentity::Builtin(name) => runmat_builtins::builtin_required_capabilities(&name.0),
+        _ => Default::default(),
+    };
     CallableFact {
         identity: Some(identity),
+        capabilities,
         parameters: Vec::new(),
         parameters_complete: false,
         outputs: Vec::new(),

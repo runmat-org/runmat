@@ -30,6 +30,7 @@ pub(crate) fn task<S>(
                     None,
                 ),
             ),
+            host: crate::capability::host_requirement(&session.revision),
             invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: Vec::new(),
             outputs: OutputContract {

@@ -119,6 +119,10 @@ impl ProgramExecutionRequest {
         }
         self.artifact.validate_against(&self.recipe)?;
         if self.callable.validate().is_err()
+            || self
+                .assignment
+                .as_ref()
+                .is_some_and(|assignment| assignment.validate().is_err())
             || self.context.validate_for(&self.callable).is_err()
             || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
@@ -343,6 +347,8 @@ mod tests {
             },
             execution_mode: "interpreter".into(),
             target: crate::ProgramTarget::portable("portable-test"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
@@ -414,6 +420,7 @@ mod tests {
             attempt_id: AttemptId::derive(&[b"attempt"]),
             worker_id: WorkerId::derive(&[b"worker"]),
             backend: PoolBackend::Remote,
+            resources: Default::default(),
         });
         request.job_id = Some(JobId::derive(&[b"job"]));
 

@@ -201,13 +201,47 @@ impl MexArtifactManifest {
             schema_version: INTEROP_MANIFEST_SCHEMA_VERSION,
             foreign_types: Vec::new(),
             adapters: vec![ForeignAdapterRequirement {
-                adapter: MEX_ADAPTER_ID.to_string(),
+                adapter: runmat_types::ForeignAdapterId::new(MEX_ADAPTER_ID)
+                    .expect("the built-in MEX adapter identity is valid"),
                 minimum_version: MEX_ADAPTER_VERSION,
                 capabilities: CapabilitySet(capabilities),
-                artifact_identities: vec![self.identity.to_string()],
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                artifact_identities: vec![runmat_types::ForeignArtifactIdentity::new(
+                    self.identity.to_string(),
+                )
+                .expect("validated MEX artifact identities are canonical")],
             }],
             adapter_contracts: Vec::new(),
         }
+    }
+
+    /// Minimum scheduler resources required to execute this module. CUDA MEX
+    /// code requires the exact built-in CUDA provider contract; ordinary C,
+    /// C++, and Fortran modules do not require an accelerator lease.
+    pub fn accelerator_requirements(
+        &self,
+    ) -> Result<Vec<runmat_execution::resource::AcceleratorRequest>, MexBuildError> {
+        if self.source_language != MexSourceLanguage::Cuda {
+            return Ok(Vec::new());
+        }
+        let provider = runmat_accelerate_api::execution_provider_contract(
+            runmat_accelerate_api::RUNMAT_CUDA_PROVIDER_ID,
+            runmat_accelerate_api::RUNMAT_BUILTIN_PROVIDER_VERSION,
+            runmat_accelerate_api::ExecutionProviderContract::CudaNativeV1,
+        )
+        .map_err(|_| MexBuildError::InvalidArtifactManifest)?;
+        Ok(vec![runmat_execution::resource::AcceleratorRequest {
+            class: runmat_execution::resource::AcceleratorClass::new("gpu")
+                .map_err(|_| MexBuildError::InvalidArtifactManifest)?,
+            count: 1,
+            // The module requires CUDA compute, but its memory demand is
+            // invocation-dependent rather than a fixed artifact property.
+            minimum_allocation_bytes: 0,
+            provider: Some(provider),
+            required_features: [runmat_execution::resource::AcceleratorFeature::Compute]
+                .into_iter()
+                .collect(),
+        }])
     }
 }
 
@@ -294,5 +328,15 @@ mod tests {
         assert!(capabilities.contains(&CapabilityRequirement::NativeCode));
         assert!(capabilities.contains(&CapabilityRequirement::ForeignRuntime));
         assert!(capabilities.contains(&CapabilityRequirement::Accelerator));
+        let requirements = artifact.accelerator_requirements().unwrap();
+        assert_eq!(requirements.len(), 1);
+        assert_eq!(requirements[0].count, 1);
+        assert_eq!(
+            requirements[0].provider.as_ref().unwrap().id.as_str(),
+            "runmat.cuda"
+        );
+        assert!(requirements[0]
+            .required_features
+            .contains(&runmat_execution::resource::AcceleratorFeature::Compute));
     }
 }

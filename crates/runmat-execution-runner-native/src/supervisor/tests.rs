@@ -192,6 +192,8 @@ fn exact_program_submission_round_trips_through_durable_storage() {
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("test-interpreter-bytecode-v1"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),

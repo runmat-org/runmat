@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, Context, Result};
-use runmat_execution_artifact::{LogicalObject, ObjectNamespace};
+use runmat_execution_artifact::{ForeignArtifactClosure, LogicalObject, ObjectNamespace};
 use runmat_java::{
     JavaArtifactBundle, JavaArtifactBundleEntry, JavaArtifactIdentity, JAVA_ARCHIVE_MEDIA_TYPE,
 };
@@ -14,6 +14,7 @@ use runmat_types::{
 pub(super) struct PreparedJavaArtifacts {
     pub(super) interop: InteropManifest,
     pub(super) objects: Vec<LogicalObject>,
+    pub(super) closures: Vec<ForeignArtifactClosure>,
     pub(super) bundle: JavaArtifactBundle,
 }
 
@@ -33,6 +34,7 @@ pub(super) fn prepare(project: &FrozenProject) -> Result<PreparedJavaArtifacts> 
     let mut identities = BTreeSet::new();
     let mut entries = Vec::with_capacity(project.java_artifacts.len());
     let mut objects = Vec::with_capacity(project.java_artifacts.len());
+    let mut closures = Vec::with_capacity(project.java_artifacts.len());
     for (logical_name, declaration) in declarations {
         let bytes = std::fs::read(&declaration.path).with_context(|| {
             format!(
@@ -59,18 +61,24 @@ pub(super) fn prepare(project: &FrozenProject) -> Result<PreparedJavaArtifacts> 
             identity: identity.clone(),
             bytes: bytes.clone(),
         });
-        objects.push(LogicalObject::new(
+        let object = LogicalObject::new(
             ObjectNamespace::ForeignArtifact,
             format!("java/{logical_name}.jar"),
             JAVA_ARCHIVE_MEDIA_TYPE,
             bytes,
+        )?;
+        closures.push(ForeignArtifactClosure::new(
+            runmat_types::ForeignAdapterId::new(runmat_java::JAVA_ADAPTER_ID)?,
+            runmat_types::ForeignArtifactIdentity::new(identity.to_string())?,
+            vec![object.descriptor.digest],
         )?);
+        objects.push(object);
     }
     let bundle = JavaArtifactBundle::new(entries)?;
     let artifact_identities = identities
         .into_iter()
-        .map(|identity| identity.to_string())
-        .collect::<Vec<_>>();
+        .map(|identity| runmat_types::ForeignArtifactIdentity::new(identity.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
     let interop = if artifact_identities.is_empty() {
         InteropManifest::empty()
     } else {
@@ -78,11 +86,12 @@ pub(super) fn prepare(project: &FrozenProject) -> Result<PreparedJavaArtifacts> 
             schema_version: INTEROP_MANIFEST_SCHEMA_VERSION,
             foreign_types: Vec::new(),
             adapters: vec![ForeignAdapterRequirement {
-                adapter: runmat_java::JAVA_ADAPTER_ID.into(),
+                adapter: runmat_types::ForeignAdapterId::new(runmat_java::JAVA_ADAPTER_ID)?,
                 minimum_version: runmat_java::JAVA_ADAPTER_VERSION,
                 capabilities: CapabilitySet(BTreeSet::from([
                     CapabilityRequirement::ForeignRuntime,
                 ])),
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
                 artifact_identities,
             }],
             adapter_contracts: Vec::new(),
@@ -94,6 +103,7 @@ pub(super) fn prepare(project: &FrozenProject) -> Result<PreparedJavaArtifacts> 
     Ok(PreparedJavaArtifacts {
         interop,
         objects,
+        closures,
         bundle,
     })
 }
@@ -138,7 +148,7 @@ mod tests {
         let [adapter] = prepared.interop.adapters.as_slice() else {
             panic!("expected Java adapter requirement");
         };
-        assert_eq!(adapter.adapter, runmat_java::JAVA_ADAPTER_ID);
+        assert_eq!(adapter.adapter.as_str(), runmat_java::JAVA_ADAPTER_ID);
         assert_eq!(adapter.artifact_identities.len(), 1);
         assert_eq!(
             prepared.objects[0].descriptor.media_type,

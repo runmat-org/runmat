@@ -20,6 +20,9 @@ pub(super) fn execute_attempt(
     request: &AttemptRequest,
     completion: &TaskCompletion,
 ) -> TransferResult {
+    request
+        .validate()
+        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     let stored = driver
         .artifacts
         .get(request.task.program_artifact_id)
@@ -39,6 +42,7 @@ pub(super) fn execute_attempt(
             attempt_id: request.id,
             worker_id: request.worker_id,
             backend: runmat_execution::PoolBackend::LocalProcesses,
+            resources: request.resource_assignment.clone(),
         }),
         job_id: None,
         arguments: request.task.inputs.clone(),
@@ -91,7 +95,7 @@ async fn run_process(
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     write_payload(&mut writer, &payload, limits)
         .await
-        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+        .map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
     let mut last_progress_sequence = 0;
     let response = loop {
         let payload = tokio::select! {
@@ -213,6 +217,13 @@ mod tests {
                 max_stderr_bytes: 4096,
                 store_root: temporary.path().join("session"),
                 worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+                host_inventory: runmat_core::RunMatSession::with_options(false, false)
+                    .unwrap()
+                    .execution_host_inventory(
+                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                    )
+                    .unwrap(),
+                accelerator_devices: Vec::new(),
             },
             scope,
         )
@@ -243,6 +254,8 @@ mod tests {
             },
             execution_mode: "interpreter".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("process-outcome-test"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),

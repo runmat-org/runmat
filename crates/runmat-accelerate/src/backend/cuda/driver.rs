@@ -14,6 +14,7 @@ const MEMORY_TYPE_DEVICE: i32 = 2;
 type Init = unsafe extern "C" fn(u32) -> ResultCode;
 type DeviceGet = unsafe extern "C" fn(*mut Device, i32) -> ResultCode;
 type DeviceGetName = unsafe extern "C" fn(*mut c_char, i32, Device) -> ResultCode;
+type DeviceTotalMemory = unsafe extern "C" fn(*mut usize, Device) -> ResultCode;
 type PrimaryContextRetain = unsafe extern "C" fn(*mut ContextHandle, Device) -> ResultCode;
 type PrimaryContextRelease = unsafe extern "C" fn(Device) -> ResultCode;
 type ContextPush = unsafe extern "C" fn(ContextHandle) -> ResultCode;
@@ -54,6 +55,7 @@ pub(super) struct CudaDriver {
     init: Init,
     device_get: DeviceGet,
     device_get_name: DeviceGetName,
+    device_total_memory: DeviceTotalMemory,
     primary_context_retain: PrimaryContextRetain,
     primary_context_release: PrimaryContextRelease,
     context_push: ContextPush,
@@ -113,10 +115,18 @@ impl CudaDriver {
         }
         .map(|symbol| *symbol)
         .context("missing CUDA driver symbol cuDevicePrimaryCtxRelease")?;
+        let device_total_memory = unsafe {
+            library
+                .get::<DeviceTotalMemory>(b"cuDeviceTotalMem_v2\0")
+                .or_else(|_| library.get::<DeviceTotalMemory>(b"cuDeviceTotalMem\0"))
+        }
+        .map(|symbol| *symbol)
+        .context("missing CUDA driver symbol cuDeviceTotalMem")?;
         Ok(Self {
             init: symbol!("cuInit", Init),
             device_get: symbol!("cuDeviceGet", DeviceGet),
             device_get_name: symbol!("cuDeviceGetName", DeviceGetName),
+            device_total_memory,
             primary_context_retain: symbol!("cuDevicePrimaryCtxRetain", PrimaryContextRetain),
             primary_context_release,
             context_push: symbol!("cuCtxPushCurrent_v2", ContextPush),
@@ -134,7 +144,7 @@ impl CudaDriver {
         })
     }
 
-    pub(super) fn initialize(&self, ordinal: i32) -> Result<(i32, usize, String)> {
+    pub(super) fn initialize(&self, ordinal: i32) -> Result<(i32, usize, String, usize)> {
         self.call("cuInit", unsafe { (self.init)(0) })?;
         let mut device = 0;
         self.call("cuDeviceGet", unsafe {
@@ -152,7 +162,11 @@ impl CudaDriver {
         let name = unsafe { CStr::from_ptr(name.as_ptr()) }
             .to_string_lossy()
             .into_owned();
-        Ok((device, context as usize, name))
+        let mut total_memory = 0_usize;
+        self.call("cuDeviceTotalMem", unsafe {
+            (self.device_total_memory)(&mut total_memory, device)
+        })?;
+        Ok((device, context as usize, name, total_memory))
     }
 
     pub(super) fn release_primary_context(&self, device: i32) {

@@ -132,6 +132,7 @@ impl FactSatisfaction for ClassReferenceFact {
 impl FactSatisfaction for CallableFact {
     fn satisfies(&self, expected: &Self) -> bool {
         option_satisfies(&self.identity, &expected.identity)
+            && expected.capabilities.0.is_subset(&self.capabilities.0)
             && self.variadic_inputs == expected.variadic_inputs
             && self.variadic_outputs == expected.variadic_outputs
             && sequence_satisfies(

@@ -34,6 +34,25 @@ impl AccelProvider for WgpuProvider {
         crate::placement::wgpu_capability_snapshot(self)
     }
 
+    fn execution_accelerator_device(
+        &self,
+        inventory_epoch: u64,
+    ) -> Result<Option<runmat_execution::resource::AcceleratorDevice>> {
+        runmat_accelerate_api::execution_accelerator_device(
+            self,
+            runmat_accelerate_api::RUNMAT_WGPU_PROVIDER_ID,
+            runmat_accelerate_api::RUNMAT_BUILTIN_PROVIDER_VERSION,
+            runmat_accelerate_api::ExecutionProviderContract::GenericComputeV1,
+            "primary-gpu",
+            &format!(
+                "wgpu-{:04x}-{:04x}-{:?}",
+                self.adapter_info.vendor, self.adapter_info.device, self.adapter_info.backend
+            ),
+            inventory_epoch,
+        )
+        .map(Some)
+    }
+
     fn query_feasibility(
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,

@@ -1,4 +1,5 @@
 mod artifact;
+mod host;
 mod identity;
 mod native_object;
 mod recipe;

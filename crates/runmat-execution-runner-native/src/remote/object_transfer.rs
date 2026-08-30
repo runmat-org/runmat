@@ -303,7 +303,10 @@ fn validate_reference(
     authorization_scope: &str,
 ) -> NativeExecutionResult<()> {
     ValuePayload::Object(Box::new(reference.clone()))
-        .validate(ValueLimits::default())
+        .validate_for_transport(
+            ValueLimits::default(),
+            runmat_execution::value::ValueTransportContext::Portable,
+        )
         .map_err(protocol)?;
     if reference.authorization_scope != authorization_scope
         || reference.encoded_length == 0

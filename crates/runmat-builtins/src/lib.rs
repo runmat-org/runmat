@@ -550,6 +550,10 @@ pub struct BuiltinFunction {
     pub is_sink: bool,
     pub suppress_auto_output: bool,
     pub execution_stack: ExecutionStackRequirement,
+    /// Capabilities that are semantically required whenever this builtin is
+    /// called. Accelerator optimization tags are intentionally separate: an
+    /// optional fast path must not become a scheduler resource requirement.
+    pub required_capabilities: &'static [runmat_types::CapabilityRequirement],
     pub descriptor: Option<&'static BuiltinDescriptor>,
     pub extensions: &'static [BuiltinExtensionDescriptor],
     pub integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
@@ -586,6 +590,7 @@ impl BuiltinFunction {
             is_sink,
             suppress_auto_output,
             execution_stack: ExecutionStackRequirement::Any,
+            required_capabilities: &[],
             descriptor: None,
             extensions: &[],
             integer_capabilities: &[],
@@ -595,6 +600,14 @@ impl BuiltinFunction {
 
     pub fn with_execution_stack(mut self, execution_stack: ExecutionStackRequirement) -> Self {
         self.execution_stack = execution_stack;
+        self
+    }
+
+    pub fn with_required_capabilities(
+        mut self,
+        capabilities: &'static [runmat_types::CapabilityRequirement],
+    ) -> Self {
+        self.required_capabilities = capabilities;
         self
     }
 
@@ -726,6 +739,23 @@ pub fn builtin_execution_stack_requirement(name: &str) -> runmat_types::Executio
         .map(|entry| entry.link.execution_stack)
         .or_else(|| builtin_function_by_name(name).map(|function| function.execution_stack))
         .unwrap_or(ExecutionStackRequirement::Any)
+}
+
+/// Returns semantic capabilities required by a builtin call.
+///
+/// Canonical catalog declarations take precedence. Runtime registration is
+/// the typed authority for cohorts that have not yet moved into the catalog.
+pub fn builtin_required_capabilities(name: &str) -> runmat_types::CapabilitySet {
+    builtin_catalog_entry_by_name(name)
+        .map(|entry| entry.contract.capability_set())
+        .or_else(|| {
+            builtin_function_by_name(name).map(|function| {
+                runmat_types::CapabilitySet(
+                    function.required_capabilities.iter().copied().collect(),
+                )
+            })
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(target_arch = "wasm32")]

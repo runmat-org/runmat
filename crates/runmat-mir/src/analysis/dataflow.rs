@@ -237,6 +237,7 @@ fn simple_operand_fact(operand: &MirOperand, facts: &[Option<ValueFact>]) -> Val
         | MirOperand::FunctionHandle(CallableIdentity::AnonymousFunction(function)) => {
             scalar_fact(ValueKindFact::Callable(CallableFact {
                 identity: Some(CallableIdentity::BoundFunction(*function)),
+                capabilities: Default::default(),
                 parameters: Vec::new(),
                 parameters_complete: false,
                 outputs: Vec::new(),
@@ -250,6 +251,7 @@ fn simple_operand_fact(operand: &MirOperand, facts: &[Option<ValueFact>]) -> Val
         MirOperand::FunctionHandle(identity) => {
             scalar_fact(ValueKindFact::Callable(CallableFact {
                 identity: Some(identity.clone()),
+                capabilities: Default::default(),
                 parameters: Vec::new(),
                 parameters_complete: false,
                 outputs: Vec::new(),

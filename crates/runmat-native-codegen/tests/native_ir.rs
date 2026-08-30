@@ -333,7 +333,10 @@ fn bound_locals_require_and_retain_canonical_semantic_names() {
     assert_eq!(local.binding, Some(binding));
     assert_eq!(local.name.as_deref(), Some("answer"));
     assert_eq!(local.kind, runmat_native_codegen::NativeLocalKind::Binding);
-    assert_eq!(assembly.schema_version, 4);
+    assert_eq!(
+        assembly.schema_version,
+        runmat_native_codegen::NATIVE_IR_SCHEMA_VERSION
+    );
     assembly.verify().unwrap();
     verify_against_mir(&assembly, &mir, Some(&names)).unwrap();
 
@@ -1049,7 +1052,7 @@ fn short_circuit_embedded_constructs_are_explicit_and_verified() {
 #[test]
 fn canonical_construct_taxonomy_is_complete_unique_and_serializable() {
     let all = runmat_mir::MirConstructKind::ALL;
-    assert_eq!(all.len(), 47);
+    assert_eq!(all.len(), 55);
     assert_eq!(
         all.iter()
             .copied()
@@ -1199,6 +1202,10 @@ fn future_spawn_and_await_carry_exact_structured_safepoints() {
         .0
         .insert(CapabilityRequirement::ParallelRuntime);
     let assembly = lower_with(&mir, &analysis, &manifest).unwrap();
+    assert!(assembly.functions[0]
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::ParallelRuntime));
     let block = &assembly.functions[0].blocks[0];
     let structured = block
         .instructions
@@ -1217,6 +1224,10 @@ fn future_spawn_and_await_carry_exact_structured_safepoints() {
     );
     assert!(block.terminator.safepoint.is_some());
     assembly.verify().unwrap();
+
+    let mut weakened = assembly;
+    weakened.functions[0].capabilities.0.clear();
+    assert!(weakened.verify().is_err());
 }
 
 #[test]

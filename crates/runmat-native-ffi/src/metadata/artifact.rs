@@ -249,13 +249,18 @@ impl NativeInterfaceArtifactManifest {
             schema_version: INTEROP_MANIFEST_SCHEMA_VERSION,
             foreign_types: Vec::new(),
             adapters: vec![ForeignAdapterRequirement {
-                adapter: NATIVE_FFI_ADAPTER_ID.into(),
+                adapter: runmat_types::ForeignAdapterId::new(NATIVE_FFI_ADAPTER_ID)
+                    .expect("the built-in native FFI adapter identity is valid"),
                 minimum_version: NATIVE_FFI_ADAPTER_VERSION,
                 capabilities: CapabilitySet(BTreeSet::from([
                     CapabilityRequirement::NativeCode,
                     CapabilityRequirement::ForeignRuntime,
                 ])),
-                artifact_identities: vec![self.identity.to_string()],
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                artifact_identities: vec![runmat_types::ForeignArtifactIdentity::new(
+                    self.identity.to_string(),
+                )
+                .expect("validated native interface identities are canonical")],
             }],
             adapter_contracts: Vec::new(),
         }

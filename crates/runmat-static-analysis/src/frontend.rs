@@ -274,7 +274,7 @@ pub fn analyze_program_with_catalog(
     let runtime_dependent = resolution.runtime_dependent;
     diagnostics.extend(resolution.diagnostics);
 
-    let compiled = compile_lowering(&lowering, &mir);
+    let compiled = compile_lowering(&lowering, &mir, &facts);
     let compile_failure = compiled.as_ref().err().cloned();
     if let Some(error) = &compile_failure {
         diagnostics.push(
@@ -329,17 +329,21 @@ pub fn analyze_program_with_catalog(
 fn compile_lowering(
     lowering: &LoweringResult,
     mir: &MirAssembly,
+    analysis: &AnalysisStore,
 ) -> Result<runmat_vm::Bytecode, CompileError> {
     let Some(entrypoint) = lowering.assembly.entrypoints.first() else {
-        let bound_functions =
-            runmat_vm::compile_semantic_function_registry(&lowering.assembly, mir)?;
+        let bound_functions = runmat_vm::compile_semantic_function_registry_with_analysis(
+            &lowering.assembly,
+            mir,
+            analysis,
+        )?;
         let function_registry = runmat_vm::FunctionRegistry::new(bound_functions.clone());
         let mut bytecode = runmat_vm::Bytecode::empty();
         bytecode.bound_functions = bound_functions;
         bytecode.function_registry = function_registry;
         return Ok(bytecode);
     };
-    runmat_vm::compile(&lowering.assembly, mir, entrypoint.id)
+    runmat_vm::compile_with_analysis(&lowering.assembly, mir, entrypoint.id, analysis)
 }
 
 fn parse_failure_message(failure: &ParseFailure) -> String {

@@ -5,11 +5,11 @@ use runmat_execution::{Digest, ProgramRevision};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ArtifactError, ArtifactResult, BundleCodeClosure, LogicalObject, ObjectDescriptor,
-    ProgramArtifact, ProgramBuildRecipe,
+    ArtifactError, ArtifactResult, BundleCodeClosure, ForeignArtifactClosure, LogicalObject,
+    ObjectDescriptor, ProgramArtifact, ProgramBuildRecipe,
 };
 
-pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 4;
+pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +43,7 @@ pub struct BundleManifest {
     pub code_closure: BundleCodeClosure,
     pub sources: Vec<ObjectDescriptor>,
     pub foreign_artifacts: Vec<ObjectDescriptor>,
+    pub foreign_artifact_closures: Vec<ForeignArtifactClosure>,
     pub callables: Vec<BundleCallable>,
     pub recipes: Vec<ProgramBuildRecipe>,
     pub artifacts: Vec<ProgramArtifact>,

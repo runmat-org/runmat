@@ -33,6 +33,7 @@ pub struct CudaProvider {
     ordinal: u32,
     context: usize,
     name: String,
+    memory_bytes: u64,
     device_id: u32,
     next_buffer: AtomicU64,
     allocations: Mutex<HashMap<u64, Allocation>>,
@@ -73,13 +74,15 @@ impl CudaProvider {
             return Ok(None);
         };
         let driver = Arc::new(driver);
-        let (cuda_device, context, name) = driver.initialize(ordinal as i32)?;
+        let (cuda_device, context, name, memory_bytes) = driver.initialize(ordinal as i32)?;
         Ok(Some(Self {
             driver,
             cuda_device,
             ordinal,
             context,
             name,
+            memory_bytes: u64::try_from(memory_bytes)
+                .map_err(|_| anyhow!("CUDA device memory exceeds the supported range"))?,
             device_id: runmat_accelerate_api::next_device_id(),
             next_buffer: AtomicU64::new(1),
             allocations: Mutex::new(HashMap::new()),
@@ -400,6 +403,32 @@ impl AccelProvider for CudaProvider {
 
     fn device_id(&self) -> u32 {
         self.device_id
+    }
+
+    fn device_info_struct(&self) -> runmat_accelerate_api::ApiDeviceInfo {
+        runmat_accelerate_api::ApiDeviceInfo {
+            device_id: self.device_id,
+            name: self.name.clone(),
+            vendor: "NVIDIA".into(),
+            memory_bytes: Some(self.memory_bytes),
+            backend: Some("cuda".into()),
+        }
+    }
+
+    fn execution_accelerator_device(
+        &self,
+        inventory_epoch: u64,
+    ) -> Result<Option<runmat_execution::resource::AcceleratorDevice>> {
+        runmat_accelerate_api::execution_accelerator_device(
+            self,
+            runmat_accelerate_api::RUNMAT_CUDA_PROVIDER_ID,
+            runmat_accelerate_api::RUNMAT_BUILTIN_PROVIDER_VERSION,
+            runmat_accelerate_api::ExecutionProviderContract::CudaNativeV1,
+            "primary-gpu",
+            &format!("cuda-ordinal-{}", self.ordinal),
+            inventory_epoch,
+        )
+        .map(Some)
     }
 
     fn native_device_api(&self) -> Option<NativeDeviceApi> {

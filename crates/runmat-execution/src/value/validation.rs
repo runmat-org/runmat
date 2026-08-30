@@ -1,12 +1,13 @@
 use super::{
     DenseValue, ExceptionValue, InlineValue, RegisteredData, StructField, ValueLimits,
-    ValuePayload, ValueRef, ValueRefKind,
+    ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
 };
 use crate::{schema::VALUE_PAYLOAD_SCHEMA_V1, ContractError};
 
 pub(super) fn validate(payload: &ValuePayload, limits: ValueLimits) -> Result<(), ContractError> {
     ValidationBudget {
         limits,
+        transport: None,
         nodes: 0,
         inline_bytes: 0,
         elements: 0,
@@ -15,15 +16,32 @@ pub(super) fn validate(payload: &ValuePayload, limits: ValueLimits) -> Result<()
     .payload(payload, 0)
 }
 
-struct ValidationBudget {
+pub(super) fn validate_for_transport(
+    payload: &ValuePayload,
     limits: ValueLimits,
+    context: ValueTransportContext<'_>,
+) -> Result<(), ContractError> {
+    ValidationBudget {
+        limits,
+        transport: Some(context),
+        nodes: 0,
+        inline_bytes: 0,
+        elements: 0,
+        text_bytes: 0,
+    }
+    .payload(payload, 0)
+}
+
+struct ValidationBudget<'a> {
+    limits: ValueLimits,
+    transport: Option<ValueTransportContext<'a>>,
     nodes: u64,
     inline_bytes: u64,
     elements: u64,
     text_bytes: u64,
 }
 
-impl ValidationBudget {
+impl ValidationBudget<'_> {
     fn payload(&mut self, payload: &ValuePayload, depth: u16) -> Result<(), ContractError> {
         self.node(depth)?;
         match payload {
@@ -234,10 +252,23 @@ impl ValidationBudget {
                 "resident references require a worker/node/process fence",
             )),
             (ValueRefKind::ResidentObject, Some(fence)) => {
-                if let Some(device) = &fence.device_identity {
-                    self.text(device)?;
+                fence.validate()?;
+                match self.transport {
+                    None => Ok(()),
+                    Some(ValueTransportContext::Portable) => Err(ContractError::invalid(
+                        "resident value",
+                        "process- or device-resident references cannot cross a portable transport boundary",
+                    )),
+                    Some(ValueTransportContext::Resident(authority))
+                        if authority.authorizes(fence) =>
+                    {
+                        Ok(())
+                    }
+                    Some(ValueTransportContext::Resident(_)) => Err(ContractError::invalid(
+                        "resident value",
+                        "worker, node lease, process generation, attempt, or accelerator lease is stale or different",
+                    )),
                 }
-                Ok(())
             }
             (_, Some(_)) => Err(ContractError::invalid(
                 "value reference",

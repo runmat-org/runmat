@@ -23,7 +23,20 @@ pub(crate) fn infer_legacy_builtin(name: &str, request: &CallRequest) -> Option<
     let function = runmat_builtins::builtin_functions()
         .into_iter()
         .find(|function| function.name.eq_ignore_ascii_case(name))?;
+    infer_registered_legacy_builtin(function, name, request).map(|mut inference| {
+        inference
+            .capabilities
+            .0
+            .extend(function.required_capabilities.iter().copied());
+        inference
+    })
+}
 
+fn infer_registered_legacy_builtin(
+    function: &runmat_builtins::BuiltinFunction,
+    name: &str,
+    request: &CallRequest,
+) -> Option<CallInference> {
     if request.arguments.len() == 1 {
         if let Some(target) = NumericClass::from_class_name(function.name) {
             return Some(call_from_fact(
@@ -403,6 +416,7 @@ fn type_to_fact(value: &Type) -> ValueFact {
         Type::Function { params, returns } => {
             ValueFact::scalar(ValueKindFact::Callable(runmat_types::CallableFact {
                 identity: None,
+                capabilities: Default::default(),
                 parameters: params.iter().map(type_to_fact).collect(),
                 parameters_complete: true,
                 outputs: match returns.as_ref() {

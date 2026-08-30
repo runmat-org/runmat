@@ -194,7 +194,9 @@ async fn remote_driver_preserves_exact_test_result_events_and_coverage() {
         1,
     )
     .unwrap();
-    let request = workload.program_request().unwrap();
+    let request = workload
+        .program_request(runmat_types::InteropManifest::empty())
+        .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, request.recipe.program_revision.clone())
         .unwrap()
         .with_materialized_program(
@@ -295,7 +297,9 @@ async fn encrypted_registry_dependency_executes_without_worker_registry_credenti
         1,
     )
     .unwrap();
-    let request = workload.program_request().unwrap();
+    let request = workload
+        .program_request(runmat_types::InteropManifest::empty())
+        .unwrap();
     let bundle =
         ExecutionBundleBuilder::native(&resolved.frozen, request.recipe.program_revision.clone())
             .unwrap()
@@ -561,9 +565,7 @@ fn resource_request() -> runmat_execution_transport_native::control::ResourceReq
         cpu_millicores: 1_000,
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 60_000,
     }
 }
@@ -578,6 +580,8 @@ fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-test"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),

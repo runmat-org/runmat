@@ -680,6 +680,7 @@ fn function_revision(
         display_name,
         private_owner_scope,
         source_id,
+        capabilities,
         instructions,
         instr_spans,
         call_arg_spans,
@@ -718,6 +719,7 @@ fn function_revision(
     append!(display_name);
     append!(private_owner_scope);
     append!(source_id);
+    append!(capabilities);
     append!(instructions);
     append!(instr_spans);
     append!(call_arg_spans);

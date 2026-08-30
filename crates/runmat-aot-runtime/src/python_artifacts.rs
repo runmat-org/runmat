@@ -38,6 +38,9 @@ mod tests {
         )
         .unwrap();
         install(&bundle.canonical_bytes().unwrap(), &adapter).unwrap();
-        assert!(adapter.descriptor().artifact_identities.contains(&expected));
+        assert!(adapter
+            .descriptor()
+            .artifact_identities
+            .contains(expected.as_str()));
     }
 }

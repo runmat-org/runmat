@@ -106,6 +106,12 @@ fn verify_function(
     if function.blocks.is_empty() {
         return Err(error("native.ir.blocks", "function must contain a block"));
     }
+    if !function.capabilities.0.is_subset(&capabilities.0) {
+        return Err(error(
+            "native.ir.function_capabilities",
+            "function requirements exceed the executable capability envelope",
+        ));
+    }
     if function.locals.len() > u32::MAX as usize
         || function.locals.iter().enumerate().any(|(index, local)| {
             local.id.0 as usize != index
@@ -278,10 +284,14 @@ fn verify_function(
                 &mut all_safepoints,
                 containing_statement,
             )?;
-            if !instruction.capabilities.0.is_subset(&capabilities.0) {
+            if !instruction
+                .capabilities
+                .0
+                .is_subset(&function.capabilities.0)
+            {
                 return Err(error(
                     "native.ir.capabilities",
-                    "instruction requirement is absent from the executable capability set",
+                    "instruction requirement is absent from the function capability set",
                 ));
             }
             actual_sites.insert(instruction.site.clone());

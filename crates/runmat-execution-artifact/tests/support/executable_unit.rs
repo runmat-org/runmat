@@ -22,6 +22,10 @@ pub fn recipe(mut recipe: ProgramBuildRecipe) -> ProgramBuildRecipe {
     recipe.entrypoint = "0".into();
     recipe.target =
         runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3");
+    let envelope =
+        ExecutableUnitEnvelope::from_canonical_bytes(&bytes(recipe.program_revision.clone()))
+            .unwrap();
+    recipe.interop = envelope.manifest.interop;
     recipe
 }
 

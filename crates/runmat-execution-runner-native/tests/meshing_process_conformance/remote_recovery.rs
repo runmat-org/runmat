@@ -113,11 +113,13 @@ async fn run_inner() {
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-recovery-worker-1"]),
         pool_id,
         resources: worker_inventory(),
+        host: worker_host_inventory(),
     };
     let second_worker = WorkerSpec {
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-recovery-worker-2"]),
         pool_id,
         resources: worker_inventory(),
+        host: worker_host_inventory(),
     };
     let (first_server, first_inner) = start_remote_worker(
         RUN_ID,

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{bail, Context, Result};
-use runmat_execution_artifact::{LogicalObject, ObjectNamespace};
+use runmat_execution_artifact::{ForeignArtifactClosure, LogicalObject, ObjectNamespace};
 use runmat_native_ffi::{
     NativeInterfaceArtifactBundle, NativeInterfaceArtifactBundleEntry,
     NativeInterfaceArtifactManifest, NATIVE_INTERFACE_MANIFEST_MEDIA_TYPE,
@@ -13,6 +13,7 @@ use runmat_types::InteropManifest;
 pub(crate) struct PreparedNativeInterfaces {
     pub(crate) interop: InteropManifest,
     pub(crate) objects: Vec<LogicalObject>,
+    pub(crate) closures: Vec<ForeignArtifactClosure>,
     pub(crate) bundle: NativeInterfaceArtifactBundle,
 }
 
@@ -77,25 +78,37 @@ pub(crate) fn prepare_native_interfaces(
     let mut objects = Vec::with_capacity(by_identity.len() * 2);
     let mut bundle_entries = Vec::with_capacity(by_identity.len());
     let mut artifact_identities = Vec::with_capacity(by_identity.len());
+    let mut closures = Vec::with_capacity(by_identity.len());
     for (identity, (manifest, library)) in by_identity {
         bundle_entries.push(NativeInterfaceArtifactBundleEntry {
             manifest: manifest.clone(),
             library: library.clone(),
         });
         let logical_root = format!("native/{}", logical_identity(&identity));
-        objects.push(LogicalObject::new(
+        let manifest_object = LogicalObject::new(
             ObjectNamespace::ForeignArtifact,
             format!("{logical_root}/manifest.json"),
             NATIVE_INTERFACE_MANIFEST_MEDIA_TYPE,
             manifest,
-        )?);
-        objects.push(LogicalObject::new(
+        )?;
+        let library_object = LogicalObject::new(
             ObjectNamespace::ForeignArtifact,
             format!("{logical_root}/library.bin"),
             NATIVE_LIBRARY_MEDIA_TYPE,
             library,
+        )?;
+        let artifact_identity = runmat_types::ForeignArtifactIdentity::new(identity)?;
+        closures.push(ForeignArtifactClosure::new(
+            runmat_types::ForeignAdapterId::new(runmat_native_ffi::NATIVE_FFI_ADAPTER_ID)?,
+            artifact_identity.clone(),
+            vec![
+                manifest_object.descriptor.digest,
+                library_object.descriptor.digest,
+            ],
         )?);
-        artifact_identities.push(identity);
+        objects.push(manifest_object);
+        objects.push(library_object);
+        artifact_identities.push(artifact_identity);
     }
 
     let mut interop = InteropManifest::empty();
@@ -117,6 +130,7 @@ pub(crate) fn prepare_native_interfaces(
     Ok(PreparedNativeInterfaces {
         interop,
         objects,
+        closures,
         bundle,
     })
 }

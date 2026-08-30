@@ -9,6 +9,8 @@ pub struct DriverWorkerAllocation {
     pub fencing_token: u64,
     pub state: String,
     pub resources: ResourceRequest,
+    pub accelerator_devices: Vec<runmat_execution::resource::AcceleratorDevice>,
+    pub host: runmat_execution::host::ExecutionHostInventory,
     pub endpoint_identity: Option<runmat_execution::security::EndpointIdentityEvidence>,
     pub run_key_envelope_authorized: bool,
 }
@@ -44,10 +46,12 @@ pub(super) fn resource_to_api(
         cpu_millicores: to_i64(value.cpu_millicores)?,
         memory_bytes: to_i64(value.memory_bytes)?,
         scratch_bytes: to_i64(value.scratch_bytes)?,
-        accelerator_count: i32::try_from(value.accelerator_count)
-            .map_err(|_| TransportError::Overflow)?,
-        accelerator_class: value.accelerator_class,
-        accelerator_memory_bytes: to_i64(value.accelerator_memory_bytes)?,
+        accelerators: value
+            .accelerators
+            .into_iter()
+            .map(runmat_server_client::execution::accelerator_request_to_api)
+            .collect::<Result<_, _>>()
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
         maximum_wall_millis: to_i64(value.maximum_wall_millis)?,
     })
 }
@@ -59,10 +63,12 @@ pub(super) fn resource_from_api(
         cpu_millicores: to_u64(value.cpu_millicores)?,
         memory_bytes: to_u64(value.memory_bytes)?,
         scratch_bytes: to_u64(value.scratch_bytes)?,
-        accelerator_count: u32::try_from(value.accelerator_count)
-            .map_err(|_| TransportError::Overflow)?,
-        accelerator_class: value.accelerator_class,
-        accelerator_memory_bytes: to_u64(value.accelerator_memory_bytes)?,
+        accelerators: value
+            .accelerators
+            .into_iter()
+            .map(runmat_server_client::execution::accelerator_request_from_api)
+            .collect::<Result<_, _>>()
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
         maximum_wall_millis: to_u64(value.maximum_wall_millis)?,
     })
 }
@@ -75,6 +81,14 @@ fn worker_from_api(
         fencing_token: to_u64(value.fencing_token)?,
         state: value.state,
         resources: resource_from_api(value.resources)?,
+        accelerator_devices: value
+            .accelerator_devices
+            .into_iter()
+            .map(runmat_server_client::execution::accelerator_device_from_api)
+            .collect::<Result<_, _>>()
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
+        host: runmat_server_client::execution::execution_host_inventory_from_api(value.host)
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
         endpoint_identity: value
             .endpoint_identity
             .map(|identity| {

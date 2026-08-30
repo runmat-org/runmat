@@ -1,8 +1,62 @@
 use crate::{CapabilitySet, SchemaValidationError};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::{Display, Formatter};
 
-pub const INTEROP_MANIFEST_SCHEMA_VERSION: u16 = 2;
+pub const INTEROP_MANIFEST_SCHEMA_VERSION: u16 = 3;
+
+macro_rules! foreign_identity {
+    ($name:ident, $field:literal, $maximum:expr) => {
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+        #[serde(transparent)]
+        pub struct $name(String);
+
+        impl $name {
+            pub fn new(value: impl Into<String>) -> Result<Self, SchemaValidationError> {
+                let value = value.into();
+                super::schema::validate_token($field, &value, $maximum)?;
+                Ok(Self(value))
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl Display for $name {
+            fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str(&self.0)
+            }
+        }
+
+        impl std::borrow::Borrow<str> for $name {
+            fn borrow(&self) -> &str {
+                self.as_str()
+            }
+        }
+
+        impl TryFrom<String> for $name {
+            type Error = SchemaValidationError;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                Self::new(value)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = String::deserialize(deserializer)?;
+                Self::try_from(value).map_err(serde::de::Error::custom)
+            }
+        }
+    };
+}
+
+foreign_identity!(ForeignAdapterId, "foreign adapter identity", 96);
+foreign_identity!(ForeignArtifactIdentity, "foreign artifact identity", 256);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,10 +126,11 @@ pub struct ForeignRequirement {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ForeignAdapterRequirement {
-    pub adapter: String,
+    pub adapter: ForeignAdapterId,
     pub minimum_version: u32,
     pub capabilities: CapabilitySet,
-    pub artifact_identities: Vec<String>,
+    pub execution_stack: super::ExecutionStackRequirement,
+    pub artifact_identities: Vec<ForeignArtifactIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,7 +211,6 @@ impl InteropManifest {
             ));
         }
         for adapter in &self.adapters {
-            super::schema::validate_token("interop.adapters.adapter", &adapter.adapter, 96)?;
             if adapter.minimum_version == 0 {
                 return Err(SchemaValidationError::new(
                     "interop.adapters.minimum_version",
@@ -172,13 +226,6 @@ impl InteropManifest {
                     "interop.adapters.artifact_identities",
                     "entries must be sorted and unique",
                 ));
-            }
-            for artifact in &adapter.artifact_identities {
-                super::schema::validate_token(
-                    "interop.adapters.artifact_identities",
-                    artifact,
-                    256,
-                )?;
             }
         }
         if self
@@ -196,7 +243,7 @@ impl InteropManifest {
             if self
                 .adapters
                 .iter()
-                .any(|adapter| adapter.adapter == contract.adapter.adapter_id())
+                .any(|adapter| adapter.adapter.as_str() == contract.adapter.adapter_id())
             {
                 return Err(SchemaValidationError::new(
                     "interop.adapter_contracts",
@@ -218,7 +265,7 @@ impl InteropManifest {
     /// ownership or affinity rules would make admission order-dependent.
     pub fn merge(manifests: impl IntoIterator<Item = Self>) -> Result<Self, SchemaValidationError> {
         let mut foreign_types = BTreeMap::new();
-        let mut adapters: BTreeMap<String, ForeignAdapterRequirement> = BTreeMap::new();
+        let mut adapters: BTreeMap<ForeignAdapterId, ForeignAdapterRequirement> = BTreeMap::new();
         let mut adapter_contracts = BTreeSet::new();
         for manifest in manifests {
             manifest.validate()?;
@@ -244,9 +291,11 @@ impl InteropManifest {
                         adapter: requirement.adapter.clone(),
                         minimum_version: requirement.minimum_version,
                         capabilities: CapabilitySet(BTreeSet::new()),
+                        execution_stack: requirement.execution_stack,
                         artifact_identities: Vec::new(),
                     });
                 adapter.minimum_version = adapter.minimum_version.max(requirement.minimum_version);
+                adapter.execution_stack = adapter.execution_stack.max(requirement.execution_stack);
                 adapter.capabilities.0.extend(requirement.capabilities.0);
                 let mut identities = adapter
                     .artifact_identities
@@ -282,10 +331,11 @@ mod tests {
     #[test]
     fn merge_is_canonical_and_unions_adapter_contracts() {
         let requirement = |capability, artifact: &str| ForeignAdapterRequirement {
-            adapter: "native".into(),
+            adapter: ForeignAdapterId::new("native").unwrap(),
             minimum_version: 1,
             capabilities: CapabilitySet(BTreeSet::from([capability])),
-            artifact_identities: vec![artifact.into()],
+            execution_stack: crate::ExecutionStackRequirement::Process,
+            artifact_identities: vec![ForeignArtifactIdentity::new(artifact).unwrap()],
         };
         let merged = InteropManifest::merge([
             InteropManifest {
@@ -302,7 +352,14 @@ mod tests {
             },
         ])
         .unwrap();
-        assert_eq!(merged.adapters[0].artifact_identities, ["a", "b"]);
+        assert_eq!(
+            merged.adapters[0]
+                .artifact_identities
+                .iter()
+                .map(ForeignArtifactIdentity::as_str)
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
         assert_eq!(merged.adapters[0].capabilities.0.len(), 2);
     }
 
@@ -340,9 +397,10 @@ mod tests {
             ..InteropManifest::empty()
         };
         manifest.adapters.push(ForeignAdapterRequirement {
-            adapter: PlannedForeignAdapter::DotNet.adapter_id().into(),
+            adapter: ForeignAdapterId::new(PlannedForeignAdapter::DotNet.adapter_id()).unwrap(),
             minimum_version: 1,
             capabilities: CapabilitySet::default(),
+            execution_stack: crate::ExecutionStackRequirement::Process,
             artifact_identities: Vec::new(),
         });
         assert_eq!(

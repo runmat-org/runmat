@@ -18,6 +18,7 @@ mod tests;
 
 pub use constant::*;
 pub use contract::*;
+pub use definitions::*;
 pub use descriptor::*;
 pub use documentation::*;
 pub use entry::*;

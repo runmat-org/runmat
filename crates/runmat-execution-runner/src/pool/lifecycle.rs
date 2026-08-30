@@ -65,6 +65,6 @@ impl PoolRecord {
     }
 
     pub fn fits(&self, request: &runmat_execution::resource::ResourceRequest) -> bool {
-        crate::scheduler::fits(&self.spec.resource_limit, &self.allocated, request)
+        crate::scheduler::scalar_resources_fit(&self.spec.resource_limit, &self.allocated, request)
     }
 }

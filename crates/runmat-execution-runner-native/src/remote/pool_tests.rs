@@ -7,7 +7,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_execution::identity::{ArtifactId, WorkerId};
-use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
+use runmat_execution::resource::{
+    AcceleratorClass, AcceleratorDevice, AcceleratorDeviceId, AcceleratorFeature,
+    AcceleratorRequest, Capability, ResourceInventory, ResourceRequest,
+};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::{InlineValue, ValuePayload};
 use runmat_execution::{
@@ -39,10 +42,39 @@ struct FakeWorker {
     installs: Arc<AtomicUsize>,
     active: Arc<AtomicUsize>,
     maximum_active: Arc<AtomicUsize>,
+    start_gate: Option<Arc<ConcurrencyGate>>,
     delay: Duration,
     cancellations: Arc<AtomicUsize>,
     drains: Arc<AtomicUsize>,
     bundle: Arc<Vec<u8>>,
+}
+
+struct ConcurrencyGate {
+    target: usize,
+    arrivals: AtomicUsize,
+    notify: tokio::sync::Notify,
+}
+
+impl ConcurrencyGate {
+    fn new(target: usize) -> Self {
+        Self {
+            target,
+            arrivals: AtomicUsize::new(0),
+            notify: tokio::sync::Notify::new(),
+        }
+    }
+
+    async fn arrive_and_wait(&self) {
+        self.arrivals.fetch_add(1, Ordering::AcqRel);
+        self.notify.notify_waiters();
+        loop {
+            let notified = self.notify.notified();
+            if self.arrivals.load(Ordering::Acquire) >= self.target {
+                return;
+            }
+            notified.await;
+        }
+    }
 }
 
 struct ResultObjectWorker {
@@ -236,6 +268,9 @@ impl RemoteWorkerChannel for FakeWorker {
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
         let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.maximum_active.fetch_max(active, Ordering::SeqCst);
+        if let Some(gate) = &self.start_gate {
+            gate.arrive_and_wait().await;
+        }
         tokio::time::sleep(self.delay).await;
         self.active.fetch_sub(1, Ordering::SeqCst);
         Ok(AttemptReport::Succeeded {
@@ -302,6 +337,7 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
     let installs = Arc::new(AtomicUsize::new(0));
     let active = Arc::new(AtomicUsize::new(0));
     let maximum_active = Arc::new(AtomicUsize::new(0));
+    let start_gate = Arc::new(ConcurrencyGate::new(3));
     for (ordinal, node) in [(0_u8, "node-a"), (1, "node-b"), (2, "node-a")] {
         pool.add_worker(Arc::new(FakeWorker {
             node: node.into(),
@@ -309,10 +345,12 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
                 id: WorkerId::derive(&[b"worker", &[ordinal]]),
                 pool_id,
                 resources: inventory(1_000),
+                host: host_inventory(),
             },
             installs: Arc::clone(&installs),
             active: Arc::clone(&active),
             maximum_active: Arc::clone(&maximum_active),
+            start_gate: Some(Arc::clone(&start_gate)),
             delay: Duration::from_millis(25),
             cancellations: Arc::new(AtomicUsize::new(0)),
             drains: Arc::new(AtomicUsize::new(0)),
@@ -342,6 +380,7 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
                             requested_outputs: 1,
                         },
                         resources: request(),
+                        host: host_requirement(),
                         retry: RetryPolicy::Never,
                         deadline_unix_millis: None,
                     },
@@ -353,6 +392,16 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
             .unwrap(),
         );
     }
+    let scheduled = pool.snapshot();
+    assert_eq!(scheduled.pools[&pool_id].active_attempts, 3);
+    assert_eq!(
+        scheduled.pools[&pool_id]
+            .workers
+            .values()
+            .filter(|worker| worker.active_attempts == 1)
+            .count(),
+        3
+    );
     for completion in completions {
         let success = completion.wait().await.unwrap();
         let (outputs, _) = success.values().expect("ordinary remote task result");
@@ -364,6 +413,59 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
         .tasks
         .values()
         .all(|task| { task.state == runmat_execution::state::TaskState::Succeeded }));
+}
+
+#[tokio::test]
+async fn remote_compiled_program_receives_its_exact_accelerator_lease() {
+    let accelerator = accelerator_request();
+    let (program, artifact_id, bundle) =
+        build_executable_bundle(false, vec![accelerator.clone()]).await;
+    let scope_id = ExecutionScopeId::derive(&[b"remote-accelerator-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-accelerator-pool"]);
+    let mut pool_resources = inventory(1_000);
+    pool_resources.accelerators = vec![accelerator_device()];
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: pool_resources.clone(),
+        },
+        17,
+        bundle.clone(),
+    )
+    .unwrap();
+    let assignments = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let worker_id = WorkerId::derive(&[b"remote-accelerator-worker"]);
+    pool.add_worker(Arc::new(ExecutingWorker {
+        spec: WorkerSpec {
+            id: worker_id,
+            pool_id,
+            resources: pool_resources,
+            host: host_inventory(),
+        },
+        bundle: Arc::new(bundle),
+        assignments: Arc::clone(&assignments),
+    }))
+    .await
+    .unwrap();
+    let task_id = TaskId::derive(&[b"remote-accelerator-task"]);
+    let weak = submission(scope_id, pool_id, task_id, artifact_id);
+    assert!(pool.submit(weak, program.clone()).is_err());
+    let mut task = submission(scope_id, pool_id, task_id, artifact_id);
+    task.request.resources.accelerators = vec![accelerator];
+    pool.submit(task, program).unwrap().wait().await.unwrap();
+
+    let assignments = assignments.lock().unwrap();
+    assert_eq!(assignments.len(), 1);
+    let lease = &assignments[0].resources.accelerator_leases[0];
+    assert_eq!(lease.device_id, accelerator_device().id);
+    assert_eq!(lease.provider, accelerator_device().provider);
+    lease
+        .validate_for_attempt(assignments[0].attempt_id)
+        .unwrap();
 }
 
 #[tokio::test]
@@ -392,6 +494,7 @@ async fn remote_pool_executes_the_compiler_bound_parallel_region() {
             id: worker_id,
             pool_id,
             resources: inventory(1_000),
+            host: host_inventory(),
         },
         bundle,
         assignments: Arc::clone(&assignments),
@@ -418,6 +521,7 @@ async fn remote_pool_executes_the_compiler_bound_parallel_region() {
                         requested_outputs: 1,
                     },
                     resources: request(),
+                    host: host_requirement(),
                     retry: RetryPolicy::IdempotentInfrastructure,
                     deadline_unix_millis: None,
                 },
@@ -504,6 +608,7 @@ async fn remote_pool_downloads_and_verifies_externalized_objects_before_success(
             id: WorkerId::derive(&[b"result-object-worker"]),
             pool_id,
             resources: inventory(1_000),
+            host: host_inventory(),
         },
         bundle,
         reference: reference.clone(),
@@ -560,6 +665,7 @@ async fn remote_pool_downloads_and_verifies_externalized_objects_before_success(
                 id: WorkerId::derive(&[b"corrupt-result-object-worker"]),
                 pool_id: corrupt_pool_id,
                 resources: inventory(1_000),
+                host: host_inventory(),
             },
             bundle: corrupt_bundle,
             reference: substituted.clone(),
@@ -589,7 +695,12 @@ async fn remote_pool_downloads_and_verifies_externalized_objects_before_success(
 async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
     let scope_id = ExecutionScopeId::derive(&[b"remote-cancel-scope"]);
     let pool_id = PoolId::derive(&[b"remote-cancel-pool"]);
-    let bundle = Arc::new(executable_bundle().await.2);
+    let accelerator = accelerator_request();
+    let (cancel_program, artifact_id, bundle) =
+        build_executable_bundle(false, vec![accelerator.clone()]).await;
+    let bundle = Arc::new(bundle);
+    let mut resources = inventory(1_000);
+    resources.accelerators = vec![accelerator_device()];
     let pool = RemotePoolDriver::new(
         scope_id,
         PoolSpec {
@@ -597,7 +708,7 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
             min_workers: 1,
             max_workers: 1,
             max_in_flight: 1,
-            resource_limit: inventory(1_000),
+            resource_limit: resources.clone(),
         },
         11,
         bundle.as_ref().clone(),
@@ -612,11 +723,13 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
         spec: WorkerSpec {
             id: worker_id,
             pool_id,
-            resources: inventory(1_000),
+            resources,
+            host: host_inventory(),
         },
         installs: Arc::new(AtomicUsize::new(0)),
         active: Arc::clone(&active),
         maximum_active: Arc::new(AtomicUsize::new(0)),
+        start_gate: None,
         delay: Duration::from_secs(30),
         cancellations: Arc::clone(&cancellations),
         drains: Arc::clone(&drains),
@@ -624,14 +737,10 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
     }))
     .await
     .unwrap();
-    let (cancel_program, artifact_id) = program().await;
     let task_id = TaskId::derive(&[b"cancel-task"]);
-    let completion = pool
-        .submit(
-            submission(scope_id, pool_id, task_id, artifact_id),
-            cancel_program,
-        )
-        .unwrap();
+    let mut cancel_submission = submission(scope_id, pool_id, task_id, artifact_id);
+    cancel_submission.request.resources.accelerators = vec![accelerator];
+    let completion = pool.submit(cancel_submission, cancel_program).unwrap();
     tokio::time::timeout(Duration::from_secs(1), async {
         while active.load(Ordering::SeqCst) == 0 {
             tokio::task::yield_now().await;
@@ -653,10 +762,24 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
         runmat_execution::state::TaskState::Cancelled
     );
     assert_eq!(cancellations.load(Ordering::SeqCst), 1);
+    let snapshot = pool.snapshot();
+    assert!(snapshot.pools[&pool_id]
+        .allocated
+        .leased_accelerator_domains
+        .is_empty());
+    assert!(snapshot.pools[&pool_id]
+        .workers
+        .values()
+        .all(|worker| worker.allocated.leased_accelerator_domains.is_empty()));
 
     let scope_id = ExecutionScopeId::derive(&[b"remote-loss-scope"]);
     let pool_id = PoolId::derive(&[b"remote-loss-pool"]);
-    let bundle = Arc::new(executable_bundle().await.2);
+    let accelerator = accelerator_request();
+    let (lost_program, artifact_id, bundle) =
+        build_executable_bundle(false, vec![accelerator.clone()]).await;
+    let bundle = Arc::new(bundle);
+    let mut resources = inventory(1_000);
+    resources.accelerators = vec![accelerator_device()];
     let pool = RemotePoolDriver::new(
         scope_id,
         PoolSpec {
@@ -664,7 +787,7 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
             min_workers: 1,
             max_workers: 1,
             max_in_flight: 1,
-            resource_limit: inventory(1_000),
+            resource_limit: resources.clone(),
         },
         12,
         bundle.as_ref().clone(),
@@ -678,11 +801,13 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
         spec: WorkerSpec {
             id: worker_id,
             pool_id,
-            resources: inventory(1_000),
+            resources,
+            host: host_inventory(),
         },
         installs: Arc::new(AtomicUsize::new(0)),
         active: Arc::clone(&active),
         maximum_active: Arc::new(AtomicUsize::new(0)),
+        start_gate: None,
         delay: Duration::from_secs(30),
         cancellations: Arc::new(AtomicUsize::new(0)),
         drains: Arc::clone(&drains),
@@ -690,14 +815,10 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
     }))
     .await
     .unwrap();
-    let (lost_program, artifact_id) = program().await;
     let lost_task_id = TaskId::derive(&[b"lost-task"]);
-    let completion = pool
-        .submit(
-            submission(scope_id, pool_id, lost_task_id, artifact_id),
-            lost_program,
-        )
-        .unwrap();
+    let mut lost_submission = submission(scope_id, pool_id, lost_task_id, artifact_id);
+    lost_submission.request.resources.accelerators = vec![accelerator];
+    let completion = pool.submit(lost_submission, lost_program).unwrap();
     tokio::time::timeout(Duration::from_secs(1), async {
         while active.load(Ordering::SeqCst) == 0 {
             tokio::task::yield_now().await;
@@ -718,6 +839,11 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
         runmat_execution::state::TaskState::Indeterminate
     );
     assert_eq!(drains.load(Ordering::SeqCst), 0);
+    let snapshot = pool.snapshot();
+    assert!(snapshot.pools[&pool_id]
+        .allocated
+        .leased_accelerator_domains
+        .is_empty());
 }
 
 #[tokio::test]
@@ -739,6 +865,7 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
         id: WorkerId::derive(&[b"quic-worker"]),
         pool_id,
         resources: inventory(1_000),
+        host: host_inventory(),
     };
     let task_id = TaskId::derive(&[b"quic-task"]);
     let (mut program, artifact_id, bundle) = executable_bundle_with_input().await;
@@ -765,6 +892,7 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
         worker_id: worker.id,
         ordinal: 1,
         driver_fence: 9,
+        resource_assignment: Default::default(),
         task: TaskRequest {
             id: task_id,
             scope_id,
@@ -777,6 +905,7 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
                 requested_outputs: 1,
             },
             resources: request(),
+            host: host_requirement(),
             retry: RetryPolicy::Never,
             deadline_unix_millis: None,
         },
@@ -989,11 +1118,13 @@ async fn execute_encrypted_spmd_program(
             id: WorkerId::derive(&[b"remote-spmd-worker-1"]),
             pool_id,
             resources: inventory(1_000),
+            host: host_inventory(),
         },
         WorkerSpec {
             id: WorkerId::derive(&[b"remote-spmd-worker-2"]),
             pool_id,
             resources: inventory(1_000),
+            host: host_inventory(),
         },
     ];
     let run_key =
@@ -1102,6 +1233,25 @@ fn inventory(cpu_millicores: u32) -> ResourceInventory {
     }
 }
 
+fn host_inventory() -> runmat_execution::host::ExecutionHostInventory {
+    runmat_core::RunMatSession::with_options(false, false)
+        .unwrap()
+        .execution_host_inventory(runmat_execution::security::ExecutionTrustTier::CustomerTrusted)
+        .unwrap()
+}
+
+fn host_requirement() -> runmat_execution::host::ExecutionHostRequirement {
+    runmat_execution::host::ExecutionHostRequirement::portable(
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+        runmat_types::CapabilitySet(BTreeSet::from([
+            runmat_types::CapabilityRequirement::HostRuntime,
+        ])),
+        runmat_types::InteropManifest::empty(),
+        BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
+    )
+    .unwrap()
+}
+
 fn request() -> ResourceRequest {
     ResourceRequest {
         cpu_millicores: 1_000,
@@ -1113,6 +1263,38 @@ fn request() -> ResourceRequest {
         max_relay_bytes: 1024 * 1024,
         accelerators: Vec::new(),
         required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+    }
+}
+
+fn accelerator_request() -> AcceleratorRequest {
+    AcceleratorRequest {
+        class: AcceleratorClass::new("gpu").unwrap(),
+        count: 1,
+        minimum_allocation_bytes: 1 << 20,
+        provider: Some(
+            runmat_accelerate_api::execution_provider_contract(
+                runmat_accelerate_api::RUNMAT_CUDA_PROVIDER_ID,
+                runmat_accelerate_api::RUNMAT_BUILTIN_PROVIDER_VERSION,
+                runmat_accelerate_api::ExecutionProviderContract::CudaNativeV1,
+            )
+            .unwrap(),
+        ),
+        required_features: BTreeSet::from([AcceleratorFeature::Compute]),
+    }
+}
+
+fn accelerator_device() -> AcceleratorDevice {
+    AcceleratorDevice {
+        id: AcceleratorDeviceId::new("device:remote-accelerator").unwrap(),
+        allocation_domain: runmat_execution::resource::AcceleratorAllocationDomainId::new(
+            "allocation:remote-accelerator",
+        )
+        .unwrap(),
+        class: AcceleratorClass::new("gpu").unwrap(),
+        provider: accelerator_request().provider.unwrap(),
+        max_allocation_bytes: 1 << 30,
+        features: BTreeSet::from([AcceleratorFeature::Compute]),
+        inventory_epoch: 9,
     }
 }
 
@@ -1153,6 +1335,7 @@ fn submission(
                 requested_outputs: 1,
             },
             resources: request(),
+            host: host_requirement(),
             retry: RetryPolicy::Never,
             deadline_unix_millis: None,
         },
@@ -1167,11 +1350,11 @@ async fn program() -> (ProgramExecutionRequest, ArtifactId) {
 }
 
 async fn executable_bundle() -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
-    build_executable_bundle(false).await
+    build_executable_bundle(false, Vec::new()).await
 }
 
 async fn executable_bundle_with_input() -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
-    build_executable_bundle(true).await
+    build_executable_bundle(true, Vec::new()).await
 }
 
 async fn parallel_region_bundle() -> (
@@ -1249,6 +1432,8 @@ end
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-parfor-test"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
@@ -1399,6 +1584,8 @@ async fn compile_spmd_region_bundle(
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-spmd-test"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
@@ -1434,6 +1621,7 @@ async fn compile_spmd_region_bundle(
 
 async fn build_executable_bundle(
     accepts_input: bool,
+    accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
 ) -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
@@ -1482,6 +1670,8 @@ async fn build_executable_bundle(
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-pool-test"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators,
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),

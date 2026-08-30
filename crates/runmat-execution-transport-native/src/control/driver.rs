@@ -69,18 +69,7 @@ impl DriverControlPlane for HttpDriverControlPlane {
             driver_resources: worker_pool::resource_from_api(response.driver_resources)?,
             desired_worker_count: u32::try_from(response.desired_worker_count)
                 .map_err(|_| TransportError::Overflow)?,
-            worker_resources: ResourceRequest {
-                cpu_millicores: to_u64(response.worker_resources.cpu_millicores)?,
-                memory_bytes: to_u64(response.worker_resources.memory_bytes)?,
-                scratch_bytes: to_u64(response.worker_resources.scratch_bytes)?,
-                accelerator_count: u32::try_from(response.worker_resources.accelerator_count)
-                    .map_err(|_| TransportError::Overflow)?,
-                accelerator_class: response.worker_resources.accelerator_class,
-                accelerator_memory_bytes: to_u64(
-                    response.worker_resources.accelerator_memory_bytes,
-                )?,
-                maximum_wall_millis: to_u64(response.worker_resources.maximum_wall_millis)?,
-            },
+            worker_resources: worker_pool::resource_from_api(response.worker_resources)?,
         })
     }
 

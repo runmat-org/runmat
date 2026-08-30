@@ -64,6 +64,9 @@ pub struct TaskRequest {
     pub pool_id: PoolId,
     pub program_artifact_id: ArtifactId,
     pub callable: Callable,
+    /// Compiler-derived runtime, target, interop, stack, and trust contract.
+    /// Scheduling must satisfy it before an attempt receives resources.
+    pub host: crate::host::ExecutionHostRequirement,
     /// Typed per-task invocation metadata. This is separate from the immutable
     /// program artifact so retries and parallel chunks can share one compiled
     /// product without aliasing their execution context.

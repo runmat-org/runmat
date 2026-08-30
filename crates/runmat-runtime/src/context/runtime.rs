@@ -110,6 +110,9 @@ impl RuntimeContext {
         execution: Rc<dyn RuntimeExecutionServices>,
         cancellation: Arc<AtomicBool>,
     ) -> Self {
+        runmat_accelerate_api::register_execution_provider_authorizer(
+            super::scope::execution_provider_authorization,
+        );
         let state = Rc::new(RuntimeContextState::new(
             RuntimeContextLocalId::next(),
             cancellation,

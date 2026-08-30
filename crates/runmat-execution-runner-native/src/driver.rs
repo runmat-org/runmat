@@ -169,7 +169,7 @@ impl LocalDriver {
             cpu_millicores: cpu,
             memory_bytes: memory,
             scratch_bytes: memory,
-            accelerators: Vec::new(),
+            accelerators: config.accelerator_devices.clone(),
             capabilities: config.worker_capabilities.clone(),
         };
         let mut driver = Driver::new(DriverConfig::default(), 1)?;
@@ -198,9 +198,14 @@ impl LocalDriver {
                     cpu_millicores: 1000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
-                    accelerators: Vec::new(),
+                    accelerators: if index == 0 {
+                        config.accelerator_devices.clone()
+                    } else {
+                        Vec::new()
+                    },
                     capabilities: config.worker_capabilities.clone(),
                 },
+                host: config.host_inventory.clone(),
             }))?;
         }
         prepare_session_root(&config.store_root)?;
@@ -284,12 +289,20 @@ impl LocalDriver {
             retry,
         } = submission;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
+        let host = artifact
+            .execution_host_requirement(
+                &recipe,
+                BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
+            )
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let accelerator_requirements = recipe.accelerators.clone();
         let request = TaskRequest {
             id: task_id,
             scope_id: self.scope_id,
             pool_id: self.pool_id,
             program_artifact_id: artifact_id,
             callable: Callable::for_program("local-session", &callable),
+            host,
             invocation_context,
             inputs,
             outputs,
@@ -301,7 +314,7 @@ impl LocalDriver {
                 max_artifact_bytes: u64::from(self.config.max_message_bytes),
                 max_egress_bytes: 0,
                 max_relay_bytes: 0,
-                accelerators: Vec::new(),
+                accelerators: accelerator_requirements,
                 required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
             },
             retry,
@@ -338,6 +351,13 @@ impl LocalDriver {
                 "local program descriptor failed validation: {error}"
             ))
         })?;
+        recipe
+            .validate_resource_request(&submission.request.resources)
+            .map_err(|error| {
+                NativeExecutionError::Protocol(format!(
+                    "local scheduler resources do not satisfy the program: {error}"
+                ))
+            })?;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
         if submission.request.scope_id != self.scope_id
             || submission.request.pool_id != self.pool_id
@@ -603,6 +623,13 @@ mod task_completion_tests {
                 max_stderr_bytes: 1024,
                 store_root: temporary.path().join("session"),
                 worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+                host_inventory: runmat_core::RunMatSession::with_options(false, false)
+                    .unwrap()
+                    .execution_host_inventory(
+                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                    )
+                    .unwrap(),
+                accelerator_devices: Vec::new(),
             },
             scope,
         )

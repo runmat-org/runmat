@@ -79,9 +79,11 @@ fn inventory() -> NodeInventory {
         cpu_millicores: 1_000,
         memory_bytes: 1024,
         scratch_bytes: 1024,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
+        host: runmat_node_agent::inventory::host(
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+        )
+        .unwrap(),
         capabilities: Default::default(),
     }
 }

@@ -47,6 +47,8 @@ async fn execute_portable_envelope(
         target: runmat_execution_artifact::ProgramTarget::portable(
             "portable-executable-unit-v3-test",
         ),
+        interop: envelope.manifest.interop.clone(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),

@@ -1,6 +1,6 @@
 use super::{NativeBlock, NativeBlockId, NativeIndexExpression, NativeLocalId, NativeMirSite};
 use runmat_types::{
-    BindingId, FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator,
+    BindingId, CapabilitySet, FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator,
     ProgramFunctionId, ProgramSourceId,
 };
 use serde::{Deserialize, Serialize};
@@ -73,6 +73,10 @@ pub struct NativeFunction {
     pub id: ProgramFunctionId,
     pub source: ProgramSourceId,
     pub name: String,
+    /// Whole-function requirements derived by canonical MIR analysis. Native
+    /// executors use this contract when a function becomes an async target;
+    /// they do not reconstruct semantics from lowered instructions.
+    pub capabilities: CapabilitySet,
     pub abi: NativeFunctionAbi,
     pub argument_validations: Vec<NativeFunctionArgumentValidation>,
     pub locals: Vec<NativeLocalMetadata>,

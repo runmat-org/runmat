@@ -28,11 +28,10 @@ async fn local_wall_limit_kills_the_owned_process_tree() {
             cpu_millicores: 1,
             memory_bytes: 8 * 1024 * 1024 * 1024,
             scratch_bytes: 1024,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerators: Vec::new(),
             maximum_wall_millis: 10,
         },
+        accelerator_devices: Vec::new(),
         role: AllocationRole::Driver,
         state: "offered".into(),
         fencing_token: 1,
@@ -93,11 +92,10 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
             cpu_millicores: 1,
             memory_bytes: 64 * 1024 * 1024,
             scratch_bytes: 1024,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerators: Vec::new(),
             maximum_wall_millis: 60_000,
         },
+        accelerator_devices: Vec::new(),
         role: AllocationRole::Worker,
         state: "active".into(),
         fencing_token: 3,
@@ -125,6 +123,10 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
             &sandbox,
             "https://server.test",
             &bootstrap,
+            &runmat_node_agent::inventory::host(
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            )
+            .unwrap(),
         )
         .await
         .unwrap();

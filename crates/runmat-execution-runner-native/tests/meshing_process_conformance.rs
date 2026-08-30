@@ -400,6 +400,7 @@ async fn remote_conformance() {
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-meshing-worker"]),
         pool_id,
         resources: worker_inventory(),
+        host: worker_host_inventory(),
     };
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([17; 32]).unwrap();
@@ -730,6 +731,13 @@ fn worker_inventory() -> ResourceInventory {
     }
 }
 
+fn worker_host_inventory() -> runmat_execution::host::ExecutionHostInventory {
+    runmat_core::RunMatSession::with_options(false, false)
+        .unwrap()
+        .execution_host_inventory(runmat_execution::security::ExecutionTrustTier::CustomerTrusted)
+        .unwrap()
+}
+
 fn config(root: &Path, worker_mode: &str) -> runmat_execution_runner_native::NativeExecutionConfig {
     let mut config =
         runmat_execution_runner_native::NativeExecutionConfig::for_current_executable().unwrap();
@@ -777,6 +785,15 @@ fn submission_for(
             scope_id,
             pool_id,
             program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),
+            host: request
+                .artifact
+                .execution_host_requirement(
+                    &request.recipe,
+                    BTreeSet::from([
+                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                    ]),
+                )
+                .unwrap(),
             artifact_access: host.artifact_access.clone(),
             cpu_millicores: 1000,
             maximum_egress_bytes: 0,

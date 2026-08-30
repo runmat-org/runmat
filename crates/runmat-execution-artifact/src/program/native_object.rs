@@ -1,5 +1,5 @@
 use minicbor::{Decoder, Encoder};
-use runmat_execution::Digest;
+use runmat_execution::{host::NativeObjectFormat, Digest};
 use serde::{Deserialize, Serialize};
 
 use crate::{ArtifactError, ArtifactResult};
@@ -13,7 +13,7 @@ const MAX_OBJECT_BYTES: usize = 512 * 1024 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct NativeObjectPayload {
     pub schema_version: u16,
-    pub object_format: String,
+    pub object_format: NativeObjectFormat,
     pub metadata_digest: Digest,
     pub object_digest: Digest,
     pub metadata: Vec<u8>,
@@ -22,13 +22,13 @@ pub struct NativeObjectPayload {
 
 impl NativeObjectPayload {
     pub fn new(
-        object_format: impl Into<String>,
+        object_format: NativeObjectFormat,
         metadata: Vec<u8>,
         object: Vec<u8>,
     ) -> ArtifactResult<Self> {
         let payload = Self {
             schema_version: NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION,
-            object_format: object_format.into(),
+            object_format,
             metadata_digest: Digest::sha256(&metadata),
             object_digest: Digest::sha256(&object),
             metadata,
@@ -40,10 +40,6 @@ impl NativeObjectPayload {
 
     pub fn validate(&self) -> ArtifactResult<()> {
         if self.schema_version != NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION
-            || self.object_format.is_empty()
-            || self.object_format.len() > 32
-            || !self.object_format.is_ascii()
-            || self.object_format.chars().any(char::is_control)
             || self.metadata.is_empty()
             || self.metadata.len() > MAX_METADATA_BYTES
             || self.object.is_empty()
@@ -65,7 +61,7 @@ impl NativeObjectPayload {
         encoder
             .array(6)
             .and_then(|encoder| encoder.u16(self.schema_version))
-            .and_then(|encoder| encoder.str(&self.object_format))
+            .and_then(|encoder| encoder.str(self.object_format.token()))
             .and_then(|encoder| encoder.bytes(self.metadata_digest.bytes()))
             .and_then(|encoder| encoder.bytes(self.object_digest.bytes()))
             .and_then(|encoder| encoder.bytes(&self.metadata))
@@ -85,7 +81,8 @@ impl NativeObjectPayload {
             ));
         }
         let schema_version = decoder.u16().map_err(decoding)?;
-        let object_format = decoder.str().map_err(decoding)?.to_string();
+        let object_format = NativeObjectFormat::from_token(decoder.str().map_err(decoding)?)
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         let metadata_digest = decode_digest(&mut decoder)?;
         let object_digest = decode_digest(&mut decoder)?;
         let metadata = decode_bounded_bytes(&mut decoder, MAX_METADATA_BYTES, "metadata")?;
@@ -136,12 +133,16 @@ fn decoding(error: minicbor::decode::Error) -> ArtifactError {
 
 #[cfg(test)]
 mod tests {
-    use super::NativeObjectPayload;
+    use super::{NativeObjectFormat, NativeObjectPayload};
 
     #[test]
     fn canonical_payload_round_trips_and_rejects_tampering() {
-        let payload =
-            NativeObjectPayload::new("mach-o", b"metadata".to_vec(), b"object".to_vec()).unwrap();
+        let payload = NativeObjectPayload::new(
+            NativeObjectFormat::MachO,
+            b"metadata".to_vec(),
+            b"object".to_vec(),
+        )
+        .unwrap();
         let bytes = payload.to_canonical_bytes().unwrap();
         assert_eq!(
             NativeObjectPayload::from_canonical_bytes(&bytes).unwrap(),

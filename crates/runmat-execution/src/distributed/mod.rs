@@ -333,6 +333,16 @@ impl DistributedShardSnapshot {
         }
         Ok(())
     }
+
+    pub fn validate_for_transport(
+        &self,
+        context: crate::value::ValueTransportContext<'_>,
+    ) -> Result<(), ContractError> {
+        self.validate()?;
+        self.owned
+            .value
+            .validate_for_transport(crate::value::ValueLimits::default(), context)
+    }
 }
 
 impl DistributedValueSnapshot {

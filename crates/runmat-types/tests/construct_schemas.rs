@@ -81,10 +81,13 @@ fn interop() -> InteropManifest {
             wasm: WasmInteropPolicy::Reject,
         }],
         adapters: vec![ForeignAdapterRequirement {
-            adapter: "mex-c".into(),
+            adapter: runmat_types::ForeignAdapterId::new("mex-c").unwrap(),
             minimum_version: 1,
             capabilities: CapabilitySet::default(),
-            artifact_identities: vec!["sha256:abc".into()],
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
+            artifact_identities: vec![
+                runmat_types::ForeignArtifactIdentity::new("sha256:abc").unwrap()
+            ],
         }],
         adapter_contracts: Vec::new(),
     }

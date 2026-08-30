@@ -146,8 +146,9 @@ fn runner_commits_root_and_complete_inventory_atomically() {
     let task = &snapshot.tasks[&task_id];
     assert_eq!(task.state, TaskState::Succeeded);
     let committed = task.committed.as_ref().unwrap();
-    assert_eq!(committed.outputs, vec![publication.root_output().clone()]);
-    assert_eq!(committed.result_objects, publication.result_objects());
+    let (outputs, result_objects) = committed.result.values().unwrap();
+    assert_eq!(outputs, [publication.root_output().clone()]);
+    assert_eq!(result_objects, publication.result_objects());
 }
 
 #[test]
@@ -236,6 +237,7 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
             id: worker,
             pool_id: pool,
             resources: inventory,
+            host: crate::task_tests::host_inventory(),
         }))
         .unwrap();
     let task_id = TaskId::derive(&[b"meshing-publication"]);
@@ -269,6 +271,7 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
                     accelerators: Vec::new(),
                     required_capabilities: BTreeSet::new(),
                 },
+                host: crate::task_tests::host_requirement(),
                 retry: RetryPolicy::Never,
                 deadline_unix_millis: None,
             },

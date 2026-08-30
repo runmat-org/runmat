@@ -46,6 +46,55 @@ impl ValuePayload {
     pub fn logical_digest(&self) -> Result<Digest, ContractError> {
         identity::logical_digest(self)
     }
+
+    /// Validates both the value encoding and whether references may cross the
+    /// requested transport boundary. Portable transport rejects process- or
+    /// device-resident references; resident transport requires an exact
+    /// worker, node lease, process generation, attempt, and device lease.
+    pub fn validate_for_transport(
+        &self,
+        limits: ValueLimits,
+        context: ValueTransportContext<'_>,
+    ) -> Result<(), ContractError> {
+        validation::validate_for_transport(self, limits, context)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ValueTransportContext<'a> {
+    Portable,
+    Resident(ResidentValueAuthority<'a>),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ResidentValueAuthority<'a> {
+    pub worker_id: WorkerId,
+    pub node_lease_id: NodeLeaseId,
+    pub process_generation: u64,
+    pub attempt_id: crate::identity::AttemptId,
+    pub accelerator_leases: &'a [crate::resource::AcceleratorDeviceLease],
+}
+
+impl ResidentValueAuthority<'_> {
+    fn authorizes(&self, fence: &ResidentFence) -> bool {
+        if self.process_generation == 0
+            || fence.worker_id != self.worker_id
+            || fence.node_lease_id != self.node_lease_id
+            || fence.process_generation != self.process_generation
+        {
+            return false;
+        }
+        match &fence.accelerator {
+            None => true,
+            Some(accelerator) => {
+                accelerator.attempt_id == self.attempt_id
+                    && self
+                        .accelerator_leases
+                        .iter()
+                        .any(|lease| lease == &accelerator.lease)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -237,5 +286,29 @@ pub struct ResidentFence {
     pub worker_id: WorkerId,
     pub node_lease_id: NodeLeaseId,
     pub process_generation: u64,
-    pub device_identity: Option<String>,
+    pub accelerator: Option<ResidentAcceleratorFence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResidentAcceleratorFence {
+    pub attempt_id: crate::identity::AttemptId,
+    pub lease: crate::resource::AcceleratorDeviceLease,
+}
+
+impl ResidentFence {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        if self.process_generation == 0 {
+            return Err(ContractError::invalid(
+                "resident value",
+                "process generation must be non-zero",
+            ));
+        }
+        if let Some(accelerator) = &self.accelerator {
+            accelerator
+                .lease
+                .validate_for_attempt(accelerator.attempt_id)?;
+        }
+        Ok(())
+    }
 }

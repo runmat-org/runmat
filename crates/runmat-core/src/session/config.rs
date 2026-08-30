@@ -188,6 +188,58 @@ impl RunMatSession {
         self.compat_mode
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn execution_host_inventory(
+        &self,
+        trust_tier: runmat_execution::security::ExecutionTrustTier,
+    ) -> Result<runmat_execution::host::ExecutionHostInventory> {
+        let environment = crate::program_environment(self.compat_mode);
+        let mut adapters = self.foreign_runtime.execution_host_inventory();
+        adapters.sort_by(|left, right| left.adapter.cmp(&right.adapter));
+        let inventory = runmat_execution::host::ExecutionHostInventory {
+            schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+            semantic_schema: environment.semantic_schema,
+            compiler_schema: environment.compiler_schema,
+            runtime_fingerprint: environment.runtime_fingerprint,
+            catalog_fingerprint: environment.catalog_fingerprint,
+            compatibility_modes: [
+                runmat_execution::LanguageCompatibilityMode::RunMat,
+                runmat_execution::LanguageCompatibilityMode::Matlab,
+                runmat_execution::LanguageCompatibilityMode::Strict,
+            ]
+            .into_iter()
+            .collect(),
+            target: runmat_execution::host::ExecutionHostTarget::Native(
+                runmat_native_codegen::NativeTarget::current()
+                    .execution_identity()
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+            ),
+            capabilities: runmat_types::CapabilitySet(
+                [
+                    runmat_types::CapabilityRequirement::HostRuntime,
+                    runmat_types::CapabilityRequirement::Filesystem,
+                    runmat_types::CapabilityRequirement::Network,
+                    runmat_types::CapabilityRequirement::UserInterface,
+                    runmat_types::CapabilityRequirement::Accelerator,
+                    runmat_types::CapabilityRequirement::NativeCode,
+                    runmat_types::CapabilityRequirement::ForeignRuntime,
+                    runmat_types::CapabilityRequirement::ParallelRuntime,
+                    runmat_types::CapabilityRequirement::DistributedRuntime,
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            adapters,
+            process_stack_available: true,
+            host_bridge_available: false,
+            trust_tier,
+        };
+        inventory
+            .validate()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        Ok(inventory)
+    }
+
     /// Set the language compatibility mode (`runmat`, `matlab`, or `strict`).
     pub fn set_compat_mode(&mut self, mode: CompatMode) {
         self.compat_mode = mode;

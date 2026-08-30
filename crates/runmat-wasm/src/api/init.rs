@@ -93,22 +93,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     session.set_compat_mode(config.language_compat);
     session.set_callstack_limit(config.callstack_limit);
     session.set_error_namespace(config.error_namespace.clone());
-    let execution_service =
-        BrowserExecutionService::new(execution_host_from_options(&options).map_err(|error| {
-            init_error_with_details(
-                InitErrorCode::InvalidOptions,
-                "Failed to initialize browser execution host",
-                Some(error),
-            )
-        })?)
-        .map_err(|error| {
-            init_error(
-                InitErrorCode::SessionCreation,
-                format!("Failed to initialize browser execution: {error}"),
-            )
-        })?;
-    session.install_execution_services(execution_service.clone());
-
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
         active: false,
@@ -156,6 +140,25 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     } else {
         install_cpu_provider(&config);
     }
+
+    // Build the browser scheduler after provider initialization so its typed
+    // worker inventory reflects the accelerator that can actually execute
+    // this session's programs.
+    let execution_service =
+        BrowserExecutionService::new(execution_host_from_options(&options).map_err(|error| {
+            init_error_with_details(
+                InitErrorCode::InvalidOptions,
+                "Failed to initialize browser execution host",
+                Some(error),
+            )
+        })?)
+        .map_err(|error| {
+            init_error(
+                InitErrorCode::SessionCreation,
+                format!("Failed to initialize browser execution: {error}"),
+            )
+        })?;
+    session.install_execution_services(execution_service.clone());
 
     let telemetry_sink: Option<Arc<dyn TelemetrySink>> = {
         #[cfg(target_arch = "wasm32")]

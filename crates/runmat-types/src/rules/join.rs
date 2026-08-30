@@ -144,6 +144,13 @@ impl FactJoin for ValueKindFact {
             }),
             (Callable(left), Callable(right)) => Callable(CallableFact {
                 identity: exact_or(&left.identity, &right.identity, None),
+                capabilities: crate::CapabilitySet(
+                    left.capabilities
+                        .0
+                        .union(&right.capabilities.0)
+                        .copied()
+                        .collect(),
+                ),
                 parameters: join_ordered(&left.parameters, &right.parameters),
                 parameters_complete: left.parameters_complete
                     && right.parameters_complete

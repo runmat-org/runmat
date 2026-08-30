@@ -1,6 +1,6 @@
+use runmat_execution::host::NativeObjectFormat as ExecutionObjectFormat;
 use runmat_execution_artifact::{
-    ExecutableForm, NativeObjectPayload, NativeTargetIdentity, ProgramArtifact, ProgramBuildRecipe,
-    ProgramTarget,
+    ExecutableForm, NativeObjectPayload, ProgramArtifact, ProgramBuildRecipe, ProgramTarget,
 };
 use runmat_native_codegen::aot::RelocatableNativeObject;
 
@@ -24,27 +24,16 @@ pub fn materialize_native_object_artifact(
         ));
     }
     let target = &object.manifest.target;
-    let abi = &target.abi;
     recipe.target = ProgramTarget::native(
         "native-object-v1",
-        NativeTargetIdentity {
-            architecture: target.architecture.clone(),
-            operating_system: target.operating_system.clone(),
-            pointer_width: target.pointer_width,
-            abi: format!(
-                "{}:{}:{}:{}",
-                abi.schema_version,
-                abi.encoded_version,
-                abi.contract_fingerprint,
-                abi.layout_fingerprint
-            ),
-            object_format: object.manifest.object_format.token().into(),
-        },
+        target
+            .execution_identity()
+            .map_err(|error| AotError::contract("aot.artifact.target", error.to_string()))?,
     );
     let metadata = serde_json::to_vec(&object.manifest)
         .map_err(|error| AotError::contract("aot.artifact.metadata", error.to_string()))?;
     let payload = NativeObjectPayload::new(
-        object.manifest.object_format.token(),
+        execution_object_format(object.manifest.object_format.token())?,
         metadata,
         object.bytes.clone(),
     )
@@ -58,6 +47,11 @@ pub fn materialize_native_object_artifact(
     )
     .map_err(|error| AotError::contract("aot.artifact.program", error.to_string()))?;
     Ok((recipe, artifact))
+}
+
+fn execution_object_format(value: &str) -> AotResult<ExecutionObjectFormat> {
+    ExecutionObjectFormat::from_token(value)
+        .map_err(|error| AotError::contract("aot.artifact.target", error.to_string()))
 }
 
 #[cfg(test)]
@@ -76,7 +70,7 @@ mod tests {
     use runmat_native_codegen::NativeTarget;
     use runmat_types::ProgramFunctionId;
 
-    use super::materialize_native_object_artifact;
+    use super::{execution_object_format, materialize_native_object_artifact};
 
     #[test]
     fn native_artifact_target_is_derived_from_the_verified_object() {
@@ -122,6 +116,8 @@ mod tests {
             },
             execution_mode: "native".into(),
             target: runmat_execution_artifact::ProgramTarget::portable("unbound"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),
@@ -134,9 +130,12 @@ mod tests {
         let payload = artifact.native_object().unwrap().unwrap();
         assert_eq!(
             payload.object_format,
-            NativeObjectFormat::for_target(&NativeTarget::current())
-                .unwrap()
-                .token()
+            execution_object_format(
+                NativeObjectFormat::for_target(&NativeTarget::current())
+                    .unwrap()
+                    .token(),
+            )
+            .unwrap()
         );
     }
 }

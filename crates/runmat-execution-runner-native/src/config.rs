@@ -14,6 +14,8 @@ pub struct NativeExecutionConfig {
     pub max_stderr_bytes: usize,
     pub store_root: PathBuf,
     pub worker_capabilities: BTreeSet<Capability>,
+    pub host_inventory: runmat_execution::host::ExecutionHostInventory,
+    pub accelerator_devices: Vec<runmat_execution::resource::AcceleratorDevice>,
 }
 
 impl NativeExecutionConfig {
@@ -22,6 +24,20 @@ impl NativeExecutionConfig {
             std::env::var_os("RUNMAT_EXECUTION_STATE_DIR").map(PathBuf::from),
             dirs::cache_dir(),
         )?;
+        let host_inventory = runmat_core::RunMatSession::with_options(false, false)
+            .map_err(io::Error::other)?
+            .execution_host_inventory(
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            )
+            .map_err(io::Error::other)?;
+        let epoch = local_inventory_epoch();
+        let mut accelerator_devices = runmat_accelerate_api::registered_providers()
+            .into_iter()
+            .map(|provider| provider.execution_accelerator_device(epoch))
+            .filter_map(|result| result.transpose())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io::Error::other)?;
+        accelerator_devices.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(Self {
             executable: std::env::current_exe()?,
             worker_arguments: vec![runmat_process_host::HiddenMode::ExecutionWorker
@@ -34,6 +50,8 @@ impl NativeExecutionConfig {
             max_stderr_bytes: 1024 * 1024,
             store_root,
             worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+            host_inventory,
+            accelerator_devices,
         })
     }
 
@@ -48,11 +66,27 @@ impl NativeExecutionConfig {
             || !self
                 .worker_capabilities
                 .contains(&Capability::ProcessIsolation)
+            || self.host_inventory.validate().is_err()
+            || self
+                .accelerator_devices
+                .windows(2)
+                .any(|pair| pair[0].id >= pair[1].id)
+            || self
+                .accelerator_devices
+                .iter()
+                .any(|device| device.validate().is_err())
         {
             return Err("native execution configuration contains an empty bound".into());
         }
         Ok(())
     }
+}
+
+fn local_inventory_epoch() -> u64 {
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    (u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX) ^ u64::from(std::process::id())).max(1)
 }
 
 fn session_store_root(

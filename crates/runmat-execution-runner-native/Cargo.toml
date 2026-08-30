@@ -51,6 +51,7 @@ rcgen = "0.14"
 runmat-geometry-core = { workspace = true }
 runmat-geometry-fixtures = { workspace = true }
 runmat-meshing-curve = { workspace = true }
+runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-test = { workspace = true }
 target-lexicon = "0.12"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

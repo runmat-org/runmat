@@ -1,17 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_types::{CapabilityRequirement, ForeignCapability, InteropManifest, WasmInteropPolicy};
+use runmat_types::{
+    CapabilityRequirement, ForeignAdapterId, ForeignArtifactIdentity, ForeignCapability,
+    InteropManifest, WasmInteropPolicy,
+};
 
 use super::{foreign_error, ForeignErrorKind, ForeignPlatform};
 use crate::RuntimeError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForeignAdapterDescriptor {
-    pub adapter: String,
+    pub adapter: ForeignAdapterId,
     pub version: u32,
     pub capabilities: BTreeSet<CapabilityRequirement>,
     pub foreign_capabilities: BTreeSet<ForeignCapability>,
-    pub artifact_identities: BTreeSet<String>,
+    pub artifact_identities: BTreeSet<ForeignArtifactIdentity>,
     pub supports_wasm: bool,
     pub supports_host_bridge: bool,
     pub execution_stack: runmat_types::ExecutionStackRequirement,
@@ -19,13 +22,13 @@ pub struct ForeignAdapterDescriptor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InteropAdmissionPlan {
-    pub adapters: Vec<String>,
+    pub adapters: Vec<ForeignAdapterId>,
     pub foreign_type_count: usize,
 }
 
 pub fn admit_interop_manifest(
     manifest: &InteropManifest,
-    available: &BTreeMap<String, ForeignAdapterDescriptor>,
+    available: &BTreeMap<ForeignAdapterId, ForeignAdapterDescriptor>,
     platform: ForeignPlatform,
 ) -> Result<InteropAdmissionPlan, RuntimeError> {
     manifest.validate().map_err(|error| {
@@ -54,7 +57,7 @@ pub fn admit_interop_manifest(
                 ));
             }
         }
-        let Some(adapter) = available.get(&requirement.type_identity.family) else {
+        let Some(adapter) = available.get(requirement.type_identity.family.as_str()) else {
             return Err(foreign_error(
                 ForeignErrorKind::AdapterUnavailable,
                 format!(
@@ -143,23 +146,32 @@ pub fn admit_interop_manifest(
 #[cfg(test)]
 mod tests {
     use runmat_types::{
-        CapabilitySet, ForeignAdapterContractReference, ForeignAdapterRequirement, ForeignAffinity,
-        ForeignLifetime, ForeignOwnership, ForeignRequirement, ForeignTypeIdentity,
-        PlannedForeignAdapter, INTEROP_MANIFEST_SCHEMA_VERSION,
+        CapabilitySet, ExecutionStackRequirement, ForeignAdapterContractReference,
+        ForeignAdapterRequirement, ForeignAffinity, ForeignLifetime, ForeignOwnership,
+        ForeignRequirement, ForeignTypeIdentity, PlannedForeignAdapter,
+        INTEROP_MANIFEST_SCHEMA_VERSION,
     };
 
     use super::*;
 
+    fn adapter_id(value: &str) -> ForeignAdapterId {
+        ForeignAdapterId::new(value).unwrap()
+    }
+
+    fn artifact(value: &str) -> ForeignArtifactIdentity {
+        ForeignArtifactIdentity::new(value).unwrap()
+    }
+
     fn descriptor() -> ForeignAdapterDescriptor {
         ForeignAdapterDescriptor {
-            adapter: "java".into(),
+            adapter: adapter_id("java"),
             version: 2,
             capabilities: BTreeSet::from([CapabilityRequirement::ForeignRuntime]),
             foreign_capabilities: BTreeSet::from([
                 ForeignCapability::Invoke,
                 ForeignCapability::Callback,
             ]),
-            artifact_identities: BTreeSet::from(["jre:21".into()]),
+            artifact_identities: BTreeSet::from([artifact("jre:21")]),
             supports_wasm: false,
             supports_host_bridge: true,
             execution_stack: runmat_types::ExecutionStackRequirement::Any,
@@ -182,12 +194,13 @@ mod tests {
                 wasm,
             }],
             adapters: vec![ForeignAdapterRequirement {
-                adapter: "java".into(),
+                adapter: adapter_id("java"),
                 minimum_version: 2,
                 capabilities: CapabilitySet(BTreeSet::from([
                     CapabilityRequirement::ForeignRuntime,
                 ])),
-                artifact_identities: vec!["jre:21".into()],
+                execution_stack: ExecutionStackRequirement::Process,
+                artifact_identities: vec![artifact("jre:21")],
             }],
             adapter_contracts: Vec::new(),
         }
@@ -195,20 +208,20 @@ mod tests {
 
     #[test]
     fn admits_exact_native_adapter_and_artifact_contracts() {
-        let available = BTreeMap::from([("java".into(), descriptor())]);
+        let available = BTreeMap::from([(adapter_id("java"), descriptor())]);
         let plan = admit_interop_manifest(
             &manifest(WasmInteropPolicy::Reject),
             &available,
             ForeignPlatform::Native,
         )
         .unwrap();
-        assert_eq!(plan.adapters, vec!["java"]);
+        assert_eq!(plan.adapters, vec![adapter_id("java")]);
         assert_eq!(plan.foreign_type_count, 1);
     }
 
     #[test]
     fn wasm_rejects_native_only_requirements_before_execution() {
-        let available = BTreeMap::from([("java".into(), descriptor())]);
+        let available = BTreeMap::from([(adapter_id("java"), descriptor())]);
         let error = admit_interop_manifest(
             &manifest(WasmInteropPolicy::Reject),
             &available,
@@ -224,7 +237,7 @@ mod tests {
     fn host_bridge_requires_both_host_and_adapter_support() {
         let mut adapter = descriptor();
         adapter.supports_host_bridge = false;
-        let available = BTreeMap::from([("java".into(), adapter)]);
+        let available = BTreeMap::from([(adapter_id("java"), adapter)]);
         let error = admit_interop_manifest(
             &manifest(WasmInteropPolicy::HostBridge),
             &available,
@@ -247,16 +260,16 @@ mod tests {
         };
         let available = BTreeMap::from([
             (
-                PlannedForeignAdapter::DotNet.adapter_id().into(),
+                adapter_id(PlannedForeignAdapter::DotNet.adapter_id()),
                 ForeignAdapterDescriptor {
-                    adapter: PlannedForeignAdapter::DotNet.adapter_id().into(),
+                    adapter: adapter_id(PlannedForeignAdapter::DotNet.adapter_id()),
                     ..descriptor()
                 },
             ),
             (
-                PlannedForeignAdapter::WindowsCom.adapter_id().into(),
+                adapter_id(PlannedForeignAdapter::WindowsCom.adapter_id()),
                 ForeignAdapterDescriptor {
-                    adapter: PlannedForeignAdapter::WindowsCom.adapter_id().into(),
+                    adapter: adapter_id(PlannedForeignAdapter::WindowsCom.adapter_id()),
                     ..descriptor()
                 },
             ),

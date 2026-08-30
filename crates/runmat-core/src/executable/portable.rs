@@ -166,11 +166,12 @@ impl ExecutableUnit {
                 wasm: runmat_types::WasmInteropPolicy::Reject,
             }],
             adapters: vec![runmat_types::ForeignAdapterRequirement {
-                adapter: "python".into(),
+                adapter: runmat_types::ForeignAdapterId::new("python").unwrap(),
                 minimum_version: 1,
                 capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
                     runmat_types::CapabilityRequirement::ForeignRuntime,
                 ])),
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
                 artifact_identities: Vec::new(),
             }],
             adapter_contracts: Vec::new(),

@@ -43,6 +43,7 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
     }
     validate_code_closure(bundle)?;
     validate_inventory(&bundle.objects, ObjectInventoryLimits::default())?;
+    validate_foreign_artifact_closures(bundle)?;
     let descriptors = bundle
         .objects
         .iter()
@@ -70,6 +71,11 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
         || bundle
             .manifest
             .foreign_artifacts
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || bundle
+            .manifest
+            .foreign_artifact_closures
             .windows(2)
             .any(|pair| pair[0] >= pair[1])
         || bundle
@@ -168,6 +174,58 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
                 "portable environment contains an invalid or secret-bearing entry".into(),
             ));
         }
+    }
+    Ok(())
+}
+
+fn validate_foreign_artifact_closures(bundle: &ExecutionBundle) -> ArtifactResult<()> {
+    let foreign_digests = bundle
+        .manifest
+        .foreign_artifacts
+        .iter()
+        .map(|artifact| artifact.digest)
+        .collect::<BTreeSet<_>>();
+    let mut bound_digests = BTreeSet::new();
+    let mut closure_keys = BTreeSet::new();
+    for closure in &bundle.manifest.foreign_artifact_closures {
+        closure.validate()?;
+        let key = (closure.adapter.clone(), closure.identity.clone());
+        if !closure_keys.insert(key)
+            || closure
+                .object_digests
+                .iter()
+                .any(|digest| !foreign_digests.contains(digest))
+        {
+            return Err(ArtifactError::Identity(
+                "foreign artifact closure is duplicated or references an absent object".into(),
+            ));
+        }
+        bound_digests.extend(closure.object_digests.iter().copied());
+    }
+    if bound_digests != foreign_digests {
+        return Err(ArtifactError::Identity(
+            "foreign artifact objects do not have an exact identity closure".into(),
+        ));
+    }
+
+    let required_keys = bundle
+        .manifest
+        .recipes
+        .iter()
+        .flat_map(|recipe| {
+            recipe.interop.adapters.iter().flat_map(|adapter| {
+                adapter
+                    .artifact_identities
+                    .iter()
+                    .cloned()
+                    .map(|identity| (adapter.adapter.clone(), identity))
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    if closure_keys != required_keys {
+        return Err(ArtifactError::Identity(
+            "foreign artifact identity closure differs from the program recipes".into(),
+        ));
     }
     Ok(())
 }
@@ -284,14 +342,14 @@ fn validate_project_handoff(
 }
 
 pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
-    let mut bytes = b"runmat-execution-bundle-v4\0".to_vec();
+    let mut bytes = b"runmat-execution-bundle-v5\0".to_vec();
     let revision = manifest
         .program_revision
         .canonical_bytes()
         .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
     let mut encoder = Encoder::new(&mut bytes);
     encoder
-        .array(13)
+        .array(14)
         .and_then(|encoder| encoder.u16(manifest.schema_version))
         .and_then(|encoder| encoder.bytes(&revision))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.graph_digest.bytes()))
@@ -325,6 +383,20 @@ pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
             .and_then(|encoder| encoder.u64(artifact.encoded_length))
             .and_then(|encoder| encoder.str(&artifact.media_type))
             .map_err(encoding)?;
+    }
+    encoder
+        .array(manifest.foreign_artifact_closures.len() as u64)
+        .map_err(encoding)?;
+    for closure in &manifest.foreign_artifact_closures {
+        encoder
+            .array(3)
+            .and_then(|encoder| encoder.str(closure.adapter.as_str()))
+            .and_then(|encoder| encoder.str(closure.identity.as_str()))
+            .and_then(|encoder| encoder.array(closure.object_digests.len() as u64))
+            .map_err(encoding)?;
+        for digest in &closure.object_digests {
+            encoder.bytes(digest.bytes()).map_err(encoding)?;
+        }
     }
     encoder
         .array(manifest.callables.len() as u64)
@@ -385,7 +457,7 @@ fn encode_capability(
         Capability::Accelerator(value) => encoder
             .array(2)
             .and_then(|encoder| encoder.u8(3))
-            .and_then(|encoder| encoder.str(value)),
+            .and_then(|encoder| encoder.str(value.as_str())),
         Capability::Custom(value) => encoder
             .array(2)
             .and_then(|encoder| encoder.u8(4))

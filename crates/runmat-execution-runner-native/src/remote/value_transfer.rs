@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use runmat_execution::identity::ValueId;
-use runmat_execution::value::{InlineValue, ValueLimits, ValuePayload, ValueRef};
+use runmat_execution::value::{
+    InlineValue, ValueLimits, ValuePayload, ValueRef, ValueTransportContext,
+};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -22,10 +24,13 @@ pub(super) fn decode_value(
     }
     let value: ValuePayload = serde_json::from_slice(encoded).map_err(protocol)?;
     value
-        .validate(ValueLimits {
-            max_inline_bytes: MAXIMUM_REMOTE_VALUE_BYTES,
-            ..ValueLimits::default()
-        })
+        .validate_for_transport(
+            ValueLimits {
+                max_inline_bytes: MAXIMUM_REMOTE_VALUE_BYTES,
+                ..ValueLimits::default()
+            },
+            ValueTransportContext::Portable,
+        )
         .map_err(protocol)?;
     if value.logical_digest().map_err(protocol)? != reference.logical_digest {
         return Err(protocol(

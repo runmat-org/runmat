@@ -258,6 +258,7 @@ async fn execute_parfor_tasks(
                 },
                 retry: runmat_execution::RetryPolicy::IdempotentInfrastructure,
                 program_revision: context.runtime.program_revision().cloned(),
+                capabilities: executable.contract.capabilities.clone(),
                 program: Some(program.clone()),
             })
             .map_err(execution_error)?;

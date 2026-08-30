@@ -78,12 +78,12 @@ async fn execute_portable_request(
         };
     }
     for requirement in &interop.adapters {
-        if requirement.adapter != runmat_native_ffi::NATIVE_FFI_ADAPTER_ID {
+        if requirement.adapter.as_str() != runmat_native_ffi::NATIVE_FFI_ADAPTER_ID {
             continue;
         }
         for identity in &requirement.artifact_identities {
-            let Some(interface) =
-                materialized.and_then(|materialized| materialized.native_interface(identity))
+            let Some(interface) = materialized
+                .and_then(|materialized| materialized.native_interface(identity.as_str()))
             else {
                 return ProgramExecutionResponse::Failure {
                     message: format!(
@@ -104,11 +104,11 @@ async fn execute_portable_request(
     if let Some(requirement) = interop
         .adapters
         .iter()
-        .find(|requirement| requirement.adapter == runmat_mex::MEX_ADAPTER_ID)
+        .find(|requirement| requirement.adapter.as_str() == runmat_mex::MEX_ADAPTER_ID)
     {
         for identity in &requirement.artifact_identities {
             let Some(artifact) =
-                materialized.and_then(|materialized| materialized.mex_artifact(identity))
+                materialized.and_then(|materialized| materialized.mex_artifact(identity.as_str()))
             else {
                 return ProgramExecutionResponse::Failure {
                     message: format!(
@@ -131,7 +131,7 @@ async fn execute_portable_request(
     if let Some(requirement) = interop
         .adapters
         .iter()
-        .find(|requirement| requirement.adapter == runmat_python::PYTHON_ADAPTER_ID)
+        .find(|requirement| requirement.adapter.as_str() == runmat_python::PYTHON_ADAPTER_ID)
     {
         let Some(bundle) = materialized.and_then(|materialized| materialized.python_bundle())
         else {
@@ -143,7 +143,7 @@ async fn execute_portable_request(
         if let Some(missing) = requirement
             .artifact_identities
             .iter()
-            .find(|identity| !available.contains(*identity))
+            .find(|identity| !available.contains(identity.as_str()))
         {
             return ProgramExecutionResponse::Failure {
                 message: format!(
@@ -160,7 +160,7 @@ async fn execute_portable_request(
     if let Some(requirement) = interop
         .adapters
         .iter()
-        .find(|requirement| requirement.adapter == runmat_java::JAVA_ADAPTER_ID)
+        .find(|requirement| requirement.adapter.as_str() == runmat_java::JAVA_ADAPTER_ID)
     {
         let Some(materialized) = materialized else {
             return ProgramExecutionResponse::Failure {
@@ -168,7 +168,7 @@ async fn execute_portable_request(
             };
         };
         for identity in &requirement.artifact_identities {
-            if materialized.java_artifact(identity).is_none() {
+            if materialized.java_artifact(identity.as_str()).is_none() {
                 return ProgramExecutionResponse::Failure {
                     message: format!(
                         "worker has no materialized Java artifact for required identity {identity}"
@@ -184,7 +184,7 @@ async fn execute_portable_request(
         let artifacts = materialized
             .java_artifacts()
             .iter()
-            .filter(|artifact| required.contains(&artifact.identity.to_string()))
+            .filter(|artifact| required.contains(artifact.identity.to_string().as_str()))
             .map(|artifact| (artifact.identity.clone(), artifact.path.clone()))
             .collect::<Vec<_>>();
         if let Err(error) = session.install_java_project_artifacts(&artifacts) {
@@ -297,9 +297,10 @@ mod tests {
     use runmat_execution::value::{InlineValue, ValuePayload};
     use runmat_execution::{Digest, ProgramCallable, ProgramFunctionId};
     use runmat_execution_artifact::{
-        ExecutableForm, ExecutionBundleBuilder, LogicalObject, ObjectNamespace, ProgramArtifact,
-        ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse, ProgramTarget,
-        PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, LogicalObject,
+        ObjectNamespace, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
+        ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
     };
     use runmat_test::descriptor::TestSelector;
     use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
@@ -335,7 +336,12 @@ mod tests {
             1,
         )
         .unwrap();
-        let response = execute_host_program_request(workload.program_request().unwrap()).await;
+        let response = execute_host_program_request(
+            workload
+                .program_request(runmat_types::InteropManifest::empty())
+                .unwrap(),
+        )
+        .await;
         let ProgramExecutionResponse::Success { value } = response else {
             panic!("test-capable host rejected a valid workload: {response:?}");
         };
@@ -367,18 +373,25 @@ mod tests {
             schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
             foreign_types: Vec::new(),
             adapters: vec![runmat_types::ForeignAdapterRequirement {
-                adapter: runmat_native_ffi::NATIVE_FFI_ADAPTER_ID.into(),
+                adapter: runmat_types::ForeignAdapterId::new(
+                    runmat_native_ffi::NATIVE_FFI_ADAPTER_ID,
+                )
+                .unwrap(),
                 minimum_version: runmat_native_ffi::NATIVE_FFI_ADAPTER_VERSION,
                 capabilities: runmat_types::CapabilitySet(BTreeSet::from([
                     runmat_types::CapabilityRequirement::NativeCode,
                     runmat_types::CapabilityRequirement::ForeignRuntime,
                 ])),
-                artifact_identities: vec!["native-ffi:v1:missing-fixture".into()],
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                artifact_identities: vec![runmat_types::ForeignArtifactIdentity::new(
+                    "native-ffi:v1:missing-fixture",
+                )
+                .unwrap()],
             }],
             adapter_contracts: Vec::new(),
         };
         let envelope = unit
-            .portable_envelope_for_with_interop(None, interop)
+            .portable_envelope_for_with_interop(None, interop.clone())
             .unwrap();
         let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
         let recipe = ProgramBuildRecipe {
@@ -390,6 +403,8 @@ mod tests {
             },
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("runner-native-interface-test"),
+            interop,
+            accelerators: Vec::new(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),
@@ -485,8 +500,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             )
             .await
             .unwrap();
+        let interop = manifest.interop_manifest();
         let envelope = unit
-            .portable_envelope_for_with_interop(Some("main"), manifest.interop_manifest())
+            .portable_envelope_for_with_interop(Some("main"), interop.clone())
             .unwrap();
         let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
         let recipe = ProgramBuildRecipe {
@@ -498,6 +514,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             },
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("remote-mex-execution"),
+            interop,
+            accelerators: manifest.accelerator_requirements().unwrap(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),
@@ -520,13 +538,21 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             module_bytes,
         )
         .unwrap();
+        let closure = ForeignArtifactClosure::new(
+            runmat_types::ForeignAdapterId::new(runmat_mex::MEX_ADAPTER_ID).unwrap(),
+            runmat_types::ForeignArtifactIdentity::new(identity).unwrap(),
+            vec![sidecar.descriptor.digest, module.descriptor.digest],
+        )
+        .unwrap();
         let bundle =
             ExecutionBundleBuilder::native(&project, unit.revision().program_revision.clone())
                 .unwrap()
                 .with_compiled_package_closure()
-                .with_foreign_artifact(sidecar)
+                .with_foreign_object(sidecar)
                 .unwrap()
-                .with_foreign_artifact(module)
+                .with_foreign_object(module)
+                .unwrap()
+                .with_foreign_artifact_closure(closure)
                 .unwrap()
                 .with_materialized_program(
                     recipe,
@@ -650,17 +676,21 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
             foreign_types: Vec::new(),
             adapters: vec![runmat_types::ForeignAdapterRequirement {
-                adapter: runmat_java::JAVA_ADAPTER_ID.into(),
+                adapter: runmat_types::ForeignAdapterId::new(runmat_java::JAVA_ADAPTER_ID).unwrap(),
                 minimum_version: runmat_java::JAVA_ADAPTER_VERSION,
                 capabilities: runmat_types::CapabilitySet(BTreeSet::from([
                     runmat_types::CapabilityRequirement::ForeignRuntime,
                 ])),
-                artifact_identities: vec![java_identity.to_string()],
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                artifact_identities: vec![runmat_types::ForeignArtifactIdentity::new(
+                    java_identity.to_string(),
+                )
+                .unwrap()],
             }],
             adapter_contracts: Vec::new(),
         };
         let envelope = unit
-            .portable_envelope_for_with_interop(Some("main"), interop)
+            .portable_envelope_for_with_interop(Some("main"), interop.clone())
             .unwrap();
         let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
         let recipe = ProgramBuildRecipe {
@@ -672,6 +702,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             },
             execution_mode: "interpreter".into(),
             target: ProgramTarget::portable("remote-java-execution"),
+            interop,
+            accelerators: Vec::new(),
             features: BTreeSet::new(),
             compile_options: BTreeSet::new(),
             source_objects: Vec::new(),
@@ -684,10 +716,18 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             jar_bytes,
         )
         .unwrap();
+        let closure = ForeignArtifactClosure::new(
+            runmat_types::ForeignAdapterId::new(runmat_java::JAVA_ADAPTER_ID).unwrap(),
+            runmat_types::ForeignArtifactIdentity::new(java_identity.to_string()).unwrap(),
+            vec![java_object.descriptor.digest],
+        )
+        .unwrap();
         let bundle = ExecutionBundleBuilder::native(&project, revision)
             .unwrap()
             .with_compiled_package_closure()
-            .with_foreign_artifact(java_object)
+            .with_foreign_object(java_object)
+            .unwrap()
+            .with_foreign_artifact_closure(closure)
             .unwrap()
             .with_materialized_program(
                 recipe,

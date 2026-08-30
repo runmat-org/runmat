@@ -52,7 +52,10 @@ impl TestAttemptWorkload {
         Ok(())
     }
 
-    pub fn program_request(&self) -> Result<ProgramExecutionRequest, String> {
+    pub fn program_request(
+        &self,
+        interop: runmat_types::InteropManifest,
+    ) -> Result<ProgramExecutionRequest, String> {
         self.validate()?;
         let recipe = ProgramBuildRecipe {
             schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
@@ -63,6 +66,8 @@ impl TestAttemptWorkload {
             },
             execution_mode: TEST_ATTEMPT_EXECUTION_MODE.into(),
             target: runmat_execution_artifact::ProgramTarget::portable(TEST_ATTEMPT_TARGET_PROFILE),
+            interop,
+            accelerators: Vec::new(),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),

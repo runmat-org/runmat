@@ -233,6 +233,8 @@ impl MeshingHostWorkload {
             },
             execution_mode: MESHING_HOST_EXECUTION_MODE.into(),
             target: ProgramTarget::portable(MESHING_HOST_TARGET_PROFILE),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
             features: Default::default(),
             compile_options: std::collections::BTreeSet::from([workload_option]),
             source_objects: Vec::new(),

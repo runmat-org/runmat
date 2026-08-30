@@ -66,7 +66,8 @@ pub(super) async fn execute(
         authority.fencing_token,
         bundle_archive,
         authority.run_id.clone(),
-    )?;
+    )
+    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let mut worker_pool = control
         .resize_workers(authority, 0, desired_workers, resources.clone())
         .await
@@ -123,6 +124,24 @@ pub(super) async fn execute(
 
     let artifact_id = ArtifactId::derive(&[request.artifact.id.0.bytes()]);
     let task_id = TaskId::derive(&[authority.run_id.as_bytes(), b"remote-root"]);
+    let host = request
+        .artifact
+        .execution_host_requirement(
+            &request.recipe,
+            [
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                runmat_execution::security::ExecutionTrustTier::HostedOrdinary,
+                runmat_execution::security::ExecutionTrustTier::AttestedConfidential,
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .map_err(protocol)?;
+    let task_resources = task_resources(&resources)?;
+    request
+        .recipe
+        .validate_resource_request(&task_resources)
+        .map_err(protocol)?;
     let completion = pool.submit(
         TaskSubmission {
             request: TaskRequest {
@@ -131,12 +150,13 @@ pub(super) async fn execute(
                 pool_id,
                 program_artifact_id: artifact_id,
                 callable: Callable::for_program("remote-run", &request.callable),
+                host,
                 invocation_context: request.context.clone(),
                 inputs: request.arguments.clone(),
                 outputs: OutputContract {
                     requested_outputs: request.requested_outputs,
                 },
-                resources: task_resources(&resources)?,
+                resources: task_resources,
                 retry: RetryPolicy::Never,
                 deadline_unix_millis: None,
             },

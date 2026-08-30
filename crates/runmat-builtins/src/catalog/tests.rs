@@ -152,6 +152,106 @@ fn distributed_execution_policy_is_declared_by_the_canonical_catalog() {
 }
 
 #[test]
+fn gpu_array_catalog_owns_its_accelerator_contract() {
+    let entry = builtin_catalog_entry_by_name("gpuArray").expect("gpuArray catalog entry");
+
+    assert_eq!(
+        entry.contract.capability_set().0,
+        [CapabilityRequirement::Accelerator].into_iter().collect()
+    );
+    assert_eq!(
+        entry.placement.accelerator,
+        BuiltinAcceleratorPolicy::Required
+    );
+    assert_eq!(
+        entry.placement.residency,
+        BuiltinResidencyPolicy::ProduceResident
+    );
+    assert_eq!(entry.descriptor.signatures.len(), 5);
+    assert_eq!(entry.descriptor.errors.len(), 15);
+}
+
+#[test]
+fn gpu_array_inference_preserves_or_converts_typed_facts_before_device_placement() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+        OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("gpuArray").expect("gpuArray catalog entry");
+    let mut source = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt16,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(4), Some(1)]),
+        StorageFact::Dense,
+    );
+    source.residency = runmat_types::ResidencyFact::Host;
+
+    let preserve = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![source.clone()],
+            literals: LiteralContext::new(vec![LiteralValue::Unknown]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(preserve.outputs[0].kind, source.kind);
+    assert_eq!(preserve.outputs[0].shape, source.shape);
+    assert_eq!(
+        preserve.outputs[0].residency,
+        runmat_types::ResidencyFact::Device { provider: None }
+    );
+
+    let convert = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![source.clone(), ValueFact::scalar(ValueKindFact::String)],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("int32".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(
+        convert.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Int32,
+            domain: NumericDomain::Real,
+        })
+    );
+
+    let reshape = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![
+                source,
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(2.0),
+                LiteralValue::Number(2.0),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(
+        reshape.outputs[0].shape,
+        ShapeFact::from(vec![Some(2), Some(2)])
+    );
+}
+
+#[test]
 fn distributed_call_inference_preserves_the_execution_owned_value_contract() {
     use runmat_types::{
         CallRequest, DistributedFact, DistributedOwner, DistributedValueId, DistributionScheme,
@@ -279,6 +379,7 @@ fn parallel_surface_retains_pool_future_and_fetch_facts() {
     }));
     let callable = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
         identity: None,
+        capabilities: Default::default(),
         parameters: vec![ValueFact::unknown(
             runmat_types::DynamicReason::RuntimeValue,
         )],
@@ -583,6 +684,7 @@ fn feval_contract_preserves_known_callable_outputs_and_dynamic_effects() {
     let second_output = ValueFact::scalar(ValueKindFact::String);
     let callable = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
         identity: None,
+        capabilities: Default::default(),
         parameters: Vec::new(),
         parameters_complete: false,
         outputs: vec![first_output.clone(), second_output.clone()],
@@ -611,6 +713,7 @@ fn feval_contract_preserves_known_callable_outputs_and_dynamic_effects() {
 
     let partially_known_callable = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
         identity: None,
+        capabilities: Default::default(),
         parameters: Vec::new(),
         parameters_complete: false,
         outputs: vec![ValueFact::scalar(ValueKindFact::Character)],
