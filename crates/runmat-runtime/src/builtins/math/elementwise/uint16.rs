@@ -1,13 +1,10 @@
 //! MATLAB-compatible `uint16` builtin with GPU-aware semantics for RunMat.
 
+#[cfg(test)]
+use runmat_builtins::UINT16_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, UINT16_ERROR_INTERNAL, UINT16_ERROR_INVALID_ARGUMENT,
+    UINT16_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -17,86 +14,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::math::elementwise::integer_cast::{cast_value, CastError, IntegerTarget};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "uint16";
-
-const UINT16_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "uint16-converted output value.",
-}];
-
-const UINT16_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar/array value to convert.",
-}];
-
-const UINT16_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = uint16(X)",
-    inputs: &UINT16_INPUTS_X,
-    outputs: &UINT16_OUTPUT,
-}];
-
-const UINT16_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UINT16.INVALID_ARGUMENT",
-    identifier: Some("RunMat:uint16:InvalidArgument"),
-    when: "Optional arguments are malformed or unsupported.",
-    message: "uint16: invalid argument",
-};
-
-const UINT16_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UINT16.INVALID_INPUT",
-    identifier: Some("RunMat:uint16:InvalidInput"),
-    when: "Input value cannot be converted to uint16.",
-    message: "uint16: invalid input",
-};
-
-const UINT16_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UINT16.INTERNAL",
-    identifier: Some("RunMat:uint16:Internal"),
-    when: "Internal conversion, gather, or provider upload failed.",
-    message: "uint16: internal error",
-};
-
-const UINT16_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    UINT16_ERROR_INVALID_ARGUMENT,
-    UINT16_ERROR_INVALID_INPUT,
-    UINT16_ERROR_INTERNAL,
-];
-
-pub const UINT16_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UINT16_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &UINT16_ERRORS,
-};
-
-const UINT16_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Every native integer class converts directly to authoritative uint16 storage without a floating intermediate.",
-}];
-
-pub const UINT16_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = uint16(integer_X)",
-        inputs: &UINT16_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host and resident conversion is exact and saturating. Real and paired-complex gpuArray inputs preserve native uint16 device storage, owner, and residency.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::uint16")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -153,13 +73,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
 
 #[runtime_builtin(
     name = "uint16",
-    category = "math/elementwise",
-    summary = "Convert scalars, arrays, and gpuArray values to uint16 using MATLAB saturating rounding.",
-    keywords = "uint16,cast,integer,conversion,gpuArray",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::uint16::UINT16_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::elementwise::uint16::UINT16_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::uint16"
 )]
 async fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -183,7 +97,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataOwned, HostTensorView, IntegerElementType};
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CharArray, IntValue, IntegerStorage, SymbolicExpr, Tensor};
 
     fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -198,22 +111,6 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = uint16(X)"));
-    }
-
-    #[test]
-    fn uint16_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

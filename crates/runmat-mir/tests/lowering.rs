@@ -1402,6 +1402,43 @@ fn analysis_store_uses_migrated_catalog_contracts_for_call_facts() {
 }
 
 #[test]
+fn analysis_store_carries_typed_integer_exp_through_the_catalog_boundary() {
+    let (body, store) =
+        analyze_single_body("function y = f(); x = uint16([1, 2, 3]); y = exp(x); end");
+    let builtin_ids = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .filter_map(|statement| match &statement.kind {
+            MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            } => match &call.callee {
+                MirCallee::Static(CallableIdentity::Builtin(id)) => Some(id.0.as_str()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(builtin_ids, ["uint16", "exp"]);
+    let output = output_fact(&body, &store);
+
+    assert_eq!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        output.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
 fn analysis_store_attaches_catalog_contract_diagnostics_to_source() {
     let mir = lower_mir("function y = f(); y = zeros(2, \"bogus\"); end");
     let store = analyze_assembly(&mir);

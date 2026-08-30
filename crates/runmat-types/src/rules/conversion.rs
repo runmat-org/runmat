@@ -12,7 +12,9 @@ use crate::{
 pub fn infer_numeric_conversion(source: &ValueFact, target: NumericClass) -> FactInference {
     let domain = match source.kind {
         ValueKindFact::Numeric(numeric) => numeric.domain,
-        ValueKindFact::Logical | ValueKindFact::Character => NumericDomain::Real,
+        ValueKindFact::Logical | ValueKindFact::Character | ValueKindFact::Symbolic => {
+            NumericDomain::Real
+        }
         ValueKindFact::Unknown => NumericDomain::Real,
         _ => {
             return FactInference {
@@ -109,5 +111,26 @@ mod tests {
         );
         assert_eq!(output.shape, ShapeFact::Unknown);
         assert_eq!(output.storage, StorageFact::Unknown);
+    }
+
+    #[test]
+    fn numeric_conversion_types_successful_symbolic_constant_results() {
+        let source = ValueFact::proven(
+            ValueKindFact::Symbolic,
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            StorageFact::Dense,
+        );
+        let output = infer_numeric_conversion(&source, NumericClass::UInt16);
+
+        assert!(output.diagnostics.is_empty());
+        assert_eq!(
+            output.fact.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::UInt16,
+                domain: NumericDomain::Real,
+            })
+        );
+        assert_eq!(output.fact.shape, source.shape);
+        assert_eq!(output.fact.storage, StorageFact::Dense);
     }
 }

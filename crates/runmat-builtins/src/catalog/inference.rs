@@ -4,10 +4,11 @@ use super::{
     ParallelInferenceRule,
 };
 use runmat_types::{
-    codistributor_fact, infer_call, CallContract, CallInference, CallRequest, CodistributorClass,
-    DistributedFact, DynamicReason, ExecutionFact, FutureStateFact, InferenceDiagnostic,
-    LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact, OutputListFact,
-    ResidencyFact, ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact,
+    codistributor_fact, infer_call, infer_numeric_conversion, AliasFact, CallContract,
+    CallInference, CallRequest, CodistributorClass, ContiguityFact, DistributedFact, DynamicReason,
+    ExecutionFact, FutureStateFact, InferenceDiagnostic, LayoutFact, LiteralContext, LiteralValue,
+    MutationFact, NumericClass, NumericDomain, NumericFact, OutputListFact, ResidencyFact,
+    ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact, ViewFact,
 };
 use std::collections::BTreeMap;
 
@@ -38,6 +39,10 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Array(ArrayInferenceRule::Full) => infer_full(request, entry),
         BuiltinInferenceRule::Array(ArrayInferenceRule::Zeros) => infer_zeros(request, entry),
         BuiltinInferenceRule::Math(MathInferenceRule::Abs) => infer_abs(request, entry),
+        BuiltinInferenceRule::Math(MathInferenceRule::Exp) => infer_exp(request, entry),
+        BuiltinInferenceRule::Math(MathInferenceRule::NumericConversion(target)) => {
+            infer_numeric_conversion_call(request, entry, target)
+        }
         BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather) => {
             infer_gather(request, entry)
         }
@@ -72,6 +77,37 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         ) => unavailable_rule(entry, request),
         BuiltinInferenceRule::Parallel(_) => infer_parallel_data(request, entry),
     }
+}
+
+fn infer_numeric_conversion_call(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    target: NumericClass,
+) -> CallInference {
+    let mut diagnostics = Vec::new();
+    let Some(input) = request.arguments.first() else {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-NUMERIC-CONVERSION-ARITY",
+            format!("{} requires exactly one input", entry.identity.name),
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+    if request.arguments.len() > 1 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-NUMERIC-CONVERSION-ARITY",
+            format!("{} accepts exactly one input", entry.identity.name),
+            1,
+        ));
+    }
+    let mut inference = infer_numeric_conversion(input, target);
+    diagnostics.append(&mut inference.diagnostics);
+    finish_fixed(entry, request, inference.fact, diagnostics)
 }
 
 /// Infer the local result produced by one catalog-admitted partition-local
@@ -602,6 +638,68 @@ fn infer_abs(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInferenc
     finish_fixed(entry, request, output, diagnostics)
 }
 
+fn infer_exp(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let mut diagnostics = Vec::new();
+    let Some(input) = request.arguments.first() else {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-EXP-ARITY",
+            "exp requires exactly one input",
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+    if request.arguments.len() > 1 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-EXP-ARITY",
+            "exp accepts exactly one input",
+            1,
+        ));
+    }
+
+    let mut output = input.clone();
+    let mut changes_numeric_class = false;
+    match &mut output.kind {
+        ValueKindFact::Numeric(numeric) => {
+            if !matches!(numeric.class, NumericClass::Double | NumericClass::Single) {
+                numeric.class = NumericClass::Double;
+                changes_numeric_class = true;
+            }
+        }
+        ValueKindFact::Logical | ValueKindFact::Character => {
+            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
+            changes_numeric_class = true;
+        }
+        ValueKindFact::Symbolic | ValueKindFact::Object(_) | ValueKindFact::Unknown => {}
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-EXP-INPUT",
+                "exp requires numeric, logical, character, symbolic, or supported tabular input",
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+            return finish_fixed(entry, request, output, diagnostics);
+        }
+    }
+
+    if matches!(output.storage, StorageFact::Sparse) {
+        output.storage = StorageFact::Dense;
+        output.residency = ResidencyFact::Host;
+    } else if changes_numeric_class && matches!(output.residency, ResidencyFact::Device { .. }) {
+        output.residency = ResidencyFact::Unknown;
+    }
+    output.layout = LayoutFact::ColumnMajor;
+    output.contiguity = ContiguityFact::Contiguous;
+    output.view = ViewFact::Materialized;
+    output.alias = AliasFact::Unique;
+    output.mutation = MutationFact::ValueSemantics;
+    finish_fixed(entry, request, output, diagnostics)
+}
+
 fn infer_zeros(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     let literals = &request.literals.literal_args;
@@ -776,7 +874,11 @@ fn finish_fixed(
     inference
 }
 
-fn argument_error(code: &str, message: &str, argument: usize) -> InferenceDiagnostic {
+fn argument_error(
+    code: impl Into<String>,
+    message: impl Into<String>,
+    argument: usize,
+) -> InferenceDiagnostic {
     let mut diagnostic = InferenceDiagnostic::error(code, message);
     diagnostic.argument = Some(argument);
     diagnostic
