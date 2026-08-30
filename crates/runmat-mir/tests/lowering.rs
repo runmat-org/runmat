@@ -1601,6 +1601,77 @@ fn analysis_store_preserves_typed_numeric_component_identities_classes_and_shape
 }
 
 #[test]
+fn analysis_store_preserves_typed_phase_angle_identity_class_domain_and_shape() {
+    let (body, store) = analyze_single_body("function y = f(); y = angle(single([1, 2, 3])); end");
+    let builtin = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            } => match &call.callee {
+                MirCallee::Static(CallableIdentity::Builtin(id)) if id.0 == "angle" => Some(id),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("statically resolved angle builtin");
+    assert_eq!(builtin, &runmat_types::BuiltinId("angle".into()));
+
+    let output = output_fact(&body, &store);
+    assert_eq!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        output.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
+fn analysis_store_preserves_typed_signum_identity_integer_class_and_shape() {
+    let (body, store) = analyze_single_body("function y = f(); y = sign(uint64([0, 1, 2])); end");
+    let builtin = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            } => match &call.callee {
+                MirCallee::Static(CallableIdentity::Builtin(id)) if id.0 == "sign" => Some(id),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("statically resolved sign builtin");
+    assert_eq!(builtin, &runmat_types::BuiltinId("sign".into()));
+    let output = output_fact(&body, &store);
+    assert_eq!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        output.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
 fn analysis_store_attaches_catalog_contract_diagnostics_to_source() {
     let mir = lower_mir("function y = f(); y = zeros(2, \"bogus\"); end");
     let store = analyze_assembly(&mir);

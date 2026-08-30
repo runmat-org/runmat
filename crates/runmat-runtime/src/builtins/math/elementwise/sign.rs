@@ -1,18 +1,13 @@
 //! MATLAB-compatible `sign` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+#[cfg(test)]
+use runmat_builtins::SIGN_DESCRIPTOR;
+use runmat_builtins::{BuiltinErrorDescriptor, SIGN_ERROR_INTERNAL, SIGN_ERROR_INVALID_INPUT};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor,
+    Value,
 };
 
 use crate::builtins::common::spec::{
@@ -21,7 +16,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::sign")]
@@ -63,71 +57,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "sign";
 
-const SIGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Elementwise sign result.",
-}];
-
-const SIGN_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Real or complex numeric input.",
-}];
-
-const SIGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = sign(X)",
-    inputs: &SIGN_INPUTS,
-    outputs: &SIGN_OUTPUT,
-}];
-
-const SIGN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight real integer classes are read and transformed directly in authoritative native storage.",
-    }];
-pub const SIGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sign(integer_X)",
-        inputs: &SIGN_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Signed values map to -1, 0, or 1 and unsigned values to 0 or 1 in the input class; unsupported resident hooks gather exact typed storage.",
-    }];
-
-const SIGN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIGN.INVALID_INPUT",
-    identifier: Some("RunMat:sign:InvalidInput"),
-    when: "Input is not a supported numeric/logical/character value.",
-    message: "sign: invalid input",
-};
-
-const SIGN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIGN.INTERNAL",
-    identifier: Some("RunMat:sign:Internal"),
-    when: "Internal gather/provider/tensor construction failed.",
-    message: "sign: internal error",
-};
-
-const SIGN_ERRORS: [BuiltinErrorDescriptor; 2] = [SIGN_ERROR_INVALID_INPUT, SIGN_ERROR_INTERNAL];
-
-pub const SIGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SIGN_ERRORS,
-};
-
 fn sign_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl std::fmt::Display,
@@ -142,13 +71,7 @@ fn sign_error_with_detail(
 
 #[runtime_builtin(
     name = "sign",
-    category = "math/elementwise",
-    summary = "Compute element-wise sign values for real or complex inputs.",
-    keywords = "sign,signum,elementwise,complex,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::sign::SIGN_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::elementwise::sign::SIGN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::sign"
 )]
 async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
@@ -173,58 +96,92 @@ async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if runmat_accelerate_api::handle_storage(&handle)
-        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-    {
-        let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) else {
-            return Err(sign_error_with_detail(
-                &SIGN_ERROR_INTERNAL,
-                "GPU provider unavailable for complex input",
-            ));
-        };
-        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-            .await
-            .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
-        let Value::ComplexTensor(tensor) = sign_complex_tensor(match gathered {
-            Value::ComplexTensor(tensor) => tensor,
-            other => {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        sign_error_with_detail(&SIGN_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
+    if gpu_helpers::expected_handle_numeric_element_type(&handle).is_err() {
+        return Err(sign_error_with_detail(
+            &SIGN_ERROR_INTERNAL,
+            "GPU input class metadata contradicts its physical storage",
+        ));
+    }
+    let storage = runmat_accelerate_api::handle_storage(&handle);
+    let integer = runmat_accelerate_api::handle_integer_type(&handle);
+    if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved && integer.is_some() {
+        return Err(sign_error_with_detail(
+            &SIGN_ERROR_INVALID_INPUT,
+            "typed complex integer input is not supported",
+        ));
+    }
+    let logical = runmat_accelerate_api::handle_is_logical(&handle);
+    let precision = runmat_accelerate_api::handle_precision(&handle);
+    let kernel_compatible =
+        !logical && (integer.is_some() || precision == Some(provider.precision()));
+    if kernel_compatible {
+        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let result = provider.unary_sign(&handle).await;
+        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        match result {
+            Ok(mut output) if valid_sign_gpu_output(&output, &handle, provider) => {
+                runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
+                if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved {
+                    return Ok(gpu_helpers::complex_gpu_value(output));
+                }
+                return Ok(gpu_helpers::resident_gpu_value(output));
+            }
+            Ok(output) => {
+                gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
                 return Err(sign_error_with_detail(
                     &SIGN_ERROR_INTERNAL,
-                    format!("expected complex GPU input, got {other:?}"),
+                    "provider unary_sign returned malformed output",
                 ));
             }
-        })?
-        else {
-            return Err(sign_error_with_detail(
-                &SIGN_ERROR_INTERNAL,
-                "complex sign returned non-complex output",
-            ));
-        };
-        let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
-            .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
-        return Ok(gpu_helpers::complex_gpu_value(out));
-    }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_sign(&handle).await {
-            if runmat_accelerate_api::handle_storage(&out)
-                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-            {
-                return Ok(gpu_helpers::complex_gpu_value(out));
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error, "unary_sign") => {}
+            Err(error) => {
+                return Err(sign_error_with_detail(
+                    &SIGN_ERROR_INTERNAL,
+                    format!("provider unary_sign failed: {error}"),
+                ));
             }
-            return Ok(gpu_helpers::resident_gpu_value(out));
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-        .await
-        .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
-    match gathered {
+    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let gathered_result =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
+    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+    let gathered =
+        gathered_result.map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err))?;
+    let host = match gathered {
         Value::Complex(re, im) => {
             let (re_out, im_out) = sign_complex(re, im);
             Ok(Value::Complex(re_out, im_out))
         }
         Value::ComplexTensor(ct) => sign_complex_tensor(ct),
         other => sign_real(other),
-    }
+    }?;
+    gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
+        .map_err(|err| sign_error_with_detail(&SIGN_ERROR_INTERNAL, err.message()))
+}
+
+fn valid_sign_gpu_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    gpu_helpers::unary_gpu_output_matches(
+        output,
+        input,
+        provider,
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: runmat_accelerate_api::handle_storage(input),
+            precision: runmat_accelerate_api::handle_precision(input),
+            integer: runmat_accelerate_api::handle_integer_type(input),
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        },
+    )
 }
 
 fn sign_real(value: Value) -> BuiltinResult<Value> {
@@ -312,12 +269,28 @@ fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
 }
 
 fn sign_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mapped = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| sign_complex(re, im))
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(re, im)| sign_complex(re, im))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(re, im)| sign_complex_f32(re, im))
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(sign_error_with_detail(
+                &SIGN_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
@@ -367,12 +340,42 @@ fn sign_complex(re: f64, im: f64) -> (f64, f64) {
     }
 }
 
+fn sign_complex_f32(re: f32, im: f32) -> (f32, f32) {
+    if re == 0.0 && im == 0.0 {
+        return (0.0, 0.0);
+    }
+    if re.is_nan() || im.is_nan() {
+        return (f32::NAN, f32::NAN);
+    }
+    let real = if re.is_infinite() { re.signum() } else { 0.0 };
+    let imag = if im.is_infinite() { im.signum() } else { 0.0 };
+    if re.is_infinite() || im.is_infinite() {
+        let norm = (real * real + imag * imag).sqrt();
+        return if norm == 0.0 {
+            (real, imag)
+        } else {
+            (real / norm, imag / norm)
+        };
+    }
+    let scale = re.abs().max(im.abs());
+    if scale == 0.0 {
+        return (0.0, 0.0);
+    }
+    let real = re / scale;
+    let imag = im / scale;
+    let magnitude = (real * real + imag * imag).sqrt();
+    if magnitude == 0.0 {
+        (0.0, 0.0)
+    } else {
+        (real / magnitude, imag / magnitude)
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
 
     fn sign_builtin(value: Value) -> BuiltinResult<Value> {
@@ -388,6 +391,25 @@ pub(crate) mod tests {
         };
         assert_eq!(&values[..3], &[-1.0, 0.0, 1.0]);
         assert!(values[3].is_nan());
+    }
+
+    #[test]
+    fn sign_preserves_native_complex_single_storage() {
+        let input = ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(vec![(3.0, 4.0), (0.0, 0.0), (f32::NAN, 1.0)].into()),
+            vec![3, 1],
+        )
+        .unwrap();
+        let Value::ComplexTensor(output) = sign_complex_tensor(input).unwrap() else {
+            panic!("expected complex tensor");
+        };
+        let ComplexStorage::F32(values) = output.into_complex_storage() else {
+            panic!("expected complex single storage");
+        };
+        assert!((values[0].0 - 0.6).abs() < 1e-6);
+        assert!((values[0].1 - 0.8).abs() < 1e-6);
+        assert_eq!(values[1], (0.0, 0.0).into());
+        assert!(values[2].0.is_nan() && values[2].1.is_nan());
     }
 
     fn assert_complex_close(got: (f64, f64), want: (f64, f64), tol: f64) {
@@ -408,33 +430,6 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = sign(X)"));
-    }
-
-    #[test]
-    fn sign_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn sign_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

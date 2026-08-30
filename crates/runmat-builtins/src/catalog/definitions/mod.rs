@@ -11,6 +11,8 @@ mod numeric_conversions;
 mod parallel;
 mod parallel_context;
 mod parallel_data;
+mod phase_angle;
+mod signum;
 
 pub use acceleration::*;
 pub use aggregate::*;
@@ -25,3 +27,5 @@ pub use numeric_conversions::*;
 pub use parallel::*;
 pub use parallel_context::*;
 pub use parallel_data::*;
+pub use phase_angle::*;
+pub use signum::*;
