@@ -15,12 +15,82 @@ pub enum BuiltinContractMaturity {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct BuiltinInferenceRuleId(pub &'static str);
+pub enum BuiltinInferenceRule {
+    Acceleration(AccelerationInferenceRule),
+    Aggregate(AggregateInferenceRule),
+    Array(ArrayInferenceRule),
+    Introspection(IntrospectionInferenceRule),
+    Math(MathInferenceRule),
+    Parallel(ParallelInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum AccelerationInferenceRule {
+    Gather,
+    GpuArray,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum AggregateInferenceRule {
+    Struct,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ArrayInferenceRule {
+    Full,
+    Zeros,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum IntrospectionInferenceRule {
+    Feval,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MathInferenceRule {
+    Abs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ParallelInferenceRule {
+    Barrier,
+    Broadcast,
+    Cat,
+    Codistributed,
+    CodistributedBuild,
+    Codistributor,
+    Codistributor1d,
+    Codistributor2dbc,
+    CodistributorIsComplete,
+    Distributed,
+    FetchNext,
+    FetchOutputs,
+    FunctionalReduce,
+    Gcp,
+    GetCodistributor,
+    GetCurrentJob,
+    GetCurrentTask,
+    GetCurrentWorker,
+    GlobalIndices,
+    Gplus,
+    Iscodistributed,
+    LocalPart,
+    Parfeval,
+    ParfevalOnAll,
+    Parpool,
+    Probe,
+    Receive,
+    Redistribute,
+    Send,
+    SendReceive,
+    SpmdIndex,
+    SpmdSize,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BuiltinContractDeclaration {
     pub maturity: BuiltinContractMaturity,
-    pub inference_rule: BuiltinInferenceRuleId,
+    pub inference_rule: BuiltinInferenceRule,
     pub compatibility: BuiltinCompatibility,
     pub async_behavior: BuiltinAsyncBehavior,
     pub purity: BuiltinPurity,

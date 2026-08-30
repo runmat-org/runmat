@@ -3,10 +3,10 @@ use crate::{
     BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
     BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
     BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinFusionPolicy, BuiltinInferenceRuleId, BuiltinLinkContract, BuiltinLinkPolicy,
+    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinLinkContract, BuiltinLinkPolicy,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinPlacementContract, BuiltinPortability, BuiltinPurity, BuiltinReachability,
-    BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
+    BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor, ParallelInferenceRule,
 };
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
@@ -510,7 +510,7 @@ const PARALLEL_LINK: BuiltinLinkContract = BuiltinLinkContract {
 };
 
 macro_rules! parallel_data_entry {
-    ($constant:ident, $name:literal, $rule:literal, $summary:literal, $descriptor:ident) => {
+    ($constant:ident, $name:literal, $rule:expr, $summary:literal, $descriptor:ident) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
@@ -525,7 +525,7 @@ macro_rules! parallel_data_entry {
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
                 maturity: BuiltinContractMaturity::Complete,
-                inference_rule: BuiltinInferenceRuleId($rule),
+                inference_rule: $rule,
                 compatibility: BuiltinCompatibility::Matlab,
                 async_behavior: BuiltinAsyncBehavior::MaySuspend,
                 purity: BuiltinPurity::Impure,
@@ -555,48 +555,48 @@ macro_rules! parallel_data_entry {
 parallel_data_entry!(
     DISTRIBUTED_CATALOG_ENTRY,
     "distributed",
-    "parallel.distributed",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Distributed),
     "Create a distributed array.",
     DISTRIBUTED_DESCRIPTOR
 );
 parallel_data_entry!(
     CODISTRIBUTED_CATALOG_ENTRY,
     "codistributed",
-    "parallel.codistributed",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Codistributed),
     "Create a codistributed array from a client value or designated worker.",
     CODISTRIBUTED_DESCRIPTOR
 );
 parallel_data_entry!(
     CODISTRIBUTED_BUILD_CATALOG_ENTRY,
     "codistributed.build",
-    "parallel.codistributed-build",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::CodistributedBuild),
     "Build a codistributed array from worker-local partitions.",
     CODISTRIBUTED_BUILD_DESCRIPTOR
 );
 parallel_data_entry!(
     REDISTRIBUTE_CATALOG_ENTRY,
     "redistribute",
-    "parallel.redistribute",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Redistribute),
     "Redistribute an array with another codistributor.",
     REDISTRIBUTE_DESCRIPTOR
 );
 parallel_data_entry!(
     GET_CODISTRIBUTOR_CATALOG_ENTRY,
     "getCodistributor",
-    "parallel.get-codistributor",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCodistributor),
     "Return the codistributor for a distributed array.",
     GET_CODISTRIBUTOR_DESCRIPTOR
 );
 parallel_data_entry!(
     GLOBAL_INDICES_CATALOG_ENTRY,
     "globalIndices",
-    "parallel.global-indices",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::GlobalIndices),
     "Return the global indices assigned to a worker.",
     GLOBAL_INDICES_DESCRIPTOR
 );
 
 macro_rules! codistributor_entry {
-    ($constant:ident, $name:literal, $rule:literal, $summary:literal, $descriptor:ident) => {
+    ($constant:ident, $name:literal, $rule:expr, $summary:literal, $descriptor:ident) => {
         codistributor_entry!(
             $constant,
             $name,
@@ -606,7 +606,7 @@ macro_rules! codistributor_entry {
             PARALLEL_PLACEMENT
         );
     };
-    ($constant:ident, $name:literal, $rule:literal, $summary:literal, $descriptor:ident, $placement:expr) => {
+    ($constant:ident, $name:literal, $rule:expr, $summary:literal, $descriptor:ident, $placement:expr) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
@@ -621,7 +621,7 @@ macro_rules! codistributor_entry {
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
                 maturity: BuiltinContractMaturity::Complete,
-                inference_rule: BuiltinInferenceRuleId($rule),
+                inference_rule: $rule,
                 compatibility: BuiltinCompatibility::Matlab,
                 async_behavior: BuiltinAsyncBehavior::NeverSuspends,
                 purity: BuiltinPurity::Pure,
@@ -651,35 +651,35 @@ macro_rules! codistributor_entry {
 codistributor_entry!(
     CODISTRIBUTOR_CATALOG_ENTRY,
     "codistributor",
-    "parallel.codistributor",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Codistributor),
     "Create a one-dimensional or two-dimensional codistributor.",
     CODISTRIBUTOR_DESCRIPTOR
 );
 codistributor_entry!(
     CODISTRIBUTOR_1D_CATALOG_ENTRY,
     "codistributor1d",
-    "parallel.codistributor1d",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Codistributor1d),
     "Create a one-dimensional codistributor.",
     CODISTRIBUTOR_1D_DESCRIPTOR
 );
 codistributor_entry!(
     CODISTRIBUTOR_2DBC_CATALOG_ENTRY,
     "codistributor2dbc",
-    "parallel.codistributor2dbc",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Codistributor2dbc),
     "Create a two-dimensional block-cyclic codistributor.",
     CODISTRIBUTOR_2DBC_DESCRIPTOR
 );
 codistributor_entry!(
     IS_COMPLETE_CATALOG_ENTRY,
     "isComplete",
-    "parallel.codistributor-is-complete",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::CodistributorIsComplete),
     "Return whether a codistributor has a complete global size.",
     IS_COMPLETE_DESCRIPTOR
 );
 codistributor_entry!(
     IS_CODISTRIBUTED_CATALOG_ENTRY,
     "iscodistributed",
-    "parallel.iscodistributed",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Iscodistributed),
     "Return whether a value is a codistributed array.",
     IS_CODISTRIBUTED_DESCRIPTOR,
     DISTRIBUTED_INSPECTION_PLACEMENT
@@ -687,133 +687,133 @@ codistributor_entry!(
 parallel_data_entry!(
     GET_LOCAL_PART_CATALOG_ENTRY,
     "getLocalPart",
-    "parallel.local-part",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::LocalPart),
     "Return the partition local to the current lab.",
     GET_LOCAL_PART_DESCRIPTOR
 );
 parallel_data_entry!(
     LAB_BARRIER_CATALOG_ENTRY,
     "labBarrier",
-    "parallel.barrier",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Barrier),
     "Synchronize all labs in the current SPMD region.",
     LAB_BARRIER_DESCRIPTOR
 );
 parallel_data_entry!(
     LAB_BROADCAST_CATALOG_ENTRY,
     "labBroadcast",
-    "parallel.broadcast",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Broadcast),
     "Broadcast a value from one lab to every lab.",
     LAB_BROADCAST_DESCRIPTOR
 );
 parallel_data_entry!(
     LAB_SEND_CATALOG_ENTRY,
     "labSend",
-    "parallel.send",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Send),
     "Send a value to another lab.",
     LAB_SEND_DESCRIPTOR
 );
 parallel_data_entry!(
     LAB_RECEIVE_CATALOG_ENTRY,
     "labReceive",
-    "parallel.receive",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Receive),
     "Receive a value from another lab.",
     LAB_RECEIVE_DESCRIPTOR
 );
 parallel_data_entry!(
     LAB_PROBE_CATALOG_ENTRY,
     "labProbe",
-    "parallel.probe",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Probe),
     "Test whether a matching lab message is available.",
     LAB_PROBE_DESCRIPTOR
 );
 parallel_data_entry!(
     GPLUS_CATALOG_ENTRY,
     "gplus",
-    "parallel.gplus",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Gplus),
     "Sum values across labs.",
     GPLUS_DESCRIPTOR
 );
 parallel_data_entry!(
     GCAT_CATALOG_ENTRY,
     "gcat",
-    "parallel.cat",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Cat),
     "Concatenate values across labs in rank order.",
     GCAT_DESCRIPTOR
 );
 parallel_data_entry!(
     GOP_CATALOG_ENTRY,
     "gop",
-    "parallel.functional-reduce",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::FunctionalReduce),
     "Reduce values across labs with an associative binary function.",
     GOP_DESCRIPTOR
 );
 parallel_data_entry!(
     LAB_SEND_RECEIVE_CATALOG_ENTRY,
     "labSendReceive",
-    "parallel.send-receive",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::SendReceive),
     "Send and receive one value as an atomic point-to-point exchange.",
     LAB_SEND_RECEIVE_DESCRIPTOR
 );
 parallel_data_entry!(
     SPMD_BARRIER_CATALOG_ENTRY,
     "spmdBarrier",
-    "parallel.barrier",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Barrier),
     "Synchronize all labs in the current SPMD region.",
     SPMD_BARRIER_DESCRIPTOR
 );
 parallel_data_entry!(
     SPMD_BROADCAST_CATALOG_ENTRY,
     "spmdBroadcast",
-    "parallel.broadcast",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Broadcast),
     "Broadcast a value from one lab to every lab.",
     SPMD_BROADCAST_DESCRIPTOR
 );
 parallel_data_entry!(
     SPMD_SEND_CATALOG_ENTRY,
     "spmdSend",
-    "parallel.send",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Send),
     "Send a value to another lab.",
     SPMD_SEND_DESCRIPTOR
 );
 parallel_data_entry!(
     SPMD_RECEIVE_CATALOG_ENTRY,
     "spmdReceive",
-    "parallel.receive",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Receive),
     "Receive a value and optional sender metadata.",
     SPMD_RECEIVE_DESCRIPTOR
 );
 parallel_data_entry!(
     SPMD_PROBE_CATALOG_ENTRY,
     "spmdProbe",
-    "parallel.probe",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Probe),
     "Test whether a matching lab message is available.",
     SPMD_PROBE_DESCRIPTOR
 );
 parallel_data_entry!(
     SPMD_SEND_RECEIVE_CATALOG_ENTRY,
     "spmdSendReceive",
-    "parallel.send-receive",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::SendReceive),
     "Send and receive one value as an atomic point-to-point exchange.",
     SPMD_SEND_RECEIVE_DESCRIPTOR
 );
 parallel_data_entry!(
     SPMD_PLUS_CATALOG_ENTRY,
     "spmdPlus",
-    "parallel.gplus",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Gplus),
     "Sum values across labs.",
     SPMD_PLUS_DESCRIPTOR
 );
 parallel_data_entry!(
     SPMD_CAT_CATALOG_ENTRY,
     "spmdCat",
-    "parallel.cat",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Cat),
     "Concatenate values across SPMD workers in rank order.",
     SPMD_CAT_DESCRIPTOR
 );
 parallel_data_entry!(
     SPMD_REDUCE_CATALOG_ENTRY,
     "spmdReduce",
-    "parallel.functional-reduce",
+    BuiltinInferenceRule::Parallel(ParallelInferenceRule::FunctionalReduce),
     "Reduce values across SPMD workers with an associative binary function.",
     SPMD_REDUCE_DESCRIPTOR
 );

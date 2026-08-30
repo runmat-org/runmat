@@ -3,14 +3,14 @@ use crate::{
     BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
     BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
     BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRuleId,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
     BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
     BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, ALL_INTEGER_CLASSES,
+    BuiltinSignatureDescriptor, IntrospectionInferenceRule, ALL_INTEGER_CLASSES,
 };
 use runmat_types::EffectKind;
 
@@ -152,7 +152,7 @@ pub const FEVAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &FEVAL_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::DynamicByDesign,
-        inference_rule: BuiltinInferenceRuleId("introspection.feval"),
+        inference_rule: BuiltinInferenceRule::Introspection(IntrospectionInferenceRule::Feval),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Impure,

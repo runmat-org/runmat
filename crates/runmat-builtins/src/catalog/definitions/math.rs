@@ -3,14 +3,14 @@ use crate::{
     BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
     BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
     BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRuleId,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
     BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
     BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, ALL_INTEGER_CLASSES, SPARSE_INTEGER_EXTENSION,
+    BuiltinSignatureDescriptor, MathInferenceRule, ALL_INTEGER_CLASSES, SPARSE_INTEGER_EXTENSION,
 };
 use runmat_types::EffectKind;
 
@@ -130,7 +130,7 @@ pub const ABS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &ABS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRuleId("math.abs"),
+        inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Abs),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Pure,

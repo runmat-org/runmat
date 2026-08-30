@@ -59,7 +59,7 @@ const PILOT: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRuleId("test.pilot"),
+        inference_rule: BuiltinInferenceRule::Array(ArrayInferenceRule::Full),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Pure,
@@ -120,9 +120,8 @@ fn migrated_registry_is_valid_and_case_insensitive() {
         builtin_catalog_entry_by_name("FULL")
             .expect("full catalog entry")
             .contract
-            .inference_rule
-            .0,
-        "array.full"
+            .inference_rule,
+        BuiltinInferenceRule::Array(ArrayInferenceRule::Full)
     );
 }
 
