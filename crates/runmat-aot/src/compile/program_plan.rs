@@ -141,7 +141,7 @@ fn runtime_families(
     if reachability
         .nodes
         .iter()
-        .any(|node| node.kind == ReachabilityNodeKind::Builtin)
+        .any(|node| node.builtin_id().is_some())
     {
         let reason = if policy == CompilationPolicy::ClosedWorld {
             format!(
@@ -197,12 +197,12 @@ fn retained_builtin_bindings(
         return Ok(Vec::new());
     }
     let mut bindings = Vec::new();
-    for node in reachability
+    for (node, builtin) in reachability
         .nodes
         .iter()
-        .filter(|node| node.kind == ReachabilityNodeKind::Builtin)
+        .filter_map(|node| node.builtin_id().map(|builtin| (node, builtin)))
     {
-        let entry = runmat_builtins::builtin_catalog_entry_by_name(&node.symbol).ok_or_else(|| {
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(&builtin.0).ok_or_else(|| {
             AotError::contract(
                 "aot.compile.closed_world_builtin",
                 format!(
@@ -280,7 +280,7 @@ mod tests {
             schema_version: REACHABILITY_SCHEMA_VERSION,
             nodes: vec![ReachabilityNode {
                 id: format!("builtin:{}", name.to_ascii_lowercase()),
-                kind: ReachabilityNodeKind::Builtin,
+                kind: ReachabilityNodeKind::Builtin(runmat_types::BuiltinId(name.into())),
                 module: "runmat-builtins".into(),
                 symbol: name.into(),
                 certainty: ReachabilityCertainty::Definite,
@@ -329,5 +329,14 @@ mod tests {
                 ..
             }
         ));
+
+        let legacy_untyped = serde_json::json!({
+            "id": "builtin:abs",
+            "kind": "builtin",
+            "module": "runmat-builtins",
+            "symbol": "abs",
+            "certainty": "definite"
+        });
+        assert!(serde_json::from_value::<ReachabilityNode>(legacy_untyped).is_err());
     }
 }

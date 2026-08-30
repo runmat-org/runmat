@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use runmat_types::{BindingId, ProgramSourceId};
+use runmat_types::{BindingId, BuiltinId, ProgramSourceId};
 use serde::{Deserialize, Serialize};
 
-pub const REACHABILITY_SCHEMA_VERSION: u16 = 1;
+pub const REACHABILITY_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -13,11 +13,11 @@ pub enum ReachabilityCertainty {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReachabilityNodeKind {
     Function,
-    Builtin,
+    Builtin(BuiltinId),
     Class,
     Method,
     Provider,
@@ -58,6 +58,15 @@ pub struct ReachabilityNode {
     pub module: String,
     pub symbol: String,
     pub certainty: ReachabilityCertainty,
+}
+
+impl ReachabilityNode {
+    pub fn builtin_id(&self) -> Option<&BuiltinId> {
+        match &self.kind {
+            ReachabilityNodeKind::Builtin(id) => Some(id),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

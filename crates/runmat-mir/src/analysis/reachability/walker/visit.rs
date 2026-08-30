@@ -255,7 +255,7 @@ impl Walker<'_> {
                     let id = format!("{family}:{symbol}");
                     self.node(
                         id.clone(),
-                        kind,
+                        kind.clone(),
                         "workspace".into(),
                         symbol,
                         Certainty::Definite,
