@@ -1,13 +1,11 @@
 //! MATLAB-compatible `conj` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::CONJ_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CONJ_CHARACTER_INPUT_EXTENSION, CONJ_ERROR_INTERNAL,
+    CONJ_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -20,7 +18,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::conj")]
@@ -63,80 +60,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "conj";
 
-pub const CONJ_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "conj-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "conj with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ConjCharacterInputExtension"),
-};
-pub const CONJ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [CONJ_CHARACTER_INPUT_EXTENSION];
-const CONJ_REAL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight real integer classes are exact identity inputs.",
-    }];
-const CONJ_COMPLEX_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Typed complex integer storage retains its class; RunMat conservatively saturates imaginary-component negation while signed-minimum and unsigned endpoints remain evidence-open." }];
-pub const CONJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Y = conj(real_integer_X)", inputs: &CONJ_REAL_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Host inputs are returned unchanged; resident real integer inputs preserve the same exact handle and metadata." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = conj(complex_integer_X)", inputs: &CONJ_COMPLEX_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Typed-complex integer storage uses the conservative resolved saturating-negation policy, preserves paired native storage on the host and owning provider, and retains the evidence qualification for signed-minimum and unsigned-imaginary endpoints." },
-];
-
-const CONJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Complex conjugate of X.",
-}];
-const CONJ_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric, logical, char, or complex input.",
-}];
-const CONJ_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = conj(X)",
-    inputs: &CONJ_INPUTS,
-    outputs: &CONJ_OUTPUT,
-}];
-const CONJ_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONJ.INVALID_INPUT",
-    identifier: Some("RunMat:conj:InvalidInput"),
-    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
-    message: "conj: invalid input",
-};
-const CONJ_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONJ.INTERNAL",
-    identifier: Some("RunMat:conj:Internal"),
-    when: "Internal tensor conversion/allocation/provider interaction failed.",
-    message: "conj: internal error",
-};
-const CONJ_ERRORS: [BuiltinErrorDescriptor; 2] = [CONJ_ERROR_INVALID_INPUT, CONJ_ERROR_INTERNAL];
-pub const CONJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CONJ_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CONJ_ERRORS,
-};
-
-fn conj_type(
-    args: &[runmat_builtins::Type],
-    context: &runmat_builtins::ResolveContext,
-) -> runmat_builtins::Type {
-    match args.first() {
-        Some(runmat_builtins::Type::Int) => runmat_builtins::Type::Int,
-        Some(runmat_builtins::Type::Bool) => runmat_builtins::Type::Bool,
-        Some(runmat_builtins::Type::Logical { shape }) => runmat_builtins::Type::Logical {
-            shape: shape.clone(),
-        },
-        _ => numeric_unary_type(args, context),
-    }
-}
-
 fn builtin_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -151,14 +74,7 @@ fn builtin_error_with_detail(
 
 #[runtime_builtin(
     name = "conj",
-    category = "math/elementwise",
-    summary = "Compute complex conjugates element-wise.",
-    keywords = "conj,complex conjugate,complex,elementwise,gpu",
-    accel = "unary",
-    type_resolver(conj_type),
-    extensions(CONJ_EXTENSIONS),
-    integer_capabilities(CONJ_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::elementwise::conj::CONJ_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::conj"
 )]
 async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
@@ -191,50 +107,95 @@ async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn conj_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let storage = runmat_accelerate_api::handle_storage(&handle);
-    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        if storage == runmat_accelerate_api::GpuTensorStorage::Real {
-            return Ok(gpu_helpers::resident_gpu_value(handle));
-        }
-        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
-            .await
-            .map_err(|err| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, err.to_string()))?;
-        let result = conj_host(gathered)?;
-        return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME)
-            .map_err(|err| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, err.message()));
+    if gpu_helpers::expected_handle_numeric_element_type(&handle).is_err() {
+        return Err(builtin_error_with_detail(
+            &CONJ_ERROR_INTERNAL,
+            "GPU input class metadata contradicts its physical storage",
+        ));
+    }
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        && storage == runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        return Ok(gpu_helpers::resident_gpu_value(handle));
     }
     if runmat_accelerate_api::handle_is_logical(&handle)
         && storage == runmat_accelerate_api::GpuTensorStorage::Real
     {
         return Ok(gpu_helpers::logical_gpu_value(handle));
     }
-    let provider = runmat_accelerate_api::provider_for_handle(&handle)
-        .or_else(runmat_accelerate_api::provider);
-    if let Some(provider) = provider {
-        if let Ok(out) = provider.unary_conj(&handle).await {
-            return Ok(
-                if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved {
-                    gpu_helpers::complex_gpu_value(out)
-                } else {
-                    gpu_helpers::resident_gpu_value(out)
-                },
-            );
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        builtin_error_with_detail(&CONJ_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
+    if runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&handle)
+        && runmat_accelerate_api::handle_precision(&handle) == Some(provider.precision())
+    {
+        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let result = provider.unary_conj(&handle).await;
+        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        match result {
+            Ok(mut out) if valid_conj_gpu_output(&out, &handle, provider) => {
+                runmat_accelerate_api::set_handle_provenance(&mut out, input_provenance);
+                return Ok(
+                    if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved {
+                        gpu_helpers::complex_gpu_value(out)
+                    } else {
+                        gpu_helpers::resident_gpu_value(out)
+                    },
+                );
+            }
+            Ok(out) => {
+                gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
+                return Err(builtin_error_with_detail(
+                    &CONJ_ERROR_INTERNAL,
+                    "provider unary_conj returned malformed output",
+                ));
+            }
+            Err(err) if err.to_string().contains("unary_conj not supported") => {}
+            Err(err) => {
+                return Err(builtin_error_with_detail(
+                    &CONJ_ERROR_INTERNAL,
+                    format!("provider unary_conj failed: {err}"),
+                ));
+            }
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-        .await
+    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let gathered_result =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
+    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+    let gathered = gathered_result
         .map_err(|err| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, err.to_string()))?;
     let host = conj_host(gathered)?;
-    let Some(provider) = provider else {
-        return Ok(host);
+    gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
+        .map_err(|err| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, err.message()))
+}
+
+fn valid_conj_gpu_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    let storage = runmat_accelerate_api::handle_storage(input);
+    let alias = if storage == runmat_accelerate_api::GpuTensorStorage::Real {
+        gpu_helpers::GpuOutputAliasPolicy::AllowInput
+    } else {
+        gpu_helpers::GpuOutputAliasPolicy::RequireDistinct
     };
-    match host {
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, &tensor)
-            .map(gpu_helpers::resident_gpu_value)
-            .map_err(|err| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, err)),
-        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
-            .map(gpu_helpers::complex_gpu_value),
-        other => Ok(other),
-    }
+    gpu_helpers::unary_gpu_output_matches(
+        output,
+        input,
+        provider,
+        gpu_helpers::UnaryGpuOutputContract {
+            storage,
+            precision: runmat_accelerate_api::handle_precision(input),
+            integer: None,
+            logical: false,
+            alias,
+        },
+    )
 }
 
 fn conj_host(value: Value) -> BuiltinResult<Value> {
@@ -338,7 +299,6 @@ pub(crate) mod tests {
         .is_ok()
             && runmat_accelerate_api::provider().is_some()
     }
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
 
     fn conj_builtin(value: Value) -> BuiltinResult<Value> {
@@ -353,55 +313,6 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = conj(X)"));
-    }
-
-    #[test]
-    fn conj_type_preserves_tensor_shape() {
-        let out = conj_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn conj_type_scalar_tensor_returns_num() {
-        let out = conj_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
-    }
-
-    #[test]
-    fn conj_type_preserves_integer_and_logical_identity_types() {
-        assert_eq!(
-            conj_type(&[Type::Int], &ResolveContext::new(Vec::new())),
-            Type::Int
-        );
-        assert_eq!(
-            conj_type(&[Type::Bool], &ResolveContext::new(Vec::new())),
-            Type::Bool
-        );
-        let logical = Type::Logical {
-            shape: Some(vec![Some(2), Some(3)]),
-        };
-        assert_eq!(
-            conj_type(
-                std::slice::from_ref(&logical),
-                &ResolveContext::new(Vec::new())
-            ),
-            logical
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -293,8 +293,8 @@ mod tests {
     #[test]
     fn closed_world_maps_catalog_bindings_to_stable_native_symbols() {
         for name in [
-            "abs", "double", "exp", "int8", "int16", "int32", "int64", "single", "uint8", "uint16",
-            "uint32", "uint64",
+            "abs", "conj", "double", "exp", "imag", "int8", "int16", "int32", "int64", "real",
+            "single", "uint8", "uint16", "uint32", "uint64",
         ] {
             let bindings =
                 retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report(name))

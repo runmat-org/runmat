@@ -20789,7 +20789,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric, logical, char, or complex input."
+              "description": "Numeric, logical, character, or complex input."
             }
           ],
           "outputs": [
@@ -20807,13 +20807,13 @@
         {
           "code": "RM.CONJ.INVALID_INPUT",
           "identifier": "RunMat:conj:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
+          "when": "Input cannot be interpreted as numeric, logical, character, or complex data.",
           "message": "conj: invalid input"
         },
         {
           "code": "RM.CONJ.INTERNAL",
           "identifier": "RunMat:conj:Internal",
-          "when": "Internal tensor conversion/allocation/provider interaction failed.",
+          "when": "Internal tensor conversion, allocation, or provider interaction fails.",
           "message": "conj: internal error"
         }
       ],
@@ -20851,7 +20851,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Host inputs are returned unchanged; resident real integer inputs preserve the same exact handle and metadata."
+          "notes": "Host inputs are returned unchanged; supported resident real integer inputs preserve the same exact handle and metadata."
         },
         {
           "form": "Y = conj(complex_integer_X)",
@@ -20870,7 +20870,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "Typed complex integer storage retains its class; RunMat conservatively saturates imaginary-component negation while signed-minimum and unsigned endpoints remain evidence-open."
+              "notes": "Typed complex integer storage retains its class; imaginary-component negation saturates while signed-minimum and unsigned endpoint compatibility remains evidence-open."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -20878,7 +20878,7 @@
           "overflow": "EvidenceOpen",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Typed-complex integer storage uses the conservative resolved saturating-negation policy, preserves paired native storage on the host and owning provider, and retains the evidence qualification for signed-minimum and unsigned-imaginary endpoints."
+          "notes": "Typed-complex integer storage uses saturating imaginary negation, preserves paired native storage on the host and owning provider, and retains the evidence qualification for signed-minimum and unsigned-imaginary endpoints."
         }
       ]
     },
@@ -72771,7 +72771,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric, logical, char, or complex input."
+              "description": "Numeric, logical, character, or complex input."
             }
           ],
           "outputs": [
@@ -72789,13 +72789,13 @@
         {
           "code": "RM.IMAG.INVALID_INPUT",
           "identifier": "RunMat:imag:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
+          "when": "Input cannot be interpreted as numeric, logical, character, or complex data.",
           "message": "imag: invalid input"
         },
         {
           "code": "RM.IMAG.INTERNAL",
           "identifier": "RunMat:imag:Internal",
-          "when": "Internal tensor conversion/allocation/provider interaction failed.",
+          "when": "Internal tensor conversion, allocation, or provider interaction fails.",
           "message": "imag: internal error"
         }
       ],
@@ -72817,7 +72817,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "RunMat accepts every native real or componentwise-complex integer class. The compatibility target defines imag elementwise for numeric input and documents full gpuArray support, but the public page does not enumerate the integer result class, so endpoint compatibility remains evidence-open."
+              "notes": "All eight real and componentwise-complex integer classes retain their class."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -72825,7 +72825,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Real integer input produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage without arithmetic or overflow. Provider paths preserve class, shape, owner, and explicit residency under the documented full gpuArray capability."
+          "notes": "Real integer input produces exact same-class zeros. Paired complex-integer input projects its exact imaginary storage without arithmetic or overflow; supported resident forms preserve class, shape, owner, and residency."
         }
       ]
     },
@@ -130219,7 +130219,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric, logical, char, or complex input."
+              "description": "Numeric, logical, character, or complex input."
             }
           ],
           "outputs": [
@@ -130237,13 +130237,13 @@
         {
           "code": "RM.REAL.INVALID_INPUT",
           "identifier": "RunMat:real:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
+          "when": "Input cannot be interpreted as numeric, logical, character, or complex data.",
           "message": "real: invalid input"
         },
         {
           "code": "RM.REAL.INTERNAL",
           "identifier": "RunMat:real:Internal",
-          "when": "Internal tensor conversion/allocation/provider interaction failed.",
+          "when": "Internal tensor conversion, allocation, or provider interaction fails.",
           "message": "real: internal error"
         }
       ],
@@ -130265,7 +130265,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "NotApplicable",
-              "notes": "The public numeric-array contract includes all built-in integer classes; real returns their real components elementwise and supports gpuArray input."
+              "notes": "All eight integer classes retain their class while projecting the real component."
             }
           ],
           "computation_domain": "ExactInteger",
@@ -130273,7 +130273,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Real integer input is an exact same-class identity and paired complex-integer input projects its same-class real component without arithmetic. RunMat preserves class, shape, owner, and residency."
+          "notes": "Real integer input is an exact same-class identity. Paired complex-integer input projects its same-class real storage without arithmetic; supported resident forms preserve class, shape, owner, and residency."
         }
       ]
     },

@@ -1,15 +1,9 @@
 //! MATLAB-compatible `imag` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+#[cfg(test)]
+use runmat_builtins::IMAG_DESCRIPTOR;
+use runmat_builtins::{BuiltinErrorDescriptor, IMAG_ERROR_INTERNAL, IMAG_ERROR_INVALID_INPUT};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
@@ -19,7 +13,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::imag")]
@@ -61,66 +54,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "imag";
 
-const IMAG_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Imaginary component of X.",
-}];
-const IMAG_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric, logical, char, or complex input.",
-}];
-const IMAG_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = imag(X)",
-    inputs: &IMAG_INPUTS,
-    outputs: &IMAG_OUTPUT,
-}];
-const IMAG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMAG.INVALID_INPUT",
-    identifier: Some("RunMat:imag:InvalidInput"),
-    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
-    message: "imag: invalid input",
-};
-const IMAG_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMAG.INTERNAL",
-    identifier: Some("RunMat:imag:Internal"),
-    when: "Internal tensor conversion/allocation/provider interaction failed.",
-    message: "imag: internal error",
-};
-const IMAG_ERRORS: [BuiltinErrorDescriptor; 2] = [IMAG_ERROR_INVALID_INPUT, IMAG_ERROR_INTERNAL];
-pub const IMAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IMAG_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IMAG_ERRORS,
-};
-
-const IMAG_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat accepts every native real or componentwise-complex integer class. The compatibility target defines imag elementwise for numeric input and documents full gpuArray support, but the public page does not enumerate the integer result class, so endpoint compatibility remains evidence-open.",
-    }];
-
-pub const IMAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = imag(integer_X)",
-        inputs: &IMAG_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Real integer input produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage without arithmetic or overflow. Provider paths preserve class, shape, owner, and explicit residency under the documented full gpuArray capability.",
-    }];
-
 fn builtin_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -135,13 +68,7 @@ fn builtin_error_with_detail(
 
 #[runtime_builtin(
     name = "imag",
-    category = "math/elementwise",
-    summary = "Extract imaginary components.",
-    keywords = "imag,imaginary,complex,elementwise,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::imag::IMAG_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::elementwise::imag::IMAG_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::imag"
 )]
 async fn imag_builtin(value: Value) -> BuiltinResult<Value> {
@@ -178,12 +105,7 @@ async fn imag_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     let exact_host_path = runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle);
-    if !gpu_helpers::gpu_class_metadata_matches(
-        &handle,
-        runmat_accelerate_api::handle_precision(&handle),
-        runmat_accelerate_api::handle_integer_type(&handle),
-        runmat_accelerate_api::handle_is_logical(&handle),
-    ) {
+    if gpu_helpers::expected_handle_numeric_element_type(&handle).is_err() {
         return Err(builtin_error_with_detail(
             &IMAG_ERROR_INTERNAL,
             "GPU input class metadata contradicts its physical storage",
@@ -235,23 +157,18 @@ fn valid_imag_gpu_output(
     input: &GpuTensorHandle,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
 ) -> bool {
-    output.shape == input.shape
-        && output.device_id == input.device_id
-        && output.buffer_id != input.buffer_id
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(output)
-            == runmat_accelerate_api::handle_precision(input)
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-        && gpu_helpers::gpu_class_metadata_matches(
-            output,
-            runmat_accelerate_api::handle_precision(input),
-            None,
-            false,
-        )
+    gpu_helpers::unary_gpu_output_matches(
+        output,
+        input,
+        provider,
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            precision: runmat_accelerate_api::handle_precision(input),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        },
+    )
 }
 
 fn imag_real(value: Value) -> BuiltinResult<Value> {
@@ -298,7 +215,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray, StringArray};
 
     fn imag_builtin(value: Value) -> BuiltinResult<Value> {
@@ -313,33 +229,6 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = imag(X)"));
-    }
-
-    #[test]
-    fn imag_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn imag_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,9 +1,8 @@
 //! MATLAB-compatible `real` builtin with GPU-aware semantics for RunMat.
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+#[cfg(test)]
+use runmat_builtins::REAL_DESCRIPTOR;
+use runmat_builtins::{BuiltinErrorDescriptor, REAL_ERROR_INTERNAL, REAL_ERROR_INVALID_INPUT};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
@@ -13,13 +12,7 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::real")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -60,65 +53,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "real";
 
-const REAL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "The public numeric-array contract includes all built-in integer classes; real returns their real components elementwise and supports gpuArray input.",
-}];
-
-pub const REAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = real(integer_X)",
-        inputs: &REAL_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Real integer input is an exact same-class identity and paired complex-integer input projects its same-class real component without arithmetic. RunMat preserves class, shape, owner, and residency.",
-    }];
-
-const REAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Real component of X.",
-}];
-const REAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric, logical, char, or complex input.",
-}];
-const REAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = real(X)",
-    inputs: &REAL_INPUTS,
-    outputs: &REAL_OUTPUT,
-}];
-const REAL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REAL.INVALID_INPUT",
-    identifier: Some("RunMat:real:InvalidInput"),
-    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
-    message: "real: invalid input",
-};
-const REAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REAL.INTERNAL",
-    identifier: Some("RunMat:real:Internal"),
-    when: "Internal tensor conversion/allocation/provider interaction failed.",
-    message: "real: internal error",
-};
-const REAL_ERRORS: [BuiltinErrorDescriptor; 2] = [REAL_ERROR_INVALID_INPUT, REAL_ERROR_INTERNAL];
-pub const REAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REAL_ERRORS,
-};
-
 fn builtin_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -133,13 +67,7 @@ fn builtin_error_with_detail(
 
 #[runtime_builtin(
     name = "real",
-    category = "math/elementwise",
-    summary = "Extract the real part of scalars, vectors, matrices, or N-D tensors.",
-    keywords = "real,real part,complex,elementwise,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::real::REAL_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::elementwise::real::REAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::real"
 )]
 async fn real_builtin(value: Value) -> BuiltinResult<Value> {
@@ -171,11 +99,40 @@ async fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
         builtin_error_with_detail(&REAL_ERROR_INTERNAL, "GPU provider unavailable for input")
     })?;
+    if gpu_helpers::expected_handle_numeric_element_type(&handle).is_err() {
+        return Err(builtin_error_with_detail(
+            &REAL_ERROR_INTERNAL,
+            "GPU input class metadata contradicts its physical storage",
+        ));
+    }
     let kernel_compatible = runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&handle)
         && runmat_accelerate_api::handle_precision(&handle) == Some(provider.precision());
     if kernel_compatible {
-        if let Ok(out) = provider.unary_real(&handle).await {
-            return Ok(Value::GpuTensor(out));
+        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let result = provider.unary_real(&handle).await;
+        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        match result {
+            Ok(mut out) if valid_real_gpu_output(&out, &handle, provider) => {
+                runmat_accelerate_api::set_handle_provenance(&mut out, input_provenance);
+                return Ok(gpu_helpers::resident_gpu_value(out));
+            }
+            Ok(out) => {
+                gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
+                return Err(builtin_error_with_detail(
+                    &REAL_ERROR_INTERNAL,
+                    "provider unary_real returned malformed output",
+                ));
+            }
+            Err(err) if err.to_string().contains("unary_real not supported") => {}
+            Err(err) => {
+                return Err(builtin_error_with_detail(
+                    &REAL_ERROR_INTERNAL,
+                    format!("provider unary_real failed: {err}"),
+                ));
+            }
         }
     }
     let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
@@ -192,6 +149,32 @@ async fn real_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }?;
     gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
         .map_err(|err| builtin_error_with_detail(&REAL_ERROR_INTERNAL, err.to_string()))
+}
+
+fn valid_real_gpu_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    let alias = if runmat_accelerate_api::handle_storage(input)
+        == runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        gpu_helpers::GpuOutputAliasPolicy::AllowInput
+    } else {
+        gpu_helpers::GpuOutputAliasPolicy::RequireDistinct
+    };
+    gpu_helpers::unary_gpu_output_matches(
+        output,
+        input,
+        provider,
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            precision: runmat_accelerate_api::handle_precision(input),
+            integer: None,
+            logical: false,
+            alias,
+        },
+    )
 }
 
 fn real_real(value: Value) -> BuiltinResult<Value> {
@@ -236,7 +219,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
 
     fn real_builtin(value: Value) -> BuiltinResult<Value> {
@@ -251,33 +233,6 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = real(X)"));
-    }
-
-    #[test]
-    fn real_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn real_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

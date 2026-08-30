@@ -317,6 +317,44 @@ pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool 
     left.device_id == right.device_id && left.buffer_id == right.buffer_id
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuOutputAliasPolicy {
+    AllowInput,
+    RequireDistinct,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnaryGpuOutputContract {
+    pub storage: GpuTensorStorage,
+    pub precision: Option<ProviderPrecision>,
+    pub integer: Option<IntegerElementType>,
+    pub logical: bool,
+    pub alias: GpuOutputAliasPolicy,
+}
+
+pub fn unary_gpu_output_matches(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn AccelProvider,
+    contract: UnaryGpuOutputContract,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && (matches!(contract.alias, GpuOutputAliasPolicy::AllowInput)
+            || !same_gpu_handle(output, input))
+        && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(output) == contract.storage
+        && runmat_accelerate_api::handle_precision(output) == contract.precision
+        && runmat_accelerate_api::handle_integer_type(output) == contract.integer
+        && runmat_accelerate_api::handle_is_logical(output) == contract.logical
+        && gpu_class_metadata_matches(
+            output,
+            contract.precision,
+            contract.integer,
+            contract.logical,
+        )
+}
+
 pub fn free_unprotected_exact_owner(handle: &GpuTensorHandle, protected: &[&GpuTensorHandle]) {
     if protected
         .iter()
@@ -1032,6 +1070,55 @@ mod preserving_download_tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    #[test]
+    fn unary_output_contract_checks_owner_class_shape_storage_and_alias_policy() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+            let input = upload_tensor(provider, &tensor).expect("input upload");
+            let output = upload_tensor(provider, &tensor).expect("output upload");
+            let contract = UnaryGpuOutputContract {
+                storage: GpuTensorStorage::Real,
+                precision: Some(ProviderPrecision::F64),
+                integer: None,
+                logical: false,
+                alias: GpuOutputAliasPolicy::RequireDistinct,
+            };
+            assert!(unary_gpu_output_matches(
+                &output, &input, provider, contract
+            ));
+            assert!(!unary_gpu_output_matches(
+                &input, &input, provider, contract
+            ));
+            assert!(unary_gpu_output_matches(
+                &input,
+                &input,
+                provider,
+                UnaryGpuOutputContract {
+                    alias: GpuOutputAliasPolicy::AllowInput,
+                    ..contract
+                }
+            ));
+
+            let mut wrong_shape = output.clone();
+            wrong_shape.shape = vec![2, 1];
+            assert!(!unary_gpu_output_matches(
+                &wrong_shape,
+                &input,
+                provider,
+                contract
+            ));
+            runmat_accelerate_api::set_handle_class_name(&output, "single");
+            assert!(!unary_gpu_output_matches(
+                &output, &input, provider, contract
+            ));
+
+            provider.free(&output).unwrap();
+            provider.free(&input).unwrap();
+            runmat_accelerate_api::clear_handle_metadata(&output);
+            runmat_accelerate_api::clear_handle_metadata(&input);
+        });
+    }
 
     #[test]
     fn central_runtime_transfer_round_trips_every_native_real_and_complex_class() {
