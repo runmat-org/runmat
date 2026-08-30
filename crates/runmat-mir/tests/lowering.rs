@@ -1489,6 +1489,68 @@ fn analysis_store_preserves_every_typed_integer_conversion_identity_and_result_c
 }
 
 #[test]
+fn analysis_store_preserves_typed_floating_conversion_and_like_contracts() {
+    for (name, class) in [
+        ("double", NumericClass::Double),
+        ("single", NumericClass::Single),
+    ] {
+        let source = format!("function y = f(); y = {name}([1, 2, 3]); end");
+        let (body, store) = analyze_single_body(&source);
+        let builtin = body
+            .blocks
+            .iter()
+            .flat_map(|block| block.statements.iter())
+            .find_map(|statement| match &statement.kind {
+                MirStmtKind::Assign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } => match &call.callee {
+                    MirCallee::Static(CallableIdentity::Builtin(id)) if id.0 == name => Some(id),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("statically resolved floating conversion");
+        assert_eq!(builtin, &runmat_types::BuiltinId(name.into()), "{name}");
+
+        let output = output_fact(&body, &store);
+        assert_eq!(
+            output.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class,
+                domain: NumericDomain::Real,
+            }),
+            "{name}"
+        );
+        assert_eq!(
+            output.shape,
+            ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+            },
+            "{name}"
+        );
+    }
+
+    let (body, store) =
+        analyze_single_body("function y = f(); y = double([1, 2, 3], \"like\", single(1)); end");
+    let output = output_fact(&body, &store);
+    assert_eq!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        "the single prototype controls residency, not double's result class"
+    );
+    assert_eq!(
+        output.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
 fn analysis_store_attaches_catalog_contract_diagnostics_to_source() {
     let mir = lower_mir("function y = f(); y = zeros(2, \"bogus\"); end");
     let store = analyze_assembly(&mir);

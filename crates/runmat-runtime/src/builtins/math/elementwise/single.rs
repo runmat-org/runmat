@@ -3,12 +3,8 @@
 use log::trace;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SINGLE_ERROR_GPU_UNSUPPORTED, SINGLE_ERROR_INTERNAL,
+    SINGLE_ERROR_INVALID_ARGUMENT, SINGLE_ERROR_INVALID_INPUT, SINGLE_LIKE_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -28,7 +24,6 @@ use crate::builtins::common::{
     tensor,
 };
 
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::single")]
@@ -72,129 +67,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "single";
 
-pub const SINGLE_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "single-like-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "single with a like output prototype is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SingleLikeOutputExtension"),
-};
-pub const SINGLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SINGLE_LIKE_OUTPUT_EXTENSION];
-
-const SINGLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Single-precision output value.",
-}];
-
-const SINGLE_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar/array value to convert.",
-}];
-
-const SINGLE_INPUTS_X_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar/array value to convert.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Literal string \"like\".",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output class/device prototype.",
-    },
-];
-
-const SINGLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = single(X)",
-        inputs: &SINGLE_INPUTS_X,
-        outputs: &SINGLE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = single(X, \"like\", prototype)",
-        inputs: &SINGLE_INPUTS_X_LIKE,
-        outputs: &SINGLE_OUTPUT,
-    },
-];
-
-const SINGLE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes convert directly from native integer storage to IEEE binary32 without an intermediate binary64 materialization.",
-    }];
-pub const SINGLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = single(integer_X)",
-        inputs: &SINGLE_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The output is native single storage with MATLAB conversion rounding; complex integer storage preserves complexity while converting each component directly.",
-    }];
-
-const SINGLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINGLE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:single:InvalidArgument"),
-    when: "Optional arguments are malformed or unsupported.",
-    message: "single: invalid argument",
-};
-
-const SINGLE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINGLE.INVALID_INPUT",
-    identifier: Some("RunMat:single:InvalidInput"),
-    when: "Input value or prototype cannot be converted to single.",
-    message: "single: invalid input",
-};
-
-const SINGLE_ERROR_GPU_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINGLE.GPU_UNSUPPORTED",
-    identifier: Some("RunMat:single:GpuUnsupported"),
-    when: "GPU output via \"like\" is requested but no compatible provider is active.",
-    message: "single: gpu output not supported",
-};
-
-const SINGLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINGLE.INTERNAL",
-    identifier: Some("RunMat:single:Internal"),
-    when: "Internal conversion, gather, or provider upload failed.",
-    message: "single: internal error",
-};
-
-const SINGLE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    SINGLE_ERROR_INVALID_ARGUMENT,
-    SINGLE_ERROR_INVALID_INPUT,
-    SINGLE_ERROR_GPU_UNSUPPORTED,
-    SINGLE_ERROR_INTERNAL,
-];
-
-pub const SINGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SINGLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SINGLE_ERRORS,
-};
-
 fn single_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl std::fmt::Display,
@@ -222,14 +94,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
 
 #[runtime_builtin(
     name = "single",
-    category = "math/elementwise",
-    summary = "Convert values to single-precision (`float32`) representation.",
-    keywords = "single,float32,cast,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::single::SINGLE_DESCRIPTOR),
-    extensions(SINGLE_EXTENSIONS),
-    integer_capabilities(SINGLE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::single"
 )]
 async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -487,7 +352,7 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
     match template {
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
-            Value::GpuTensor(_) => convert_to_gpu(value),
+            Value::GpuTensor(prototype) => convert_to_gpu(value, prototype).await,
             Value::Tensor(_)
             | Value::Num(_)
             | Value::Int(_)
@@ -505,31 +370,49 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
     }
 }
 
-fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+async fn convert_to_gpu(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
         single_error_with_detail(
             &SINGLE_ERROR_GPU_UNSUPPORTED,
-            "GPU output requested via 'like' but no acceleration provider is active",
+            "GPU output requested via 'like' but the prototype owner is unavailable",
         )
     })?;
-    match value {
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
-        Value::Tensor(tensor) => {
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+    let value = match value {
+        Value::GpuTensor(handle)
+            if valid_single_resident_value(&handle, prototype, provider, &handle.shape) =>
+        {
+            return Ok(Value::GpuTensor(handle));
         }
+        Value::GpuTensor(handle) => convert_to_host_like(Value::GpuTensor(handle)).await?,
+        other => other,
+    };
+    match value {
+        Value::Tensor(tensor) => upload_single_like(provider, prototype, &tensor),
         Value::Num(n) => {
             let tensor =
                 Tensor::from_numeric_storage(NumericStorage::F32(vec![n as f32]), vec![1, 1])
                     .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor))
+            upload_single_like(provider, prototype, &tensor)
         }
-        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
-        Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
+        Value::Int(i) => {
+            let tensor = Tensor::from_numeric_storage(
+                NumericStorage::F32(vec![int_value_to_f32(&i)]),
+                vec![1, 1],
+            )
+            .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
+            upload_single_like(provider, prototype, &tensor)
+        }
+        Value::Bool(b) => {
+            let tensor = Tensor::from_numeric_storage(
+                NumericStorage::F32(vec![if b { 1.0 } else { 0.0 }]),
+                vec![1, 1],
+            )
+            .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
+            upload_single_like(provider, prototype, &tensor)
+        }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
-            convert_to_gpu(Value::Tensor(tensor))
+            let tensor = single_tensor_to_host(tensor::logical_to_tensor(&logical)?)?;
+            upload_single_like(provider, prototype, &tensor)
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(single_error_with_detail(
             &SINGLE_ERROR_INVALID_INPUT,
@@ -539,6 +422,73 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             &SINGLE_ERROR_INVALID_INPUT,
             format!("unsupported result type for GPU output via 'like' ({other:?})"),
         )),
+    }
+}
+
+fn upload_single_like(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    prototype: &GpuTensorHandle,
+    tensor: &Tensor,
+) -> BuiltinResult<Value> {
+    let handle = gpu_helpers::upload_tensor(provider, tensor)
+        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?;
+    if valid_single_like_output(&handle, prototype, provider, &tensor.shape) {
+        Ok(Value::GpuTensor(handle))
+    } else {
+        free_rejected_single_handle(&handle, &[prototype]);
+        Err(single_error_with_detail(
+            &SINGLE_ERROR_INTERNAL,
+            "provider returned malformed GPU output for 'like'",
+        ))
+    }
+}
+
+fn valid_single_like_output(
+    output: &GpuTensorHandle,
+    prototype: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    expected_shape: &[usize],
+) -> bool {
+    !single_gpu_handles_alias(output, prototype)
+        && valid_single_resident_value(output, prototype, provider, expected_shape)
+}
+
+fn valid_single_resident_value(
+    output: &GpuTensorHandle,
+    prototype: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    expected_shape: &[usize],
+) -> bool {
+    output.shape == expected_shape
+        && output.device_id == prototype.device_id
+        && runmat_accelerate_api::handle_precision(output)
+            == Some(runmat_accelerate_api::ProviderPrecision::F32)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn single_gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn free_rejected_single_handle(handle: &GpuTensorHandle, protected: &[&GpuTensorHandle]) {
+    if protected
+        .iter()
+        .any(|protected| single_gpu_handles_alias(handle, protected))
+    {
+        trace!("single: rejected handle aliases a caller-owned prototype; not freeing it");
+        return;
+    }
+    if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) {
+        if let Err(error) = owner.free(handle) {
+            trace!("single: failed to free rejected handle through its owner ({error})");
+        }
+    } else {
+        trace!("single: rejected handle has no resolvable owner; leaving cleanup to its producer");
     }
 }
 
@@ -560,7 +510,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::SINGLE_DESCRIPTOR;
     use runmat_value::{IntegerComplexStorage, IntegerStorage, SymbolicArray, SymbolicExpr};
 
     fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -576,33 +526,6 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"Y = single(X)"));
         assert!(labels.contains(&"Y = single(X, \"like\", prototype)"));
-    }
-
-    #[test]
-    fn single_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn single_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -904,6 +827,73 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn single_like_validates_physical_output_and_protects_the_prototype() {
+        test_support::with_test_provider(|provider| {
+            let make_output = || {
+                let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).expect("single tensor");
+                gpu_helpers::upload_tensor(provider, &tensor).expect("single upload")
+            };
+            let prototype = {
+                let tensor = Tensor::from_f32(vec![0.0], vec![1, 1]).expect("prototype tensor");
+                gpu_helpers::upload_tensor(provider, &tensor).expect("prototype upload")
+            };
+
+            let valid = make_output();
+            assert!(valid_single_like_output(
+                &valid,
+                &prototype,
+                provider,
+                &[2, 1],
+            ));
+            provider.free(&valid).expect("free valid output");
+
+            let mut wrong_shape = make_output();
+            wrong_shape.shape = vec![1, 2];
+            assert!(!valid_single_like_output(
+                &wrong_shape,
+                &prototype,
+                provider,
+                &[2, 1],
+            ));
+            provider.free(&wrong_shape).expect("free wrong shape");
+
+            let mut wrong_precision = make_output();
+            wrong_precision.descriptor.element_type =
+                Some(runmat_accelerate_api::NumericElementType::F64);
+            assert!(!valid_single_like_output(
+                &wrong_precision,
+                &prototype,
+                provider,
+                &[2, 1],
+            ));
+            provider
+                .free(&wrong_precision)
+                .expect("free wrong precision");
+
+            let mut wrong_storage = make_output();
+            wrong_storage.descriptor.storage =
+                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
+            assert!(!valid_single_like_output(
+                &wrong_storage,
+                &prototype,
+                provider,
+                &[2, 1],
+            ));
+            provider.free(&wrong_storage).expect("free wrong storage");
+
+            assert!(!valid_single_like_output(
+                &prototype,
+                &prototype,
+                provider,
+                &[1, 1],
+            ));
+            free_rejected_single_handle(&prototype, &[&prototype]);
+            assert!(block_on(provider.download_numeric(&prototype)).is_ok());
+            provider.free(&prototype).expect("free prototype");
         });
     }
 

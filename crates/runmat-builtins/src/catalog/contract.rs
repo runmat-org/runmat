@@ -51,6 +51,7 @@ pub enum MathInferenceRule {
     Abs,
     Exp,
     NumericConversion(runmat_types::NumericClass),
+    NumericConversionWithLike(runmat_types::NumericClass),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
