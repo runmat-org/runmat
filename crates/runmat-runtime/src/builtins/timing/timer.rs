@@ -38,13 +38,14 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const TIMER_CLASS: &str = "timer";
+const TIMER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("timer");
 const BUILTIN_TIMER: &str = "timer";
-const TIMER_METHOD_START: &str = "__runmat_timer_start";
-const TIMER_METHOD_STARTAT: &str = "__runmat_timer_startat";
-const TIMER_METHOD_STOP: &str = "__runmat_timer_stop";
-const TIMER_METHOD_WAIT: &str = "__runmat_timer_wait";
-const TIMER_METHOD_DELETE: &str = "__runmat_timer_delete";
+const TIMER_CALLABLE_START: &str = "__runmat_timer_start";
+const TIMER_CALLABLE_STARTAT: &str = "__runmat_timer_startat";
+const TIMER_CALLABLE_STOP: &str = "__runmat_timer_stop";
+const TIMER_CALLABLE_WAIT: &str = "__runmat_timer_wait";
+const TIMER_CALLABLE_DELETE: &str = "__runmat_timer_delete";
 
 const CALLBACK_PROPS: [&str; 4] = ["TimerFcn", "StartFcn", "StopFcn", "ErrorFcn"];
 const STRING_PROPS: [&str; 5] = [
@@ -398,7 +399,7 @@ pub async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     runmat_gc::gc_add_root(target)
         .map_err(|err| timer_error(&TIMER_ERROR_GC, format!("timer: {err}")))?;
     let handle = HandleRef {
-        class_name: TIMER_CLASS.to_string(),
+        class_name: TIMER_CLASS.into(),
         target,
         valid: true,
     };
@@ -576,27 +577,42 @@ timer_setter_builtin!(
 timer_setter_builtin!(timer_set_user_data_builtin, "set.UserData", "UserData");
 
 fn ensure_timer_class_registered() {
-    if crate::class_registry::get_class(TIMER_CLASS).is_some() {
+    if crate::class_registry::get_class(&TIMER_CLASS.owned()).is_some() {
         return;
     }
 
     let mut methods = HashMap::new();
     for (name, function_name) in [
-        ("start", TIMER_METHOD_START),
-        ("startat", TIMER_METHOD_STARTAT),
-        ("stop", TIMER_METHOD_STOP),
-        ("wait", TIMER_METHOD_WAIT),
-        ("delete", TIMER_METHOD_DELETE),
+        (
+            runmat_types::StaticMethodName::new("start"),
+            TIMER_CALLABLE_START,
+        ),
+        (
+            runmat_types::StaticMethodName::new("startat"),
+            TIMER_CALLABLE_STARTAT,
+        ),
+        (
+            runmat_types::StaticMethodName::new("stop"),
+            TIMER_CALLABLE_STOP,
+        ),
+        (
+            runmat_types::StaticMethodName::new("wait"),
+            TIMER_CALLABLE_WAIT,
+        ),
+        (
+            runmat_types::StaticMethodName::new("delete"),
+            TIMER_CALLABLE_DELETE,
+        ),
     ] {
         methods.insert(
-            name.to_string(),
+            name.into(),
             crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
+                name: name.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: function_name.to_string(),
+                function_name: function_name.into(),
                 implicit_class_argument: None,
             },
         );
@@ -611,9 +627,9 @@ fn ensure_timer_class_registered() {
         .chain(["UserData"])
     {
         properties.insert(
-            name.to_string(),
+            name.into(),
             crate::class_registry::RuntimeProperty {
-                name: name.to_string(),
+                name: name.into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: is_timer_mutable_property(name),
@@ -629,8 +645,8 @@ fn ensure_timer_class_registered() {
     }
 
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: TIMER_CLASS.to_string(),
-        parent: Some("handle".to_string()),
+        name: TIMER_CLASS.into(),
+        parent: Some(runmat_types::standard::HANDLE.into()),
         properties,
         methods,
     });
@@ -753,7 +769,7 @@ async fn set_timer_property_object(
             format!("timer: set.{property_name} requires timer object receiver"),
         ));
     };
-    if object.class_name != TIMER_CLASS {
+    if !object.class_name.is(TIMER_CLASS) {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_HANDLE,
             format!(

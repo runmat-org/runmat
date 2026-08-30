@@ -120,7 +120,7 @@ mod tests {
             let target = gc_allocate(Value::String("target".to_string()))
                 .expect("target allocation should succeed");
             let holder = Value::HandleObject(HandleRef {
-                class_name: "Thing".to_string(),
+                class_name: "Thing".into(),
                 target,
                 valid: true,
             });
@@ -151,7 +151,7 @@ mod tests {
             let cell = Value::Cell(
                 CellArray::new(
                     vec![Value::HandleObject(HandleRef {
-                        class_name: "Thing".to_string(),
+                        class_name: "Thing".into(),
                         target,
                         valid: true,
                     })],
@@ -190,21 +190,21 @@ mod tests {
                 .expect("callback allocation should succeed");
 
             let handle = Value::HandleObject(HandleRef {
-                class_name: "Thing".to_string(),
+                class_name: "Thing".into(),
                 target,
                 valid: true,
             });
             let listener = Value::Listener(Listener {
                 id: 1,
                 target,
-                target_class_name: "Thing".to_string(),
-                event_name: "Changed".to_string(),
+                target_class_name: "Thing".into(),
+                event_name: "Changed".into(),
                 callback,
                 enabled: true,
                 valid: true,
             });
             let closure = Value::Closure(Closure {
-                function_name: "callback".to_string(),
+                function_name: "callback".into(),
                 bound_function: None,
                 captures: vec![Value::OutputList(vec![handle, listener])],
             });

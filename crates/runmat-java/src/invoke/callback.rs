@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use jni::objects::{JObject, JObjectArray, JString, JValue, JValueOwned};
 use jni::{JNIEnv, NativeMethod};
 
-use super::conversion::{capture_boxed, object_class_name};
+use super::conversion::{capture_boxed, object_class_name, WellKnownJavaClass};
 use super::{
     error::jni_error, JavaCallbackInvocation, JavaInvocationError, JavaSession, JavaValue,
 };
@@ -331,7 +331,7 @@ fn capture_callback_value(
         return Ok(JavaValue::Null);
     }
     let class_name = object_class_name(environment, &object)?;
-    if class_name == "java.lang.String" {
+    if WellKnownJavaClass::from_name(&class_name) == Some(WellKnownJavaClass::String) {
         return Ok(JavaValue::String(
             environment
                 .get_string(&JString::from(object))

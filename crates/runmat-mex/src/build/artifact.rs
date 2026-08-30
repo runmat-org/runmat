@@ -102,7 +102,7 @@ impl MexArtifactManifest {
         let manifest = Self {
             schema_version: MEX_ARTIFACT_SCHEMA_VERSION,
             identity,
-            module_name: module_name.to_string(),
+            module_name: module_name.into(),
             target,
             api,
             source_language,

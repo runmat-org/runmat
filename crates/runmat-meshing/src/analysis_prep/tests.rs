@@ -37,7 +37,7 @@ fn sample_geometry() -> GeometryAsset {
         surface_meshes: Vec::new(),
         regions: vec![Region {
             region_id: "region_main".to_string(),
-            name: "main".to_string(),
+            name: "main".into(),
             tag: None,
             cad_ownership: None,
         }],

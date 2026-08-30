@@ -1592,7 +1592,7 @@ pub(crate) mod tests {
         let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
         let result = pagefun_impl(
             Value::BoundFunctionHandle {
-                name: "mtimes".to_string(),
+                name: "mtimes".into(),
                 function: 17,
             },
             Value::Tensor(lhs),

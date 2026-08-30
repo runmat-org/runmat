@@ -8,10 +8,11 @@ pub(in crate::builtins::table) fn default_properties(
 }
 
 pub(in crate::builtins::table) fn default_properties_for_class(
-    class_name: &str,
+    class_name: impl Into<runmat_types::ClassIdentity>,
     variable_names: Vec<String>,
     row_names: Option<Vec<String>>,
 ) -> StructValue {
+    let class_name = class_name.into();
     let mut props = StructValue::new();
     props.insert(
         VARIABLE_NAMES,
@@ -38,7 +39,7 @@ pub(in crate::builtins::table) fn default_properties_for_class(
         Value::StringArray(
             StringArray::new(
                 vec![
-                    if class_name == TIMETABLE_CLASS {
+                    if class_name.is(TIMETABLE_CLASS) {
                         "Time".to_string()
                     } else {
                         DEFAULT_ROW_DIM_NAME.to_string()

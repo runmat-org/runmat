@@ -6,15 +6,19 @@ use runmat_value::{
 
 use crate::{builtins::common::tensor, BuiltinResult};
 
+use super::layer_identity::ForwardLayerKind;
 use super::{
     any_type, autodiff, deep_learning_error, gather_args, layer_names, layers_from_value,
     logical_scalar, numeric_values, numeric_vector, object, parse_name_values, positive_usize,
     scalar_text, string_array, tensor_value, unsupported_error,
 };
 
-pub(crate) const DLNETWORK_CLASS: &str = "dlnetwork";
-pub(crate) const SERIES_NETWORK_CLASS: &str = "SeriesNetwork";
-pub(crate) const DAG_NETWORK_CLASS: &str = "DAGNetwork";
+pub(crate) const DLNETWORK_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("dlnetwork");
+pub(crate) const SERIES_NETWORK_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("SeriesNetwork");
+pub(crate) const DAG_NETWORK_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("DAGNetwork");
 
 #[runtime_builtin(
     name = "dlnetwork",
@@ -82,7 +86,8 @@ pub(super) async fn forward_builtin(
     }
     let network = crate::gather_if_needed_async(&network).await?;
     let input = crate::gather_if_needed_async(&input).await?;
-    let wrap_dlarray = matches!(&input, Value::Object(object) if object.class_name == "dlarray");
+    let wrap_dlarray =
+        matches!(&input, Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS));
     let format = dlarray_format(&input);
     let traced_input = input.clone();
     let tensor = input_tensor(input, "forward")?;
@@ -114,7 +119,7 @@ fn gpu_backed_dlarray_handle(value: &Value) -> Option<&GpuTensorHandle> {
     let Value::Object(object) = value else {
         return None;
     };
-    if object.class_name != "dlarray" {
+    if !object.class_name.is(super::DLARRAY_CLASS) {
         return None;
     }
     match object.properties.get("Data") {
@@ -124,10 +129,9 @@ fn gpu_backed_dlarray_handle(value: &Value) -> Option<&GpuTensorHandle> {
 }
 
 pub(crate) fn is_deep_learning_network_object(object: &ObjectInstance) -> bool {
-    matches!(
-        object.class_name.as_str(),
-        DLNETWORK_CLASS | SERIES_NETWORK_CLASS | DAG_NETWORK_CLASS
-    )
+    object.class_name.is(DLNETWORK_CLASS)
+        || object.class_name.is(SERIES_NETWORK_CLASS)
+        || object.class_name.is(DAG_NETWORK_CLASS)
 }
 
 pub(crate) fn predict_deep_learning_object(
@@ -151,7 +155,7 @@ pub(super) fn layers_from_network_value(
 ) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Object(object)
-            if object.class_name == "nnet.cnn.LayerGraph"
+            if object.class_name.is(super::LAYER_GRAPH_CLASS)
                 || is_deep_learning_network_object(&object) =>
         {
             Ok(object
@@ -167,7 +171,7 @@ pub(super) fn layers_from_network_value(
 }
 
 pub(super) fn network_object(
-    class_name: &str,
+    class_name: runmat_types::StaticClassIdentity,
     layers: Vec<Value>,
     mut options: std::collections::BTreeMap<String, Value>,
     function: &'static str,
@@ -229,7 +233,7 @@ pub(super) fn network_object(
     for (name, value) in options {
         properties.push((canonical_network_option(&name), value));
     }
-    Ok(object(class_name, properties))
+    Ok(super::object_with_identity(class_name, properties))
 }
 
 fn canonical_network_option(name: &str) -> String {
@@ -280,7 +284,7 @@ pub(super) fn learnables_struct(layers: &[Value], function: &'static str) -> Bui
         let Value::Object(object) = layer else {
             continue;
         };
-        if object.class_name != "nnet.cnn.layer.FullyConnectedLayer" {
+        if !object.class_name.is(super::FULLY_CONNECTED_LAYER_CLASS) {
             continue;
         }
         let name = layer_name(object);
@@ -324,11 +328,11 @@ pub(super) fn initialise_fully_connected_layers(
         let Value::Object(object) = layer else {
             continue;
         };
-        match object.class_name.as_str() {
-            "nnet.cnn.layer.FeatureInputLayer" => {
+        match ForwardLayerKind::from_identity(&object.class_name) {
+            Some(ForwardLayerKind::FeatureInput) => {
                 current_width = Some(feature_input_width(object, function)?);
             }
-            "nnet.cnn.layer.FullyConnectedLayer" => {
+            Some(ForwardLayerKind::FullyConnected) => {
                 let input_width = current_width.ok_or_else(|| {
                     deep_learning_error(
                         function,
@@ -350,11 +354,13 @@ pub(super) fn initialise_fully_connected_layers(
                 }
                 current_width = Some(output_size);
             }
-            "nnet.cnn.layer.ReLULayer"
-            | "nnet.cnn.layer.ELULayer"
-            | "nnet.cnn.layer.SoftmaxLayer"
-            | "nnet.cnn.layer.ClassificationOutputLayer"
-            | "nnet.cnn.layer.RegressionOutputLayer" => {}
+            Some(
+                ForwardLayerKind::Relu
+                | ForwardLayerKind::Elu
+                | ForwardLayerKind::Softmax
+                | ForwardLayerKind::ClassificationOutput
+                | ForwardLayerKind::RegressionOutput,
+            ) => {}
             _ => {}
         }
     }
@@ -394,19 +400,14 @@ pub(super) fn validate_forward_layers(
                 format!("{function}: network layers must be layer objects"),
             ));
         };
-        match object.class_name.as_str() {
-            "nnet.cnn.layer.FeatureInputLayer"
-            | "nnet.cnn.layer.FullyConnectedLayer"
-            | "nnet.cnn.layer.ReLULayer"
-            | "nnet.cnn.layer.ELULayer"
-            | "nnet.cnn.layer.SoftmaxLayer"
-            | "nnet.cnn.layer.ClassificationOutputLayer"
-            | "nnet.cnn.layer.RegressionOutputLayer" => {}
-            other => {
+        match ForwardLayerKind::from_identity(&object.class_name) {
+            Some(_) => {}
+            None => {
                 return Err(deep_learning_error(
                     function,
                     format!(
-                        "{function}: layer type '{other}' is not supported for RunMat forward execution"
+                        "{function}: layer type '{}' is not supported for RunMat forward execution",
+                        object.class_name
                     ),
                 ));
             }
@@ -427,7 +428,7 @@ fn require_network_object(value: Value, function: &'static str) -> BuiltinResult
 
 fn input_tensor(value: Value, function: &'static str) -> BuiltinResult<Tensor> {
     let tensor = match value {
-        Value::Object(object) if object.class_name == "dlarray" => {
+        Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => {
             let data = object.properties.get("Data").cloned().ok_or_else(|| {
                 deep_learning_error(function, format!("{function}: dlarray is missing Data"))
             })?;
@@ -447,7 +448,7 @@ fn input_tensor(value: Value, function: &'static str) -> BuiltinResult<Tensor> {
 
 fn dlarray_format(value: &Value) -> String {
     match value {
-        Value::Object(object) if object.class_name == "dlarray" => object
+        Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => object
             .properties
             .get("Format")
             .and_then(|value| match value {
@@ -481,8 +482,8 @@ fn evaluate_network(
                 format!("{function}: network layers must be layer objects"),
             ));
         };
-        current = match layer.class_name.as_str() {
-            "nnet.cnn.layer.FeatureInputLayer" => {
+        current = match ForwardLayerKind::from_identity(&layer.class_name) {
+            Some(ForwardLayerKind::FeatureInput) => {
                 let expected = feature_input_width(&layer, function)?;
                 if current.cols != expected {
                     return Err(deep_learning_error(
@@ -496,19 +497,17 @@ fn evaluate_network(
                 saw_input = true;
                 current
             }
-            "nnet.cnn.layer.FullyConnectedLayer" => {
+            Some(ForwardLayerKind::FullyConnected) => {
                 fully_connected_forward(current, &layer, function)?
             }
-            "nnet.cnn.layer.ReLULayer" => map_tensor(current, |value| value.max(0.0), function)?,
-            "nnet.cnn.layer.ELULayer" => elu_forward(current, &layer, function)?,
-            "nnet.cnn.layer.SoftmaxLayer" => softmax_rows(current, function)?,
-            "nnet.cnn.layer.ClassificationOutputLayer" | "nnet.cnn.layer.RegressionOutputLayer" => {
-                current
-            }
-            other => {
+            Some(ForwardLayerKind::Relu) => map_tensor(current, |value| value.max(0.0), function)?,
+            Some(ForwardLayerKind::Elu) => elu_forward(current, &layer, function)?,
+            Some(ForwardLayerKind::Softmax) => softmax_rows(current, function)?,
+            Some(kind) if kind.is_output() => current,
+            _ => {
                 return Err(deep_learning_error(
                     function,
-                    format!("{function}: unsupported layer type '{other}'"),
+                    format!("{function}: unsupported layer type '{}'", layer.class_name),
                 ));
             }
         };
@@ -552,71 +551,65 @@ async fn evaluate_network_gpu(
         let Value::Object(layer) = layer else {
             unreachable!("validate_gpu_forward_layers accepts layer objects only");
         };
-        match layer.class_name.as_str() {
-            "nnet.cnn.layer.FullyConnectedLayer" => {
-                current = fully_connected_forward_gpu(
-                    provider,
-                    current,
-                    current_is_temporary,
-                    &layer,
+        if layer.class_name.is(super::FULLY_CONNECTED_LAYER_CLASS) {
+            current = fully_connected_forward_gpu(
+                provider,
+                current,
+                current_is_temporary,
+                &layer,
+                function,
+            )
+            .await?;
+            current_is_temporary = true;
+        } else if layer.class_name.is(super::RELU_LAYER_CLASS) {
+            let output = provider.scalar_max(&current, 0.0).map_err(|err| {
+                deep_learning_error(
                     function,
+                    format!("{function}: provider-resident ReLU failed: {err}"),
                 )
-                .await?;
-                current_is_temporary = true;
+            })?;
+            if current_is_temporary {
+                let _ = provider.free(&current);
             }
-            "nnet.cnn.layer.ReLULayer" => {
-                let output = provider.scalar_max(&current, 0.0).map_err(|err| {
-                    deep_learning_error(
+            current = output;
+            current_is_temporary = true;
+        } else if layer.class_name.is(super::ELU_LAYER_CLASS) {
+            let alpha = elu_alpha(&layer, function)?;
+            let output = match provider.activation_elu(&current, alpha).await {
+                Ok(handle) => handle,
+                Err(err) => {
+                    if current_is_temporary {
+                        let _ = provider.free(&current);
+                    }
+                    return Err(deep_learning_error(
                         function,
-                        format!("{function}: provider-resident ReLU failed: {err}"),
-                    )
-                })?;
-                if current_is_temporary {
-                    let _ = provider.free(&current);
+                        format!("{function}: provider-resident ELU failed: {err}"),
+                    ));
                 }
-                current = output;
-                current_is_temporary = true;
+            };
+            if current_is_temporary {
+                let _ = provider.free(&current);
             }
-            "nnet.cnn.layer.ELULayer" => {
-                let alpha = elu_alpha(&layer, function)?;
-                let output = match provider.activation_elu(&current, alpha).await {
-                    Ok(handle) => handle,
-                    Err(err) => {
-                        if current_is_temporary {
-                            let _ = provider.free(&current);
-                        }
-                        return Err(deep_learning_error(
-                            function,
-                            format!("{function}: provider-resident ELU failed: {err}"),
-                        ));
+            current = output;
+            current_is_temporary = true;
+        } else if layer.class_name.is(super::SOFTMAX_LAYER_CLASS) {
+            let output = match provider.activation_softmax_rows(&current).await {
+                Ok(handle) => handle,
+                Err(err) => {
+                    if current_is_temporary {
+                        let _ = provider.free(&current);
                     }
-                };
-                if current_is_temporary {
-                    let _ = provider.free(&current);
+                    return Err(deep_learning_error(
+                        function,
+                        format!("{function}: provider-resident Softmax failed: {err}"),
+                    ));
                 }
-                current = output;
-                current_is_temporary = true;
+            };
+            if current_is_temporary {
+                let _ = provider.free(&current);
             }
-            "nnet.cnn.layer.SoftmaxLayer" => {
-                let output = match provider.activation_softmax_rows(&current).await {
-                    Ok(handle) => handle,
-                    Err(err) => {
-                        if current_is_temporary {
-                            let _ = provider.free(&current);
-                        }
-                        return Err(deep_learning_error(
-                            function,
-                            format!("{function}: provider-resident Softmax failed: {err}"),
-                        ));
-                    }
-                };
-                if current_is_temporary {
-                    let _ = provider.free(&current);
-                }
-                current = output;
-                current_is_temporary = true;
-            }
-            _ => {}
+            current = output;
+            current_is_temporary = true;
         }
     }
     Ok(current)
@@ -652,8 +645,8 @@ fn validate_gpu_forward_layers(
                 format!("{function}: network layers must be layer objects"),
             ));
         };
-        match layer.class_name.as_str() {
-            "nnet.cnn.layer.FeatureInputLayer" if !saw_input => {
+        match ForwardLayerKind::from_identity(&layer.class_name) {
+            Some(ForwardLayerKind::FeatureInput) if !saw_input => {
                 let expected = feature_input_width(layer, function)?;
                 if features != expected {
                     return Err(deep_learning_error(
@@ -665,7 +658,7 @@ fn validate_gpu_forward_layers(
                 }
                 saw_input = true;
             }
-            "nnet.cnn.layer.FullyConnectedLayer" if saw_input => {
+            Some(ForwardLayerKind::FullyConnected) if saw_input => {
                 let weights = tensor_property(layer, "Weights", function)?;
                 if weights.shape.len() > 2 || weights.cols != features {
                     return Err(deep_learning_error(
@@ -688,19 +681,19 @@ fn validate_gpu_forward_layers(
                 features = weights.rows;
                 saw_transform = true;
             }
-            "nnet.cnn.layer.ReLULayer" if saw_input => saw_transform = true,
-            "nnet.cnn.layer.ELULayer" if saw_input => {
+            Some(ForwardLayerKind::Relu) if saw_input => saw_transform = true,
+            Some(ForwardLayerKind::Elu) if saw_input => {
                 let _ = elu_alpha(layer, function)?;
                 saw_transform = true;
             }
-            "nnet.cnn.layer.SoftmaxLayer" if saw_input => saw_transform = true,
-            "nnet.cnn.layer.ClassificationOutputLayer" | "nnet.cnn.layer.RegressionOutputLayer"
-                if saw_input && saw_transform => {}
-            other => {
+            Some(ForwardLayerKind::Softmax) if saw_input => saw_transform = true,
+            Some(kind) if kind.is_output() && saw_input && saw_transform => {}
+            _ => {
                 return Err(unsupported_error(
                     function,
                     format!(
-                        "{function}: provider-resident forward does not yet support layer type '{other}'"
+                        "{function}: provider-resident forward does not yet support layer type '{}'",
+                        layer.class_name
                     ),
                 ));
             }

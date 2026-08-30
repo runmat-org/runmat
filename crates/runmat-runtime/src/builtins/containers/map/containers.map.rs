@@ -38,7 +38,8 @@ use crate::{
     OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
 };
 
-const CLASS_NAME: &str = "containers.Map";
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("containers.Map");
 const BUILTIN_CONSTRUCTOR: &str = "containers.Map";
 const BUILTIN_KEYS: &str = "containers.Map.keys";
 const BUILTIN_VALUES: &str = "containers.Map.values";
@@ -799,7 +800,7 @@ thread_local! {
 }
 
 static CONTAINERS_MAP_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(CLASS_NAME);
+    crate::class_registry::ClassRegistration::new(CLASS_IDENTITY);
 
 struct MapRootState {
     root_id: RootId,
@@ -897,9 +898,9 @@ fn ensure_containers_map_class_registered() {
         let mut properties = HashMap::new();
         for name in ["Count", "KeyType", "ValueType"] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: true,
@@ -912,29 +913,35 @@ fn ensure_containers_map_class_registered() {
 
         let mut methods = HashMap::new();
         for (name, function_name) in [
-            ("keys", BUILTIN_KEYS),
-            ("values", BUILTIN_VALUES),
-            ("isKey", BUILTIN_IS_KEY),
-            ("remove", BUILTIN_REMOVE),
+            (runmat_types::StaticMethodName::new("keys"), BUILTIN_KEYS),
+            (
+                runmat_types::StaticMethodName::new("values"),
+                BUILTIN_VALUES,
+            ),
+            (runmat_types::StaticMethodName::new("isKey"), BUILTIN_IS_KEY),
+            (
+                runmat_types::StaticMethodName::new("remove"),
+                BUILTIN_REMOVE,
+            ),
             (OBJECT_SUBSREF_METHOD, BUILTIN_SUBSREF),
             (OBJECT_SUBSASGN_METHOD, BUILTIN_SUBSASGN),
         ] {
             methods.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeMethod {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
-                    function_name: function_name.to_string(),
+                    function_name: function_name.into(),
                     implicit_class_argument: None,
                 },
             );
         }
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: CLASS_NAME.to_string(),
+            name: CLASS_IDENTITY.into(),
             parent: None,
             properties,
             methods,
@@ -1877,7 +1884,7 @@ fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Valu
             .insert(id, store);
         Ok::<(), RuntimeError>(())
     })?;
-    let mut storage = ObjectInstance::new(CLASS_NAME.to_string());
+    let mut storage = ObjectInstance::new(CLASS_IDENTITY);
     storage
         .properties
         .insert("id".to_string(), Value::Int(IntValue::U64(id)));
@@ -1904,7 +1911,7 @@ fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Valu
         Ok::<(), RuntimeError>(())
     })?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: CLASS_NAME.to_string(),
+        class_name: CLASS_IDENTITY.owned(),
         target: gc,
         valid: true,
     }))
@@ -1960,11 +1967,11 @@ fn ensure_handle(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<()>
     if !crate::is_handle_valid(handle) {
         return Err(map_error("containers.Map: handle is invalid", builtin));
     }
-    if handle.class_name != CLASS_NAME {
+    if !handle.class_name.is(CLASS_IDENTITY) {
         return Err(map_error(
             format!(
                 "containers.Map: expected handle of class '{}', got '{}'",
-                CLASS_NAME, handle.class_name
+                CLASS_IDENTITY, handle.class_name
             ),
             builtin,
         ));
@@ -1980,7 +1987,9 @@ fn map_id(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<u64> {
         )
     })?;
     let id_value = match &storage {
-        Value::Object(object) if object.class_name == CLASS_NAME => object.properties.get("id"),
+        Value::Object(object) if object.class_name.is(CLASS_IDENTITY) => {
+            object.properties.get("id")
+        }
         Value::Struct(StructValue { fields }) => fields.get("id"),
         other => {
             return Err(map_internal(
@@ -2851,7 +2860,7 @@ async fn collect_key_spec(
 
 pub fn map_length(value: &Value) -> Option<usize> {
     if let Value::HandleObject(handle) = value {
-        if crate::is_handle_valid(handle) && handle.class_name == CLASS_NAME {
+        if crate::is_handle_valid(handle) && handle.class_name.is(CLASS_IDENTITY) {
             if let Ok(id) = map_id(handle, BUILTIN_CONSTRUCTOR) {
                 return MAP_REGISTRY.with(|registry| {
                     registry
@@ -3300,11 +3309,11 @@ pub(crate) mod tests {
             Value::Num(f64::INFINITY),
             Value::Num(u64::MAX as f64),
         ] {
-            let mut storage = ObjectInstance::new(CLASS_NAME.to_string());
+            let mut storage = ObjectInstance::new(CLASS_IDENTITY);
             storage.properties.insert("id".to_string(), id_value);
             let target = runmat_gc::gc_allocate(Value::Object(storage)).expect("storage");
             let handle = HandleRef {
-                class_name: CLASS_NAME.to_string(),
+                class_name: CLASS_IDENTITY.owned(),
                 target,
                 valid: true,
             };

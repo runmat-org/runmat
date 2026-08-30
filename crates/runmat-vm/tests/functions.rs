@@ -62,6 +62,7 @@ fn numeric_workspace_value(values: &[runmat_value::Value], expected: f64) -> boo
 }
 
 fn has_object_class(values: &[runmat_value::Value], class_name: &str) -> bool {
+    let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     values.iter().any(|v| match v {
         runmat_value::Value::Object(obj) => obj.class_name == class_name,
         runmat_value::Value::HandleObject(obj) => obj.class_name == class_name,
@@ -70,9 +71,10 @@ fn has_object_class(values: &[runmat_value::Value], class_name: &str) -> bool {
 }
 
 fn has_class_ref(values: &[runmat_value::Value], class_name: &str) -> bool {
+    let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     values
         .iter()
-        .any(|v| matches!(v, runmat_value::Value::ClassRef(name) if name == class_name))
+        .any(|v| matches!(v, runmat_value::Value::ClassRef(name) if name == &class_name))
 }
 
 fn has_numeric_tensor(values: &[runmat_value::Value], expected: &[f64]) -> bool {
@@ -124,6 +126,7 @@ fn has_object_num_property(
     property_name: &str,
     expected: f64,
 ) -> bool {
+    let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     values.iter().any(|v| match v {
         runmat_value::Value::Object(obj) if obj.class_name == class_name => {
             matches!(
@@ -141,6 +144,7 @@ fn has_object_string_property(
     property_name: &str,
     expected: &str,
 ) -> bool {
+    let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     values.iter().any(|v| match v {
         runmat_value::Value::Object(obj) if obj.class_name == class_name => {
             matches!(
@@ -5911,7 +5915,8 @@ fn oop_negative_undefined_property_and_missing_subsref() {
             .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-1.0).abs()<1e-9)));
     }
 
-    // Class without subsref should error on () indexing
+    // Default object-array indexing still enforces scalar bounds when no
+    // class-defined subsref overload exists.
     let prog2 = r#"
         classdef NoRef
             properties
@@ -5920,7 +5925,7 @@ fn oop_negative_undefined_property_and_missing_subsref() {
         end
         o = new_object('NoRef');
         try
-            x = o(1);
+            x = o(2);
         catch e
             ok=2;
         end

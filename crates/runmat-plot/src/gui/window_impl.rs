@@ -232,7 +232,7 @@ impl<'window> PlotWindow<'window> {
 
         let node = crate::core::SceneNode {
             id: 0, // Will be set by scene
-            name: "Test Line Plot".to_string(),
+            name: "Test Line Plot".into(),
             transform: Mat4::IDENTITY,
             visible: true,
             cast_shadows: false,

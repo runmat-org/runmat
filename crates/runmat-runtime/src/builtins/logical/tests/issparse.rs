@@ -288,7 +288,7 @@ pub(crate) mod tests {
         let chars = CharArray::new_row("abc");
         let strings = StringArray::new(vec!["abc".into()], vec![1, 1]).unwrap();
         let structure = StructValue::new();
-        let object = ObjectInstance::new("Example".into());
+        let object = ObjectInstance::new("Example");
         assert_eq!(run_issparse(Value::Cell(cell)).unwrap(), Value::Bool(false));
         assert_eq!(run_issparse(string).unwrap(), Value::Bool(false));
         assert_eq!(
@@ -369,7 +369,7 @@ pub(crate) mod tests {
                 .expect("integer tensor");
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload integer");
-            runmat_accelerate_api::set_handle_class_name(&handle, "double");
+            runmat_accelerate_api::set_handle_class_identity(&handle, "double");
             let error = run_issparse(Value::GpuTensor(handle.clone()))
                 .expect_err("contradictory class metadata must reject");
             assert!(error.message().contains("metadata is contradictory"));

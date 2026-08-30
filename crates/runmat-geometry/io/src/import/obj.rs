@@ -219,7 +219,7 @@ impl ObjRegionTracker {
             .insert(KEY.to_string(), region_id.clone());
         self.regions.push(Region {
             region_id: region_id.clone(),
-            name: "Default Region".to_string(),
+            name: "Default Region".into(),
             tag: Some("mesh_default".to_string()),
             cad_ownership: None,
         });

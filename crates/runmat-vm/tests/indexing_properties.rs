@@ -439,7 +439,7 @@ fn object_without_subsref_uses_default_parenthesis_indexing() {
     "#;
     let values = execute_source(program).expect("default object indexing");
     assert!(values.iter().any(
-        |value| matches!(value, runmat_value::Value::Object(object) if object.class_name == "NoIdx")
+        |value| matches!(value, runmat_value::Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("NoIdx")))
     ));
 }
 

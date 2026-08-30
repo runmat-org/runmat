@@ -60,9 +60,11 @@ fn fea_numeric_constructors_accept_every_host_integer_class() {
             "fea.LoadCase",
             "fea.Material",
         ] {
+            let class_identity =
+                runmat_types::ClassIdentity::new(class_name).expect("test class identity");
             assert!(
                 values.iter().any(|value| {
-                    matches!(value, Value::Object(object) if object.class_name == class_name)
+                    matches!(value, Value::Object(object) if object.class_name == class_identity)
                 }),
                 "{constructor} must construct {class_name}"
             );

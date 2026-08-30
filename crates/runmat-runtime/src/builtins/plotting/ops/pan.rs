@@ -21,7 +21,8 @@ use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "pan";
-const PAN_CLASS_NAME: &str = "matlab.graphics.interaction.internal.pan";
+const PAN_CLASS_NAME: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.graphics.interaction.internal.pan");
 
 const INTEGER_TARGET_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "pan-integer-graphics-target",
@@ -335,7 +336,7 @@ fn pan_object_from_snapshot(snapshot: PanStateSnapshot) -> BuiltinResult<Value> 
     let target =
         runmat_gc::gc_allocate(Value::Object(object)).map_err(|err| internal(err.to_string()))?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: PAN_CLASS_NAME.to_string(),
+        class_name: PAN_CLASS_NAME.into(),
         target,
         valid: true,
     }))

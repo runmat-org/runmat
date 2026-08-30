@@ -59,7 +59,7 @@ pub(super) async fn layer_graph_builtin(args: Vec<Value>) -> BuiltinResult<Value
 pub(super) async fn analyze_network_builtin(network: Value) -> BuiltinResult<Value> {
     let network = gather_if_needed_async(&network).await?;
     let layers = match &network {
-        Value::Object(object) if object.class_name == "nnet.cnn.LayerGraph" => object
+        Value::Object(object) if object.class_name.is(super::LAYER_GRAPH_CLASS) => object
             .properties
             .get("Layers")
             .cloned()

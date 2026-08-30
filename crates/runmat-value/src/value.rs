@@ -51,7 +51,7 @@ pub enum Value {
         function: usize,
     },
     Closure(Closure),
-    ClassRef(String),
+    ClassRef(runmat_types::ClassIdentity),
     MException(MException),
     /// Lazy executable work owned by the active runtime execution service.
     Future(runmat_execution::FutureHandle),

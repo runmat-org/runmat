@@ -53,13 +53,13 @@ pub(super) fn cube_geometry() -> GeometryAsset {
         regions: vec![
             Region {
                 region_id: "region_fixed".to_string(),
-                name: "fixed".to_string(),
+                name: "fixed".into(),
                 tag: Some("fixed".to_string()),
                 cad_ownership: None,
             },
             Region {
                 region_id: "region_load".to_string(),
-                name: "load".to_string(),
+                name: "load".into(),
                 tag: Some("load".to_string()),
                 cad_ownership: None,
             },

@@ -18,6 +18,11 @@ use crate::builtins::io::repl_fs::compat::{
 };
 use crate::BuiltinResult;
 
+const XML_DOCUMENT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("org.w3c.dom.Document");
+const XML_ELEMENT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("org.w3c.dom.Element");
+
 const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "input",
     ty: BuiltinParamType::Any,
@@ -237,7 +242,7 @@ impl Default for ReadStructOptions {
     fn default() -> Self {
         Self {
             attribute_suffix: "Attribute".to_string(),
-            text_node_name: "Text".to_string(),
+            text_node_name: "Text".into(),
         }
     }
 }
@@ -551,7 +556,7 @@ fn serialize_xml_value(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::Object(object) if object.class_name == "org.w3c.dom.Document" => {
+        Value::Object(object) if object.class_name.is(XML_DOCUMENT_CLASS) => {
             if let Some(Value::String(text)) = object.properties.get("Text") {
                 return Ok(text.clone());
             }
@@ -563,7 +568,7 @@ fn serialize_xml_value(value: &Value) -> BuiltinResult<String> {
                 "xmlwrite: document object has no serializable DocumentElement",
             ))
         }
-        Value::Object(object) if object.class_name == "org.w3c.dom.Element" => {
+        Value::Object(object) if object.class_name.is(XML_ELEMENT_CLASS) => {
             serialize_xml_element_object(object)
         }
         Value::Struct(st) => serialize_xml_struct("root", st),
@@ -736,7 +741,7 @@ mod tests {
         let value = run(xmlread_builtin(vec![Value::String(path_to_string(&path))])).unwrap();
         match value {
             Value::Object(object) => {
-                assert_eq!(object.class_name, "org.w3c.dom.Document");
+                assert_eq!(object.class_name.display_name(), "org.w3c.dom.Document");
                 assert_eq!(
                     object.properties.get("DocumentElementName"),
                     Some(&char_value("root"))

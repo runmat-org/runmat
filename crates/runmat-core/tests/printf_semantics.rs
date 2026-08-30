@@ -137,7 +137,7 @@ fn fprintf_format_error_propagates_to_session_boundary() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
     let request = runmat_core::abi::ExecutionRequest::for_source(
         runmat_core::abi::SourceInput::Text {
-            name: "<test>".to_string(),
+            name: "<test>".into(),
             text: "fprintf('%q', 1);".to_string(),
         },
         engine.compat_mode(),

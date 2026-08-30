@@ -260,7 +260,7 @@ fn project_definition(
         name,
         qualified_name: source.qualified_name.clone(),
         source_path: source_path.to_path_buf(),
-        package_name: package_name.to_string(),
+        package_name: package_name.into(),
         dependency_alias: dependency_alias.map(ToOwned::to_owned),
         package_instance: Some(source.id.package_instance.clone()),
         source_id: Some(source.id.clone()),

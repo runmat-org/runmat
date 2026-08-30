@@ -11,7 +11,7 @@ fn evidence_summarizes_adaptive_iterations_without_raw_marker_details() {
             convergence_status: AdaptiveConvergenceStatus::Pending,
             indicators: vec![RefinementIndicatorSummary {
                 namespace: "structural".to_string(),
-                name: "load_regions".to_string(),
+                name: "load_regions".into(),
                 requested_mode: RefinementIndicatorMode::Auto,
                 status: RefinementIndicatorStatus::Used,
                 detail: Some("field available".to_string()),
@@ -39,14 +39,14 @@ fn evidence_summarizes_adaptive_iterations_without_raw_marker_details() {
             indicators: vec![
                 RefinementIndicatorSummary {
                     namespace: "structural".to_string(),
-                    name: "stress_gradient".to_string(),
+                    name: "stress_gradient".into(),
                     requested_mode: RefinementIndicatorMode::Auto,
                     status: RefinementIndicatorStatus::Used,
                     detail: None,
                 },
                 RefinementIndicatorSummary {
                     namespace: "thermal".to_string(),
-                    name: "temperature_gradient".to_string(),
+                    name: "temperature_gradient".into(),
                     requested_mode: RefinementIndicatorMode::Auto,
                     status: RefinementIndicatorStatus::SkippedMissingField,
                     detail: Some("required recovered field is unavailable".to_string()),

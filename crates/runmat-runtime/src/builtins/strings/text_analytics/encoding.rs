@@ -29,7 +29,8 @@ use crate::builtins::strings::text_analytics::embeddings::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
-pub const WORD_ENCODING_CLASS: &str = "wordEncoding";
+pub const WORD_ENCODING_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("wordEncoding");
 
 const WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
@@ -676,10 +677,10 @@ fn ensure_word_encoding_class_registered() {
     WORD_ENCODING_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["NumWords", "Vocabulary"] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: WORD_ENCODING_CLASS.to_string(),
+            name: WORD_ENCODING_CLASS.into(),
             parent: None,
             properties,
             methods: HashMap::new(),
@@ -689,7 +690,7 @@ fn ensure_word_encoding_class_registered() {
 
 fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
     crate::class_registry::RuntimeProperty {
-        name: name.to_string(),
+        name: name.into(),
         is_static: false,
         is_constant: false,
         is_dependent: false,

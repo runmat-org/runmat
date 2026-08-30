@@ -20,18 +20,27 @@ pub(in crate::builtins::table) use crate::{
     OBJECT_INDEX_PAREN,
 };
 
-pub const TABLE_CLASS: &str = "table";
-pub const TIMETABLE_CLASS: &str = "timetable";
+pub const TABLE_CLASS: runmat_types::StaticClassIdentity = runmat_types::standard::TABLE;
+pub const TIMETABLE_CLASS: runmat_types::StaticClassIdentity = runmat_types::standard::TIMETABLE;
 
-pub(in crate::builtins::table) const CATEGORICAL_CLASS: &str = "categorical";
-pub(in crate::builtins::table) const DICTIONARY_CLASS: &str = "dictionary";
-pub(in crate::builtins::table) const TIMERANGE_CLASS: &str = "timerange";
-pub(in crate::builtins::table) const VARTYPE_CLASS: &str = "vartype";
-pub(in crate::builtins::table) const ROWFILTER_CLASS: &str = "rowfilter";
-pub(in crate::builtins::table) const ARRAY_DATASTORE_CLASS: &str = "arrayDatastore";
-pub(in crate::builtins::table) const FILE_DATASTORE_CLASS: &str = "fileDatastore";
-pub(in crate::builtins::table) const PARQUET_DATASTORE_CLASS: &str = "parquetDatastore";
-pub(in crate::builtins::table) const UITABLE_CLASS: &str = "uitable";
+pub(in crate::builtins::table) const CATEGORICAL_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::standard::CATEGORICAL;
+pub(in crate::builtins::table) const DICTIONARY_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::standard::DICTIONARY;
+pub(in crate::builtins::table) const TIMERANGE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("timerange");
+pub(in crate::builtins::table) const VARTYPE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("vartype");
+pub(in crate::builtins::table) const ROWFILTER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("rowfilter");
+pub(in crate::builtins::table) const ARRAY_DATASTORE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("arrayDatastore");
+pub(in crate::builtins::table) const FILE_DATASTORE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fileDatastore");
+pub(in crate::builtins::table) const PARQUET_DATASTORE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("parquetDatastore");
+pub(in crate::builtins::table) const UITABLE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("uitable");
 
 pub(in crate::builtins::table) const TABLE_VARIABLES_FIELD: &str = "__table_variables";
 pub(in crate::builtins::table) const TABLE_PROPERTIES_FIELD: &str = "__table_properties";

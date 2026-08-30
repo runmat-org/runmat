@@ -5,7 +5,7 @@ use runmat_types::MemberAccess;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DynamicPropertyDef {
     pub name: String,
-    pub defining_class: String,
+    pub defining_class: runmat_types::ClassIdentity,
     pub metadata_handle: Option<GcHandle>,
     pub get_access: MemberAccess,
     pub set_access: MemberAccess,
@@ -20,7 +20,7 @@ pub struct DynamicPropertyDef {
 }
 
 impl DynamicPropertyDef {
-    pub fn new(name: String, defining_class: String) -> Self {
+    pub fn new(name: String, defining_class: runmat_types::ClassIdentity) -> Self {
         Self {
             name,
             defining_class,

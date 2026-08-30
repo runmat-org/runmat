@@ -123,7 +123,7 @@ pub(in crate::builtins::table) fn compare_table_cells(
             let bv = *array.data.get(b).unwrap_or(&0);
             Ok(av.cmp(&bv))
         }
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             let tensor = crate::builtins::datetime::serials_from_datetime_value(value)?;
             Ok(double_value_at(&tensor, a)
                 .unwrap_or(f64::NAN)
@@ -245,21 +245,21 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
             .get(row)
             .map(|value| GroupAtom::Logical(*value != 0))
             .unwrap_or(GroupAtom::Missing),
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
                 .and_then(|tensor| double_value_at(&tensor, row))
                 .map(number_group_atom)
                 .unwrap_or(GroupAtom::Missing)
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .ok()
                 .and_then(|tensor| double_value_at(&tensor, row))
                 .map(number_group_atom)
                 .unwrap_or(GroupAtom::Missing)
         }
-        Value::Object(obj) if obj.is_class("calendarDuration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::CALENDAR_DURATION) => {
             crate::builtins::datetime::calendar_duration_tensors_from_value(value)
                 .ok()
                 .and_then(|(months, days)| {
@@ -743,14 +743,14 @@ pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> 
             .get(row)
             .map(|value| value.to_string())
             .unwrap_or_default(),
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
                 .and_then(|tensor| double_value_at(&tensor, row))
                 .map(format_key_number)
                 .unwrap_or_default()
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .ok()
                 .and_then(|tensor| double_value_at(&tensor, row))

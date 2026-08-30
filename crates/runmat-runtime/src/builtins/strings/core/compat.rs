@@ -27,7 +27,8 @@ use crate::builtins::strings::common::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
-const PATTERN_CLASS: &str = "pattern";
+const PATTERN_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("pattern");
 
 static UNICODE_DECIMAL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^\p{Nd}$").expect("valid Unicode decimal pattern"));

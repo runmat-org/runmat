@@ -15,8 +15,8 @@ use runmat_types::{
     infer_call, infer_concatenate, infer_numeric_conversion, infer_reduction, infer_repmat,
     infer_reshape, permute_shape, CallContract, CallInference, CallRequest, CellFact,
     DimensionFact, DynamicReason, FactInference, FactJoin, InferenceDiagnostic, NumericClass,
-    NumericDomain, NumericFact, ObjectFact, OutputListFact, QualifiedName, ShapeFact, StorageFact,
-    StructFact, SymbolName, ValueFact, ValueKindFact,
+    NumericDomain, NumericFact, ObjectFact, OutputListFact, ShapeFact, StorageFact, StructFact,
+    ValueFact, ValueKindFact,
 };
 
 pub(crate) fn infer_legacy_builtin(name: &str, request: &CallRequest) -> Option<CallInference> {
@@ -351,10 +351,7 @@ fn fact_to_type(fact: &ValueFact) -> Type {
                 .then(|| structure.fields.keys().cloned().collect()),
         },
         ValueKindFact::Object(object) => Type::Object {
-            class_name: object
-                .runtime_class
-                .as_ref()
-                .and_then(QualifiedName::display_name),
+            class_name: object.runtime_class.clone(),
             shape,
         },
         ValueKindFact::Callable(callable) => Type::Function {
@@ -453,13 +450,7 @@ fn type_to_fact(value: &Type) -> ValueFact {
         Type::Object { class_name, shape } => ValueFact::proven(
             ValueKindFact::Object(ObjectFact {
                 class: None,
-                runtime_class: class_name.as_ref().map(|name| {
-                    QualifiedName(
-                        name.split('.')
-                            .map(|part| SymbolName(part.to_string()))
-                            .collect(),
-                    )
-                }),
+                runtime_class: class_name.clone(),
                 properties: BTreeMap::new(),
                 properties_complete: false,
                 handle_semantics: None,

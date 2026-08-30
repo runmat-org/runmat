@@ -708,7 +708,7 @@ mod tests {
 
         let parent_node = SceneNode {
             id: 0,
-            name: "Parent".to_string(),
+            name: "Parent".into(),
             transform: Mat4::IDENTITY,
             visible: true,
             cast_shadows: true,
@@ -726,7 +726,7 @@ mod tests {
 
         let child_node = SceneNode {
             id: 0,
-            name: "Child".to_string(),
+            name: "Child".into(),
             transform: Mat4::from_translation(Vec3::new(1.0, 0.0, 0.0)),
             visible: true,
             cast_shadows: true,
@@ -757,7 +757,7 @@ mod tests {
 
         let node = SceneNode {
             id: explicit_id,
-            name: "Stable".to_string(),
+            name: "Stable".into(),
             transform: Mat4::IDENTITY,
             visible: true,
             cast_shadows: false,
@@ -778,7 +778,7 @@ mod tests {
 
         let generated_id = scene.add_node(SceneNode {
             id: explicit_id,
-            name: "Generated".to_string(),
+            name: "Generated".into(),
             transform: Mat4::IDENTITY,
             visible: true,
             cast_shadows: false,

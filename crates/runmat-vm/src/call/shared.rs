@@ -201,18 +201,20 @@ mod tests {
 
     #[test]
     fn class_defines_member_subsref_includes_inherited_method_metadata() {
-        let parent_name = unique_class_name("vm_subsref_parent");
-        let child_name = unique_class_name("vm_subsref_child");
+        let parent_name =
+            runmat_types::ClassIdentity::new(unique_class_name("vm_subsref_parent")).unwrap();
+        let child_name =
+            runmat_types::ClassIdentity::new(unique_class_name("vm_subsref_child")).unwrap();
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
-            OBJECT_PROTOCOL_SUBSREF.to_string(),
+            OBJECT_PROTOCOL_SUBSREF.into(),
             runmat_runtime::class_registry::RuntimeMethod {
-                name: OBJECT_PROTOCOL_SUBSREF.to_string(),
+                name: OBJECT_PROTOCOL_SUBSREF.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: "subsref_impl".to_string(),
+                function_name: "subsref_impl".into(),
                 implicit_class_argument: None,
             },
         );
@@ -244,18 +246,20 @@ mod tests {
 
     #[test]
     fn class_defines_member_subsasgn_includes_inherited_method_metadata() {
-        let parent_name = unique_class_name("vm_subsasgn_parent");
-        let child_name = unique_class_name("vm_subsasgn_child");
+        let parent_name =
+            runmat_types::ClassIdentity::new(unique_class_name("vm_subsasgn_parent")).unwrap();
+        let child_name =
+            runmat_types::ClassIdentity::new(unique_class_name("vm_subsasgn_child")).unwrap();
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
-            OBJECT_PROTOCOL_SUBSASGN.to_string(),
+            OBJECT_PROTOCOL_SUBSASGN.into(),
             runmat_runtime::class_registry::RuntimeMethod {
-                name: OBJECT_PROTOCOL_SUBSASGN.to_string(),
+                name: OBJECT_PROTOCOL_SUBSASGN.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: "subsasgn_impl".to_string(),
+                function_name: "subsasgn_impl".into(),
                 implicit_class_argument: None,
             },
         );

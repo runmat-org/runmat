@@ -48,24 +48,42 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod author_study;
 
-const FEA_STUDY_CLASS: &str = "fea.Study";
-const FEA_SWEEP_CLASS: &str = "fea.Sweep";
-const FEA_VALIDATION_CLASS: &str = "fea.Validation";
-const FEA_PLAN_CLASS: &str = "fea.Plan";
-const FEA_RUN_RESULT_CLASS: &str = "fea.RunResult";
-const FEA_MODEL_CLASS: &str = "fea.Model";
-const FEA_MATERIAL_CLASS: &str = "fea.Material";
-const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
-const FEA_BOUNDARY_CONDITION_CLASS: &str = "fea.BoundaryCondition";
-const FEA_LOAD_CASE_CLASS: &str = "fea.LoadCase";
-const FEA_STEP_CLASS: &str = "fea.Step";
-const FEA_DOMAIN_CLASS: &str = "fea.Domain";
-const FEA_INTERFACE_CLASS: &str = "fea.Interface";
-const FEA_RUN_OPTIONS_CLASS: &str = "fea.RunOptions";
-const FEA_RESULTS_CLASS: &str = "fea.Results";
-const FEA_FIELD_CLASS: &str = "fea.Field";
-const FEA_COMPARE_CLASS: &str = "fea.Compare";
-const FEA_TRENDS_CLASS: &str = "fea.Trends";
+const FEA_STUDY_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Study");
+const FEA_SWEEP_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Sweep");
+const FEA_VALIDATION_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Validation");
+const FEA_PLAN_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Plan");
+const FEA_RUN_RESULT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.RunResult");
+const FEA_MODEL_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Model");
+const FEA_MATERIAL_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Material");
+const FEA_MATERIAL_ASSIGNMENT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.MaterialAssignment");
+const FEA_BOUNDARY_CONDITION_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.BoundaryCondition");
+const FEA_LOAD_CASE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.LoadCase");
+const FEA_STEP_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Step");
+const FEA_DOMAIN_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Domain");
+const FEA_INTERFACE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Interface");
+const FEA_RUN_OPTIONS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.RunOptions");
+const FEA_RESULTS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Results");
+const FEA_FIELD_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Field");
+const FEA_COMPARE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Compare");
+const FEA_TRENDS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("fea.Trends");
 const FEA_STUDY_SPEC_JSON_PROPERTY: &str = "__runmat_fea_study_spec_json";
 const FEA_SWEEP_SPEC_JSON_PROPERTY: &str = "__runmat_fea_sweep_spec_json";
 const FEA_PAYLOAD_JSON_PROPERTY: &str = "__runmat_fea_payload_json";
@@ -1481,12 +1499,12 @@ async fn resolve_document_input(
     builtin: &'static str,
 ) -> BuiltinResult<FeaResolvedDocument> {
     match input {
-        Value::Object(object) if object.class_name == FEA_STUDY_CLASS => {
+        Value::Object(object) if object.class_name.is(FEA_STUDY_CLASS) => {
             let spec: AnalysisStudySpec =
                 object_json_property(builtin, &object, FEA_STUDY_SPEC_JSON_PROPERTY, &ERROR_INPUT)?;
             Ok(FeaResolvedDocument::Study(Box::new(spec)))
         }
-        Value::Object(object) if object.class_name == FEA_SWEEP_CLASS => {
+        Value::Object(object) if object.class_name.is(FEA_SWEEP_CLASS) => {
             let spec: AnalysisStudySweepSpec =
                 object_json_property(builtin, &object, FEA_SWEEP_SPEC_JSON_PROPERTY, &ERROR_INPUT)?;
             Ok(FeaResolvedDocument::Sweep(spec))
@@ -3162,7 +3180,7 @@ fn interface_vec_from_value(
 fn object_vec_from_value<T: DeserializeOwned>(
     builtin: &'static str,
     value: &Value,
-    expected_class: &'static str,
+    expected_class: runmat_types::StaticClassIdentity,
 ) -> BuiltinResult<Vec<T>> {
     object_vec_from_value_with_property(builtin, value, expected_class, FEA_PAYLOAD_JSON_PROPERTY)
 }
@@ -3170,7 +3188,7 @@ fn object_vec_from_value<T: DeserializeOwned>(
 fn object_vec_from_value_with_property<T: DeserializeOwned>(
     builtin: &'static str,
     value: &Value,
-    expected_class: &'static str,
+    expected_class: runmat_types::StaticClassIdentity,
     payload_property: &'static str,
 ) -> BuiltinResult<Vec<T>> {
     match value {
@@ -3198,7 +3216,7 @@ fn object_vec_from_value_with_property<T: DeserializeOwned>(
 fn object_payload<T: DeserializeOwned>(
     builtin: &'static str,
     value: &Value,
-    expected_class: &'static str,
+    expected_class: runmat_types::StaticClassIdentity,
 ) -> BuiltinResult<T> {
     object_payload_with_property(builtin, value, expected_class, FEA_PAYLOAD_JSON_PROPERTY)
 }
@@ -3206,7 +3224,7 @@ fn object_payload<T: DeserializeOwned>(
 fn object_payload_with_property<T: DeserializeOwned>(
     builtin: &'static str,
     value: &Value,
-    expected_class: &'static str,
+    expected_class: runmat_types::StaticClassIdentity,
     payload_property: &'static str,
 ) -> BuiltinResult<T> {
     let Value::Object(object) = value else {
@@ -3216,7 +3234,7 @@ fn object_payload_with_property<T: DeserializeOwned>(
             format!("expected {expected_class} object"),
         ));
     };
-    if object.class_name != expected_class {
+    if !object.class_name.is(expected_class) {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -4769,7 +4787,7 @@ fn operation_result_to_object<T: Serialize>(
     builtin: &'static str,
     operation_error_descriptor: &'static BuiltinErrorDescriptor,
     internal_error_descriptor: &'static BuiltinErrorDescriptor,
-    class_name: &'static str,
+    class_name: runmat_types::StaticClassIdentity,
     result: Result<OperationEnvelope<T>, OperationErrorEnvelope>,
     hidden_json_property: Option<&'static str>,
 ) -> BuiltinResult<Value> {
@@ -4788,7 +4806,7 @@ fn operation_result_to_object_preserving_integers<T: Serialize>(
     builtin: &'static str,
     operation_error_descriptor: &'static BuiltinErrorDescriptor,
     internal_error_descriptor: &'static BuiltinErrorDescriptor,
-    class_name: &'static str,
+    class_name: runmat_types::StaticClassIdentity,
     result: Result<OperationEnvelope<T>, OperationErrorEnvelope>,
     hidden_json_property: Option<&'static str>,
     signed_fields: &[&str],
@@ -4892,7 +4910,7 @@ fn public_sweep_error(mut error: OperationErrorEnvelope) -> OperationErrorEnvelo
 fn serializable_to_object<T: Serialize>(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
-    class_name: &'static str,
+    class_name: runmat_types::StaticClassIdentity,
     value: &T,
     hidden_json_property: Option<&'static str>,
 ) -> BuiltinResult<Value> {
@@ -4903,7 +4921,7 @@ fn serializable_to_object<T: Serialize>(
 fn serializable_to_object_preserving_integers<T: Serialize>(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
-    class_name: &'static str,
+    class_name: runmat_types::StaticClassIdentity,
     value: &T,
     hidden_json_property: Option<&'static str>,
     signed_fields: &[&str],
@@ -5213,7 +5231,7 @@ fn exact_json_integer_array(json: &serde_json::Value, shape: &[usize]) -> Option
 fn serializable_to_object_value<T: Serialize>(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
-    class_name: &'static str,
+    class_name: runmat_types::StaticClassIdentity,
     value: &T,
     hidden_json_property: Option<&'static str>,
 ) -> BuiltinResult<ObjectInstance> {
@@ -5221,7 +5239,7 @@ fn serializable_to_object_value<T: Serialize>(
     let json = serde_json::to_value(value)
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
     let converted = value_from_json_preserving_integer_kinds(builtin, error, &json)?;
-    let mut object = ObjectInstance::new(class_name.to_string());
+    let mut object = ObjectInstance::new(class_name);
     if let Value::Struct(fields) = converted {
         object.properties = fields.fields.into_iter().collect();
     } else {
@@ -5351,20 +5369,20 @@ fn ensure_fea_classes_registered() {
         let workflow_methods = workflow_methods();
         for class_name in [FEA_STUDY_CLASS, FEA_SWEEP_CLASS] {
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.to_string(),
+                name: class_name.into(),
                 parent: None,
                 properties: HashMap::new(),
                 methods: workflow_methods.clone(),
             });
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: FEA_RUN_RESULT_CLASS.to_string(),
+            name: FEA_RUN_RESULT_CLASS.into(),
             parent: None,
             properties: HashMap::new(),
             methods: run_result_methods(),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: FEA_RESULTS_CLASS.to_string(),
+            name: FEA_RESULTS_CLASS.into(),
             parent: None,
             properties: HashMap::new(),
             methods: results_methods(),
@@ -5374,7 +5392,7 @@ fn ensure_fea_classes_registered() {
                 continue;
             }
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.to_string(),
+                name: class_name.into(),
                 parent: None,
                 properties: HashMap::new(),
                 methods: HashMap::new(),
@@ -5395,7 +5413,7 @@ fn ensure_fea_classes_registered() {
             FEA_TRENDS_CLASS,
         ] {
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.to_string(),
+                name: class_name.into(),
                 parent: None,
                 properties: HashMap::new(),
                 methods: if class_name == FEA_FIELD_CLASS {
@@ -5408,23 +5426,26 @@ fn ensure_fea_classes_registered() {
     });
 }
 
-fn workflow_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+fn workflow_methods() -> HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> {
     [
-        ("validate", VALIDATE_NAME),
-        ("plan", PLAN_NAME),
-        ("run", RUN_NAME),
+        (
+            runmat_types::StaticMethodName::new("validate"),
+            VALIDATE_NAME,
+        ),
+        (runmat_types::StaticMethodName::new("plan"), PLAN_NAME),
+        (runmat_types::StaticMethodName::new("run"), RUN_NAME),
     ]
     .into_iter()
     .map(|(name, function_name)| {
         (
-            name.to_string(),
+            name.into(),
             crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
+                name: name.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: function_name.to_string(),
+                function_name: function_name.into(),
                 implicit_class_argument: None,
             },
         )
@@ -5432,23 +5453,23 @@ fn workflow_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     .collect()
 }
 
-fn run_result_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+fn run_result_methods() -> HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> {
     [
-        ("results", RESULTS_NAME),
-        ("field", FIELD_NAME),
-        ("plot", PLOT_NAME),
+        (runmat_types::StaticMethodName::new("results"), RESULTS_NAME),
+        (runmat_types::StaticMethodName::new("field"), FIELD_NAME),
+        (runmat_types::StaticMethodName::new("plot"), PLOT_NAME),
     ]
     .into_iter()
     .map(|(name, function_name)| {
         (
-            name.to_string(),
+            name.into(),
             crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
+                name: name.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: function_name.to_string(),
+                function_name: function_name.into(),
                 implicit_class_argument: None,
             },
         )
@@ -5456,39 +5477,42 @@ fn run_result_methods() -> HashMap<String, crate::class_registry::RuntimeMethod>
     .collect()
 }
 
-fn results_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [("field", FIELD_NAME), ("plot", PLOT_NAME)]
-        .into_iter()
-        .map(|(name, function_name)| {
-            (
-                name.to_string(),
-                crate::class_registry::RuntimeMethod {
-                    name: name.to_string(),
-                    is_static: false,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: MemberAccess::Public,
-                    function_name: function_name.to_string(),
-                    implicit_class_argument: None,
-                },
-            )
-        })
-        .collect()
+fn results_methods() -> HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> {
+    [
+        (runmat_types::StaticMethodName::new("field"), FIELD_NAME),
+        (runmat_types::StaticMethodName::new("plot"), PLOT_NAME),
+    ]
+    .into_iter()
+    .map(|(name, function_name)| {
+        (
+            name.into(),
+            crate::class_registry::RuntimeMethod {
+                name: name.into(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: MemberAccess::Public,
+                function_name: function_name.into(),
+                implicit_class_argument: None,
+            },
+        )
+    })
+    .collect()
 }
 
-fn field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [("plot", PLOT_NAME)]
+fn field_methods() -> HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> {
+    [(runmat_types::StaticMethodName::new("plot"), PLOT_NAME)]
         .into_iter()
         .map(|(name, function_name)| {
             (
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeMethod {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
-                    function_name: function_name.to_string(),
+                    function_name: function_name.into(),
                     implicit_class_argument: None,
                 },
             )
@@ -6323,7 +6347,7 @@ run:
         let Value::Object(study_object) = study.clone() else {
             panic!("expected loaded FEA study object");
         };
-        assert_eq!(study_object.class_name, FEA_STUDY_CLASS);
+        assert!(study_object.class_name.is(FEA_STUDY_CLASS));
         assert!(study_object
             .properties
             .contains_key(FEA_STUDY_SPEC_JSON_PROPERTY));
@@ -6333,7 +6357,7 @@ run:
         let Value::Object(validation_object) = validation else {
             panic!("expected validation object");
         };
-        assert_eq!(validation_object.class_name, FEA_VALIDATION_CLASS);
+        assert!(validation_object.class_name.is(FEA_VALIDATION_CLASS));
         assert_eq!(
             validation_object.properties.get("valid"),
             Some(&Value::Bool(true))
@@ -6343,7 +6367,7 @@ run:
         let Value::Object(plan_object) = plan else {
             panic!("expected plan object");
         };
-        assert_eq!(plan_object.class_name, FEA_PLAN_CLASS);
+        assert!(plan_object.class_name.is(FEA_PLAN_CLASS));
         assert!(plan_object.properties.contains_key("operation_sequence"));
     }
 
@@ -6713,7 +6737,7 @@ run:
         let Value::Object(results_object) = results.clone() else {
             panic!("expected results object");
         };
-        assert_eq!(results_object.class_name, FEA_RESULTS_CLASS);
+        assert!(results_object.class_name.is(FEA_RESULTS_CLASS));
         assert_eq!(
             results_object.properties.get("run_id"),
             Some(&Value::String("synthetic_plot_run".to_string()))
@@ -6730,7 +6754,7 @@ run:
         let Value::Object(field_object) = field else {
             panic!("expected field object");
         };
-        assert_eq!(field_object.class_name, FEA_FIELD_CLASS);
+        assert!(field_object.class_name.is(FEA_FIELD_CLASS));
         assert_eq!(
             field_object.properties.get("field_id"),
             Some(&Value::String("structural.von_mises".to_string()))
@@ -7159,11 +7183,11 @@ run:
         );
     }
 
-    fn assert_object_class(value: &Value, expected: &str) {
+    fn assert_object_class(value: &Value, expected: runmat_types::StaticClassIdentity) {
         let Value::Object(object) = value else {
             panic!("expected object value");
         };
-        assert_eq!(object.class_name, expected);
+        assert!(object.class_name.is(expected));
         assert!(
             object.properties.contains_key(FEA_PAYLOAD_JSON_PROPERTY)
                 || object.properties.contains_key(FEA_STUDY_SPEC_JSON_PROPERTY)

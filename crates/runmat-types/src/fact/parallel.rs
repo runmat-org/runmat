@@ -1,6 +1,6 @@
 use crate::{
-    DistributedValueId, DistributionScheme, LabCount, ObjectFact, ParallelRegionId,
-    ProgramFunctionId, QualifiedName, ShapeFact, StorageFact, SymbolName, ValueFact, ValueKindFact,
+    ClassIdentity, DistributedValueId, DistributionScheme, LabCount, ObjectFact, ParallelRegionId,
+    ProgramFunctionId, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -53,6 +53,16 @@ impl CodistributorClass {
         }
     }
 
+    pub const fn identity(self) -> crate::StaticClassIdentity {
+        crate::StaticClassIdentity::new(self.runtime_name())
+    }
+
+    pub fn from_identity(identity: &crate::ClassIdentity) -> Option<Self> {
+        [Self::OneDimensional, Self::TwoDimensionalBlockCyclic]
+            .into_iter()
+            .find(|class| identity.is(class.identity()))
+    }
+
     pub const fn from_scheme(scheme: &DistributionScheme) -> Option<Self> {
         match scheme {
             DistributionScheme::Block { .. } | DistributionScheme::OneDimensional { .. } => {
@@ -72,8 +82,10 @@ pub fn codistributor_fact(class: Option<CodistributorClass>) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: class
-                .map(|class| QualifiedName(vec![SymbolName(class.runtime_name().to_owned())])),
+            runtime_class: class.map(|class| {
+                ClassIdentity::new(class.runtime_name())
+                    .expect("codistributor runtime class names are canonical")
+            }),
             properties: BTreeMap::new(),
             properties_complete: false,
             handle_semantics: Some(false),

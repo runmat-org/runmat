@@ -369,9 +369,9 @@ fn validate_tabular_kinds(inputs: &[TabularInput]) -> BuiltinResult<()> {
     if inputs.is_empty() {
         return Err(stacked_err("expected at least one table or timetable"));
     }
-    let first_is_timetable = inputs[0].object.is_class("timetable");
+    let first_is_timetable = inputs[0].object.is_class(runmat_types::standard::TIMETABLE);
     for input in inputs.iter().skip(1) {
-        if input.object.is_class("timetable") != first_is_timetable {
+        if input.object.is_class(runmat_types::standard::TIMETABLE) != first_is_timetable {
             return Err(stacked_err(
                 "multiple tabular inputs must be all tables or all timetables",
             ));
@@ -384,11 +384,13 @@ fn source_table_snapshot(inputs: &[TabularInput]) -> BuiltinResult<StackedSource
     let mut classes = Vec::with_capacity(inputs.len());
     let mut variable_names = Vec::with_capacity(inputs.len());
     for input in inputs {
-        classes.push(if input.object.is_class("timetable") {
-            "timetable".into()
-        } else {
-            "table".into()
-        });
+        classes.push(
+            if input.object.is_class(runmat_types::standard::TIMETABLE) {
+                "timetable".into()
+            } else {
+                "table".into()
+            },
+        );
         variable_names.push(
             table_variable_names_from_object(&input.object)
                 .map_err(|err| stacked_err(format!("failed to read table variables: {err}")))?,
@@ -580,7 +582,7 @@ fn parse_table_call(
     }
     if options.x_label.is_empty() {
         options.x_label = options.x_variable.first().cloned().unwrap_or_else(|| {
-            if inputs[0].object.is_class("timetable") {
+            if inputs[0].object.is_class(runmat_types::standard::TIMETABLE) {
                 "Time"
             } else {
                 "Rows"
@@ -600,7 +602,7 @@ fn table_x_values(
     input_count: usize,
 ) -> BuiltinResult<(Vec<f64>, Tensor)> {
     let x_variable = table_x_variable_for_input(options, input_index, input_count)?;
-    if object.is_class("timetable") && x_variable.is_some() {
+    if object.is_class(runmat_types::standard::TIMETABLE) && x_variable.is_some() {
         return Err(stacked_err(
             "XVariable is only supported for table inputs; timetable row times are used automatically",
         ));
@@ -1034,7 +1036,10 @@ fn is_numeric_like(value: &Value) -> bool {
         | Value::Int(_)
         | Value::Bool(_)
         | Value::LogicalArray(_) => true,
-        Value::Object(obj) => obj.is_class("datetime") || obj.is_class("duration"),
+        Value::Object(obj) => {
+            obj.is_class(runmat_types::standard::DATETIME)
+                || obj.is_class(runmat_types::standard::DURATION)
+        }
         _ => false,
     }
 }
@@ -1045,15 +1050,15 @@ fn numeric_tensor(value: &Value, name: &str) -> BuiltinResult<Tensor> {
 
 fn numeric_tensor_from_value(value: &Value, name: &str) -> BuiltinResult<Tensor> {
     match value {
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .map_err(|err| stacked_err(format!("{name}: {err}")))
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .map_err(|err| stacked_err(format!("{name}: {err}")))
         }
-        Value::Object(obj) if obj.is_class("categorical") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::CATEGORICAL) => {
             let codes = obj
                 .properties
                 .get("Codes")

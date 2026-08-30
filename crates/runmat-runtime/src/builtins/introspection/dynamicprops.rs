@@ -15,9 +15,12 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value};
 use std::collections::HashMap;
 
-pub const DYNAMICPROPS_CLASS: &str = "dynamicprops";
-pub const DYNAMIC_PROPERTY_CLASS: &str = "matlab.metadata.DynamicProperty";
-pub const STATIC_PROPERTY_METADATA_CLASS: &str = "matlab.metadata.Property";
+pub const DYNAMICPROPS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("dynamicprops");
+pub const DYNAMIC_PROPERTY_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.metadata.DynamicProperty");
+pub const STATIC_PROPERTY_METADATA_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.metadata.Property");
 
 pub const FINDPROP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {
@@ -209,11 +212,11 @@ pub const DYNAMIC_PROPERTY_DELETE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescrip
 };
 
 fn dynamic_error(
-    builtin: &'static str,
+    builtin: impl AsRef<str>,
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
 ) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(builtin);
+    let mut builder = build_runtime_error(message).with_builtin(builtin.as_ref());
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -313,9 +316,9 @@ fn access_value(access: &MemberAccess) -> Value {
 fn dynamic_def_to_metadata_object(
     def: &DynamicPropertyDef,
     target: Option<Value>,
-    class_name: &str,
+    class_name: runmat_types::StaticClassIdentity,
 ) -> ObjectInstance {
-    let mut object = ObjectInstance::new(class_name.to_string());
+    let mut object = ObjectInstance::new(class_name);
     object
         .properties
         .insert("Name".to_string(), Value::String(def.name.clone()));
@@ -364,10 +367,10 @@ fn dynamic_def_to_metadata_object(
 }
 
 fn dynamic_def_from_class_property(
-    class_name: &str,
+    class_name: &runmat_types::ClassIdentity,
     prop: &crate::class_registry::RuntimeProperty,
 ) -> DynamicPropertyDef {
-    let mut def = DynamicPropertyDef::new(prop.name.clone(), class_name.to_string());
+    let mut def = DynamicPropertyDef::new(prop.name.to_string(), class_name.clone());
     def.get_access = prop.get_access;
     def.set_access = prop.set_access;
     def.dependent = prop.is_dependent;
@@ -382,7 +385,7 @@ fn allocate_dynamic_property_handle(
     let handle = runmat_gc::gc_allocate(Value::Object(metadata))
         .map_err(|err| format!("addprop: failed to allocate metadata handle: {err}"))?;
     Ok(HandleRef {
-        class_name: DYNAMIC_PROPERTY_CLASS.to_string(),
+        class_name: DYNAMIC_PROPERTY_CLASS.into(),
         target: handle,
         valid: true,
     })
@@ -390,14 +393,14 @@ fn allocate_dynamic_property_handle(
 
 fn dynamic_property_handle_from_gc(target: runmat_gc::GcHandle) -> Value {
     Value::HandleObject(HandleRef {
-        class_name: DYNAMIC_PROPERTY_CLASS.to_string(),
+        class_name: DYNAMIC_PROPERTY_CLASS.into(),
         target,
         valid: true,
     })
 }
 
-fn require_dynamicprops_target(class_name: &str) -> BuiltinResult<()> {
-    if crate::class_registry::is_class_or_subclass(class_name, DYNAMICPROPS_CLASS) {
+fn require_dynamicprops_target(class_name: &runmat_types::ClassIdentity) -> BuiltinResult<()> {
+    if crate::class_registry::is_class_or_subclass(class_name, &DYNAMICPROPS_CLASS.owned()) {
         Ok(())
     } else {
         Err(dynamic_error(
@@ -409,7 +412,7 @@ fn require_dynamicprops_target(class_name: &str) -> BuiltinResult<()> {
 }
 
 fn metadata_target_and_name(metadata: &ObjectInstance) -> BuiltinResult<(HandleRef, String)> {
-    if metadata.class_name != DYNAMIC_PROPERTY_CLASS {
+    if !metadata.class_name.is(DYNAMIC_PROPERTY_CLASS) {
         return Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_INVALID_METADATA,
@@ -501,7 +504,7 @@ pub fn metadata_assignment(
     field: &str,
     value: Value,
 ) -> BuiltinResult<bool> {
-    if metadata.class_name != DYNAMIC_PROPERTY_CLASS {
+    if !metadata.class_name.is(DYNAMIC_PROPERTY_CLASS) {
         return Ok(false);
     }
     if field == "Name" || field == "DefiningClass" {
@@ -636,7 +639,11 @@ async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<
             ));
         };
         require_dynamicprops_target(&obj.class_name)?;
-        if crate::class_registry::lookup_property(&obj.class_name, &property_name).is_some()
+        if crate::class_registry::lookup_property(
+            &obj.class_name,
+            &runmat_types::MemberName::from(property_name.as_str()),
+        )
+        .is_some()
             || obj.has_dynamic_property(&property_name)
         {
             return Err(dynamic_error(
@@ -722,9 +729,10 @@ fn findprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value
                     Value::HandleObject(handle.clone()),
                 )?));
             }
-            if let Some((prop, owner)) =
-                crate::class_registry::lookup_property(&obj.class_name, &property_name)
-            {
+            if let Some((prop, owner)) = crate::class_registry::lookup_property(
+                &obj.class_name,
+                &runmat_types::MemberName::from(property_name.as_str()),
+            ) {
                 let def = dynamic_def_from_class_property(&owner, &prop);
                 return Ok(Value::Object(dynamic_def_to_metadata_object(
                     &def,
@@ -742,9 +750,10 @@ fn findprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value
                     DYNAMIC_PROPERTY_CLASS,
                 )));
             }
-            if let Some((prop, owner)) =
-                crate::class_registry::lookup_property(&obj.class_name, &property_name)
-            {
+            if let Some((prop, owner)) = crate::class_registry::lookup_property(
+                &obj.class_name,
+                &runmat_types::MemberName::from(property_name.as_str()),
+            ) {
                 let def = dynamic_def_from_class_property(&owner, &prop);
                 return Ok(Value::Object(dynamic_def_to_metadata_object(
                     &def,
@@ -783,7 +792,7 @@ async fn dynamic_property_delete_builtin(prop: Value) -> BuiltinResult<Value> {
             "dynamic property delete requires a metadata handle",
         ));
     };
-    if prop_handle.class_name != DYNAMIC_PROPERTY_CLASS {
+    if !prop_handle.class_name.is(DYNAMIC_PROPERTY_CLASS) {
         return Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_INVALID_METADATA,
@@ -886,7 +895,7 @@ mod tests {
         let obj = ObjectInstance::new(class_name.to_string());
         let root = runmat_gc::gc_allocate_rooted(Value::Object(obj)).expect("gc");
         let value = Value::HandleObject(HandleRef {
-            class_name: class_name.to_string(),
+            class_name: class_name.into(),
             target: root.handle(),
             valid: true,
         });
@@ -895,8 +904,8 @@ mod tests {
 
     fn dynamic_target_handle(class_name: &str) -> (Value, runmat_gc::ExplicitRoot) {
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: class_name.to_string(),
-            parent: Some(DYNAMICPROPS_CLASS.to_string()),
+            name: class_name.into(),
+            parent: Some(DYNAMICPROPS_CLASS.into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });
@@ -996,8 +1005,8 @@ mod tests {
     fn addprop_rejects_handle_classes_without_dynamicprops_parent() {
         {
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: "PlainHandleForDynamicProps".to_string(),
-                parent: Some("handle".to_string()),
+                name: "PlainHandleForDynamicProps".into(),
+                parent: Some(runmat_types::standard::HANDLE.into()),
                 properties: HashMap::new(),
                 methods: HashMap::new(),
             });

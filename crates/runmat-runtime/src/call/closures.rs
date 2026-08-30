@@ -1,7 +1,7 @@
 use crate::call::identity::external_qualified_display_name;
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
-use runmat_types::MemberAccess;
+use runmat_types::{ClassIdentity, MemberAccess};
 use runmat_value::{Closure, Value};
 
 pub fn closure_value(function_name: String, captures: Vec<Value>) -> Value {
@@ -24,11 +24,11 @@ pub fn semantic_closure_value(
     })
 }
 
-pub fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<String> {
+pub fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<ClassIdentity> {
     let caller_function_name = caller_function_name?;
     if let Some((class_name, method_name)) = caller_function_name.rsplit_once('.') {
         if !class_name.is_empty() && !method_name.is_empty() {
-            return Some(class_name.to_string());
+            return ClassIdentity::new(class_name).ok();
         }
     }
     crate::class_registry::class_names()
@@ -44,14 +44,14 @@ pub fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<S
 }
 
 pub fn method_access_permitted(
-    owner: &str,
+    owner: &ClassIdentity,
     access: &MemberAccess,
     caller_function_name: Option<&str>,
 ) -> bool {
     match access {
         MemberAccess::Public => true,
         MemberAccess::Private => {
-            caller_class_for_function(caller_function_name).as_deref() == Some(owner)
+            caller_class_for_function(caller_function_name).as_ref() == Some(owner)
         }
         MemberAccess::Protected => {
             caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
@@ -62,7 +62,7 @@ pub fn method_access_permitted(
 }
 
 pub fn resolve_method_semantic_function_id(
-    owner: &str,
+    owner: &ClassIdentity,
     method_name: &str,
     function_name: &str,
 ) -> Option<usize> {
@@ -90,7 +90,8 @@ pub fn load_method_closure(
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(object) => {
-            let function_name = external_qualified_display_name(&object.class_name, &name);
+            let function_name =
+                external_qualified_display_name(object.class_name.display_name(), &name);
             Ok(Value::Closure(Closure {
                 bound_function: crate::user_functions::resolve_semantic_function_by_name(
                     &function_name,
@@ -100,7 +101,9 @@ pub fn load_method_closure(
             }))
         }
         Value::ClassRef(class_name) => {
-            if let Some((method, owner)) = crate::class_registry::lookup_method(&class_name, &name)
+            let method_name = runmat_types::MethodName::from(name.as_str());
+            if let Some((method, owner)) =
+                crate::class_registry::lookup_method(&class_name, &method_name)
             {
                 if !method.is_static {
                     return Err(semantic_error(
@@ -124,7 +127,7 @@ pub fn load_method_closure(
                     captures: vec![],
                 }));
             }
-            let qualified_name = external_qualified_display_name(&class_name, &name);
+            let qualified_name = external_qualified_display_name(class_name.display_name(), &name);
             if runmat_builtins::builtin_name_is_known(&qualified_name) {
                 Ok(Value::Closure(Closure {
                     bound_function: crate::user_functions::resolve_semantic_function_by_name(

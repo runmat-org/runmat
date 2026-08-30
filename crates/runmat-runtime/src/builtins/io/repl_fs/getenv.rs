@@ -591,7 +591,7 @@ pub(crate) mod tests {
         let Value::Object(dictionary) = result else {
             panic!("expected dictionary object");
         };
-        assert!(dictionary.is_class("dictionary"));
+        assert!(dictionary.is_class(runmat_types::standard::DICTIONARY));
         let Value::Cell(keys) = dictionary.properties.get("Keys").expect("dictionary keys") else {
             panic!("expected dictionary key cells");
         };

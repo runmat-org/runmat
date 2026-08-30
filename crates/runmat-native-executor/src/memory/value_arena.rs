@@ -331,7 +331,7 @@ mod tests {
             let handle = rooted.handle();
             let mut arena = ValueArena::new().expect("activate arena roots");
             arena.insert(Value::HandleObject(runmat_value::HandleRef {
-                class_name: "test".to_string(),
+                class_name: "test".into(),
                 target: handle,
                 valid: true,
             }));

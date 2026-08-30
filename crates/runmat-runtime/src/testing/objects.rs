@@ -2,20 +2,21 @@ use runmat_test::descriptor::{FixtureDescriptor, TestDescriptor};
 use runmat_test::result::{Diagnostic, TestResult};
 use runmat_value::{ObjectArray, ObjectInstance, Value};
 
-pub const TEST_CASE_CLASS: &str = "matlab.unittest.TestCase";
-pub const FUNCTION_TEST_CASE_CLASS: &str = "matlab.unittest.FunctionTestCase";
-pub const TEST_SUITE_CLASS: &str = "matlab.unittest.TestSuite";
-pub const TEST_RESULT_CLASS: &str = "matlab.unittest.TestResult";
+pub const TEST_CASE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.TestCase");
+pub const FUNCTION_TEST_CASE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.FunctionTestCase");
+pub const TEST_SUITE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.TestSuite");
+pub const TEST_RESULT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.TestResult");
 
 pub fn test_case_object(name: impl Into<String>, function_based: bool) -> Value {
-    let mut object = ObjectInstance::new(
-        if function_based {
-            FUNCTION_TEST_CASE_CLASS
-        } else {
-            TEST_CASE_CLASS
-        }
-        .into(),
-    );
+    let mut object = ObjectInstance::new(if function_based {
+        FUNCTION_TEST_CASE_CLASS
+    } else {
+        TEST_CASE_CLASS
+    });
     object
         .properties
         .insert("Name".into(), Value::String(name.into()));
@@ -23,7 +24,7 @@ pub fn test_case_object(name: impl Into<String>, function_based: bool) -> Value 
 }
 
 pub fn test_suite_object(test: &TestDescriptor) -> Value {
-    let mut object = ObjectInstance::new(TEST_SUITE_CLASS.into());
+    let mut object = ObjectInstance::new(TEST_SUITE_CLASS);
     object
         .properties
         .insert("Name".into(), Value::String(test.display_name.clone()));
@@ -57,7 +58,7 @@ pub fn test_suite_object(test: &TestDescriptor) -> Value {
 }
 
 pub fn test_result_object(name: impl Into<String>, result: &TestResult) -> Value {
-    let mut object = ObjectInstance::new(TEST_RESULT_CLASS.into());
+    let mut object = ObjectInstance::new(TEST_RESULT_CLASS);
     object
         .properties
         .insert("Name".into(), Value::String(name.into()));
@@ -91,7 +92,7 @@ pub fn test_result_object(name: impl Into<String>, result: &TestResult) -> Value
 }
 
 pub fn fixture_object(fixture: &FixtureDescriptor) -> Value {
-    let mut object = ObjectInstance::new("matlab.unittest.fixtures.Fixture".into());
+    let mut object = ObjectInstance::new("matlab.unittest.fixtures.Fixture");
     object
         .properties
         .insert("Name".into(), Value::String(fixture.display_name.clone()));
@@ -103,7 +104,7 @@ pub fn fixture_object(fixture: &FixtureDescriptor) -> Value {
 }
 
 pub fn diagnostic_object(diagnostic: &Diagnostic) -> Value {
-    let mut object = ObjectInstance::new("matlab.unittest.diagnostics.Diagnostic".into());
+    let mut object = ObjectInstance::new("matlab.unittest.diagnostics.Diagnostic");
     object.properties.insert(
         "Identifier".into(),
         Value::String(diagnostic.identifier.clone()),
@@ -114,12 +115,12 @@ pub fn diagnostic_object(diagnostic: &Diagnostic) -> Value {
     Value::Object(object)
 }
 
-pub fn plugin_object(class_name: impl Into<String>) -> Value {
-    Value::Object(ObjectInstance::new(class_name.into()))
+pub fn plugin_object(class_name: impl Into<runmat_types::ClassIdentity>) -> Value {
+    Value::Object(ObjectInstance::new(class_name))
 }
 
 pub fn object_array_or_scalar(
-    class_name: impl Into<String>,
+    class_name: impl Into<runmat_types::ClassIdentity>,
     values: Vec<Value>,
 ) -> Result<Value, String> {
     if values.len() == 1 {

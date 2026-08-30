@@ -11,10 +11,15 @@ use crate::object::indexing::{
 };
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
-use runmat_types::{CallableFallbackPolicy, CallableIdentity, MethodId, QualifiedName, SymbolName};
+use runmat_types::{
+    CallableFallbackPolicy, CallableIdentity, ClassIdentity, MethodId, QualifiedName, SymbolName,
+};
 use runmat_value::Value;
 
-fn caller_has_internal_class_access(caller_function_name: Option<&str>, class_name: &str) -> bool {
+fn caller_has_internal_class_access(
+    caller_function_name: Option<&str>,
+    class_name: &ClassIdentity,
+) -> bool {
     caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
         crate::class_registry::is_class_or_subclass(&caller_class, class_name)
             || crate::class_registry::is_class_or_subclass(class_name, &caller_class)
@@ -68,7 +73,7 @@ fn runtime_named_identity(name: &str) -> (CallableIdentity, CallableFallbackPoli
 }
 
 fn method_function_identity(
-    owner: &str,
+    owner: &ClassIdentity,
     method_name: &str,
     function_name: &str,
 ) -> (CallableIdentity, CallableFallbackPolicy) {
@@ -84,7 +89,7 @@ fn method_function_identity(
     }
     if trimmed.is_empty() {
         return (
-            external_qualified_identity(owner, method_name),
+            external_qualified_identity(owner.display_name(), method_name),
             CallableFallbackPolicy::ExternalBoundary,
         );
     }
@@ -92,37 +97,37 @@ fn method_function_identity(
         return runtime_named_identity(trimmed);
     }
     (
-        external_qualified_identity(owner, trimmed),
+        external_qualified_identity(owner.display_name(), trimmed),
         CallableFallbackPolicy::ExternalBoundary,
     )
 }
 
 fn is_operator_overload_name(name: &str) -> bool {
-    matches!(
-        name,
-        "plus"
-            | "minus"
-            | "times"
-            | "mtimes"
-            | "rdivide"
-            | "mrdivide"
-            | "ldivide"
-            | "mldivide"
-            | "power"
-            | "mpower"
-            | "uminus"
-            | "uplus"
-            | "lt"
-            | "le"
-            | "gt"
-            | "ge"
-            | "eq"
-            | "ne"
-            | "and"
-            | "or"
-            | "xor"
-            | "not"
-    )
+    const OVERLOADS: &[runmat_types::StaticMethodName] = &[
+        runmat_types::StaticMethodName::new("plus"),
+        runmat_types::StaticMethodName::new("minus"),
+        runmat_types::StaticMethodName::new("times"),
+        runmat_types::StaticMethodName::new("mtimes"),
+        runmat_types::StaticMethodName::new("rdivide"),
+        runmat_types::StaticMethodName::new("mrdivide"),
+        runmat_types::StaticMethodName::new("ldivide"),
+        runmat_types::StaticMethodName::new("mldivide"),
+        runmat_types::StaticMethodName::new("power"),
+        runmat_types::StaticMethodName::new("mpower"),
+        runmat_types::StaticMethodName::new("uminus"),
+        runmat_types::StaticMethodName::new("uplus"),
+        runmat_types::StaticMethodName::new("lt"),
+        runmat_types::StaticMethodName::new("le"),
+        runmat_types::StaticMethodName::new("gt"),
+        runmat_types::StaticMethodName::new("ge"),
+        runmat_types::StaticMethodName::new("eq"),
+        runmat_types::StaticMethodName::new("ne"),
+        runmat_types::StaticMethodName::new("and"),
+        runmat_types::StaticMethodName::new("or"),
+        runmat_types::StaticMethodName::new("xor"),
+        runmat_types::StaticMethodName::new("not"),
+    ];
+    OVERLOADS.iter().any(|method| method.matches_text(name))
 }
 
 fn is_receiver_validation_error(err: &RuntimeError) -> bool {
@@ -166,7 +171,7 @@ async fn try_call_identity_with_policy(
 
 async fn call_member_index_on_object_like(
     receiver: Value,
-    class_name: &str,
+    class_name: &ClassIdentity,
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
@@ -179,7 +184,8 @@ async fn call_member_index_on_object_like(
     {
         return Box::pin(call_object_member_subsref(receiver, name)).await;
     }
-    if let Some((m, owner)) = crate::class_registry::lookup_method(class_name, &name) {
+    let method_name = runmat_types::MethodName::from(name.as_str());
+    if let Some((m, owner)) = crate::class_registry::lookup_method(class_name, &method_name) {
         if m.is_static {
             return Err(semantic_error(
                 "MethodStaticOnInstance",
@@ -206,7 +212,7 @@ async fn call_member_index_on_object_like(
     let mut method_args = Vec::with_capacity(1 + args.len());
     method_args.push(receiver.clone());
     method_args.extend(args.iter().cloned());
-    let qualified_identity = external_qualified_identity(class_name, &name);
+    let qualified_identity = external_qualified_identity(class_name.display_name(), &name);
     if let Some(v) = try_call_identity_with_policy(
         qualified_identity.clone(),
         method_args.clone(),
@@ -292,7 +298,8 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
     };
 
     let method_args = vec![lhs.clone(), rhs.clone()];
-    if let Some((m, owner)) = crate::class_registry::lookup_method(&class_name, &name) {
+    let method_name = runmat_types::MethodName::from(name.as_str());
+    if let Some((m, owner)) = crate::class_registry::lookup_method(&class_name, &method_name) {
         if m.is_static {
             return Err(semantic_error(
                 "MethodStaticOnInstance",
@@ -331,7 +338,7 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
         };
     }
 
-    let qualified_identity = external_qualified_identity(&class_name, &name);
+    let qualified_identity = external_qualified_identity(class_name.display_name(), &name);
     let ordered_result = call_identity_with_policy(
         qualified_identity.clone(),
         method_args.clone(),
@@ -471,13 +478,19 @@ pub async fn call_object_member_subsasgn(
 }
 
 pub fn class_defines_member_subsref(class: &crate::class_registry::RuntimeClass) -> bool {
-    crate::class_registry::lookup_method(&class.name, ObjectIndexOp::Subsref.protocol_name())
-        .is_some()
+    crate::class_registry::lookup_method(
+        &class.name,
+        &ObjectIndexOp::Subsref.protocol_name().owned(),
+    )
+    .is_some()
 }
 
 pub fn class_defines_member_subsasgn(class: &crate::class_registry::RuntimeClass) -> bool {
-    crate::class_registry::lookup_method(&class.name, ObjectIndexOp::Subsasgn.protocol_name())
-        .is_some()
+    crate::class_registry::lookup_method(
+        &class.name,
+        &ObjectIndexOp::Subsasgn.protocol_name().owned(),
+    )
+    .is_some()
 }
 
 /// Reports whether an object-like value has opted into class-defined indexing.
@@ -506,9 +519,10 @@ pub async fn call_object_index_descriptor_method_with_outputs(
     requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
     if let Some(class_name) = class_name_from_base(descriptor.base()) {
-        if let Some((method, owner)) =
-            crate::class_registry::lookup_method(class_name, descriptor.operation().protocol_name())
-        {
+        if let Some((method, owner)) = crate::class_registry::lookup_method(
+            class_name,
+            &descriptor.operation().protocol_name().owned(),
+        ) {
             let mut semantic_args = vec![
                 descriptor.base().clone(),
                 build_matlab_substruct_arg(&descriptor)?,
@@ -610,7 +624,8 @@ pub async fn call_method_or_member_index_named_with_outputs(
             .await
         }
         Value::ClassRef(cls) => {
-            if let Some((m, owner)) = crate::class_registry::lookup_method(&cls, &name) {
+            let method_name = runmat_types::MethodName::from(name.as_str());
+            if let Some((m, owner)) = crate::class_registry::lookup_method(&cls, &method_name) {
                 if !m.is_static {
                     return Err(semantic_error(
                         "MethodNotStatic",
@@ -639,7 +654,7 @@ pub async fn call_method_or_member_index_named_with_outputs(
                 ));
             }
 
-            let qualified_identity = external_qualified_identity(&cls, &name);
+            let qualified_identity = external_qualified_identity(cls.display_name(), &name);
             call_identity_with_policy(
                 qualified_identity,
                 args,

@@ -291,9 +291,9 @@ impl Default for WordCloudOptions {
             layout_num: 1,
             size_power: 0.5,
             title: String::new(),
-            title_font_name: DEFAULT_FONT_NAME.to_string(),
+            title_font_name: DEFAULT_FONT_NAME.into(),
             visible: true,
-            font_name: DEFAULT_FONT_NAME.to_string(),
+            font_name: DEFAULT_FONT_NAME.into(),
             box_visible: false,
             units: "normalized".to_string(),
             position: DEFAULT_POSITION,
@@ -529,7 +529,7 @@ fn parse_data(args: Vec<Value>) -> BuiltinResult<WordCloudData> {
         [Value::Object(object), word_var, size_var] if is_table_object(object) => {
             table_words_and_sizes(object, word_var, size_var)
         }
-        [Value::Object(object), _topic_idx] if object.is_class("ldaModel") => Err(wordcloud_error(
+        [Value::Object(object), _topic_idx] if object.is_class(runmat_types::standard::LDA_MODEL) => Err(wordcloud_error(
             "LDA topic word clouds require ldaModel support and remain tracked by the Text Analytics umbrella",
         )),
         _ => Err(wordcloud_error(
@@ -552,13 +552,13 @@ fn validate_options_for_data(
 
 fn parse_single_data(value: &Value) -> BuiltinResult<WordCloudData> {
     match value {
-        Value::Object(object) if object.is_class("tokenizedDocument") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::TOKENIZED_DOCUMENT) => {
             documents_counts(documents_from_object(object)?)
         }
-        Value::Object(object) if object.is_class("bagOfWords") => bag_of_words_counts(object),
-        Value::Object(object) if object.is_class("bagOfNgrams") => bag_of_ngrams_counts(object),
-        Value::Object(object) if object.is_class("categorical") => categorical_counts(object),
-        Value::Object(object) if object.is_class("ldaModel") => Err(wordcloud_error(
+        Value::Object(object) if object.is_class(runmat_types::standard::BAG_OF_WORDS) => bag_of_words_counts(object),
+        Value::Object(object) if object.is_class(runmat_types::standard::BAG_OF_NGRAMS) => bag_of_ngrams_counts(object),
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => categorical_counts(object),
+        Value::Object(object) if object.is_class(runmat_types::standard::LDA_MODEL) => Err(wordcloud_error(
             "LDA topic word clouds require ldaModel support and remain tracked by the Text Analytics umbrella",
         )),
         Value::Object(object) => Err(wordcloud_error(format!(
@@ -650,7 +650,8 @@ fn table_selector(value: &Value, names: &[String], label: &str) -> BuiltinResult
 }
 
 fn is_table_object(object: &ObjectInstance) -> bool {
-    object.is_class("table") || object.is_class("timetable")
+    object.is_class(runmat_types::standard::TABLE)
+        || object.is_class(runmat_types::standard::TIMETABLE)
 }
 
 fn text_documents(value: &Value) -> BuiltinResult<Vec<Vec<String>>> {
@@ -2002,7 +2003,7 @@ mod tests {
         .expect_err("Color rows must match words at creation");
         assert!(err.to_string().contains("Color matrix rows"));
 
-        let lda = Value::Object(ObjectInstance::new("ldaModel".into()));
+        let lda = Value::Object(ObjectInstance::new("ldaModel"));
         let err = wordcloud_builtin(vec![lda, Value::Num(1.0)])
             .expect_err("LDA model should be explicit unsupported");
         assert!(err.to_string().contains("ldaModel"));
@@ -2026,7 +2027,7 @@ mod tests {
                 Value::StringArray(StringArray::new(words.clone(), vec![1, words.len()]).unwrap())
             })
             .collect::<Vec<_>>();
-        let mut object = ObjectInstance::new("tokenizedDocument".into());
+        let mut object = ObjectInstance::new("tokenizedDocument");
         object.properties.insert(
             "Documents".into(),
             Value::Cell(CellArray::new(cell_values, doc_count, 1).unwrap()),
@@ -2035,7 +2036,7 @@ mod tests {
     }
 
     fn bag_of_ngrams_object(ngrams_column_major: &[&str], counts: Vec<f64>) -> Value {
-        let mut object = ObjectInstance::new("bagOfNgrams".into());
+        let mut object = ObjectInstance::new("bagOfNgrams");
         object
             .properties
             .insert("Ngrams".into(), str_array(ngrams_column_major, vec![2, 2]));
@@ -2046,7 +2047,7 @@ mod tests {
     }
 
     fn categorical_object(categories: &[&str], codes: Vec<f64>) -> Value {
-        let mut object = ObjectInstance::new("categorical".into());
+        let mut object = ObjectInstance::new("categorical");
         object.properties.insert(
             "Categories".into(),
             str_array(categories, vec![1, categories.len()]),
@@ -2064,7 +2065,7 @@ mod tests {
         }
         let mut props = StructValue::new();
         props.insert("VariableNames", str_array(names, vec![1, names.len()]));
-        let mut object = ObjectInstance::new("table".into());
+        let mut object = ObjectInstance::new("table");
         object
             .properties
             .insert(TABLE_VARIABLES_FIELD.into(), Value::Struct(variables));

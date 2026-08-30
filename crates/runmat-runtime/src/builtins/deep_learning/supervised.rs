@@ -5,6 +5,7 @@ use runmat_value::{NumericScalar, ObjectInstance, StructValue, Tensor, Value};
 
 use crate::{builtins::common::tensor, BuiltinResult};
 
+use super::layer_identity::ForwardLayerKind;
 use super::{
     any_type, deep_learning_error, gather_args, model, numeric_values, positive_usize, scalar_text,
     string_array,
@@ -34,7 +35,7 @@ pub(super) async fn train_network_builtin(args: Vec<Value>) -> BuiltinResult<Val
     let config = TrainingConfig::from_value(&args[3], "trainNetwork")?;
     let network_class = if matches!(
         &args[2],
-        Value::Object(object) if object.class_name == "nnet.cnn.LayerGraph"
+        Value::Object(object) if object.class_name.is(super::LAYER_GRAPH_CLASS)
     ) {
         model::DAG_NETWORK_CLASS
     } else {
@@ -76,7 +77,7 @@ fn train_and_output(
     x: Matrix,
     task: Task,
     config: TrainingConfig,
-    network_class: &str,
+    network_class: runmat_types::StaticClassIdentity,
     function: &'static str,
 ) -> BuiltinResult<Value> {
     let mut state = OptimizerState::new(config.solver);
@@ -335,14 +336,14 @@ fn infer_train_network_task(
     if layers.iter().any(|layer| {
         matches!(
             layer,
-            Value::Object(object) if object.class_name == "nnet.cnn.layer.ClassificationOutputLayer"
+            Value::Object(object) if object.class_name.is(super::CLASSIFICATION_OUTPUT_LAYER_CLASS)
         )
     }) {
         classification_target(y, observations, "trainNetwork").map(Task::Classification)
     } else if layers.iter().any(|layer| {
         matches!(
             layer,
-            Value::Object(object) if object.class_name == "nnet.cnn.layer.RegressionOutputLayer"
+            Value::Object(object) if object.class_name.is(super::REGRESSION_OUTPUT_LAYER_CLASS)
         )
     }) {
         numeric_matrix(y.clone(), "trainNetwork", "Y").and_then(|target| {
@@ -423,7 +424,7 @@ fn is_label_target(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => true,
         Value::Cell(cell) => cell.data.iter().all(is_label_target),
-        Value::Object(object) => object.class_name == "categorical",
+        Value::Object(object) => object.class_name.is(runmat_types::standard::CATEGORICAL),
         _ => false,
     }
 }
@@ -484,7 +485,7 @@ fn label_strings(value: &Value, function: &'static str) -> BuiltinResult<Option<
             }
             Ok(Some(labels))
         }
-        Value::Object(object) if object.class_name == "categorical" => {
+        Value::Object(object) if object.class_name.is(runmat_types::standard::CATEGORICAL) => {
             let categories = match object.properties.get("Categories") {
                 Some(Value::StringArray(categories)) => categories.data.clone(),
                 _ => {
@@ -628,7 +629,7 @@ impl TrainingConfig {
                 format!("{function}: expected a trainingOptions object"),
             ));
         };
-        if object.class_name != "nnet.cnn.TrainingOptions" {
+        if !object.class_name.is(super::TRAINING_OPTIONS_CLASS) {
             return Err(deep_learning_error(
                 function,
                 format!("{function}: expected a trainingOptions object"),
@@ -822,7 +823,7 @@ fn loss_and_gradient(
             let has_softmax = layers.iter().any(|layer| {
                 matches!(
                     layer,
-                    Value::Object(object) if object.class_name == "nnet.cnn.layer.SoftmaxLayer"
+                    Value::Object(object) if object.class_name.is(super::SOFTMAX_LAYER_CLASS)
                 )
             });
             let probabilities = if has_softmax {
@@ -891,8 +892,8 @@ fn forward_training(
                 format!("{function}: network layers must be layer objects"),
             ));
         };
-        current = match layer.class_name.as_str() {
-            "nnet.cnn.layer.FeatureInputLayer" => {
+        current = match ForwardLayerKind::from_identity(&layer.class_name) {
+            Some(ForwardLayerKind::FeatureInput) => {
                 let expected = model::feature_input_width(layer, function)?;
                 if current.cols != expected {
                     return Err(deep_learning_error(
@@ -906,7 +907,7 @@ fn forward_training(
                 saw_input = true;
                 current
             }
-            "nnet.cnn.layer.FullyConnectedLayer" => {
+            Some(ForwardLayerKind::FullyConnected) => {
                 let weights = Matrix::from_tensor(
                     model::tensor_property(layer, "Weights", function)?,
                     function,
@@ -925,13 +926,13 @@ fn forward_training(
                 });
                 output
             }
-            "nnet.cnn.layer.ReLULayer" => {
+            Some(ForwardLayerKind::Relu) => {
                 let previous = current;
                 let output = map_matrix(&previous, |value| value.max(0.0));
                 caches.push(LayerCache::Relu { input: previous });
                 output
             }
-            "nnet.cnn.layer.ELULayer" => {
+            Some(ForwardLayerKind::Elu) => {
                 let alpha = layer
                     .properties
                     .get("Alpha")
@@ -953,20 +954,18 @@ fn forward_training(
                 });
                 output
             }
-            "nnet.cnn.layer.SoftmaxLayer" => {
+            Some(ForwardLayerKind::Softmax) => {
                 let output = softmax(&current, function)?;
                 caches.push(LayerCache::Softmax {
                     output: output.clone(),
                 });
                 output
             }
-            "nnet.cnn.layer.ClassificationOutputLayer" | "nnet.cnn.layer.RegressionOutputLayer" => {
-                current
-            }
-            other => {
+            Some(kind) if kind.is_output() => current,
+            _ => {
                 return Err(deep_learning_error(
                     function,
-                    format!("{function}: unsupported layer type '{other}'"),
+                    format!("{function}: unsupported layer type '{}'", layer.class_name),
                 ));
             }
         };

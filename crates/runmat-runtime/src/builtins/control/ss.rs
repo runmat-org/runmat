@@ -27,7 +27,7 @@ use crate::builtins::control::type_resolvers::ss_type;
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "ss";
-const SS_CLASS: &str = "ss";
+const SS_CLASS: runmat_types::StaticClassIdentity = runmat_types::StaticClassIdentity::new("ss");
 
 static SS_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(SS_CLASS);
@@ -310,9 +310,9 @@ fn ensure_ss_class_registered() {
             "OutputName",
         ] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -323,9 +323,10 @@ fn ensure_ss_class_registered() {
             );
         }
 
-        let methods: HashMap<String, crate::class_registry::RuntimeMethod> = HashMap::new();
+        let methods: HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> =
+            HashMap::new();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: SS_CLASS.to_string(),
+            name: SS_CLASS.into(),
             parent: None,
             properties,
             methods,
@@ -695,7 +696,7 @@ mod tests {
         let Value::Object(object) = &sys else {
             panic!("expected object");
         };
-        assert_eq!(object.class_name, "ss");
+        assert_eq!(object.class_name.display_name(), "ss");
         assert_eq!(property(&sys, "Ts"), &Value::Num(0.0));
         assert_tensor(property(&sys, "A"), &[2, 2], &[0.0, -2.0, 1.0, -3.0]);
         assert_tensor(property(&sys, "B"), &[2, 1], &[0.0, 1.0]);

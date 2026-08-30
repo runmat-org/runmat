@@ -9,7 +9,8 @@ use runmat_value::{CharArray, HandleRef, ObjectInstance, StructValue, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const CLASS_NAME: &str = "inputParser";
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("inputParser");
 const INPUT_PARSER_NAME: &str = "inputParser";
 const ADD_PARAMETER_NAME: &str = "addParameter";
 const PARSE_NAME: &str = "parse";
@@ -212,7 +213,7 @@ fn new_results_struct(parameters: &StructValue) -> StructValue {
 
 fn parser_handle(value: &Value, builtin: &'static str) -> BuiltinResult<HandleRef> {
     match value {
-        Value::HandleObject(handle) if handle.class_name == CLASS_NAME => {
+        Value::HandleObject(handle) if handle.class_name.is(CLASS_IDENTITY) => {
             if crate::is_handle_valid(handle) {
                 Ok(handle.clone())
             } else {
@@ -233,7 +234,7 @@ fn with_parser_object_mut<R>(
         let Value::Object(obj) = target else {
             return Err(input_parser_error(builtin, &ERROR_INVALID_PARSER));
         };
-        if obj.class_name != CLASS_NAME {
+        if !obj.class_name.is(CLASS_IDENTITY) {
             return Err(input_parser_error(builtin, &ERROR_INVALID_PARSER));
         }
         let result = f(obj)?;
@@ -277,7 +278,7 @@ fn parameters_mut<'a>(
     builtin_path = "crate::builtins::introspection::input_parser"
 )]
 async fn input_parser_builtin() -> BuiltinResult<Value> {
-    let mut obj = ObjectInstance::new(CLASS_NAME.to_string());
+    let mut obj = ObjectInstance::new(CLASS_IDENTITY);
     obj.properties.insert(
         RESULTS_PROPERTY.to_string(),
         Value::Struct(StructValue::new()),
@@ -290,7 +291,7 @@ async fn input_parser_builtin() -> BuiltinResult<Value> {
         input_parser_error_with_detail(INPUT_PARSER_NAME, &ERROR_INVALID_PARSER, err.to_string())
     })?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: CLASS_NAME.to_string(),
+        class_name: CLASS_IDENTITY.owned(),
         target,
         valid: true,
     }))
@@ -412,7 +413,7 @@ mod tests {
         let Value::HandleObject(handle) = &parser else {
             panic!("expected handle");
         };
-        assert_eq!(handle.class_name, CLASS_NAME);
+        assert!(handle.class_name.is(CLASS_IDENTITY));
         assert!(crate::is_handle_valid(handle));
         let Value::Struct(results) = property(&parser, RESULTS_PROPERTY) else {
             panic!("expected Results struct");

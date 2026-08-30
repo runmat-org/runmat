@@ -2,11 +2,12 @@ use crate::{build_runtime_error, create_class_object, make_cell_with_shape, Runt
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::builtin_functions;
 
+use runmat_types::ClassIdentity;
 use runmat_value::Value;
 use std::cell::RefCell;
 
 thread_local! {
-    static CLASS_ACCESS_CONTEXT: RefCell<Option<String>> = const { RefCell::new(None) };
+    static CLASS_ACCESS_CONTEXT: RefCell<Option<ClassIdentity>> = const { RefCell::new(None) };
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -18,7 +19,7 @@ fn ensure_wasm_builtins_registered() {
 fn ensure_wasm_builtins_registered() {}
 
 pub struct ClassAccessContextGuard {
-    previous: Option<String>,
+    previous: Option<ClassIdentity>,
     context: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
@@ -35,7 +36,7 @@ impl Drop for ClassAccessContextGuard {
     }
 }
 
-pub fn push_class_access_context(class_name: Option<String>) -> ClassAccessContextGuard {
+pub fn push_class_access_context(class_name: Option<ClassIdentity>) -> ClassAccessContextGuard {
     let context =
         crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()));
     let previous = if let Some(context) = &context {
@@ -46,14 +47,14 @@ pub fn push_class_access_context(class_name: Option<String>) -> ClassAccessConte
     ClassAccessContextGuard { previous, context }
 }
 
-fn current_class_access_context() -> Option<String> {
+fn current_class_access_context() -> Option<ClassIdentity> {
     if let Some(context) = crate::context::legacy::active() {
         return context.state().call.borrow().class_access.clone();
     }
     CLASS_ACCESS_CONTEXT.with(|slot| slot.borrow().clone())
 }
 
-pub fn class_access_context() -> Option<String> {
+pub fn class_access_context() -> Option<ClassIdentity> {
     current_class_access_context()
 }
 
@@ -275,7 +276,11 @@ async fn call_builtin_async_impl(
             return compatibility_checked_builtin_result(name, args, result);
         }
         // Fallback: treat as class constructor if class is registered.
-        if crate::class_registry::get_class(name).is_some() {
+        if ClassIdentity::new(name)
+            .ok()
+            .and_then(|identity| crate::class_registry::get_class(&identity))
+            .is_some()
+        {
             let result = call_registered_class_constructor(name, args, output_count).await?;
             return compatibility_checked_builtin_result(name, args, result);
         }
@@ -601,11 +606,12 @@ pub(crate) async fn try_call_registered_instance_method(
         return Ok(None);
     };
     let class_name = match receiver {
-        Value::Object(obj) => obj.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
+        Value::Object(obj) => &obj.class_name,
+        Value::HandleObject(handle) => &handle.class_name,
         _ => return Ok(None),
     };
-    let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name)
+    let method_identity = runmat_types::MethodName::from(method_name);
+    let Some((method, owner)) = crate::class_registry::lookup_method(class_name, &method_identity)
     else {
         return Ok(None);
     };
@@ -615,9 +621,9 @@ pub(crate) async fn try_call_registered_instance_method(
     let caller_class = current_class_access_context();
     let access_allowed = match method.access {
         runmat_types::MemberAccess::Public => true,
-        runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_types::MemberAccess::Private => caller_class.as_ref() == Some(&owner),
         runmat_types::MemberAccess::Protected => caller_class
-            .as_deref()
+            .as_ref()
             .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
     };
     if !access_allowed {
@@ -635,13 +641,13 @@ pub(crate) async fn try_call_registered_instance_method(
     )
     .await
     {
-        return finalize_instance_method_result(method_name, receiver, result).map(Some);
+        return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
     }
     if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != method_name
     {
         let result = call_builtin_async_impl(&method.function_name, args, output_count).await;
-        return finalize_instance_method_result(method_name, receiver, result).map(Some);
+        return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
     }
     let owner_qualified = format!("{owner}.{method_name}");
     if owner_qualified != method.function_name {
@@ -652,25 +658,27 @@ pub(crate) async fn try_call_registered_instance_method(
         )
         .await
         {
-            return finalize_instance_method_result(method_name, receiver, result).map(Some);
+            return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
         }
         if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != method_name
         {
             let result = call_builtin_async_impl(&owner_qualified, args, output_count).await;
-            return finalize_instance_method_result(method_name, receiver, result).map(Some);
+            return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
         }
     }
     Ok(None)
 }
 
 fn finalize_instance_method_result(
-    method_name: &str,
+    method_name: &runmat_types::MethodName,
     receiver: &Value,
     result: Result<Value, RuntimeError>,
 ) -> Result<Value, RuntimeError> {
     let result = result?;
-    if method_name == "delete" {
+    const DELETE_METHOD: runmat_types::StaticMethodName =
+        runmat_types::StaticMethodName::new("delete");
+    if DELETE_METHOD.is(method_name) {
         if let Value::HandleObject(handle) = receiver {
             if !crate::set_handle_valid(handle, false) {
                 return Err(build_runtime_error(format!(
@@ -696,10 +704,15 @@ async fn try_call_registered_static_method(
     if class_name.trim().is_empty() || method_name.trim().is_empty() {
         return Ok(None);
     }
-    if crate::class_registry::get_class(class_name).is_none() {
+    let Ok(class_identity) = ClassIdentity::new(class_name) else {
+        return Ok(None);
+    };
+    if crate::class_registry::get_class(&class_identity).is_none() {
         return Ok(None);
     }
-    let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name)
+    let method_identity = runmat_types::MethodName::from(method_name);
+    let Some((method, owner)) =
+        crate::class_registry::lookup_method(&class_identity, &method_identity)
     else {
         return Ok(None);
     };
@@ -750,21 +763,31 @@ async fn call_registered_class_constructor(
     output_count: Option<usize>,
 ) -> Result<Value, RuntimeError> {
     let requested_outputs = output_count.unwrap_or(1);
+    let class_identity = ClassIdentity::new(class_name).map_err(|error| {
+        build_runtime_error(format!("Invalid class name '{class_name}': {error}"))
+            .with_identifier("RunMat:InvalidClassName")
+            .build()
+    })?;
     let default_object = create_class_object(class_name.to_string()).await?;
     let constructor_method_name = class_name.rsplit('.').next().unwrap_or(class_name);
-    let Some((ctor, owner)) =
-        crate::class_registry::lookup_method(class_name, constructor_method_name)
-            .or_else(|| crate::class_registry::lookup_method(class_name, class_name))
-    else {
+    let constructor_identity = runmat_types::MethodName::from(constructor_method_name);
+    let qualified_constructor_identity = runmat_types::MethodName::from(class_name);
+    let Some((ctor, owner)) = crate::class_registry::lookup_method(
+        &class_identity,
+        &constructor_identity,
+    )
+    .or_else(|| {
+        crate::class_registry::lookup_method(&class_identity, &qualified_constructor_identity)
+    }) else {
         return Ok(default_object);
     };
     let owner_qualified = format!("{owner}.{constructor_method_name}");
     let caller_class = current_class_access_context();
     let ctor_access_allowed = match ctor.access {
         runmat_types::MemberAccess::Public => true,
-        runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_types::MemberAccess::Private => caller_class.as_ref() == Some(&owner),
         runmat_types::MemberAccess::Protected => caller_class
-            .as_deref()
+            .as_ref()
             .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
     };
     if !ctor_access_allowed {
@@ -1253,7 +1276,7 @@ mod tests {
     #[test]
     fn value_contains_gpu_detects_nested_closure_captures() {
         let value = Value::Closure(Closure {
-            function_name: "worker".to_string(),
+            function_name: "worker".into(),
             bound_function: None,
             captures: vec![Value::GpuTensor(GpuTensorHandle {
                 shape: vec![1],
@@ -1300,7 +1323,7 @@ mod tests {
         runmat_accelerate_api::clear_provider();
         let _provider_guard = ThreadProviderGuard::set(None);
         let value = Value::Closure(Closure {
-            function_name: "worker".to_string(),
+            function_name: "worker".into(),
             bound_function: None,
             captures: vec![Value::GpuTensor(GpuTensorHandle {
                 shape: vec![1],
@@ -1337,9 +1360,9 @@ mod tests {
 
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
-            child_name.clone(),
+            child_name.clone().into(),
             crate::class_registry::RuntimeMethod {
-                name: child_name.clone(),
+                name: child_name.clone().into(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
@@ -1349,14 +1372,14 @@ mod tests {
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: parent_name.clone(),
+            name: parent_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: parent_methods,
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child_name.clone(),
-            parent: Some(parent_name),
+            name: child_name.clone().into(),
+            parent: Some(parent_name.into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });
@@ -1366,7 +1389,7 @@ mod tests {
         let Value::Object(obj) = out else {
             panic!("expected object from constructor dispatch");
         };
-        assert_eq!(obj.class_name, child_name);
+        assert_eq!(obj.class_name.display_name(), child_name);
         assert_eq!(obj.properties.get("x"), Some(&Value::Num(12.0)));
     }
 
@@ -1375,19 +1398,19 @@ mod tests {
         let private_class_name = unique_class_name("runtime_ctor_private");
         let mut private_methods = HashMap::new();
         private_methods.insert(
-            private_class_name.clone(),
+            private_class_name.clone().into(),
             crate::class_registry::RuntimeMethod {
-                name: private_class_name.clone(),
+                name: private_class_name.clone().into(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Private,
-                function_name: "Point.origin".to_string(),
+                function_name: "Point.origin".into(),
                 implicit_class_argument: None,
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: private_class_name.clone(),
+            name: private_class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: private_methods,
@@ -1399,9 +1422,9 @@ mod tests {
         let public_class_name = unique_class_name("runtime_ctor_public_no_semantic");
         let mut public_methods = HashMap::new();
         public_methods.insert(
-            public_class_name.clone(),
+            public_class_name.clone().into(),
             crate::class_registry::RuntimeMethod {
-                name: public_class_name.clone(),
+                name: public_class_name.clone().into(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
@@ -1411,7 +1434,7 @@ mod tests {
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: public_class_name.clone(),
+            name: public_class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: public_methods,
@@ -1422,7 +1445,7 @@ mod tests {
         let Value::Object(obj) = out else {
             panic!("expected object result");
         };
-        assert_eq!(obj.class_name, public_class_name);
+        assert_eq!(obj.class_name.display_name(), public_class_name);
     }
 
     #[test]
@@ -1430,15 +1453,15 @@ mod tests {
         let class_name = unique_class_name("runtime_static_dispatch");
         let fn_name = unique_class_name("runtime_static_fn");
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: class_name.clone(),
+            name: class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: {
                 let mut methods = HashMap::new();
                 methods.insert(
-                    "zero".to_string(),
+                    "zero".into(),
                     crate::class_registry::RuntimeMethod {
-                        name: "zero".to_string(),
+                        name: "zero".into(),
                         is_static: true,
                         is_abstract: false,
                         is_sealed: false,

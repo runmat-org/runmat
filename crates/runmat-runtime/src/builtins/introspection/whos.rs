@@ -690,7 +690,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. } => 0,
-        Value::ClassRef(name) => name.len().saturating_mul(2),
+        Value::ClassRef(name) => name.display_name().len().saturating_mul(2),
         Value::MException(exc) => {
             let base = exc
                 .message

@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_hir::{FunctionArgumentValidation, FunctionId};
 use runmat_types::{
-    CertaintyFact, DynamicReason, FactJoin, FunctionArgDim, FunctionArgValidator, NumericClass,
-    NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    standard, CertaintyFact, ClassIdentity, DynamicReason, FactJoin, FunctionArgDim,
+    FunctionArgValidator, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact,
+    ValueFact, ValueKindFact,
 };
 
 use crate::{MirAssembly, MirBody};
@@ -305,30 +306,22 @@ fn validation_fact(validation: &FunctionArgumentValidation) -> ValueFact {
 }
 
 fn class_fact(class: &str) -> Option<ValueKindFact> {
-    let numeric = match class.to_ascii_lowercase().as_str() {
-        "double" => Some(NumericClass::Double),
-        "single" => Some(NumericClass::Single),
-        "int8" => Some(NumericClass::Int8),
-        "uint8" => Some(NumericClass::UInt8),
-        "int16" => Some(NumericClass::Int16),
-        "uint16" => Some(NumericClass::UInt16),
-        "int32" => Some(NumericClass::Int32),
-        "uint32" => Some(NumericClass::UInt32),
-        "int64" => Some(NumericClass::Int64),
-        "uint64" => Some(NumericClass::UInt64),
-        _ => None,
-    };
+    let identity = ClassIdentity::new(class.to_ascii_lowercase()).ok()?;
+    let numeric = NumericClass::from_class_identity(&identity);
     if let Some(class) = numeric {
         return Some(ValueKindFact::Numeric(NumericFact {
             class,
             domain: NumericDomain::Real,
         }));
     }
-    match class.to_ascii_lowercase().as_str() {
-        "logical" => Some(ValueKindFact::Logical),
-        "char" => Some(ValueKindFact::Character),
-        "string" => Some(ValueKindFact::String),
-        _ => None,
+    if identity.is(standard::LOGICAL) {
+        Some(ValueKindFact::Logical)
+    } else if identity.is(standard::CHAR) {
+        Some(ValueKindFact::Character)
+    } else if identity.is(standard::STRING) {
+        Some(ValueKindFact::String)
+    } else {
+        None
     }
 }
 

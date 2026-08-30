@@ -189,7 +189,7 @@ pub(crate) mod tests {
             ismatrix_builtin(Value::String("runmat".into())).expect("ismatrix string");
         let func_result =
             ismatrix_builtin(Value::FunctionHandle("sin".into())).expect("ismatrix function");
-        let object = Value::Object(ObjectInstance::new("TestClass".into()));
+        let object = Value::Object(ObjectInstance::new("TestClass"));
         let object_result = ismatrix_builtin(object).expect("ismatrix object");
         assert_eq!(bool_result, Value::Bool(true));
         assert_eq!(string_result, Value::Bool(true));

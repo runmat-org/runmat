@@ -492,14 +492,14 @@ fn accumulate_semantic_regions(
         let region_id = format!("cad_layer_{}", stable_region_slug(layer));
         let region = Region {
             region_id: region_id.clone(),
-            name: layer.to_string(),
+            name: layer.into(),
             tag: Some("cad_layer".to_string()),
             cad_ownership: Some(CadRegionOwnership {
                 face_id: None,
                 curve_id: None,
                 label: Some(CadLabelRef {
                     label_entry: format!("layer:{layer}"),
-                    name: layer.to_string(),
+                    name: layer.into(),
                     kind: CadSemanticKind::Layer,
                 }),
                 owner_path: Vec::new(),
@@ -517,14 +517,14 @@ fn accumulate_semantic_regions(
             let region_id = format!("cad_color_{}", stable_region_slug(hex));
             let region = Region {
                 region_id: region_id.clone(),
-                name: hex.to_string(),
+                name: hex.into(),
                 tag: Some("cad_color".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: format!("color:{hex}"),
-                        name: hex.to_string(),
+                        name: hex.into(),
                         kind: CadSemanticKind::Color,
                     }),
                     owner_path: Vec::new(),
@@ -547,7 +547,7 @@ fn accumulate_semantic_regions(
             let region_id = format!("cad_material_{}", stable_region_slug(name));
             let region = Region {
                 region_id: region_id.clone(),
-                name: name.to_string(),
+                name: name.into(),
                 tag: Some("cad_material".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
@@ -558,7 +558,7 @@ fn accumulate_semantic_regions(
                         } else {
                             material.label_entry.clone()
                         },
-                        name: name.to_string(),
+                        name: name.into(),
                         kind: CadSemanticKind::Material,
                     }),
                     owner_path: Vec::new(),
@@ -687,7 +687,7 @@ mod tests {
     fn topology_regions_include_cad_semantic_ownership_regions() {
         let topology = OcctCadTopology {
             backend: "test".to_string(),
-            format_name: "step".to_string(),
+            format_name: "step".into(),
             truncated: false,
             triangle_budget: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
@@ -695,24 +695,24 @@ mod tests {
             triangle_face_ids: vec![0],
             faces: vec![OcctCadFace {
                 face_id: 0,
-                name: "Mount Face".to_string(),
+                name: "Mount Face".into(),
                 ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:1:7".to_string(),
-                        name: "Mount Face".to_string(),
+                        name: "Mount Face".into(),
                         kind: CadSemanticKind::Face,
                     }),
                     owner_path: vec![
                         CadLabelRef {
                             label_entry: "0:1".to_string(),
-                            name: "Assembly A".to_string(),
+                            name: "Assembly A".into(),
                             kind: CadSemanticKind::Assembly,
                         },
                         CadLabelRef {
                             label_entry: "0:1:1".to_string(),
-                            name: "Bracket".to_string(),
+                            name: "Bracket".into(),
                             kind: CadSemanticKind::Body,
                         },
                     ],
@@ -724,7 +724,7 @@ mod tests {
                     }),
                     material: Some(CadPhysicalMaterialEvidence {
                         label_entry: "0:5:1".to_string(),
-                        name: "Aluminum 6061".to_string(),
+                        name: "Aluminum 6061".into(),
                         description: Some("test material".to_string()),
                         density: Some("2.7".to_string()),
                         density_name: Some("density".to_string()),
@@ -772,7 +772,7 @@ mod tests {
     fn topology_result_preserves_truncated_preview_as_warning() {
         let topology = OcctCadTopology {
             backend: "test".to_string(),
-            format_name: "step".to_string(),
+            format_name: "step".into(),
             truncated: true,
             triangle_budget: Some(1),
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
@@ -780,7 +780,7 @@ mod tests {
             triangle_face_ids: vec![0],
             faces: vec![OcctCadFace {
                 face_id: 0,
-                name: "Face 1".to_string(),
+                name: "Face 1".into(),
                 ownership: None,
             }],
             face_evaluation_samples: vec![

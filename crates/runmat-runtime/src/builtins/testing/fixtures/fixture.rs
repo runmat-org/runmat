@@ -4,9 +4,12 @@ use runmat_value::{HandleRef, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
 
-const FIXTURE_CLASS: &str = "matlab.unittest.fixtures.Fixture";
-const PATH_FIXTURE_CLASS: &str = "matlab.unittest.fixtures.PathFixture";
-const TEMPORARY_FOLDER_FIXTURE_CLASS: &str = "matlab.unittest.fixtures.TemporaryFolderFixture";
+const FIXTURE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.fixtures.Fixture");
+const PATH_FIXTURE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.fixtures.PathFixture");
+const TEMPORARY_FOLDER_FIXTURE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.fixtures.TemporaryFolderFixture");
 
 static TEMPORARY_FOLDER_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -58,7 +61,8 @@ async fn temporary_folder_fixture(args: Vec<Value>) -> BuiltinResult<Value> {
 async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> {
     validate_test_case(&receiver)?;
     let handle = fixture_handle(&fixture)?;
-    if crate::class_registry::is_class_or_subclass(&handle.class_name, PATH_FIXTURE_CLASS) {
+    if crate::class_registry::is_class_or_subclass(&handle.class_name, &PATH_FIXTURE_CLASS.owned())
+    {
         let path = handle_text_property(&handle, "Path")?;
         crate::call_builtin_async("addpath", &[Value::String(path.clone())]).await?;
         crate::testing::record_runtime_teardown(
@@ -68,7 +72,7 @@ async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> 
         .map_err(|message| testing_error("applyFixture", message))?;
     } else if crate::class_registry::is_class_or_subclass(
         &handle.class_name,
-        TEMPORARY_FOLDER_FIXTURE_CLASS,
+        &TEMPORARY_FOLDER_FIXTURE_CLASS.owned(),
     ) {
         let folder = temporary_folder_path();
         runmat_filesystem::create_dir_all_async(&folder)
@@ -85,7 +89,10 @@ async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> 
             vec![Value::String(folder), Value::String("s".into())],
         )
         .map_err(|message| testing_error("applyFixture", message))?;
-    } else if !crate::class_registry::is_class_or_subclass(&handle.class_name, FIXTURE_CLASS) {
+    } else if !crate::class_registry::is_class_or_subclass(
+        &handle.class_name,
+        &FIXTURE_CLASS.owned(),
+    ) {
         return Err(testing_error(
             "applyFixture",
             format!(
@@ -124,11 +131,16 @@ fn fixture_handle(value: &Value) -> BuiltinResult<HandleRef> {
 fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
     crate::testing::ensure_testing_classes();
     let class_name = match receiver {
-        Value::Object(object) => object.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
-        _ => "",
+        Value::Object(object) => Some(&object.class_name),
+        Value::HandleObject(handle) => Some(&handle.class_name),
+        _ => None,
     };
-    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if class_name.is_some_and(|identity| {
+        crate::class_registry::is_class_or_subclass(
+            identity,
+            &crate::testing::TEST_CASE_CLASS.owned(),
+        )
+    }) {
         Ok(())
     } else {
         Err(testing_error(

@@ -84,7 +84,7 @@ pub fn through_hole_plate_geometry() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "body".to_string(),
-            name: "body".to_string(),
+            name: "body".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         }],
@@ -105,13 +105,13 @@ pub fn split_material_through_hole_plate_geometry() -> GeometryAsset {
     geometry.regions = vec![
         Region {
             region_id: "region_base".to_string(),
-            name: "base".to_string(),
+            name: "base".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "region_cap".to_string(),
-            name: "cap".to_string(),
+            name: "cap".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
@@ -191,7 +191,7 @@ pub fn nested_tetrahedron_shell_geometry() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "body".to_string(),
-            name: "body".to_string(),
+            name: "body".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         }],

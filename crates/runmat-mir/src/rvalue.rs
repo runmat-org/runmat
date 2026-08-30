@@ -3,6 +3,7 @@ use runmat_hir::{
     CallSyntax, FunctionId, MemberName, OperatorKind, QualifiedName, RequestedOutputCount,
     SymbolName,
 };
+use runmat_types::ClassIdentity;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,7 +50,7 @@ pub enum MirRvalue {
     },
     WorkspaceFirstStaticProperty {
         workspace_name: SymbolName,
-        class_name: String,
+        class_name: ClassIdentity,
         property: MemberName,
     },
     MetaClass(QualifiedName),

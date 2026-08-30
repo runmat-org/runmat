@@ -22,11 +22,16 @@ fn add_teardown(receiver: Value, callback: Value, arguments: Vec<Value>) -> Buil
 fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
     crate::testing::ensure_testing_classes();
     let class_name = match receiver {
-        Value::Object(object) => object.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
-        _ => "",
+        Value::Object(object) => Some(&object.class_name),
+        Value::HandleObject(handle) => Some(&handle.class_name),
+        _ => None,
     };
-    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if class_name.is_some_and(|identity| {
+        crate::class_registry::is_class_or_subclass(
+            identity,
+            &crate::testing::TEST_CASE_CLASS.owned(),
+        )
+    }) {
         Ok(())
     } else {
         Err(

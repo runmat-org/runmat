@@ -210,7 +210,10 @@ fn encode_type(hash: &mut Sha256, ty: &Type) {
         }
         Type::Object { class_name, shape } => {
             field(hash, b"object");
-            optional(hash, class_name.as_deref());
+            optional(
+                hash,
+                class_name.as_ref().map(|identity| identity.display_name()),
+            );
             encode_shape(hash, shape);
         }
         Type::OutputList(types) => {

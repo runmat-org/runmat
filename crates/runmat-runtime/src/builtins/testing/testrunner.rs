@@ -3,7 +3,8 @@ use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
 
-const TEST_RUNNER_CLASS: &str = "matlab.unittest.TestRunner";
+const TEST_RUNNER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.TestRunner");
 
 fn runner_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Object {
@@ -40,20 +41,23 @@ async fn with_text_output(options: Vec<Value>) -> BuiltinResult<Value> {
 fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
     crate::testing::ensure_testing_classes();
     let plugin_class = match &plugin {
-        Value::Object(object) => object.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
-        _ => "",
+        Value::Object(object) => Some(&object.class_name),
+        Value::HandleObject(handle) => Some(&handle.class_name),
+        _ => None,
     };
-    if !crate::class_registry::is_class_or_subclass(
-        plugin_class,
-        "matlab.unittest.plugins.TestRunnerPlugin",
-    ) {
+    if !plugin_class.is_some_and(|identity| {
+        crate::class_registry::is_class_or_subclass(
+            identity,
+            &runmat_types::standard::UNIT_TEST_RUNNER_PLUGIN.owned(),
+        )
+    }) {
         return Err(runner_error("addPlugin requires a TestRunnerPlugin"));
     }
     let Value::HandleObject(handle) = &runner else {
         return Err(runner_error("addPlugin requires a TestRunner handle"));
     };
-    if !crate::class_registry::is_class_or_subclass(&handle.class_name, TEST_RUNNER_CLASS) {
+    if !crate::class_registry::is_class_or_subclass(&handle.class_name, &TEST_RUNNER_CLASS.owned())
+    {
         return Err(runner_error("addPlugin requires a TestRunner handle"));
     }
     runmat_gc::gc_with_value_mut(&handle.target, |target| match target {
@@ -94,7 +98,8 @@ async fn run(runner: Value, suite: Value) -> BuiltinResult<Value> {
     let Value::HandleObject(handle) = &runner else {
         return Err(runner_error("TestRunner.run requires a TestRunner handle"));
     };
-    if !crate::class_registry::is_class_or_subclass(&handle.class_name, TEST_RUNNER_CLASS) {
+    if !crate::class_registry::is_class_or_subclass(&handle.class_name, &TEST_RUNNER_CLASS.owned())
+    {
         return Err(runner_error("TestRunner.run requires a TestRunner handle"));
     }
     let plugins = runmat_gc::gc_with_value(&handle.target, |target| {

@@ -1003,7 +1003,7 @@ async fn run_minmax_case(
     };
 
     Ok(CaseReport {
-        name: name.to_string(),
+        name: name.into(),
         category: "minmax".to_string(),
         detail: format!("{:?} {}x{} dim {}", kind, rows, cols, dim),
         input_shapes: vec![(rows, cols)],
@@ -1081,7 +1081,7 @@ async fn run_composite_atda_case(
     };
 
     Ok(CaseReport {
-        name: name.to_string(),
+        name: name.into(),
         category: "composite".to_string(),
         detail: format!("At^T * diag(D) * A {}x{}", rows, cols),
         input_shapes: vec![(rows, cols), (cols, cols)],
@@ -1170,7 +1170,7 @@ where
     };
 
     Ok(CaseReport {
-        name: name.to_string(),
+        name: name.into(),
         category: category.to_string(),
         detail,
         input_shapes: inputs.iter().map(|m| (m.rows, m.cols)).collect(),

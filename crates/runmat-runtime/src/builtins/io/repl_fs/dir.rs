@@ -507,7 +507,7 @@ fn record_from_metadata(folder: &str, name: String, metadata: &vfs::FsMetadata) 
 fn make_special(name: &str, folder: &str, metadata: Option<&vfs::FsMetadata>) -> DirRecord {
     let (date, datenum) = timestamp_fields(metadata.and_then(|m| m.modified()));
     DirRecord {
-        name: name.to_string(),
+        name: name.into(),
         folder: folder.to_string(),
         date,
         bytes: 0.0,

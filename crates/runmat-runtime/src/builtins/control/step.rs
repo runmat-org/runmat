@@ -385,7 +385,7 @@ fn is_plot_style_arg(value: &Value) -> bool {
 }
 
 fn is_tf_object(value: &Value) -> bool {
-    matches!(value, Value::Object(object) if object.is_class("tf"))
+    matches!(value, Value::Object(object) if object.is_class(runmat_types::standard::TRANSFER_FUNCTION))
 }
 
 #[derive(Clone, Debug)]
@@ -403,7 +403,7 @@ impl TransferFunction {
                 "expected a tf object",
             ));
         };
-        if !object.is_class("tf") {
+        if !object.is_class(runmat_types::standard::TRANSFER_FUNCTION) {
             return Err(step_error_with_detail(
                 &STEP_ERROR_INVALID_MODEL,
                 format!("expected a tf object, got {}", object.class_name),

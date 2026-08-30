@@ -1214,7 +1214,7 @@ mod tests {
                 let handle =
                     gc_allocate(Value::String("thread-root".to_string())).expect("allocation");
                 let root_value = Value::HandleObject(HandleRef {
-                    class_name: "ThreadRoot".to_string(),
+                    class_name: "ThreadRoot".into(),
                     target: handle,
                     valid: true,
                 });

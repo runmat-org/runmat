@@ -1993,7 +1993,7 @@ mod tests {
             .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
         state.context.locals.push(Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target,
             valid: true,
         }));
@@ -2031,7 +2031,7 @@ mod tests {
             .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
         let local_value = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target,
             valid: true,
         });
@@ -2141,7 +2141,7 @@ mod tests {
             .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
         state.vars = vec![Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target,
             valid: true,
         })];
@@ -2180,7 +2180,7 @@ mod tests {
             .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
         let nested = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target,
             valid: true,
         });
@@ -2221,7 +2221,7 @@ mod tests {
             .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
         let nested = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target,
             valid: true,
         });
@@ -2263,7 +2263,7 @@ mod tests {
             .context
             .call_stack
             .push(crate::bytecode::program::CallFrame {
-                function_name: "<local>".to_string(),
+                function_name: "<local>".into(),
                 return_address: 0,
                 locals_start: 0,
                 locals_count: 1,
@@ -2305,7 +2305,7 @@ mod tests {
             .context
             .call_stack
             .push(crate::bytecode::program::CallFrame {
-                function_name: "<local>".to_string(),
+                function_name: "<local>".into(),
                 return_address: 0,
                 locals_start: 0,
                 locals_count: 2,
@@ -2348,7 +2348,7 @@ mod tests {
             .context
             .call_stack
             .push(crate::bytecode::program::CallFrame {
-                function_name: "<local>".to_string(),
+                function_name: "<local>".into(),
                 return_address: 0,
                 locals_start: 0,
                 locals_count: 1,
@@ -2393,14 +2393,14 @@ mod tests {
             .context
             .call_stack
             .push(crate::bytecode::program::CallFrame {
-                function_name: "<local>".to_string(),
+                function_name: "<local>".into(),
                 return_address: 0,
                 locals_start: 0,
                 locals_count: 1,
                 expected_outputs: 0,
             });
         state.context.locals.push(Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target,
             valid: true,
         }));
@@ -2437,7 +2437,7 @@ mod tests {
             .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
         let local_value = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target,
             valid: true,
         });
@@ -2447,7 +2447,7 @@ mod tests {
             .context
             .call_stack
             .push(crate::bytecode::program::CallFrame {
-                function_name: "<local>".to_string(),
+                function_name: "<local>".into(),
                 return_address: 0,
                 locals_start: 0,
                 locals_count: 1,
@@ -2489,7 +2489,7 @@ mod tests {
             .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
         let nested = Value::HandleObject(HandleRef {
-            class_name: "Payload".to_string(),
+            class_name: "Payload".into(),
             target,
             valid: true,
         });
@@ -2499,7 +2499,7 @@ mod tests {
             .context
             .call_stack
             .push(crate::bytecode::program::CallFrame {
-                function_name: "<local>".to_string(),
+                function_name: "<local>".into(),
                 return_address: 0,
                 locals_start: 0,
                 locals_count: 2,

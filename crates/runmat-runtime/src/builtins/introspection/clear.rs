@@ -388,7 +388,7 @@ mod tests {
         let cleanup = block_on(
             crate::builtins::introspection::on_cleanup::on_cleanup_builtin(
                 Value::BoundFunctionHandle {
-                    name: "cleanup".to_string(),
+                    name: "cleanup".into(),
                     function: 11,
                 },
             ),

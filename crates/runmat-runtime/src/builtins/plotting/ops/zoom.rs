@@ -23,7 +23,8 @@ use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "zoom";
-const ZOOM_CLASS_NAME: &str = "matlab.graphics.interaction.internal.zoom";
+const ZOOM_CLASS_NAME: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.graphics.interaction.internal.zoom");
 
 const ZOOM_INTEGER_TARGET_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "zoom-integer-target-handle",
@@ -395,7 +396,7 @@ fn zoom_object_from_snapshot(snapshot: ZoomStateSnapshot) -> BuiltinResult<Value
     let target =
         runmat_gc::gc_allocate(Value::Object(object)).map_err(|err| internal(err.to_string()))?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: ZOOM_CLASS_NAME.to_string(),
+        class_name: ZOOM_CLASS_NAME.into(),
         target,
         valid: true,
     }))

@@ -43,11 +43,12 @@ pub const CLASSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::introspection::classref"
 )]
 pub async fn classref_builtin(class_name: String) -> crate::BuiltinResult<Value> {
-    if matches!(
-        class_name.as_str(),
-        crate::builtins::introspection::object_indexing::INDEXING_CONTEXT_CLASS
-            | crate::builtins::introspection::object_indexing::LEGACY_INDEXING_CONTEXT_CLASS
-    ) {
+    let identity = runmat_types::ClassIdentity::new(&class_name)
+        .map_err(|error| crate::build_runtime_error(error.to_string()).build())?;
+    if identity.is(crate::builtins::introspection::object_indexing::INDEXING_CONTEXT_CLASS)
+        || identity
+            .is(crate::builtins::introspection::object_indexing::LEGACY_INDEXING_CONTEXT_CLASS)
+    {
         crate::builtins::introspection::object_indexing::ensure_indexing_context_classes_registered(
         );
     }

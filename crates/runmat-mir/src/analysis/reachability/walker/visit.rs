@@ -154,13 +154,11 @@ impl Walker<'_> {
                 }
             }
             MirRvalue::ObjectLiteral { class_name, fields } => {
-                self.class(
-                    from,
-                    &class_name
-                        .display_name()
-                        .unwrap_or_else(|| "<class>".into()),
-                    Reason::ClassReference,
-                );
+                if let Ok(class_identity) =
+                    runmat_types::ClassIdentity::from_qualified_name(class_name)
+                {
+                    self.class(from, &class_identity, Reason::ClassReference);
+                }
                 for (_, value) in fields {
                     self.operand(from, value, Reason::FunctionHandle);
                 }
@@ -177,13 +175,13 @@ impl Walker<'_> {
             MirRvalue::WorkspaceFirstStaticProperty { class_name, .. } => {
                 self.class(from, class_name, Reason::ClassReference);
             }
-            MirRvalue::MetaClass(class_name) => self.class(
-                from,
-                &class_name
-                    .display_name()
-                    .unwrap_or_else(|| "<class>".into()),
-                Reason::ClassReference,
-            ),
+            MirRvalue::MetaClass(class_name) => {
+                if let Ok(class_identity) =
+                    runmat_types::ClassIdentity::from_qualified_name(class_name)
+                {
+                    self.class(from, &class_identity, Reason::ClassReference);
+                }
+            }
             MirRvalue::Future { function, args, .. } => {
                 self.retain_function(
                     *function,

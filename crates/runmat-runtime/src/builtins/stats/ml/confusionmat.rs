@@ -488,7 +488,7 @@ fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
                 categories: None,
             })
         }
-        Value::Object(object) if object.is_class("categorical") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             ensure_categorical_vector_shape(&object, name)?;
             let labels = crate::builtins::table::categorical_labels(&Value::Object(object.clone()))?
                 .into_iter()
@@ -1207,7 +1207,7 @@ mod tests {
         let Value::Object(order) = &values[1] else {
             panic!("categorical order");
         };
-        assert!(order.is_class("categorical"));
+        assert!(order.is_class(runmat_types::standard::CATEGORICAL));
         let order_labels =
             crate::builtins::table::categorical_labels(&Value::Object(order.clone())).unwrap();
         assert_eq!(order_labels, vec!["low", "medium", "high"]);

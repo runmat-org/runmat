@@ -1,18 +1,28 @@
 use crate::interpreter::errors::mex;
 use runmat_runtime::RuntimeError;
-use runmat_types::MemberAccess;
+use runmat_types::{ClassIdentity, MemberAccess};
 use runmat_value::Value;
 
+pub struct RuntimeClassPropertyRegistration {
+    pub name: runmat_types::MemberName,
+    pub is_static: bool,
+    pub is_constant: bool,
+    pub is_dependent: bool,
+    pub default_value: Option<Value>,
+    pub get_access: MemberAccess,
+    pub set_access: MemberAccess,
+}
+
 pub fn register_class(
-    name: String,
-    super_class: Option<String>,
+    name: ClassIdentity,
+    super_class: Option<ClassIdentity>,
     is_sealed: bool,
     is_abstract: bool,
-    properties: Vec<(String, bool, bool, Option<Value>, String, String)>,
-    methods: Vec<(String, String, bool, bool, bool, String)>,
+    properties: Vec<RuntimeClassPropertyRegistration>,
+    methods: Vec<crate::bytecode::instr::BytecodeClassMethod>,
     enumerations: Vec<String>,
 ) -> Result<(), RuntimeError> {
-    if let Some(parent) = super_class.as_deref() {
+    if let Some(parent) = super_class.as_ref() {
         if runmat_runtime::class_registry::is_class_sealed(parent) {
             return Err(mex(
                 "RunMat:ClassSealed",
@@ -21,63 +31,37 @@ pub fn register_class(
         }
     }
     let mut prop_map = std::collections::HashMap::new();
-    for (p, is_static, is_constant, default_value, get_access, set_access) in properties {
-        let gacc = if get_access.eq_ignore_ascii_case("private") {
-            MemberAccess::Private
-        } else if get_access.eq_ignore_ascii_case("protected") {
-            MemberAccess::Protected
-        } else {
-            MemberAccess::Public
-        };
-        let sacc = if set_access.eq_ignore_ascii_case("private") {
-            MemberAccess::Private
-        } else if set_access.eq_ignore_ascii_case("protected") {
-            MemberAccess::Protected
-        } else {
-            MemberAccess::Public
-        };
-        let (is_dep, clean_name) = if let Some(stripped) = p.strip_prefix("@dep:") {
-            (true, stripped.to_string())
-        } else {
-            (false, p.clone())
-        };
+    for property in properties {
         prop_map.insert(
-            clean_name.clone(),
+            property.name.clone(),
             runmat_runtime::class_registry::RuntimeProperty {
-                name: clean_name,
-                is_static,
-                is_constant,
-                is_dependent: is_dep,
-                get_access: gacc,
-                set_access: sacc,
-                default_value,
+                name: property.name,
+                is_static: property.is_static,
+                is_constant: property.is_constant,
+                is_dependent: property.is_dependent,
+                get_access: property.get_access,
+                set_access: property.set_access,
+                default_value: property.default_value,
             },
         );
     }
     let mut method_map = std::collections::HashMap::new();
-    for (mname, fname, is_static, is_method_abstract, is_method_sealed, access) in methods {
-        let access = if access.eq_ignore_ascii_case("private") {
-            MemberAccess::Private
-        } else if access.eq_ignore_ascii_case("protected") {
-            MemberAccess::Protected
-        } else {
-            MemberAccess::Public
-        };
+    for method in methods {
         method_map.insert(
-            mname.clone(),
+            method.name.clone(),
             runmat_runtime::class_registry::RuntimeMethod {
-                name: mname,
-                is_static,
-                is_abstract: is_method_abstract,
-                is_sealed: is_method_sealed,
-                access,
-                function_name: fname,
+                name: method.name,
+                is_static: method.is_static,
+                is_abstract: method.is_abstract,
+                is_sealed: method.is_sealed,
+                access: method.access,
+                function_name: method.function_name,
                 implicit_class_argument: None,
             },
         );
     }
 
-    let inherited_sealed = collect_inherited_sealed_methods(super_class.as_deref());
+    let inherited_sealed = collect_inherited_sealed_methods(super_class.as_ref());
     if let Some(conflict) = method_map
         .keys()
         .find(|method_name| inherited_sealed.contains(*method_name))
@@ -92,7 +76,7 @@ pub fn register_class(
     }
 
     if !is_abstract {
-        let mut required_abstract = collect_required_abstract_methods(super_class.as_deref());
+        let mut required_abstract = collect_required_abstract_methods(super_class.as_ref());
         for (method_name, method) in &method_map {
             if method.is_abstract {
                 required_abstract.insert(method_name.clone());
@@ -122,11 +106,11 @@ pub fn register_class(
 }
 
 fn collect_required_abstract_methods(
-    super_class: Option<&str>,
-) -> std::collections::HashSet<String> {
+    super_class: Option<&ClassIdentity>,
+) -> std::collections::HashSet<runmat_types::MethodName> {
     let mut lineage = Vec::new();
     let mut visited = std::collections::HashSet::new();
-    let mut cursor = super_class.map(str::to_string);
+    let mut cursor = super_class.cloned();
     while let Some(class_name) = cursor {
         if !visited.insert(class_name.clone()) {
             break;
@@ -152,11 +136,11 @@ fn collect_required_abstract_methods(
 }
 
 fn collect_inherited_sealed_methods(
-    super_class: Option<&str>,
-) -> std::collections::HashSet<String> {
+    super_class: Option<&ClassIdentity>,
+) -> std::collections::HashSet<runmat_types::MethodName> {
     let mut sealed = std::collections::HashSet::new();
     let mut visited = std::collections::HashSet::new();
-    let mut cursor = super_class.map(str::to_string);
+    let mut cursor = super_class.cloned();
     while let Some(class_name) = cursor {
         if !visited.insert(class_name.clone()) {
             break;

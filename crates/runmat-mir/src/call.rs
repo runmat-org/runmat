@@ -6,6 +6,7 @@ use runmat_builtins::{
 use runmat_hir::{
     CallSyntax, CallableFallbackPolicy, CallableIdentity, RequestedOutputCount, Span,
 };
+use runmat_types::{ClassIdentity, MethodName};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,13 +33,13 @@ pub struct MirCall {
 pub enum MirCallee {
     Static(CallableIdentity),
     SuperConstructor {
-        current_class: String,
-        super_class: String,
+        current_class: ClassIdentity,
+        super_class: ClassIdentity,
     },
     SuperMethod {
-        current_class: String,
-        super_class: String,
-        method: String,
+        current_class: ClassIdentity,
+        super_class: ClassIdentity,
+        method: MethodName,
     },
     Dynamic(MirOperand),
 }

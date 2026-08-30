@@ -1180,11 +1180,12 @@ pub fn validate_resident_metadata(value: &Value) -> BuiltinResult<()> {
     let integer = handle_integer_type(handle);
     let logical = handle_is_logical(handle);
     let precision = runmat_accelerate_api::handle_precision(handle);
-    let expected_class =
-        crate::builtins::common::gpu_helpers::expected_gpu_class_name(precision, integer, logical);
-    let class_valid = runmat_accelerate_api::handle_class_name(handle)
-        .as_deref()
-        .is_none_or(|class_name| Some(class_name) == expected_class);
+    let expected_class = crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
+        precision, integer, logical,
+    );
+    let class_valid = runmat_accelerate_api::handle_class_identity(handle)
+        .as_ref()
+        .is_none_or(|class_identity| Some(class_identity) == expected_class.as_ref());
     let physical_valid = if integer.is_some() {
         storage == GpuTensorStorage::Real && precision.is_none() && !logical
     } else if logical {
@@ -1487,9 +1488,9 @@ fn logical_value_all_true(value: &Value) -> BuiltinResult<bool> {
 }
 
 fn ensure_same_numeric_class(builtin: &str, lhs: &Value, rhs: &Value) -> BuiltinResult<()> {
-    let lhs = numeric_class_name(lhs)
+    let lhs = numeric_class_identity(lhs)
         .ok_or_else(|| invalid_argument_error(builtin, "expected numeric input"))?;
-    let rhs = numeric_class_name(rhs)
+    let rhs = numeric_class_identity(rhs)
         .ok_or_else(|| invalid_argument_error(builtin, "expected numeric bound"))?;
     if lhs != rhs {
         return Err(invalid_argument_error(
@@ -1501,25 +1502,27 @@ fn ensure_same_numeric_class(builtin: &str, lhs: &Value, rhs: &Value) -> Builtin
     Ok(())
 }
 
-fn numeric_class_name(value: &Value) -> Option<String> {
+fn numeric_class_identity(value: &Value) -> Option<runmat_types::ClassIdentity> {
     match value {
-        Value::GpuTensor(handle) if handle_is_logical(handle) => Some("logical".into()),
+        Value::GpuTensor(handle) if handle_is_logical(handle) => {
+            Some(runmat_types::standard::LOGICAL.owned())
+        }
         Value::GpuTensor(handle) if handle_integer_type(handle).is_some() => {
-            crate::builtins::common::gpu_helpers::expected_gpu_class_name(
+            crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
                 None,
                 handle_integer_type(handle),
                 false,
             )
-            .map(str::to_owned)
         }
-        Value::GpuTensor(handle) => crate::builtins::common::gpu_helpers::expected_gpu_class_name(
-            runmat_accelerate_api::handle_precision(handle),
-            None,
-            false,
-        )
-        .map(str::to_owned),
+        Value::GpuTensor(handle) => {
+            crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
+                runmat_accelerate_api::handle_precision(handle),
+                None,
+                false,
+            )
+        }
         _ if value_is_numeric_or_logical(value) => {
-            Some(class_name_for_value(value).to_ascii_lowercase())
+            runmat_types::ClassIdentity::new(class_name_for_value(value)).ok()
         }
         _ => None,
     }
@@ -1829,13 +1832,16 @@ pub async fn value_is_member_async(value: &Value, set: &Value) -> BuiltinResult<
 }
 
 fn ensure_member_class_compatibility(value: &Value, set: &Value) -> BuiltinResult<()> {
-    let Some(value_class) = numeric_class_name(value) else {
+    let Some(value_class) = numeric_class_identity(value) else {
         return Ok(());
     };
-    let Some(set_class) = numeric_class_name(set) else {
+    let Some(set_class) = numeric_class_identity(set) else {
         return Ok(());
     };
-    if value_class == set_class || value_class == "double" || set_class == "double" {
+    if value_class == set_class
+        || value_class.is(runmat_types::standard::DOUBLE)
+        || set_class.is(runmat_types::standard::DOUBLE)
+    {
         return Ok(());
     }
     Err(invalid_argument_error(

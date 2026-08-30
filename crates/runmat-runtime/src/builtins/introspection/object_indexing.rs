@@ -12,9 +12,12 @@ use runmat_types::MemberAccess;
 use runmat_value::{NumericScalar, Value};
 use std::sync::OnceLock;
 
-pub(crate) const NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD: &str = "numArgumentsFromSubscript";
-pub(crate) const INDEXING_CONTEXT_CLASS: &str = "matlab.indexing.IndexingContext";
-pub(crate) const LEGACY_INDEXING_CONTEXT_CLASS: &str = "matlab.mixin.util.IndexingContext";
+pub(crate) const NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD: runmat_types::StaticMethodName =
+    runmat_types::StaticMethodName::new("numArgumentsFromSubscript");
+pub(crate) const INDEXING_CONTEXT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.indexing.IndexingContext");
+pub(crate) const LEGACY_INDEXING_CONTEXT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.mixin.util.IndexingContext");
 const INDEXING_CONTEXT_STATEMENT: &str = "Statement";
 const INDEXING_CONTEXT_EXPRESSION: &str = "Expression";
 const INDEXING_CONTEXT_ASSIGNMENT: &str = "Assignment";
@@ -332,15 +335,15 @@ pub(crate) fn ensure_indexing_context_classes_registered() {
     });
 }
 
-fn register_indexing_context_class(name: &str) {
+fn register_indexing_context_class(name: runmat_types::StaticClassIdentity) {
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: name.to_string(),
+        name: name.into(),
         parent: None,
         properties: std::collections::HashMap::new(),
         methods: std::collections::HashMap::new(),
     });
     crate::class_registry::register_class_enumerations(
-        name,
+        &name.owned(),
         [
             INDEXING_CONTEXT_STATEMENT.to_string(),
             INDEXING_CONTEXT_EXPRESSION.to_string(),
@@ -354,7 +357,7 @@ fn num_args_error(
     detail: impl Into<String>,
 ) -> crate::RuntimeError {
     crate::runtime_descriptor_error_with_detail(
-        NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD,
+        NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.display_name(),
         descriptor,
         detail.into(),
     )
@@ -660,15 +663,16 @@ fn default_num_arguments(
 }
 
 async fn dispatch_num_arguments_overload(
-    class_name: String,
+    class_name: runmat_types::ClassIdentity,
     target: Value,
     subscript: Value,
     indexing_context: Value,
 ) -> crate::BuiltinResult<Option<Value>> {
     let args = vec![target, subscript, indexing_context];
-    if let Some((method, owner)) =
-        crate::class_registry::lookup_method(&class_name, NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD)
-    {
+    if let Some((method, owner)) = crate::class_registry::lookup_method(
+        &class_name,
+        &NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.owned(),
+    ) {
         let owner_member = format!("{owner}.{NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD}");
         let mut candidates = vec![method.function_name];
         if !candidates
@@ -692,7 +696,7 @@ async fn dispatch_num_arguments_overload(
         }
         return Err(undefined.unwrap_or_else(|| {
             crate::runtime_descriptor_error_with_detail(
-                NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD,
+                NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.display_name(),
                 &NUM_ARGUMENTS_ERROR_ARGUMENT,
                 "registered method did not resolve to a callable implementation",
             )
@@ -701,7 +705,7 @@ async fn dispatch_num_arguments_overload(
 
     match crate::dispatch_object_external_member(
         class_name,
-        NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD,
+        NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.display_name(),
         args,
         1,
     )
@@ -728,7 +732,7 @@ pub(crate) async fn dispatch_subsref(
             let dispatch_payload = payload.clone();
             match crate::dispatch_object_external_member(
                 class_name,
-                crate::OBJECT_SUBSREF_METHOD,
+                crate::OBJECT_SUBSREF_METHOD.display_name(),
                 vec![
                     dispatch_receiver,
                     Value::String(dispatch_kind),
@@ -786,7 +790,7 @@ pub(crate) async fn dispatch_subsasgn(
             let dispatch_rhs = rhs.clone();
             match crate::dispatch_object_external_member(
                 class_name,
-                crate::OBJECT_SUBSASGN_METHOD,
+                crate::OBJECT_SUBSASGN_METHOD.display_name(),
                 vec![
                     dispatch_receiver,
                     Value::String(dispatch_kind),
@@ -1185,9 +1189,9 @@ mod tests {
         let child = "NumArgsFromSubscriptChild";
         let mut methods = HashMap::new();
         methods.insert(
-            NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.to_string(),
+            NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.into(),
             crate::class_registry::RuntimeMethod {
-                name: NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.to_string(),
+                name: NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
@@ -1197,14 +1201,14 @@ mod tests {
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: base.to_string(),
+            name: base.into(),
             parent: None,
             properties: HashMap::new(),
             methods,
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child.to_string(),
-            parent: Some(base.to_string()),
+            name: child.into(),
+            parent: Some(base.into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });

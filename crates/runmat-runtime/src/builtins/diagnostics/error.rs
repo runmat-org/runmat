@@ -381,7 +381,11 @@ async fn error_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             let (identifier, message) = extract_struct_error_fields(st)?;
             Err(error_flow(&identifier, &message))
         }
-        Value::Object(object) if object.class_name.starts_with("matlab.lang.correction.") => {
+        Value::Object(object)
+            if object
+                .class_name
+                .is_in_namespace(runmat_types::standard::LANGUAGE_CORRECTION_NAMESPACE) =>
+        {
             Err(error_error(&ERROR_ERROR_CORRECTION_UNSUPPORTED))
         }
         other => handle_message_arguments(other, rest).await,

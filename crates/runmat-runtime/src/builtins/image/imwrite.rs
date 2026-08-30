@@ -1891,7 +1891,7 @@ mod tests {
             );
 
             let bad_path = dir.path().join("bad.png");
-            runmat_accelerate_api::set_handle_class_name(&handle, "uint16");
+            runmat_accelerate_api::set_handle_class_identity(&handle, "uint16");
             let err = call(vec![
                 Value::GpuTensor(handle),
                 Value::from(bad_path.to_string_lossy().as_ref()),

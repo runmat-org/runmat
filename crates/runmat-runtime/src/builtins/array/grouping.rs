@@ -1738,7 +1738,7 @@ fn ensure_findgroups_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<
         )?;
     }
     if let Value::Object(object) = first {
-        if object.is_class("timetable") {
+        if object.is_class(runmat_types::standard::TIMETABLE) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &FINDGROUPS_TIMETABLE_EXTENSION,
                 "findgroups",
@@ -1836,25 +1836,27 @@ fn findgroups_vector_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
         }
         Value::StringArray(array) => Ok(array.shape.clone()),
         Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
-        Value::Object(object) if object.is_class("categorical") => object
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => object
             .properties
             .get("Codes")
             .map(findgroups_vector_shape)
             .transpose()
             .map(|shape| shape.unwrap_or_else(|| vec![0, 1])),
-        Value::Object(object) if object.is_class("datetime") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value).map(|tensor| tensor.shape)
         }
-        Value::Object(object) if object.is_class("duration") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .map(|tensor| tensor.shape)
         }
-        Value::Object(object) if object.is_class("calendarDuration") => object
-            .properties
-            .get("__months")
-            .map(findgroups_vector_shape)
-            .transpose()
-            .map(|shape| shape.unwrap_or_else(|| vec![0, 1])),
+        Value::Object(object) if object.is_class(runmat_types::standard::CALENDAR_DURATION) => {
+            object
+                .properties
+                .get("__months")
+                .map(findgroups_vector_shape)
+                .transpose()
+                .map(|shape| shape.unwrap_or_else(|| vec![0, 1]))
+        }
         _ => Ok(vec![1, 1]),
     }
 }
@@ -1876,10 +1878,10 @@ fn validate_findgroups_grouping_value(value: &Value) -> BuiltinResult<()> {
             Ok(())
         }
         Value::Object(object)
-            if object.is_class("categorical")
-                || object.is_class("datetime")
-                || object.is_class("duration")
-                || object.is_class("calendarDuration") =>
+            if object.is_class(runmat_types::standard::CATEGORICAL)
+                || object.is_class(runmat_types::standard::DATETIME)
+                || object.is_class(runmat_types::standard::DURATION)
+                || object.is_class(runmat_types::standard::CALENDAR_DURATION) =>
         {
             Ok(())
         }
@@ -1897,7 +1899,7 @@ fn validate_findgroups_grouping_value(value: &Value) -> BuiltinResult<()> {
 
 fn findgroups_value_row_count(value: &Value) -> BuiltinResult<usize> {
     if let Value::Object(object) = value {
-        if object.is_class("calendarDuration") {
+        if object.is_class(runmat_types::standard::CALENDAR_DURATION) {
             return object
                 .properties
                 .get("__months")
@@ -1943,18 +1945,18 @@ fn columns_from_group_value(
         }
         Value::Cell(cell) => Ok(vec![GroupColumn {
             rows: cell.rows.max(cell.cols).max(cell.data.len()),
-            name: base_name.to_string(),
+            name: base_name.into(),
             value: Value::Cell(cell),
         }]),
-        Value::Object(object) if object.is_class("categorical") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             let rows = value_row_count(&Value::Object(object.clone()))?;
             Ok(vec![GroupColumn {
                 rows,
-                name: base_name.to_string(),
+                name: base_name.into(),
                 value: Value::Object(object),
             }])
         }
-        Value::Object(object) if object.is_class("calendarDuration") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::CALENDAR_DURATION) => {
             let rows = object
                 .properties
                 .get("__months")
@@ -1963,7 +1965,7 @@ fn columns_from_group_value(
                 .unwrap_or(0);
             Ok(vec![GroupColumn {
                 rows,
-                name: base_name.to_string(),
+                name: base_name.into(),
                 value: Value::Object(object),
             }])
         }
@@ -1971,7 +1973,7 @@ fn columns_from_group_value(
             let rows = value_row_count(&other).unwrap_or(1);
             Ok(vec![GroupColumn {
                 rows,
-                name: base_name.to_string(),
+                name: base_name.into(),
                 value: other,
             }])
         }
@@ -1987,7 +1989,7 @@ fn tensor_columns(
         let rows = tensor_utils::tensor_element_len(&tensor);
         let value = tensor.reshape(vec![rows, 1]).map_err(grouping_error)?;
         return Ok(vec![GroupColumn {
-            name: base_name.to_string(),
+            name: base_name.into(),
             rows,
             value: Value::Tensor(value),
         }]);
@@ -2022,7 +2024,7 @@ fn logical_columns(
     if !split_matrix || cols <= 1 || rows == 1 {
         let len = array.data.len();
         return Ok(vec![GroupColumn {
-            name: base_name.to_string(),
+            name: base_name.into(),
             rows: len,
             value: Value::LogicalArray(
                 LogicalArray::from_host_buffer(array.data, vec![len, 1]).map_err(grouping_error)?,
@@ -2058,7 +2060,7 @@ fn string_columns(
     if !split_matrix || cols <= 1 || rows == 1 {
         let len = array.data.len();
         return Ok(vec![GroupColumn {
-            name: base_name.to_string(),
+            name: base_name.into(),
             rows: len,
             value: Value::StringArray(
                 StringArray::new(array.data, vec![len, 1]).map_err(grouping_error)?,
@@ -2195,14 +2197,14 @@ fn atom_at(value: &Value, row: usize) -> BuiltinResult<Atom> {
             .get(row)
             .map(scalar_atom)
             .unwrap_or(Ok(Atom::Missing)),
-        Value::Object(object) if object.is_class("categorical") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             let label = categorical_label_at(object, row);
             Ok(match label.as_deref() {
                 None | Some("<undefined>") | Some("") => Atom::Missing,
                 Some(text) => Atom::Text(text.to_string()),
             })
         }
-        Value::Object(object) if object.is_class("datetime") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::DATETIME) => {
             let serials = crate::builtins::datetime::serials_from_datetime_value(value)?;
             let value = if row < tensor_utils::tensor_element_len(&serials) {
                 tensor_utils::tensor_value_f64(&serials, row)
@@ -2215,7 +2217,7 @@ fn atom_at(value: &Value, row: usize) -> BuiltinResult<Atom> {
                 Ok(Atom::Number(value))
             }
         }
-        Value::Object(object) if object.is_class("duration") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::DURATION) => {
             let tensor = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
             let value = if row < tensor_utils::tensor_element_len(&tensor) {
                 tensor_utils::tensor_value_f64(&tensor, row)
@@ -2228,7 +2230,7 @@ fn atom_at(value: &Value, row: usize) -> BuiltinResult<Atom> {
                 Ok(Atom::Number(value))
             }
         }
-        Value::Object(object) if object.is_class("calendarDuration") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::CALENDAR_DURATION) => {
             let months = calendar_duration_component(object, "__months", row)?;
             let days = calendar_duration_component(object, "__days", row)?;
             if months.is_nan() || days.is_nan() {
@@ -2364,7 +2366,7 @@ fn select_group_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
     let Value::Object(object) = value else {
         return select_rows(value, rows);
     };
-    if !object.is_class("calendarDuration") {
+    if !object.is_class(runmat_types::standard::CALENDAR_DURATION) {
         return select_rows(value, rows);
     }
     let mut selected = object.clone();

@@ -111,9 +111,11 @@ pub(crate) async fn predict_builtin(
     let statistical_model = matches!(
         &model,
         Value::Object(object)
-            if object.class_name == "LinearModel"
-                || object.class_name == CLASSIFICATION_TREE_CLASS
-                || object.class_name == CLASSIFICATION_LINEAR_CLASS
+            if object
+                .class_name
+                .is(runmat_types::StaticClassIdentity::new("LinearModel"))
+                || object.class_name.is(CLASSIFICATION_TREE_CLASS)
+                || object.class_name.is(CLASSIFICATION_LINEAR_CLASS)
     );
     if statistical_model {
         crate::builtins::common::validation::reject_typed_complex_integer(&xnew, "predict")?;
@@ -152,10 +154,10 @@ pub(crate) async fn predict_builtin(
         {
             crate::builtins::deep_learning::model::predict_deep_learning_object(object, xnew, rest)?
         }
-        Value::Object(object) if object.class_name == CLASSIFICATION_TREE_CLASS => {
+        Value::Object(object) if object.class_name.is(CLASSIFICATION_TREE_CLASS) => {
             predict_classification_tree_object(object, xnew, rest)?
         }
-        Value::Object(object) if object.class_name == CLASSIFICATION_LINEAR_CLASS => {
+        Value::Object(object) if object.class_name.is(CLASSIFICATION_LINEAR_CLASS) => {
             predict_classification_linear_object(object, xnew, rest)?
         }
         other => predict_linear_model_dispatch(other, xnew, rest)?,

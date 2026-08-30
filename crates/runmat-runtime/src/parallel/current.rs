@@ -3,9 +3,12 @@ use runmat_value::{ObjectInstance, Tensor, Value};
 
 use crate::context::RuntimeContext;
 
-const TASK_CLASS: &str = "parallel.Task";
-const WORKER_CLASS: &str = "parallel.Worker";
-const JOB_CLASS: &str = "parallel.Job";
+const TASK_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("parallel.Task");
+const WORKER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("parallel.Worker");
+const JOB_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("parallel.Job");
 
 pub fn task(context: &RuntimeContext) -> Value {
     context
@@ -123,7 +126,7 @@ mod tests {
         let runmat_value::Value::Object(task) = task(&runtime) else {
             panic!("task assignment should produce an object");
         };
-        assert_eq!(task.class_name, "parallel.Task");
+        assert_eq!(task.class_name.display_name(), "parallel.Task");
         assert_eq!(
             task.properties.get("ID"),
             Some(&runmat_value::Value::String(assignment.task_id.to_string()))
@@ -132,7 +135,7 @@ mod tests {
         let runmat_value::Value::Object(worker) = worker(&runtime) else {
             panic!("worker assignment should produce an object");
         };
-        assert_eq!(worker.class_name, "parallel.Worker");
+        assert_eq!(worker.class_name.display_name(), "parallel.Worker");
         assert_eq!(
             worker.properties.get("Backend"),
             Some(&runmat_value::Value::String("local_processes".into()))
@@ -141,7 +144,7 @@ mod tests {
         let runmat_value::Value::Object(job) = job(&runtime) else {
             panic!("job assignment should produce an object");
         };
-        assert_eq!(job.class_name, "parallel.Job");
+        assert_eq!(job.class_name.display_name(), "parallel.Job");
     }
 
     #[test]

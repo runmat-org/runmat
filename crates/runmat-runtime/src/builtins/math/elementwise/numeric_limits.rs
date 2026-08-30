@@ -678,7 +678,7 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("integer prototype upload");
-            runmat_accelerate_api::set_handle_class_name(&prototype, "double");
+            runmat_accelerate_api::set_handle_class_identity(&prototype, "double");
             let error = intmax_builtin(vec![
                 Value::from("like"),
                 Value::GpuTensor(prototype.clone()),

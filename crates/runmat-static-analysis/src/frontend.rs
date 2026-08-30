@@ -658,10 +658,10 @@ mod tests {
         let graph_digest = runmat_package::ContentDigest::sha256("graph");
         let source_revision = runmat_package::ContentDigest::sha256("sources");
         let definition = runmat_package::ProjectSymbolDefinition {
-            name: "helper".to_string(),
-            qualified_name: "helper".to_string(),
+            name: "helper".into(),
+            qualified_name: "helper".into(),
             source_path: PathBuf::from("src/helper.m"),
-            package_name: "demo".to_string(),
+            package_name: "demo".into(),
             dependency_alias: None,
             package_instance: Some(package_instance),
             source_id: Some(source_id),
@@ -685,7 +685,7 @@ mod tests {
         assert_eq!(
             analysis.resolution,
             vec![ResolutionEvidence {
-                name: "helper".to_string(),
+                name: "helper".into(),
                 span: analysis.resolution[0].span,
                 state: ResolutionState::Resolved,
                 reason: "matched a statically indexed project source".to_string(),

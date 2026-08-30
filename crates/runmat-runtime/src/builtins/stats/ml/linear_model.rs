@@ -25,7 +25,8 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const FITLM_NAME: &str = "fitlm";
 const PREDICT_NAME: &str = "predict";
-const LINEAR_MODEL_CLASS: &str = "LinearModel";
+const LINEAR_MODEL_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("LinearModel");
 const EPS: f64 = 1.0e-12;
 
 const OUTPUT_MDL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

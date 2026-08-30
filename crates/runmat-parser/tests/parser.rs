@@ -996,7 +996,7 @@ fn parse_function_definition() {
         Program {
             sections: vec![],
             body: vec![Stmt::Function {
-                name: "add".to_string(),
+                name: "add".into(),
                 params: vec!["x".to_string()],
                 outputs: vec!["y".to_string()],
                 argument_validations: vec![],
@@ -1183,7 +1183,7 @@ fn parse_function_arguments_block_tracks_unsupported_trailing_tokens() {
     assert_eq!(
         argument_validations[0].validators,
         vec![runmat_parser::FunctionArgValidatorDecl {
-            name: "mustBeFinite".to_string(),
+            name: "mustBeFinite".into(),
             args: vec![],
         }]
     );
@@ -1309,7 +1309,7 @@ fn parse_function_arguments_block_supports_brace_validators() {
     assert_eq!(
         argument_validations[0].validators,
         vec![runmat_parser::FunctionArgValidatorDecl {
-            name: "mustBeFinite".to_string(),
+            name: "mustBeFinite".into(),
             args: vec![],
         }]
     );

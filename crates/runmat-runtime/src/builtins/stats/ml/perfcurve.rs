@@ -911,7 +911,7 @@ fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
                 categories: None,
             })
         }
-        Value::Object(object) if object.is_class("categorical") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             ensure_categorical_vector_shape(&object, name)?;
             let labels = crate::builtins::table::categorical_labels(&Value::Object(object.clone()))?
                 .into_iter()

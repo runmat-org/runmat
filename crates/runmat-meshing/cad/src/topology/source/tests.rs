@@ -43,13 +43,13 @@ fn generic_cad_face_healing_ignores_material_region_identity() {
     geometry.regions = vec![
         Region {
             region_id: "region_base".to_string(),
-            name: "base".to_string(),
+            name: "base".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "region_cap".to_string(),
-            name: "cap".to_string(),
+            name: "cap".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
@@ -551,14 +551,14 @@ fn cube_geometry_with_curve_evaluator() -> runmat_geometry_core::GeometryAsset {
     let mut geometry = cube_geometry(true);
     geometry.regions.push(Region {
         region_id: "curve_000004".to_string(),
-        name: "Curve 4".to_string(),
+        name: "Curve 4".into(),
         tag: Some("cad_curve".to_string()),
         cad_ownership: Some(CadRegionOwnership {
             face_id: None,
             curve_id: Some(4),
             label: Some(CadLabelRef {
                 label_entry: "0:1:curve:4".to_string(),
-                name: "Curve 4".to_string(),
+                name: "Curve 4".into(),
                 kind: CadSemanticKind::Subshape,
             }),
             owner_path: Vec::new(),
@@ -580,7 +580,7 @@ fn cube_geometry_with_curve_evaluator() -> runmat_geometry_core::GeometryAsset {
         .push(CadCurveEvaluator {
             evaluator_id: "cad_curve_4".to_string(),
             imported_curve_id: 4,
-            name: "Curve 4".to_string(),
+            name: "Curve 4".into(),
             supports_point_evaluation: true,
             supports_projection: true,
             supports_tangent: true,
@@ -601,14 +601,14 @@ fn cube_geometry_with_curve_evaluator() -> runmat_geometry_core::GeometryAsset {
 fn annulus_face_geometry() -> runmat_geometry_core::GeometryAsset {
     let face_region = Region {
         region_id: "face_000007".to_string(),
-        name: "annulus face".to_string(),
+        name: "annulus face".into(),
         tag: Some("cad_face".to_string()),
         cad_ownership: Some(CadRegionOwnership {
             face_id: Some(7),
             curve_id: None,
             label: Some(CadLabelRef {
                 label_entry: "0:1:7".to_string(),
-                name: "annulus face".to_string(),
+                name: "annulus face".into(),
                 kind: CadSemanticKind::Face,
             }),
             owner_path: Vec::new(),
@@ -708,14 +708,14 @@ fn annulus_face_geometry() -> runmat_geometry_core::GeometryAsset {
 fn cube_geometry(with_semantic_face: bool) -> runmat_geometry_core::GeometryAsset {
     let face_region = Region {
         region_id: "face_000001".to_string(),
-        name: "face".to_string(),
+        name: "face".into(),
         tag: Some("cad_face".to_string()),
         cad_ownership: with_semantic_face.then(|| CadRegionOwnership {
             face_id: Some(1),
             curve_id: None,
             label: Some(CadLabelRef {
                 label_entry: "0:1:1".to_string(),
-                name: "face".to_string(),
+                name: "face".into(),
                 kind: CadSemanticKind::Face,
             }),
             owner_path: Vec::new(),
@@ -739,12 +739,12 @@ fn cube_geometry(with_semantic_face: bool) -> runmat_geometry_core::GeometryAsse
                 vec![CadEvaluatorSet {
                     evaluator_id: "cad_evaluator_test".to_string(),
                     backend: "test".to_string(),
-                    format_name: "step".to_string(),
+                    format_name: "step".into(),
                     requires_source_geometry: true,
                     faces: vec![CadFaceEvaluator {
                         evaluator_id: "cad_face_1".to_string(),
                         imported_face_id: 1,
-                        name: "face".to_string(),
+                        name: "face".into(),
                         supports_point_evaluation: true,
                         supports_projection: true,
                         supports_normal: true,

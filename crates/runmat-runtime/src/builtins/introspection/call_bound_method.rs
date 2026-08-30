@@ -96,8 +96,11 @@ pub async fn call_bound_method_builtin(
             ))
         }
     };
-    let _scope_guard =
-        scope_class.map(|class_name| crate::push_class_access_context(Some(class_name)));
+    let _scope_guard = scope_class.and_then(|class_name| {
+        runmat_types::ClassIdentity::new(class_name)
+            .ok()
+            .map(|identity| crate::push_class_access_context(Some(identity)))
+    });
     let class_name = crate::object_receiver_class_name(&base).ok_or_else(|| {
         crate::runtime_descriptor_error(
             "__runmat_call_bound_method__",
@@ -115,7 +118,10 @@ pub async fn call_bound_method_builtin(
     args.push(base);
     args.extend(rest);
     let requested_outputs = crate::current_requested_outputs();
-    if let Some((_resolved, owner)) = crate::class_registry::lookup_method(&class_name, &method) {
+    let method_identity = runmat_types::MethodName::from(method.as_str());
+    if let Some((_resolved, owner)) =
+        crate::class_registry::lookup_method(&class_name, &method_identity)
+    {
         return crate::dispatch_object_external_member(owner, &method, args, requested_outputs)
             .await;
     }

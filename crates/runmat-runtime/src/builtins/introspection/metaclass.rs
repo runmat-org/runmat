@@ -113,7 +113,13 @@ pub const METACLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1
     builtin_path = "crate::builtins::introspection::metaclass"
 )]
 fn metaclass_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    Ok(Value::ClassRef(class_name_for_value(&value)))
+    let class_name = class_name_for_value(&value);
+    let identity = runmat_types::ClassIdentity::new(class_name).map_err(|error| {
+        crate::build_runtime_error(format!("metaclass: {error}"))
+            .with_identifier("RunMat:InvalidClassName")
+            .build()
+    })?;
+    Ok(Value::ClassRef(identity))
 }
 
 #[cfg(test)]
@@ -133,7 +139,7 @@ mod tests {
         let Value::ClassRef(class_name) = metaclass_builtin(value).expect("metaclass") else {
             panic!("metaclass should return ClassRef");
         };
-        class_name
+        class_name.display_name().to_owned()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -145,7 +151,7 @@ mod tests {
         );
         assert_eq!(
             call(Value::HandleObject(HandleRef {
-                class_name: "pkg.HandlePoint".to_string(),
+                class_name: "pkg.HandlePoint".into(),
                 target: handle_target(),
                 valid: true,
             })),
@@ -177,7 +183,7 @@ mod tests {
             )),
             "cell"
         );
-        assert_eq!(call(Value::ClassRef("Point".to_string())), "meta.class");
+        assert_eq!(call(Value::ClassRef("Point".into())), "meta.class");
         assert_eq!(
             call(Value::MException(MException::new(
                 "RunMat:Test".to_string(),
@@ -211,8 +217,8 @@ mod tests {
             call(Value::Listener(Listener {
                 id: 7,
                 target: handle_target(),
-                target_class_name: "pkg.Target".to_string(),
-                event_name: "Changed".to_string(),
+                target_class_name: "pkg.Target".into(),
+                event_name: "Changed".into(),
                 callback: handle_target(),
                 enabled: true,
                 valid: true,

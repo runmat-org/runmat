@@ -163,7 +163,7 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
                     output: Some(v_mul),
                 },
                 FusionOp::Builtin {
-                    name: "sum".to_string(),
+                    name: "sum".into(),
                     inputs: vec![v_mul, v_dim],
                     output: Some(v_y),
                 },

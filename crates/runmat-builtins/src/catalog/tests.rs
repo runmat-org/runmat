@@ -1,6 +1,6 @@
 use super::*;
 use crate::{BuiltinAsyncBehavior, BuiltinCompatibility, BuiltinPurity, BuiltinSemanticKind};
-use runmat_types::{CapabilityRequirement, EffectKind};
+use runmat_types::{CapabilityRequirement, ClassIdentity, EffectKind};
 
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -457,8 +457,7 @@ fn codistributor_constructors_have_static_value_class_facts() {
             object
                 .runtime_class
                 .as_ref()
-                .and_then(|name| name.0.first())
-                .map(|name| name.0.as_str()),
+                .map(ClassIdentity::display_name),
             Some(expected_class)
         );
         assert_eq!(object.handle_semantics, Some(false));
@@ -1274,8 +1273,8 @@ fn exponential_contracts_share_class_rules_but_keep_exact_sparse_semantics() {
 
     use runmat_types::{
         AliasFact, CallRequest, NumericClass, NumericDomain, NumericFact, ObjectFact,
-        OutputSelection, QualifiedName, RequestedOutputCount, ShapeFact, StorageFact, SymbolName,
-        ValueFact, ValueKindFact, ViewFact,
+        OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+        ViewFact,
     };
 
     let input = ValueFact::proven(
@@ -1354,7 +1353,7 @@ fn exponential_contracts_share_class_rules_but_keep_exact_sparse_semantics() {
     let table = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(QualifiedName(vec![SymbolName("table".into())])),
+            runtime_class: Some(runmat_types::standard::TABLE.owned()),
             properties: BTreeMap::from([(
                 "Variables".into(),
                 ValueFact::scalar(ValueKindFact::Logical),
@@ -1378,14 +1377,14 @@ fn exponential_contracts_share_class_rules_but_keep_exact_sparse_semantics() {
     };
     assert_eq!(
         table_output.runtime_class,
-        Some(QualifiedName(vec![SymbolName("table".into())]))
+        Some(runmat_types::standard::TABLE.owned())
     );
     assert!(table_output.properties.is_empty());
     assert!(!table_output.properties_complete);
 
     let user_object = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
         class: None,
-        runtime_class: Some(QualifiedName(vec![SymbolName("UserClass".into())])),
+        runtime_class: Some(ClassIdentity::new("UserClass").unwrap()),
         properties: BTreeMap::new(),
         properties_complete: false,
         handle_semantics: None,

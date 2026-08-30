@@ -678,7 +678,7 @@ fn python_status_value(
     process_id: Option<u32>,
 ) -> Value {
     let installation = discover_python(&discovery_request(configuration)).ok();
-    let mut environment = ObjectInstance::new("py.PythonEnvironment".into());
+    let mut environment = ObjectInstance::new("py.PythonEnvironment");
     environment.properties.insert(
         "Version".into(),
         Value::String(
@@ -1149,7 +1149,10 @@ mod tests {
         let Value::Object(environment) = adapter.status_value().expect("read status") else {
             panic!("expected PythonEnvironment");
         };
-        assert_eq!(environment.class_name, "py.PythonEnvironment");
+        assert_eq!(
+            environment.class_name.display_name(),
+            "py.PythonEnvironment"
+        );
         assert_eq!(
             environment.properties.get("Status"),
             Some(&Value::String("NotLoaded".into()))

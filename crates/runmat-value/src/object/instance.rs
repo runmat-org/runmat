@@ -1,25 +1,26 @@
 use super::DynamicPropertyDef;
 use crate::Value;
+use runmat_types::ClassIdentity;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectInstance {
-    pub class_name: String,
+    pub class_name: ClassIdentity,
     pub properties: HashMap<String, Value>,
     pub dynamic_properties: Option<Box<HashMap<String, DynamicPropertyDef>>>,
 }
 
 impl ObjectInstance {
-    pub fn new(class_name: String) -> Self {
+    pub fn new(class_name: impl Into<ClassIdentity>) -> Self {
         Self {
-            class_name,
+            class_name: class_name.into(),
             properties: HashMap::new(),
             dynamic_properties: None,
         }
     }
 
-    pub fn is_class(&self, name: &str) -> bool {
-        self.class_name == name
+    pub fn is_class(&self, identity: runmat_types::StaticClassIdentity) -> bool {
+        self.class_name.is(identity)
     }
 
     pub fn dynamic_property(&self, name: &str) -> Option<&DynamicPropertyDef> {

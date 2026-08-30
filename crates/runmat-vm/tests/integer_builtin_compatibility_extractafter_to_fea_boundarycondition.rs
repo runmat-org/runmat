@@ -84,7 +84,7 @@ fn compiled_fcontour_and_boundary_condition_accept_every_integer_class() {
         assert!(values.iter().any(|value| matches!(value, Value::Num(_))));
         assert!(values.iter().any(|value| {
             matches!(value, Value::Object(object)
-                if object.class_name == "fea.BoundaryCondition")
+                if object.class_name.is(runmat_types::StaticClassIdentity::new("fea.BoundaryCondition")))
         }));
     }
 }

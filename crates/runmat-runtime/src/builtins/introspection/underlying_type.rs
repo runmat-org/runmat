@@ -470,7 +470,7 @@ pub(crate) mod tests {
         st.fields.insert("x".into(), Value::Num(1.0));
         assert_eq!(underlying_type_for_value(&Value::Struct(st)), "struct");
 
-        let object = ObjectInstance::new("pkg.Point".into());
+        let object = ObjectInstance::new("pkg.Point");
         assert_eq!(
             underlying_type_for_value(&Value::Object(object)),
             "pkg.Point"
@@ -537,7 +537,7 @@ pub(crate) mod tests {
                 Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], NumericDType::F32).unwrap();
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload");
-            runmat_accelerate_api::set_handle_class_name(&handle, "single");
+            runmat_accelerate_api::set_handle_class_identity(&handle, "single");
 
             assert_eq!(
                 underlying_type_builtin(Value::GpuTensor(handle.clone())).expect("underlying"),
@@ -593,7 +593,7 @@ pub(crate) mod tests {
                 &tensor,
             )
             .unwrap();
-            runmat_accelerate_api::set_handle_class_name(&handle, "double");
+            runmat_accelerate_api::set_handle_class_identity(&handle, "double");
             let error = underlying_type_builtin(Value::GpuTensor(handle))
                 .expect_err("contradictory class metadata must reject");
             assert_eq!(

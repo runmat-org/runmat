@@ -895,7 +895,7 @@ mod tests {
         let Value::Object(object) = &sys else {
             panic!("expected object");
         };
-        assert_eq!(object.class_name, "tf");
+        assert_eq!(object.class_name.display_name(), "tf");
         assert_eq!(
             property(&sys, "Variable"),
             &Value::CharArray(CharArray::new_row("s"))

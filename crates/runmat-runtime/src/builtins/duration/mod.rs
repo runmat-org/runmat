@@ -18,7 +18,7 @@ use crate::{
 };
 
 const BUILTIN_NAME: &str = "duration";
-const DURATION_CLASS: &str = "duration";
+const DURATION_CLASS: runmat_types::StaticClassIdentity = runmat_types::standard::DURATION;
 const DAYS_FIELD: &str = "__days";
 const FORMAT_FIELD: &str = "Format";
 pub(crate) const DEFAULT_DURATION_FORMAT: &str = "hh:mm:ss";
@@ -377,9 +377,9 @@ fn ensure_duration_class_registered() {
     DURATION_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         properties.insert(
-            FORMAT_FIELD.to_string(),
+            FORMAT_FIELD.into(),
             crate::class_registry::RuntimeProperty {
-                name: FORMAT_FIELD.to_string(),
+                name: FORMAT_FIELD.into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -393,19 +393,19 @@ fn ensure_duration_class_registered() {
         for name in [
             OBJECT_SUBSREF_METHOD,
             OBJECT_SUBSASGN_METHOD,
-            "plus",
-            "minus",
-            "eq",
-            "ne",
-            "lt",
-            "le",
-            "gt",
-            "ge",
+            runmat_types::StaticMethodName::new("plus"),
+            runmat_types::StaticMethodName::new("minus"),
+            runmat_types::StaticMethodName::new("eq"),
+            runmat_types::StaticMethodName::new("ne"),
+            runmat_types::StaticMethodName::new("lt"),
+            runmat_types::StaticMethodName::new("le"),
+            runmat_types::StaticMethodName::new("gt"),
+            runmat_types::StaticMethodName::new("ge"),
         ] {
             methods.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeMethod {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
@@ -417,7 +417,7 @@ fn ensure_duration_class_registered() {
         }
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: DURATION_CLASS.to_string(),
+            name: DURATION_CLASS.into(),
             parent: None,
             properties,
             methods,

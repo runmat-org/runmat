@@ -25,7 +25,7 @@ fn assert_error_prefix(namespace: &str, code: &str) {
 
     let request = runmat_core::abi::ExecutionRequest::for_source(
         runmat_core::abi::SourceInput::Text {
-            name: "<test>".to_string(),
+            name: "<test>".into(),
             text: code.to_string(),
         },
         CompatMode::Matlab,

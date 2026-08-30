@@ -181,11 +181,17 @@ pub(super) fn value_to_python(value: Value) -> Result<PythonValue, RuntimeError>
                 .map(|(name, value)| Ok((PythonValue::String(name), value_to_python(value)?)))
                 .collect::<Result<_, RuntimeError>>()?,
         )),
-        Value::Object(value) if value.is_class("datetime") => datetime_to_python(&value),
-        Value::Object(value) if value.is_class("duration") => {
+        Value::Object(value) if value.is_class(runmat_types::standard::DATETIME) => {
+            datetime_to_python(&value)
+        }
+        Value::Object(value) if value.is_class(runmat_types::standard::DURATION) => {
             duration_to_python(Value::Object(value))
         }
-        Value::Object(value) if value.class_name == "RunMat.PythonArguments" => {
+        Value::Object(value)
+            if value
+                .class_name
+                .is(runmat_types::standard::PYTHON_ARGUMENTS) =>
+        {
             keyword_bundle(value)
         }
         Value::Foreign(_) => Err(invalid_conversion(

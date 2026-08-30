@@ -11,6 +11,8 @@ use runmat_value::{CellArray, ObjectInstance, Value};
 use crate::{build_runtime_error, BuiltinResult};
 
 const PYTHON_ADAPTER: &str = "python";
+const PYTHON_ENVIRONMENT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("py.PythonEnvironment");
 
 const ARGUMENTS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "arguments",
@@ -138,7 +140,7 @@ fn pyargs_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
         values.push(arguments.next().expect("even argument count"));
     }
     let length = names.len();
-    let mut bundle = ObjectInstance::new("RunMat.PythonArguments".into());
+    let mut bundle = ObjectInstance::new(runmat_types::standard::PYTHON_ARGUMENTS);
     bundle.properties.insert(
         "Names".into(),
         Value::Cell(CellArray::new(names, 1, length).map_err(invalid_call)?),
@@ -206,7 +208,8 @@ async fn terminate_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
     if arguments.len() != 1
         || !matches!(
             arguments.first(),
-            Some(Value::Object(environment)) if environment.class_name == "py.PythonEnvironment"
+            Some(Value::Object(environment))
+                if environment.class_name.is(PYTHON_ENVIRONMENT_CLASS)
         )
     {
         return Err(invalid_call(

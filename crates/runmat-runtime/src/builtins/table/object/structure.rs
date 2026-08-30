@@ -49,7 +49,7 @@ pub(crate) fn table_from_columns_like(
     selected_rows: Option<&[usize]>,
 ) -> BuiltinResult<Value> {
     let mut out =
-        table_from_columns_with_class(source.class_name.as_str(), names, columns, row_names)?;
+        table_from_columns_with_class(source.class_name.clone(), names, columns, row_names)?;
     if source.is_class(TIMETABLE_CLASS) {
         if let Value::Object(object) = &mut out {
             let row_times = if let Some(rows) = selected_rows {
@@ -64,11 +64,12 @@ pub(crate) fn table_from_columns_like(
 }
 
 pub(in crate::builtins::table) fn table_from_columns_with_class(
-    class_name: &str,
+    class_name: impl Into<runmat_types::ClassIdentity>,
     names: Vec<String>,
     columns: Vec<Value>,
     row_names: Option<Vec<String>>,
 ) -> BuiltinResult<Value> {
+    let class_name = class_name.into();
     ensure_table_class_registered();
     if names.len() != columns.len() {
         return Err(invalid_variable(
@@ -88,8 +89,8 @@ pub(in crate::builtins::table) fn table_from_columns_with_class(
     for (name, value) in names.iter().cloned().zip(columns) {
         variables.insert(name, value);
     }
-    let props = default_properties_for_class(class_name, names, row_names);
-    let mut object = ObjectInstance::new(class_name.to_string());
+    let props = default_properties_for_class(class_name.clone(), names, row_names);
+    let mut object = ObjectInstance::new(class_name);
     object
         .properties
         .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(variables));
@@ -159,7 +160,7 @@ pub(in crate::builtins::table) fn into_timetable_object(
 }
 
 pub(in crate::builtins::table) fn is_tabular_class(object: &ObjectInstance) -> bool {
-    object.is_class(TABLE_CLASS) || object.is_class(TIMETABLE_CLASS)
+    object.class_name.is(TABLE_CLASS) || object.class_name.is(TIMETABLE_CLASS)
 }
 
 pub fn table_variables(object: &ObjectInstance) -> BuiltinResult<StructValue> {

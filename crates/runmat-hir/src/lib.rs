@@ -40,8 +40,8 @@ pub use ids::{BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, So
 pub use lowering::lower;
 pub use lowering_context::{FunctionOutputArity, LoweringContext};
 pub use runmat_types::{
-    ClassDeclaration, ClassKind, EnumerationDeclaration, EventDeclaration, InheritanceDeclaration,
-    MemberAccess, MethodAttributes, MethodDeclaration, PropertyAttributes, PropertyDeclaration,
-    SemanticAttribute, SpawnSafetyFact, SpawnSafetyReason,
+    ClassDeclaration, ClassIdentity, ClassKind, EnumerationDeclaration, EventDeclaration,
+    InheritanceDeclaration, MemberAccess, MethodAttributes, MethodDeclaration, PropertyAttributes,
+    PropertyDeclaration, SemanticAttribute, SpawnSafetyFact, SpawnSafetyReason,
 };
 pub use span::{merge_span, Span};

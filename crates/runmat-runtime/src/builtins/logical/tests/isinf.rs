@@ -205,9 +205,11 @@ fn valid_logical_mask(
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(output) == Some(provider.precision())
         && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && runmat_accelerate_api::handle_class_name(output)
-            .as_deref()
-            .is_none_or(|class| matches!(class, "logical" | "single" | "double"))
+        && runmat_accelerate_api::handle_class_identity(output).is_none_or(|class| {
+            class.is(runmat_types::standard::LOGICAL)
+                || class.is(runmat_types::standard::SINGLE)
+                || class.is(runmat_types::standard::DOUBLE)
+        })
 }
 
 fn resident_integer_mask(

@@ -90,7 +90,7 @@ pub(crate) async fn gather_value(name: &'static str, value: &Value) -> BuiltinRe
 struct ResidentMetadata {
     logical: bool,
     transpose: Option<runmat_accelerate_api::TransposeInfo>,
-    class_name: Option<String>,
+    class_identity: Option<runmat_types::ClassIdentity>,
 }
 
 pub(crate) struct ResidentInputGuard {
@@ -129,7 +129,7 @@ impl ResidentMetadata {
         Self {
             logical: runmat_accelerate_api::handle_is_logical(handle),
             transpose: runmat_accelerate_api::handle_transpose_info(handle),
-            class_name: runmat_accelerate_api::handle_class_name(handle),
+            class_identity: runmat_accelerate_api::handle_class_identity(handle),
         }
     }
 
@@ -143,9 +143,9 @@ impl ResidentMetadata {
             ),
             None => runmat_accelerate_api::clear_handle_transpose(handle),
         }
-        match self.class_name.as_ref() {
-            Some(value) => runmat_accelerate_api::set_handle_class_name(handle, value.clone()),
-            None => runmat_accelerate_api::clear_handle_class_name(handle),
+        match self.class_identity.as_ref() {
+            Some(value) => runmat_accelerate_api::set_handle_class_identity(handle, value.clone()),
+            None => runmat_accelerate_api::clear_handle_class_identity(handle),
         }
         runmat_accelerate_api::mark_residency(handle);
     }
@@ -370,12 +370,12 @@ fn validate_class_name(
     dtype: NumericDType,
     name: &'static str,
 ) -> BuiltinResult<()> {
-    if let Some(class_name) = runmat_accelerate_api::handle_class_name(handle) {
-        if class_name != dtype.class_name() {
+    if let Some(class_identity) = runmat_accelerate_api::handle_class_identity(handle) {
+        if class_identity != dtype.class_identity() {
             return Err(builtin_error(
                 name,
                 format!(
-                    "{name}: GPU class metadata {class_name} conflicts with {} storage",
+                    "{name}: GPU class metadata {class_identity} conflicts with {} storage",
                     dtype.class_name()
                 ),
             ));

@@ -704,7 +704,7 @@ mod tests {
         let _outputs = crate::output_count::push_output_count(Some(3));
         let result = block_on(fsolve_builtin(
             Value::BoundFunctionHandle {
-                name: "no_real_root".to_string(),
+                name: "no_real_root".into(),
                 function: 44,
             },
             Value::Num(0.0),
@@ -862,7 +862,7 @@ mod tests {
         )));
         let root = block_on(fsolve_builtin(
             Value::BoundFunctionHandle {
-                name: "system_function".to_string(),
+                name: "system_function".into(),
                 function: 43,
             },
             Value::Num(1.0),

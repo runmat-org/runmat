@@ -123,26 +123,26 @@ fn superclasses_builtin(value: Value) -> crate::BuiltinResult<Value> {
     } else {
         return Err(superclasses_error_with_detail(
             &SUPERCLASSES_ERROR_CLASS_UNKNOWN,
-            class_name,
+            class_name.display_name().to_owned(),
         ));
     };
 
     let cols = supers.len();
     let cells = supers
         .into_iter()
-        .map(|name| Value::CharArray(CharArray::new_row(&name)))
+        .map(|name| Value::CharArray(CharArray::new_row(name.display_name())))
         .collect::<Vec<_>>();
     Ok(Value::Cell(
         CellArray::new(cells, 1, cols).map_err(superclasses_message_error)?,
     ))
 }
 
-fn requested_class_name(value: &Value) -> BuiltinResult<String> {
-    match value {
-        Value::String(class_name) => Ok(class_name.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows <= 1 => Ok(ca.data.iter().collect::<String>()),
-        Value::ClassRef(class_name) => Ok(class_name.clone()),
+fn requested_class_name(value: &Value) -> BuiltinResult<runmat_types::ClassIdentity> {
+    let source = match value {
+        Value::String(class_name) => class_name.clone(),
+        Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
+        Value::CharArray(ca) if ca.rows <= 1 => ca.data.iter().collect::<String>(),
+        Value::ClassRef(class_name) => return Ok(class_name.clone()),
         Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -152,38 +152,43 @@ fn requested_class_name(value: &Value) -> BuiltinResult<String> {
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
-        | Value::Job(_) => Ok(class_name_for_value(value)),
-        _ => Err(superclasses_error(&SUPERCLASSES_ERROR_CLASS_INVALID)),
-    }
+        | Value::Job(_) => class_name_for_value(value),
+        _ => return Err(superclasses_error(&SUPERCLASSES_ERROR_CLASS_INVALID)),
+    };
+    runmat_types::ClassIdentity::new(source).map_err(|error| {
+        superclasses_error_with_detail(&SUPERCLASSES_ERROR_CLASS_UNKNOWN, error.to_string())
+    })
 }
 
-fn known_leaf_class_without_registered_metadata(class_name: &str) -> bool {
-    matches!(
-        class_name,
-        "double"
-            | "single"
-            | "logical"
-            | "char"
-            | "string"
-            | "cell"
-            | "struct"
-            | "function_handle"
-            | "handle"
-            | "gpuArray"
-            | "meta.class"
-            | "MException"
-            | "event.listener"
-            | "sparse"
-            | "sym"
-            | "int8"
-            | "uint8"
-            | "int16"
-            | "uint16"
-            | "int32"
-            | "uint32"
-            | "int64"
-            | "uint64"
-    )
+fn known_leaf_class_without_registered_metadata(class_name: &runmat_types::ClassIdentity) -> bool {
+    use runmat_types::standard;
+    [
+        standard::DOUBLE,
+        standard::SINGLE,
+        standard::LOGICAL,
+        standard::CHAR,
+        standard::STRING,
+        standard::CELL,
+        standard::STRUCT,
+        standard::FUNCTION_HANDLE,
+        standard::HANDLE,
+        standard::GPU_ARRAY,
+        standard::META_CLASS,
+        standard::MEXCEPTION,
+        standard::EVENT_LISTENER,
+        standard::SPARSE,
+        standard::SYMBOLIC,
+        standard::INT8,
+        standard::UINT8,
+        standard::INT16,
+        standard::UINT16,
+        standard::INT32,
+        standard::UINT32,
+        standard::INT64,
+        standard::UINT64,
+    ]
+    .into_iter()
+    .any(|identity| class_name.is(identity))
 }
 
 fn superclasses_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -222,7 +227,7 @@ mod tests {
 
     fn method(name: &str) -> crate::class_registry::RuntimeMethod {
         crate::class_registry::RuntimeMethod {
-            name: name.to_string(),
+            name: name.into(),
             is_static: false,
             is_abstract: false,
             is_sealed: false,
@@ -246,22 +251,22 @@ mod tests {
         let child = unique_class_name(&format!("{label}Child"));
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: grand.clone(),
+            name: grand.clone().into(),
             parent: None,
             properties: HashMap::new(),
-            methods: HashMap::from([("root".to_string(), method("root"))]),
+            methods: HashMap::from([("root".into(), method("root"))]),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: parent.clone(),
-            parent: Some(grand.clone()),
+            name: parent.clone().into(),
+            parent: Some(grand.clone().into()),
             properties: HashMap::new(),
-            methods: HashMap::from([("mid".to_string(), method("mid"))]),
+            methods: HashMap::from([("mid".into(), method("mid"))]),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child.clone(),
-            parent: Some(parent.clone()),
+            name: child.clone().into(),
+            parent: Some(parent.clone().into()),
             properties: HashMap::new(),
-            methods: HashMap::from([("leaf".to_string(), method("leaf"))]),
+            methods: HashMap::from([("leaf".into(), method("leaf"))]),
         });
 
         (grand, parent, child)
@@ -318,13 +323,13 @@ mod tests {
         );
         assert_eq!(
             call(Value::HandleObject(HandleRef {
-                class_name: child.clone(),
+                class_name: child.clone().into(),
                 target,
                 valid: true,
             })),
             vec![parent.clone(), grand.clone()]
         );
-        assert_eq!(call(Value::ClassRef(child)), vec![parent, grand]);
+        assert_eq!(call(Value::ClassRef(child.into())), vec![parent, grand]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -349,7 +354,7 @@ mod tests {
         )))
         .is_empty());
         assert!(call(Value::HandleObject(HandleRef {
-            class_name: String::new(),
+            class_name: runmat_types::standard::HANDLE.into(),
             target: runmat_gc::gc_allocate(Value::Num(0.0)).expect("gc allocation"),
             valid: true,
         }))

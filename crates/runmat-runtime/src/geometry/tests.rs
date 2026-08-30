@@ -1141,7 +1141,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
         regions: vec![
             Region {
                 region_id: "face_000001".to_string(),
-                name: "Face 1".to_string(),
+                name: "Face 1".into(),
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
@@ -1155,14 +1155,14 @@ fn asset_summary_reports_semantic_cad_region_status() {
             },
             Region {
                 region_id: "cad_label_0_1_1".to_string(),
-                name: "Bracket".to_string(),
+                name: "Bracket".into(),
                 tag: Some("cad_body".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:1".to_string(),
-                        name: "Bracket".to_string(),
+                        name: "Bracket".into(),
                         kind: CadSemanticKind::Body,
                     }),
                     owner_path: Vec::new(),
@@ -1194,7 +1194,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
 fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
     let owner = CadLabelRef {
         label_entry: "0:1".to_string(),
-        name: "Bracket".to_string(),
+        name: "Bracket".into(),
         kind: CadSemanticKind::Body,
     };
     let asset = GeometryAsset {
@@ -1236,14 +1236,14 @@ fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
         regions: vec![
             Region {
                 region_id: "face_000001".to_string(),
-                name: "Face 1".to_string(),
+                name: "Face 1".into(),
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:face:1".to_string(),
-                        name: "Face 1".to_string(),
+                        name: "Face 1".into(),
                         kind: CadSemanticKind::Face,
                     }),
                     owner_path: vec![owner.clone()],
@@ -1254,14 +1254,14 @@ fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
             },
             Region {
                 region_id: "face_000002".to_string(),
-                name: "Face 2".to_string(),
+                name: "Face 2".into(),
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(1),
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:face:2".to_string(),
-                        name: "Face 2".to_string(),
+                        name: "Face 2".into(),
                         kind: CadSemanticKind::Face,
                     }),
                     owner_path: vec![owner.clone()],

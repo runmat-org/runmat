@@ -301,7 +301,10 @@ fn java_environment_configuration_and_desktop_capability_are_session_owned() {
     let Value::Object(status) = status else {
         panic!("jenv configuration must return a JavaEnvironment object");
     };
-    assert_eq!(status.class_name, "matlab.javaclient.JavaEnvironment");
+    assert_eq!(
+        status.class_name.display_name(),
+        "matlab.javaclient.JavaEnvironment"
+    );
     assert_eq!(
         status.properties.get("Status"),
         Some(&Value::String("notloaded".into()))

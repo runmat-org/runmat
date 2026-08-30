@@ -1347,7 +1347,7 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             Ok(Value::Struct(out))
         }
         Value::Object(object) if is_tabular_object(object) => ismissing_table(object),
-        Value::Object(object) if object.is_class("datetime") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::DATETIME) => {
             let serials = crate::builtins::datetime::serials_from_datetime_value(value)?;
             let values = tensor_utils::tensor_values_f64_cow(&serials);
             logical_from_iter(
@@ -1355,7 +1355,7 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
                 serials.shape.clone(),
             )
         }
-        Value::Object(object) if object.is_class("duration") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::DURATION) => {
             let days = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
             let values = tensor_utils::tensor_values_f64_cow(&days);
             logical_from_iter(values.iter().map(|day| day.is_nan()), days.shape.clone())

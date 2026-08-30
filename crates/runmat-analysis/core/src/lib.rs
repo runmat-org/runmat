@@ -55,7 +55,7 @@ mod tests {
             frame: ReferenceFrame::Global,
             materials: vec![MaterialModel {
                 material_id: "mat_steel".to_string(),
-                name: "Steel".to_string(),
+                name: "Steel".into(),
                 mechanical: MaterialMechanicalModel {
                     youngs_modulus_pa: 200e9,
                     poisson_ratio: 0.3,

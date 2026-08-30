@@ -966,7 +966,10 @@ fn assign_complex_tensor_element(
 }
 
 async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
-    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(
+        &obj.class_name,
+        &runmat_types::MemberName::from(name),
+    ) {
         if prop.is_static {
             return Err(setfield_flow(format!(
                 "You cannot access the static property '{}' through an instance of class '{}'.",
@@ -999,7 +1002,10 @@ async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult
         return Ok(value.clone());
     }
 
-    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(
+        &obj.class_name,
+        &runmat_types::MemberName::from(name),
+    ) {
         if prop.get_access == MemberAccess::Private {
             return Err(setfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
@@ -1027,7 +1033,10 @@ async fn write_object_property(
         return Ok(());
     }
 
-    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(
+        &obj.class_name,
+        &runmat_types::MemberName::from(name),
+    ) {
         if prop.is_static {
             return Err(setfield_static_access(format!(
                 "Property '{}' is static; use classref('{}').{}",
@@ -1834,15 +1843,15 @@ pub(crate) mod tests {
     #[test]
     fn setfield_assigns_object_property() {
         let mut class_def = crate::class_registry::RuntimeClass {
-            name: "Simple".to_string(),
+            name: "Simple".into(),
             parent: None,
             properties: Default::default(),
             methods: Default::default(),
         };
         class_def.properties.insert(
-            "x".to_string(),
+            "x".into(),
             crate::class_registry::RuntimeProperty {
-                name: "x".to_string(),
+                name: "x".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -1894,15 +1903,15 @@ pub(crate) mod tests {
     #[test]
     fn setfield_errors_on_static_property_assignment() {
         let mut class_def = crate::class_registry::RuntimeClass {
-            name: "StaticSetfield".to_string(),
+            name: "StaticSetfield".into(),
             parent: None,
             properties: Default::default(),
             methods: Default::default(),
         };
         class_def.properties.insert(
-            "version".to_string(),
+            "version".into(),
             crate::class_registry::RuntimeProperty {
-                name: "version".to_string(),
+                name: "version".into(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
@@ -1934,15 +1943,15 @@ pub(crate) mod tests {
         let child_name = "runmat.unittest.StaticSetfieldChild";
 
         let mut parent = crate::class_registry::RuntimeClass {
-            name: parent_name.to_string(),
+            name: parent_name.into(),
             parent: None,
             properties: Default::default(),
             methods: Default::default(),
         };
         parent.properties.insert(
-            "version".to_string(),
+            "version".into(),
             crate::class_registry::RuntimeProperty {
-                name: "version".to_string(),
+                name: "version".into(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
@@ -1953,8 +1962,8 @@ pub(crate) mod tests {
         );
         crate::class_registry::register_class(parent);
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child_name.to_string(),
-            parent: Some(parent_name.to_string()),
+            name: child_name.into(),
+            parent: Some(parent_name.into()),
             properties: Default::default(),
             methods: Default::default(),
         });
@@ -1981,7 +1990,7 @@ pub(crate) mod tests {
         let gc_ptr = gc_allocate(Value::Object(inner)).expect("gc allocation");
         let handle_ptr = gc_ptr;
         let handle = HandleRef {
-            class_name: "PointHandle".to_string(),
+            class_name: "PointHandle".into(),
             target: handle_ptr,
             valid: true,
         };

@@ -288,7 +288,7 @@ fn execute_text_request_named_source(
 ) -> Result<abi::ExecutionOutcome, RunError> {
     let request = abi::ExecutionRequest::for_source(
         abi::SourceInput::Text {
-            name: source_name.to_string(),
+            name: source_name.into(),
             text: source_text.to_string(),
         },
         session.compat_mode(),
@@ -2047,7 +2047,7 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-syntax-semantic.m".to_string(),
+            name: "command-syntax-semantic.m".into(),
             text: "hold on; h = true; axis off;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2134,7 +2134,7 @@ fn execute_request_rejects_command_syntax_in_strict_mode() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-syntax-strict.m".to_string(),
+            name: "command-syntax-strict.m".into(),
             text: "hold on".to_string(),
         },
         compatibility: CompatMode::Strict,
@@ -2161,7 +2161,7 @@ fn execute_request_supports_warning_off_all_command_rewrite() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-warning-off-all.m".to_string(),
+            name: "command-warning-off-all.m".into(),
             text: "warning off all; warning('hello from test'); ok = 1;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2184,7 +2184,7 @@ fn execute_request_supports_clearvars_name_command_rewrite() {
     let outcome = block_on(
         session.execute_request(abi::ExecutionRequest {
             source: abi::SourceInput::Text {
-                name: "command-clearvars-name.m".to_string(),
+                name: "command-clearvars-name.m".into(),
                 text: "x = 1; y = 2; clearvars x; ex = exist('x', 'var'); ey = exist('y', 'var');"
                     .to_string(),
             },
@@ -2213,7 +2213,7 @@ fn execute_request_supports_close_all_command_rewrite() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-close-all.m".to_string(),
+            name: "command-close-all.m".into(),
             text: "close all; ok = 1;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2252,7 +2252,7 @@ fn execute_request_supports_clearvars_except_command_rewrite() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-clearvars-except.m".to_string(),
+            name: "command-clearvars-except.m".into(),
             text:
                 "x = 1; y = 2; z = 3; clearvars -except y; ex = exist('x', 'var'); ey = exist('y', 'var'); ez = exist('z', 'var');"
                     .to_string(),
@@ -2286,7 +2286,7 @@ fn execute_request_rejects_clearvars_except_without_names_command_rewrite() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-clearvars-except-missing.m".to_string(),
+            name: "command-clearvars-except-missing.m".into(),
             text: "clearvars -except".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2372,7 +2372,7 @@ fn execute_request_supports_format_command_rewrite_through_semantic_pipeline() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-format-long.m".to_string(),
+            name: "command-format-long.m".into(),
             text: "format long; x = 1;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2656,7 +2656,7 @@ fn execute_request_uses_request_workspace_handle() {
     let workspace = abi::WorkspaceHandle(uuid::Uuid::from_u128(7));
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "request-test.m".to_string(),
+            name: "request-test.m".into(),
             text: "requested = 7;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2681,7 +2681,7 @@ fn execute_request_honors_zero_requested_outputs() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "request-zero-output.m".to_string(),
+            name: "request-zero-output.m".into(),
             text: "1 + 1".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2782,7 +2782,7 @@ fn execute_request_runtime_diagnostic_preserves_span_and_callstack() {
     let source = "x = [1];\ny = x(2);\n";
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "runtime-span.m".to_string(),
+            name: "runtime-span.m".into(),
             text: source.to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2813,7 +2813,7 @@ fn execute_request_honors_top_level_await_host_policy() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "request-await-policy.m".to_string(),
+            name: "request-await-policy.m".into(),
             text: "y = await(1);".to_string(),
         },
         compatibility: CompatMode::RunMat,
@@ -10188,7 +10188,7 @@ fn runtests_runs_script_test_file_and_restores_workspace() {
     let runmat_value::Value::Object(obj) = results else {
         panic!("expected scalar TestResult object, got {results:?}");
     };
-    assert!(obj.is_class("matlab.unittest.TestResult"));
+    assert!(obj.is_class(runmat_runtime::testing::TEST_RESULT_CLASS));
     assert_eq!(
         obj.properties.get("Passed"),
         Some(&runmat_value::Value::Bool(true))
@@ -10265,7 +10265,9 @@ fn runtests_discovers_subfolder_tests_when_requested() {
         panic!("expected TestResult object array, got {results:?}");
     };
     assert_eq!(array.shape(), &[1, 2]);
-    assert_eq!(array.class_name(), "matlab.unittest.TestResult");
+    assert!(array
+        .class_name()
+        .is(runmat_runtime::testing::TEST_RESULT_CLASS));
     for value in array.data() {
         let runmat_value::Value::Object(obj) = value else {
             panic!("expected TestResult object, got {value:?}");
@@ -10390,7 +10392,9 @@ end
         panic!("expected function TestResult object array, got {results:?}");
     };
     assert_eq!(array.shape(), &[1, 2]);
-    assert_eq!(array.class_name(), "matlab.unittest.TestResult");
+    assert!(array
+        .class_name()
+        .is(runmat_runtime::testing::TEST_RESULT_CLASS));
     for value in array.data() {
         let runmat_value::Value::Object(obj) = value else {
             panic!("expected TestResult object, got {value:?}");
@@ -10933,7 +10937,7 @@ fn dynamic_workspace_execute_request_can_disable_dynamic_eval_host_policy() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "dynamic-eval-policy.m".to_string(),
+            name: "dynamic-eval-policy.m".into(),
             text: "eval('policy_x = 1');".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -10959,7 +10963,7 @@ fn dynamic_workspace_execute_request_dynamic_eval_policy_does_not_block_assignin
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "dynamic-eval-policy-assignin.m".to_string(),
+            name: "dynamic-eval-policy-assignin.m".into(),
             text: "assignin('base', 'policy_assign', 12);".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -11803,7 +11807,7 @@ fn run_respects_dynamic_eval_host_policy() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "run-policy.m".to_string(),
+            name: "run-policy.m".into(),
             text: "run('policy_worker');".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -14952,11 +14956,11 @@ fn codistributor_factory_and_codistributed_inspection_use_canonical_runtime_valu
     let variables = session.get_variables();
     assert!(matches!(
         variables.get("defaultCodist"),
-        Some(runmat_value::Value::Object(object)) if object.class_name == "codistributor1d"
+        Some(runmat_value::Value::Object(object)) if object.class_name.is(runmat_types::StaticClassIdentity::new("codistributor1d"))
     ));
     assert!(matches!(
         variables.get("blockCodist"),
-        Some(runmat_value::Value::Object(object)) if object.class_name == "codistributor2dbc"
+        Some(runmat_value::Value::Object(object)) if object.class_name.is(runmat_types::StaticClassIdentity::new("codistributor2dbc"))
     ));
     assert_eq!(
         variables.get("defaultComplete"),
@@ -15006,7 +15010,7 @@ fn compatible_codistributed_client_construction_preserves_exact_indices() {
     );
     assert!(matches!(
         variables.get("codist"),
-        Some(runmat_value::Value::Object(object)) if object.class_name == "codistributor1d"
+        Some(runmat_value::Value::Object(object)) if object.class_name.is(runmat_types::StaticClassIdentity::new("codistributor1d"))
     ));
 }
 

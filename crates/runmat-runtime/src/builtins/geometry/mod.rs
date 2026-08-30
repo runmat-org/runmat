@@ -18,8 +18,10 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub mod triangulation;
 
-pub const GEOMETRY_ASSET_CLASS: &str = "geometry.Asset";
-const GEOMETRY_INSPECT_RESULT_CLASS: &str = "geometry.InspectResult";
+pub const GEOMETRY_ASSET_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("geometry.Asset");
+const GEOMETRY_INSPECT_RESULT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("geometry.InspectResult");
 pub const GEOMETRY_ASSET_JSON_PROPERTY: &str = "__runmat_geometry_asset_json";
 const GEOMETRY_LOAD_NAME: &str = "geometry.load";
 const GEOMETRY_INSPECT_NAME: &str = "geometry.inspect";
@@ -387,16 +389,16 @@ fn operation_result_to_value<T: Serialize>(
     operation_error_descriptor: &'static BuiltinErrorDescriptor,
     internal_error_descriptor: &'static BuiltinErrorDescriptor,
     result: Result<OperationEnvelope<T>, OperationErrorEnvelope>,
-    class_name: Option<&'static str>,
+    class_identity: Option<runmat_types::StaticClassIdentity>,
     hidden_json_property: Option<&'static str>,
 ) -> BuiltinResult<Value> {
     let envelope =
         result.map_err(|err| operation_error(builtin, operation_error_descriptor, err))?;
-    match class_name {
-        Some(class_name) => serializable_to_object(
+    match class_identity {
+        Some(class_identity) => serializable_to_object(
             builtin,
             internal_error_descriptor,
-            class_name,
+            class_identity,
             &envelope.data,
             hidden_json_property,
         ),
@@ -417,7 +419,7 @@ fn serializable_to_value<T: Serialize>(
 fn serializable_to_object<T: Serialize>(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
-    class_name: &'static str,
+    class_identity: runmat_types::StaticClassIdentity,
     value: &T,
     hidden_json_property: Option<&'static str>,
 ) -> BuiltinResult<Value> {
@@ -426,7 +428,7 @@ fn serializable_to_object<T: Serialize>(
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
     let converted = value_from_json(&json)
         .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
-    let mut object = ObjectInstance::new(class_name.to_string());
+    let mut object = ObjectInstance::new(class_identity);
     if let Value::Struct(fields) = converted {
         object.properties = fields.fields.into_iter().collect();
     } else {
@@ -444,37 +446,45 @@ fn ensure_geometry_classes_registered() {
     static REGISTER: OnceLock<()> = OnceLock::new();
     REGISTER.get_or_init(|| {
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: GEOMETRY_ASSET_CLASS.to_string(),
+            name: GEOMETRY_ASSET_CLASS.into(),
             parent: None,
             properties: HashMap::new(),
             methods: geometry_asset_methods(),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: GEOMETRY_INSPECT_RESULT_CLASS.to_string(),
+            name: GEOMETRY_INSPECT_RESULT_CLASS.into(),
             parent: None,
             properties: HashMap::new(),
-            methods: HashMap::<String, crate::class_registry::RuntimeMethod>::new(),
+            methods: HashMap::<runmat_types::MethodName, crate::class_registry::RuntimeMethod>::new(
+            ),
         });
         triangulation::register_delaunaytri_class();
     });
 }
 
-fn geometry_asset_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+fn geometry_asset_methods(
+) -> HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> {
     [
-        ("listRegions", GEOMETRY_LIST_REGIONS_NAME),
-        ("meshes", GEOMETRY_MESHES_NAME),
+        (
+            runmat_types::StaticMethodName::new("listRegions"),
+            GEOMETRY_LIST_REGIONS_NAME,
+        ),
+        (
+            runmat_types::StaticMethodName::new("meshes"),
+            GEOMETRY_MESHES_NAME,
+        ),
     ]
     .into_iter()
     .map(|(name, function_name)| {
         (
-            name.to_string(),
+            name.into(),
             crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
+                name: name.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: function_name.to_string(),
+                function_name: function_name.into(),
                 implicit_class_argument: None,
             },
         )
@@ -550,7 +560,7 @@ mod tests {
         let Value::Object(result) = value else {
             panic!("expected object value");
         };
-        assert_eq!(result.class_name, GEOMETRY_INSPECT_RESULT_CLASS);
+        assert!(result.class_name.is(GEOMETRY_INSPECT_RESULT_CLASS));
         assert!(result.properties.contains_key("format"));
         assert!(result.properties.contains_key("byte_count"));
     }

@@ -12,12 +12,14 @@ use std::sync::Once;
 use std::thread::ThreadId;
 
 use runmat_gc_api::{GcHandle, Trace, Tracer};
-use runmat_types::MemberAccess;
+use runmat_types::{
+    standard, ClassIdentity, MemberAccess, MemberName, MethodName, StaticClassIdentity,
+};
 use runmat_value::Value;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeProperty {
-    pub name: String,
+    pub name: MemberName,
     pub is_static: bool,
     pub is_constant: bool,
     pub is_dependent: bool,
@@ -28,7 +30,7 @@ pub struct RuntimeProperty {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeMethod {
-    pub name: String,
+    pub name: MethodName,
     pub is_static: bool,
     pub is_abstract: bool,
     pub is_sealed: bool,
@@ -39,10 +41,10 @@ pub struct RuntimeMethod {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeClass {
-    pub name: String,
-    pub parent: Option<String>,
-    pub properties: HashMap<String, RuntimeProperty>,
-    pub methods: HashMap<String, RuntimeMethod>,
+    pub name: ClassIdentity,
+    pub parent: Option<ClassIdentity>,
+    pub properties: HashMap<MemberName, RuntimeProperty>,
+    pub methods: HashMap<MethodName, RuntimeMethod>,
 }
 
 /// Session-aware registration check for lazily installed builtin classes.
@@ -51,16 +53,16 @@ pub struct RuntimeClass {
 /// class registry, so two interleaved sessions on one native or WASM thread
 /// cannot cause one another to skip registration.
 pub struct ClassRegistration {
-    class_name: &'static str,
+    class_name: StaticClassIdentity,
 }
 
 impl ClassRegistration {
-    pub const fn new(class_name: &'static str) -> Self {
+    pub const fn new(class_name: StaticClassIdentity) -> Self {
         Self { class_name }
     }
 
     fn get(&self) -> bool {
-        with_state(|state| state.registrations.contains(self.class_name))
+        with_state(|state| state.registrations.contains(&self.class_name))
     }
 
     pub fn ensure(&self, register: impl FnOnce()) {
@@ -84,12 +86,12 @@ thread_local! {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeClassState {
-    classes: HashMap<String, RuntimeClass>,
-    sealed: HashSet<String>,
-    abstract_classes: HashSet<String>,
-    static_values: HashMap<(String, String), Value>,
-    enumerations: HashMap<String, HashSet<String>>,
-    registrations: HashSet<&'static str>,
+    classes: HashMap<ClassIdentity, RuntimeClass>,
+    sealed: HashSet<ClassIdentity>,
+    abstract_classes: HashSet<ClassIdentity>,
+    static_values: HashMap<(ClassIdentity, String), Value>,
+    enumerations: HashMap<ClassIdentity, HashSet<String>>,
+    registrations: HashSet<StaticClassIdentity>,
 }
 
 impl Default for RuntimeClassState {
@@ -183,11 +185,20 @@ pub fn static_property_gc_roots() -> Vec<GcHandle> {
     collector.0
 }
 
-fn primitive_class_registry() -> HashMap<String, RuntimeClass> {
+fn primitive_class_registry() -> HashMap<ClassIdentity, RuntimeClass> {
     let mut registry = HashMap::new();
     for class_name in [
-        "double", "single", "logical", "int8", "int16", "int32", "int64", "uint8", "uint16",
-        "uint32", "uint64",
+        standard::DOUBLE,
+        standard::SINGLE,
+        standard::LOGICAL,
+        standard::INT8,
+        standard::INT16,
+        standard::INT32,
+        standard::INT64,
+        standard::UINT8,
+        standard::UINT16,
+        standard::UINT32,
+        standard::UINT64,
     ] {
         let method = RuntimeMethod {
             name: "zeros".into(),
@@ -196,12 +207,12 @@ fn primitive_class_registry() -> HashMap<String, RuntimeClass> {
             is_sealed: false,
             access: MemberAccess::Public,
             function_name: "zeros".into(),
-            implicit_class_argument: Some(class_name.into()),
+            implicit_class_argument: Some(class_name.display_name().to_owned()),
         };
         registry.insert(
-            class_name.into(),
+            class_name.owned(),
             RuntimeClass {
-                name: class_name.into(),
+                name: class_name.owned(),
                 parent: None,
                 properties: HashMap::new(),
                 methods: HashMap::from([("zeros".into(), method)]),
@@ -209,47 +220,63 @@ fn primitive_class_registry() -> HashMap<String, RuntimeClass> {
         );
     }
     for (name, parent) in [
-        ("handle", None),
-        ("dynamicprops", Some("handle")),
-        ("matlab.metadata.Property", None),
-        ("matlab.metadata.DynamicProperty", Some("handle")),
+        (standard::HANDLE, None),
+        (standard::DYNAMIC_PROPERTIES, Some(standard::HANDLE)),
+        (standard::METADATA_PROPERTY, None),
+        (standard::METADATA_DYNAMIC_PROPERTY, Some(standard::HANDLE)),
     ] {
         registry.insert(
-            name.into(),
+            name.owned(),
             RuntimeClass {
-                name: name.into(),
-                parent: parent.map(str::to_owned),
+                name: name.owned(),
+                parent: parent.map(StaticClassIdentity::owned),
                 properties: HashMap::new(),
                 methods: HashMap::new(),
             },
         );
     }
+    let gpu_array = runmat_builtins::standard_class_declaration(&standard::GPU_ARRAY.owned())
+        .expect("gpuArray standard class declaration");
+    let methods = gpu_array
+        .methods
+        .into_iter()
+        .map(|method| {
+            let function_name = match method.callable {
+                runmat_types::CallableIdentity::Builtin(id) => id.0,
+                runmat_types::CallableIdentity::ExternalName(name) => name
+                    .display_name()
+                    .expect("standard class method has a qualified callable identity"),
+                identity => panic!(
+                    "standard gpuArray method '{}' has unsupported callable identity {identity:?}",
+                    method.name
+                ),
+            };
+            let name = method.name;
+            (
+                name.clone(),
+                RuntimeMethod {
+                    name,
+                    is_static: method.is_static,
+                    is_abstract: method.attributes.is_abstract,
+                    is_sealed: method.attributes.is_sealed,
+                    access: method.attributes.access,
+                    function_name,
+                    implicit_class_argument: method.implicit_class_argument,
+                },
+            )
+        })
+        .collect();
     registry.insert(
-        "gpuArray".into(),
+        standard::GPU_ARRAY.owned(),
         RuntimeClass {
-            name: "gpuArray".into(),
+            name: standard::GPU_ARRAY.owned(),
             parent: None,
             properties: HashMap::new(),
-            methods: runmat_builtins::GPU_ARRAY_PUBLIC_METHODS
-                .iter()
-                .map(|method| {
-                    (
-                        (*method).to_owned(),
-                        RuntimeMethod {
-                            name: (*method).to_owned(),
-                            is_static: false,
-                            is_abstract: false,
-                            is_sealed: false,
-                            access: MemberAccess::Public,
-                            function_name: format!("gpuArray.{method}"),
-                            implicit_class_argument: None,
-                        },
-                    )
-                })
-                .collect(),
+            methods,
         },
     );
-    if let Some(class) = registry.get_mut("matlab.metadata.DynamicProperty") {
+    let dynamic_property_class = ClassIdentity::from("matlab.metadata.DynamicProperty");
+    if let Some(class) = registry.get_mut(&dynamic_property_class) {
         class.methods.insert(
             "delete".into(),
             RuntimeMethod {
@@ -284,23 +311,26 @@ pub fn register_class_with_modifiers(def: RuntimeClass, is_sealed: bool, is_abst
     });
 }
 
-fn set_membership(registry: &mut HashSet<String>, name: &str, present: bool) {
+fn set_membership(registry: &mut HashSet<ClassIdentity>, name: &ClassIdentity, present: bool) {
     if present {
-        registry.insert(name.to_owned());
+        registry.insert(name.clone());
     } else {
         registry.remove(name);
     }
 }
 
-pub fn register_class_enumerations(class_name: &str, members: impl IntoIterator<Item = String>) {
+pub fn register_class_enumerations(
+    class_name: &ClassIdentity,
+    members: impl IntoIterator<Item = String>,
+) {
     with_state_mut(|state| {
-        let entry = state.enumerations.entry(class_name.to_owned()).or_default();
+        let entry = state.enumerations.entry(class_name.clone()).or_default();
         entry.clear();
         entry.extend(members);
     });
 }
 
-pub fn class_has_enumeration_member(class_name: &str, member: &str) -> bool {
+pub fn class_has_enumeration_member(class_name: &ClassIdentity, member: &str) -> bool {
     with_state(|state| {
         state
             .enumerations
@@ -309,23 +339,26 @@ pub fn class_has_enumeration_member(class_name: &str, member: &str) -> bool {
     })
 }
 
-pub fn get_class(name: &str) -> Option<RuntimeClass> {
+pub fn get_class(name: &ClassIdentity) -> Option<RuntimeClass> {
     with_state(|state| state.classes.get(name).cloned())
 }
 
-pub fn class_names() -> Vec<String> {
+pub fn class_names() -> Vec<ClassIdentity> {
     with_state(|state| state.classes.keys().cloned().collect())
 }
 
 /// Resolve the declaring class context for a runtime function name. Executors
 /// use this shared lookup to apply identical private/protected member access.
-pub fn class_context_for_function(function_name: &str) -> Option<String> {
+pub fn class_context_for_function(function_name: &str) -> Option<ClassIdentity> {
     if function_name.is_empty() {
         return None;
     }
     if let Some((class_name, method_name)) = function_name.rsplit_once('.') {
-        if !class_name.is_empty() && !method_name.is_empty() && get_class(class_name).is_some() {
-            return Some(class_name.to_string());
+        if !class_name.is_empty() && !method_name.is_empty() {
+            let identity = ClassIdentity::new(class_name).ok()?;
+            if get_class(&identity).is_some() {
+                return Some(identity);
+            }
         }
     }
     class_names().into_iter().find(|class_name| {
@@ -334,7 +367,7 @@ pub fn class_context_for_function(function_name: &str) -> Option<String> {
                 method.function_name == function_name
                     || method
                         .function_name
-                        .strip_prefix(class_name)
+                        .strip_prefix(class_name.display_name())
                         .is_some_and(|suffix| {
                             suffix
                                 .strip_prefix('.')
@@ -349,27 +382,27 @@ pub fn class_context_for_function(function_name: &str) -> Option<String> {
     })
 }
 
-pub fn is_class_sealed(name: &str) -> bool {
+pub fn is_class_sealed(name: &ClassIdentity) -> bool {
     with_state(|state| state.sealed.contains(name))
 }
 
-pub fn is_class_abstract(name: &str) -> bool {
+pub fn is_class_abstract(name: &ClassIdentity) -> bool {
     with_state(|state| state.abstract_classes.contains(name))
 }
 
-pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
+pub fn is_class_or_subclass(class_name: &ClassIdentity, ancestor_name: &ClassIdentity) -> bool {
     if class_name == ancestor_name {
         return true;
     }
     with_state(|state| {
         let registry = &state.classes;
-        let mut current = Some(class_name.to_owned());
+        let mut current = Some(class_name.clone());
         let mut visited = HashSet::new();
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
                 return false;
             }
-            if name == ancestor_name {
+            if &name == ancestor_name {
                 return true;
             }
             current = registry.get(&name).and_then(|class| class.parent.clone());
@@ -378,7 +411,7 @@ pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
     })
 }
 
-pub fn superclass_chain(class_name: &str) -> Option<Vec<String>> {
+pub fn superclass_chain(class_name: &ClassIdentity) -> Option<Vec<ClassIdentity>> {
     with_state(|state| {
         let registry = &state.classes;
         if !registry.contains_key(class_name) {
@@ -387,7 +420,7 @@ pub fn superclass_chain(class_name: &str) -> Option<Vec<String>> {
         let mut current = registry
             .get(class_name)
             .and_then(|class| class.parent.clone());
-        let mut visited = HashSet::from([class_name.to_owned()]);
+        let mut visited = HashSet::from([class_name.clone()]);
         let mut result = Vec::new();
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
@@ -400,21 +433,27 @@ pub fn superclass_chain(class_name: &str) -> Option<Vec<String>> {
     })
 }
 
-pub fn lookup_property(class_name: &str, property: &str) -> Option<(RuntimeProperty, String)> {
+pub fn lookup_property(
+    class_name: &ClassIdentity,
+    property: &MemberName,
+) -> Option<(RuntimeProperty, ClassIdentity)> {
     lookup_member(class_name, |class| class.properties.get(property).cloned())
 }
 
-pub fn lookup_method(class_name: &str, method: &str) -> Option<(RuntimeMethod, String)> {
+pub fn lookup_method(
+    class_name: &ClassIdentity,
+    method: &runmat_types::MethodName,
+) -> Option<(RuntimeMethod, ClassIdentity)> {
     lookup_member(class_name, |class| class.methods.get(method).cloned())
 }
 
 fn lookup_member<T>(
-    class_name: &str,
+    class_name: &ClassIdentity,
     mut member: impl FnMut(&RuntimeClass) -> Option<T>,
-) -> Option<(T, String)> {
+) -> Option<(T, ClassIdentity)> {
     with_state(|state| {
         let registry = &state.classes;
-        let mut current = Some(class_name.to_owned());
+        let mut current = Some(class_name.clone());
         let mut visited = HashSet::new();
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
@@ -430,22 +469,22 @@ fn lookup_member<T>(
     })
 }
 
-pub fn get_static_property_value(class_name: &str, property: &str) -> Option<Value> {
+pub fn get_static_property_value(class_name: &ClassIdentity, property: &str) -> Option<Value> {
     with_state(|state| {
         state
             .static_values
-            .get(&(class_name.to_owned(), property.to_owned()))
+            .get(&(class_name.clone(), property.to_owned()))
             .cloned()
     })
 }
 
-pub fn set_static_property_value(class_name: &str, property: &str, value: Value) {
+pub fn set_static_property_value(class_name: &ClassIdentity, property: &str, value: Value) {
     ensure_gc_root_provider();
     mark_static_values_thread_active();
     with_state_mut(|state| {
         state
             .static_values
-            .insert((class_name.to_owned(), property.to_owned()), value);
+            .insert((class_name.clone(), property.to_owned()), value);
     });
 }
 
@@ -466,11 +505,11 @@ fn with_state_mut<R>(callback: impl FnOnce(&mut RuntimeClassState) -> R) -> R {
 }
 
 pub fn set_static_property_value_in_owner(
-    class_name: &str,
+    class_name: &ClassIdentity,
     property: &str,
     value: Value,
 ) -> Result<(), String> {
-    let Some((_, owner)) = lookup_property(class_name, property) else {
+    let Some((_, owner)) = lookup_property(class_name, &MemberName::from(property)) else {
         return Err(format!("Unknown static property '{class_name}.{property}'"));
     };
     set_static_property_value(&owner, property, value);
@@ -484,14 +523,14 @@ mod tests {
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    fn unique_class_name(prefix: &str) -> String {
-        format!(
+    fn unique_class_name(prefix: &str) -> ClassIdentity {
+        ClassIdentity::from(format!(
             "{prefix}_{}",
             TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed)
-        )
+        ))
     }
 
-    fn empty_class(name: String, parent: Option<String>) -> RuntimeClass {
+    fn empty_class(name: ClassIdentity, parent: Option<ClassIdentity>) -> RuntimeClass {
         RuntimeClass {
             name,
             parent,
@@ -502,28 +541,45 @@ mod tests {
 
     #[test]
     fn primitives_and_inheritance_are_session_local_and_resolvable() {
+        let uint64 = runmat_types::standard::UINT64.owned();
+        let dynamicprops = ClassIdentity::from("dynamicprops");
+        let handle = runmat_types::standard::HANDLE.owned();
         assert_eq!(
-            lookup_method("uint64", "zeros").unwrap().0.function_name,
+            lookup_method(&uint64, &runmat_types::MethodName::from("zeros"))
+                .unwrap()
+                .0
+                .function_name,
             "zeros"
         );
-        assert!(is_class_or_subclass("dynamicprops", "handle"));
-        assert_eq!(
-            superclass_chain("dynamicprops"),
-            Some(vec!["handle".into()])
-        );
+        assert!(is_class_or_subclass(&dynamicprops, &handle));
+        assert_eq!(superclass_chain(&dynamicprops), Some(vec![handle]));
     }
 
     #[test]
     fn every_primitive_exposes_class_preserving_static_zeros_binding() {
         for name in [
-            "double", "single", "logical", "int8", "int16", "int32", "int64", "uint8", "uint16",
-            "uint32", "uint64",
+            standard::DOUBLE,
+            standard::SINGLE,
+            standard::LOGICAL,
+            standard::INT8,
+            standard::INT16,
+            standard::INT32,
+            standard::INT64,
+            standard::UINT8,
+            standard::UINT16,
+            standard::UINT32,
+            standard::UINT64,
         ] {
-            let (method, owner) = lookup_method(name, "zeros").unwrap();
-            assert_eq!(owner, name);
+            let identity = name.owned();
+            let (method, owner) =
+                lookup_method(&identity, &runmat_types::MethodName::from("zeros")).unwrap();
+            assert_eq!(owner.display_name(), name.display_name());
             assert!(method.is_static);
             assert_eq!(method.function_name, "zeros");
-            assert_eq!(method.implicit_class_argument.as_deref(), Some(name));
+            assert_eq!(
+                method.implicit_class_argument.as_deref(),
+                Some(name.display_name())
+            );
         }
     }
 
@@ -540,7 +596,10 @@ mod tests {
             Some(vec![parent.clone(), grand.clone()])
         );
         assert_eq!(superclass_chain(&grand), Some(Vec::new()));
-        assert_eq!(superclass_chain("missing-class"), None);
+        assert_eq!(
+            superclass_chain(&ClassIdentity::from("missing-class")),
+            None
+        );
 
         let orphan = unique_class_name("orphan");
         let missing_parent = unique_class_name("missing_parent");
@@ -552,7 +611,10 @@ mod tests {
         register_class(empty_class(first.clone(), Some(second.clone())));
         register_class(empty_class(second.clone(), Some(first.clone())));
         assert_eq!(superclass_chain(&first), Some(vec![second]));
-        assert!(!is_class_or_subclass(&first, "missing-ancestor"));
+        assert!(!is_class_or_subclass(
+            &first,
+            &ClassIdentity::from("missing-ancestor")
+        ));
     }
 
     #[test]
@@ -586,18 +648,26 @@ mod tests {
         );
         register_class(parent_class);
         register_class(empty_class(child.clone(), Some(parent.clone())));
-        assert_eq!(lookup_method(&child, "parentOnly").unwrap().1, parent);
         assert_eq!(
-            lookup_property(&child, "parentFlag").unwrap().0.name,
-            "parentFlag"
+            lookup_method(&child, &runmat_types::MethodName::from("parentOnly"))
+                .unwrap()
+                .1,
+            parent
+        );
+        assert_eq!(
+            lookup_property(&child, &MemberName::from("parentFlag"))
+                .unwrap()
+                .0
+                .name,
+            MemberName::from("parentFlag")
         );
 
         let first = unique_class_name("lookup_cycle_first");
         let second = unique_class_name("lookup_cycle_second");
         register_class(empty_class(first.clone(), Some(second.clone())));
         register_class(empty_class(second, Some(first.clone())));
-        assert!(lookup_method(&first, "missing").is_none());
-        assert!(lookup_property(&first, "missing").is_none());
+        assert!(lookup_method(&first, &runmat_types::MethodName::from("missing")).is_none());
+        assert!(lookup_property(&first, &MemberName::from("missing")).is_none());
     }
 
     #[test]

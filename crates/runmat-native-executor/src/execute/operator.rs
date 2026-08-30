@@ -22,11 +22,11 @@ pub(super) fn evaluate(
             return runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered(
                 arguments[0].clone(),
                 arguments[1].clone(),
-                name,
+                name.display_name(),
             )
             .await;
         }
-        runmat_runtime::call_builtin_async(name, &arguments).await
+        runmat_runtime::call_builtin_async(name.display_name(), &arguments).await
     };
     let value = super::sync::complete(&state.runtime, future, "operator evaluation")?;
     Ok(state.arena.insert(value))

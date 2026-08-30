@@ -547,7 +547,7 @@ fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         Instr::CreateObjectLiteral { class_name, fields }
-            if class_name == "Point"
+            if class_name.is(runmat_types::StaticClassIdentity::new("Point"))
                 && fields == &vec!["x".to_string(), "y".to_string()]
     )));
 
@@ -555,7 +555,7 @@ fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
     let Value::Object(obj) = &vars[0] else {
         panic!("expected object value");
     };
-    assert_eq!(obj.class_name, "Point");
+    assert_eq!(obj.class_name.display_name(), "Point");
     assert!(matches!(obj.properties.get("x"), Some(Value::Num(v)) if *v == 1.0));
     assert!(matches!(obj.properties.get("y"), Some(Value::Num(v)) if *v == 2.0));
 }

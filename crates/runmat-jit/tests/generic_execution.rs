@@ -504,7 +504,7 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
         .expect("allocate rooted native test value");
     let handle = rooted.handle();
     let handle_value = Value::HandleObject(runmat_value::HandleRef {
-        class_name: "NativeGcValue".to_string(),
+        class_name: "NativeGcValue".into(),
         target: handle,
         valid: true,
     });
@@ -772,7 +772,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     else {
         panic!("super constructor must return the active child receiver");
     };
-    assert_eq!(value.class_name, "NativeChild");
+    assert_eq!(value.class_name.display_name(), "NativeChild");
     drop(invoker);
     drop(resolver);
 }

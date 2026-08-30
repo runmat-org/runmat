@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn functions_reports_anonymous_closure_metadata() {
         let value = dispatch_functions(Value::Closure(runmat_value::Closure {
-            function_name: "@anon0".to_string(),
+            function_name: "@anon0".into(),
             bound_function: None,
             captures: Vec::new(),
         }))

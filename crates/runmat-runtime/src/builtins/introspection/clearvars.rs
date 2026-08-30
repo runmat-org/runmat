@@ -402,7 +402,7 @@ mod tests {
         let removed = block_on(
             crate::builtins::introspection::on_cleanup::on_cleanup_builtin(
                 Value::BoundFunctionHandle {
-                    name: "cleanup".to_string(),
+                    name: "cleanup".into(),
                     function: 11,
                 },
             ),
@@ -411,7 +411,7 @@ mod tests {
         let kept = block_on(
             crate::builtins::introspection::on_cleanup::on_cleanup_builtin(
                 Value::BoundFunctionHandle {
-                    name: "cleanup".to_string(),
+                    name: "cleanup".into(),
                     function: 12,
                 },
             ),

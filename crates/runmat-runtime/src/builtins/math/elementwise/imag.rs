@@ -451,7 +451,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-            runmat_accelerate_api::set_handle_class_name(&handle, "single");
+            runmat_accelerate_api::set_handle_class_identity(&handle, "single");
             let err =
                 block_on(imag_gpu(handle)).expect_err("contradictory class metadata must reject");
             assert!(err.message().contains("class metadata contradicts"));

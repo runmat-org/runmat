@@ -1,6 +1,7 @@
 use std::fmt;
 
 use runmat_gc_api::{Trace, Tracer};
+use runmat_types::ClassIdentity;
 
 use crate::{HandleRef, ObjectInstance, Value};
 
@@ -13,21 +14,18 @@ use crate::{HandleRef, ObjectInstance, Value};
 /// without falling back to a cell array.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectArray {
-    class_name: String,
+    class_name: ClassIdentity,
     data: Vec<Value>,
     shape: Vec<usize>,
 }
 
 impl ObjectArray {
     pub fn new(
-        class_name: impl Into<String>,
+        class_name: impl Into<ClassIdentity>,
         data: Vec<Value>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
         let class_name = class_name.into();
-        if class_name.is_empty() {
-            return Err("object array class name must not be empty".into());
-        }
         if shape.len() < 2 {
             return Err("object array shape must contain at least two dimensions".into());
         }
@@ -43,11 +41,11 @@ impl ObjectArray {
         }
         for value in &data {
             let element_class = match value {
-                Value::Object(object) => object.class_name.as_str(),
-                Value::HandleObject(handle) => handle.class_name.as_str(),
+                Value::Object(object) => &object.class_name,
+                Value::HandleObject(handle) => &handle.class_name,
                 _ => return Err("object array elements must be value or handle objects".into()),
             };
-            if element_class != class_name {
+            if element_class != &class_name {
                 return Err(format!(
                     "object array element class '{element_class}' does not match '{class_name}'"
                 ));
@@ -61,7 +59,7 @@ impl ObjectArray {
     }
 
     pub fn from_objects(
-        class_name: impl Into<String>,
+        class_name: impl Into<ClassIdentity>,
         objects: Vec<ObjectInstance>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
@@ -73,7 +71,7 @@ impl ObjectArray {
     }
 
     pub fn from_handles(
-        class_name: impl Into<String>,
+        class_name: impl Into<ClassIdentity>,
         handles: Vec<HandleRef>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
@@ -84,16 +82,16 @@ impl ObjectArray {
         )
     }
 
-    pub fn row(class_name: impl Into<String>, data: Vec<Value>) -> Result<Self, String> {
+    pub fn row(class_name: impl Into<ClassIdentity>, data: Vec<Value>) -> Result<Self, String> {
         let len = data.len();
         Self::new(class_name, data, vec![1, len])
     }
 
-    pub fn empty(class_name: impl Into<String>, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn empty(class_name: impl Into<ClassIdentity>, shape: Vec<usize>) -> Result<Self, String> {
         Self::new(class_name, Vec::new(), shape)
     }
 
-    pub fn class_name(&self) -> &str {
+    pub fn class_name(&self) -> &ClassIdentity {
         &self.class_name
     }
 
@@ -163,25 +161,25 @@ mod tests {
     #[test]
     fn validates_homogeneous_column_major_storage() {
         let values = vec![
-            Value::Object(ObjectInstance::new("pkg.Result".into())),
-            Value::Object(ObjectInstance::new("pkg.Result".into())),
+            Value::Object(ObjectInstance::new("pkg.Result")),
+            Value::Object(ObjectInstance::new("pkg.Result")),
         ];
         let array = ObjectArray::new("pkg.Result", values, vec![1, 2]).unwrap();
         assert_eq!(array.shape(), &[1, 2]);
         assert_eq!(array.len(), 2);
-        assert_eq!(array.class_name(), "pkg.Result");
+        assert_eq!(array.class_name().display_name(), "pkg.Result");
     }
 
     #[test]
     fn rejects_mixed_classes_and_shape_mismatch() {
         let mixed = vec![
-            Value::Object(ObjectInstance::new("A".into())),
-            Value::Object(ObjectInstance::new("B".into())),
+            Value::Object(ObjectInstance::new("A")),
+            Value::Object(ObjectInstance::new("B")),
         ];
         assert!(ObjectArray::new("A", mixed, vec![1, 2]).is_err());
         assert!(ObjectArray::new(
             "A",
-            vec![Value::Object(ObjectInstance::new("A".into()))],
+            vec![Value::Object(ObjectInstance::new("A"))],
             vec![1, 2]
         )
         .is_err());

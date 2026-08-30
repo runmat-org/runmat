@@ -6322,6 +6322,7 @@ dependencies = [
  "anyhow",
  "once_cell",
  "runmat-execution",
+ "runmat-types",
  "serde",
  "serde_json",
  "wgpu 0.19.4",

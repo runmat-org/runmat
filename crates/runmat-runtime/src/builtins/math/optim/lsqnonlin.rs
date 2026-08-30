@@ -978,7 +978,7 @@ mod tests {
         )));
         let result = block_on(lsqnonlin_builtin(
             Value::BoundFunctionHandle {
-                name: "residual".to_string(),
+                name: "residual".into(),
                 function: 1,
             },
             vec![tensor(vec![0.0, 0.0], vec![2, 1])],
@@ -1008,7 +1008,7 @@ mod tests {
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
         let result = block_on(lsqnonlin_builtin(
             Value::BoundFunctionHandle {
-                name: "bounded".to_string(),
+                name: "bounded".into(),
                 function: 2,
             },
             vec![
@@ -1043,7 +1043,7 @@ mod tests {
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
         let result = block_on(lsqnonlin_builtin(
             Value::BoundFunctionHandle {
-                name: "empty_options".to_string(),
+                name: "empty_options".into(),
                 function: 22,
             },
             vec![Value::Num(0.0), empty.clone(), empty.clone(), empty],
@@ -1069,7 +1069,7 @@ mod tests {
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
         let result = block_on(lsqnonlin_builtin(
             Value::BoundFunctionHandle {
-                name: "partial_bounds".to_string(),
+                name: "partial_bounds".into(),
                 function: 23,
             },
             vec![tensor(vec![0.0, 0.0], vec![2, 1]), empty, Value::Num(1.0)],
@@ -1101,7 +1101,7 @@ mod tests {
         options.insert("Algorithm", Value::from("levenberg-marquardt"));
         let result = block_on(lsqnonlin_builtin(
             Value::BoundFunctionHandle {
-                name: "multi".to_string(),
+                name: "multi".into(),
                 function: 3,
             },
             vec![
@@ -1156,7 +1156,7 @@ mod tests {
         problem.insert(
             "objective",
             Value::BoundFunctionHandle {
-                name: "problem".to_string(),
+                name: "problem".into(),
                 function: 4,
             },
         );

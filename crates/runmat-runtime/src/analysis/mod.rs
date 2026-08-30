@@ -18451,7 +18451,7 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
         }
         materials.push(MaterialModel {
             material_id: material_id.to_string(),
-            name: name.to_string(),
+            name: name.into(),
             mechanical: MaterialMechanicalModel {
                 youngs_modulus_pa,
                 poisson_ratio,
@@ -18471,7 +18471,7 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
     if materials.is_empty() {
         materials.push(MaterialModel {
             material_id: "mat_default_steel".to_string(),
-            name: "Steel (Default)".to_string(),
+            name: "Steel (Default)".into(),
             mechanical: MaterialMechanicalModel {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,

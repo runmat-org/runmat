@@ -1881,7 +1881,7 @@ mod tests {
             )],
             regions: vec![Region {
                 region_id: "tip".to_string(),
-                name: "Tip".to_string(),
+                name: "Tip".into(),
                 tag: Some("tip".to_string()),
                 cad_ownership: None,
             }],

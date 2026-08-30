@@ -107,7 +107,7 @@ pub(crate) struct CallState {
     pub dynamic_clearer: Option<std::rc::Rc<crate::user_functions::DynamicFunctionClearer>>,
     pub source_functions: Option<std::sync::Arc<Vec<crate::user_functions::SourceFunctionInfo>>>,
     pub active_functions: Vec<usize>,
-    pub class_access: Option<String>,
+    pub class_access: Option<runmat_types::ClassIdentity>,
 }
 
 impl std::fmt::Debug for CallState {

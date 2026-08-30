@@ -83,14 +83,14 @@ pub(super) fn geometry_with_face_evaluator() -> GeometryAsset {
     let mut geometry = geometry_for_topology();
     geometry.regions = vec![Region {
         region_id: "face_000001".to_string(),
-        name: "face".to_string(),
+        name: "face".into(),
         tag: Some("cad_face".to_string()),
         cad_ownership: Some(CadRegionOwnership {
             face_id: Some(1),
             curve_id: None,
             label: Some(CadLabelRef {
                 label_entry: "0:1:1".to_string(),
-                name: "face".to_string(),
+                name: "face".into(),
                 kind: CadSemanticKind::Face,
             }),
             owner_path: Vec::new(),
@@ -108,12 +108,12 @@ pub(super) fn geometry_with_face_evaluator() -> GeometryAsset {
     geometry.source_geometry.cad_evaluators = vec![CadEvaluatorSet {
         evaluator_id: "cad_evaluator_test".to_string(),
         backend: "test".to_string(),
-        format_name: "step".to_string(),
+        format_name: "step".into(),
         requires_source_geometry: true,
         faces: vec![CadFaceEvaluator {
             evaluator_id: "cad_face_1".to_string(),
             imported_face_id: 1,
-            name: "face".to_string(),
+            name: "face".into(),
             supports_point_evaluation: true,
             supports_projection: true,
             supports_normal: true,

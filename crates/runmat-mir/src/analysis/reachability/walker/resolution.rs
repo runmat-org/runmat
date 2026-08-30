@@ -220,13 +220,18 @@ impl Walker<'_> {
         }
     }
 
-    pub(super) fn class(&mut self, from: &str, class_name: &str, reason: Reason) {
-        let id = format!("class:{}", class_name.to_ascii_lowercase());
+    pub(super) fn class(
+        &mut self,
+        from: &str,
+        class_identity: &runmat_types::ClassIdentity,
+        reason: Reason,
+    ) {
+        let id = format!("class:{class_identity}");
         self.node(
             id.clone(),
             Kind::Class,
             "class".into(),
-            class_name.into(),
+            class_identity.display_name().into(),
             Certainty::FiniteDynamic,
         );
         self.edge(
@@ -241,10 +246,8 @@ impl Walker<'_> {
             .classes
             .iter()
             .filter(|class| {
-                class
-                    .name
-                    .display_name()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(class_name))
+                runmat_types::ClassIdentity::from_qualified_name(&class.name)
+                    .is_ok_and(|candidate| &candidate == class_identity)
             })
             .flat_map(|class| class.methods.iter().map(|method| method.function))
             .collect::<Vec<_>>();
@@ -280,7 +283,7 @@ impl Walker<'_> {
         };
         self.builtin_reference(
             from,
-            name,
+            name.display_name(),
             Certainty::FiniteDynamic,
             Reason::OperatorDispatch,
             Some(format!("{operator:?} overload fallback")),

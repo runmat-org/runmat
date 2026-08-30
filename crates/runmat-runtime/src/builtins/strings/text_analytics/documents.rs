@@ -32,8 +32,10 @@ use crate::builtins::strings::text_analytics::stopwords::{
 use crate::builtins::table::table_variables;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
-pub const TOKENIZED_DOCUMENT_CLASS: &str = "tokenizedDocument";
-pub const BAG_OF_WORDS_CLASS: &str = "bagOfWords";
+pub const TOKENIZED_DOCUMENT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("tokenizedDocument");
+pub const BAG_OF_WORDS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("bagOfWords");
 const MAX_DENSE_BAG_COUNT_CELLS: usize = 50_000_000;
 
 pub const REMOVE_STOP_WORDS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
@@ -583,10 +585,10 @@ fn ensure_tokenized_document_class_registered() {
             "HeadDetails",
             "DependencyDetails",
         ] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: TOKENIZED_DOCUMENT_CLASS.to_string(),
+            name: TOKENIZED_DOCUMENT_CLASS.into(),
             parent: None,
             properties,
             methods: HashMap::new(),
@@ -598,10 +600,10 @@ fn ensure_bag_of_words_class_registered() {
     BAG_OF_WORDS_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["Counts", "Vocabulary", "NumWords", "NumDocuments"] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: BAG_OF_WORDS_CLASS.to_string(),
+            name: BAG_OF_WORDS_CLASS.into(),
             parent: None,
             properties,
             methods: HashMap::new(),
@@ -611,7 +613,7 @@ fn ensure_bag_of_words_class_registered() {
 
 fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
     crate::class_registry::RuntimeProperty {
-        name: name.to_string(),
+        name: name.into(),
         is_static: false,
         is_constant: false,
         is_dependent: false,
@@ -3332,7 +3334,7 @@ mod tests {
         )
         .unwrap();
         let doc = object(run_tokenized(vec![Value::StringArray(input)]).expect("tokenized"));
-        assert_eq!(doc.class_name, TOKENIZED_DOCUMENT_CLASS);
+        assert!(doc.class_name.is(TOKENIZED_DOCUMENT_CLASS));
         assert_eq!(doc.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(
             string_array_property(&doc, "Vocabulary"),
@@ -3743,7 +3745,7 @@ mod tests {
         .unwrap();
         let docs = run_tokenized(vec![Value::StringArray(input)]).expect("tokenized");
         let bag = object(run_bag(vec![docs]).expect("bag"));
-        assert_eq!(bag.class_name, BAG_OF_WORDS_CLASS);
+        assert!(bag.class_name.is(BAG_OF_WORDS_CLASS));
         assert_eq!(
             string_array_property(&bag, "Vocabulary"),
             vec!["an", "example", "of", "a", "short", "sentence", "second"]

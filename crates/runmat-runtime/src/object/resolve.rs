@@ -15,6 +15,7 @@ use crate::object::dispatch::{
 };
 use crate::object::indexing::ObjectIndexOp;
 use crate::RuntimeError;
+use runmat_types::ClassIdentity;
 use runmat_value::{Closure, StructValue, Tensor, Value};
 
 const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
@@ -24,20 +25,27 @@ fn mex(identifier: &str, message: &str) -> RuntimeError {
     crate::runtime_error::semantic_error(identifier, message)
 }
 
-fn has_builtin_member_subsref_protocol(class_name: &str) -> bool {
+fn has_builtin_member_subsref_protocol(class_name: &ClassIdentity) -> bool {
     let qualified = format!("{class_name}.{}", ObjectIndexOp::Subsref.protocol_name());
     runmat_builtins::builtin_name_is_known(&qualified)
 }
 
-fn caller_has_internal_class_access(caller_function_name: Option<&str>, class_name: &str) -> bool {
+fn caller_has_internal_class_access(
+    caller_function_name: Option<&str>,
+    class_name: &ClassIdentity,
+) -> bool {
     if let Some(caller_name) = caller_function_name {
         if let Some((caller_class, _)) = caller_name.rsplit_once('.') {
-            if !caller_class.is_empty()
-                && crate::class_registry::get_class(caller_class).is_some()
-                && (crate::class_registry::is_class_or_subclass(caller_class, class_name)
-                    || crate::class_registry::is_class_or_subclass(class_name, caller_class))
-            {
-                return true;
+            if let Ok(caller_identity) = ClassIdentity::new(caller_class) {
+                if crate::class_registry::get_class(&caller_identity).is_some()
+                    && (crate::class_registry::is_class_or_subclass(&caller_identity, class_name)
+                        || crate::class_registry::is_class_or_subclass(
+                            class_name,
+                            &caller_identity,
+                        ))
+                {
+                    return true;
+                }
             }
         }
     }
@@ -49,17 +57,19 @@ fn caller_has_internal_class_access(caller_function_name: Option<&str>, class_na
 
 fn caller_is_index_overload(
     caller_function_name: Option<&str>,
-    class_name: &str,
+    class_name: &ClassIdentity,
     op: ObjectIndexOp,
 ) -> bool {
     let Some(caller) = caller_function_name else {
         return false;
     };
     let method_name = op.protocol_name();
-    if caller == method_name {
+    if method_name.matches_text(caller) {
         return true;
     }
-    if let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name) {
+    if let Some((method, owner)) =
+        crate::class_registry::lookup_method(class_name, &method_name.owned())
+    {
         if caller == method.function_name {
             return true;
         }
@@ -68,15 +78,17 @@ fn caller_is_index_overload(
         }
     }
     if let Some((caller_class, caller_method)) = caller.rsplit_once('.') {
-        if caller_method == method_name
-            && crate::class_registry::is_class_or_subclass(class_name, caller_class)
-        {
-            return true;
+        if method_name.matches_text(caller_method) {
+            if let Ok(caller_identity) = ClassIdentity::new(caller_class) {
+                if crate::class_registry::is_class_or_subclass(class_name, &caller_identity) {
+                    return true;
+                }
+            }
         }
     }
     if let Some(caller_class) = caller_class_for_function(Some(caller)) {
         if let Some((method, _owner)) =
-            crate::class_registry::lookup_method(&caller_class, method_name)
+            crate::class_registry::lookup_method(&caller_class, &method_name.owned())
         {
             if method.function_name == caller
                 && (crate::class_registry::is_class_or_subclass(class_name, &caller_class)
@@ -89,10 +101,12 @@ fn caller_is_index_overload(
     false
 }
 
-fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<String> {
+fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<ClassIdentity> {
     let caller_function_name = caller_function_name?;
-    if crate::class_registry::get_class(caller_function_name).is_some() {
-        return Some(caller_function_name.to_string());
+    if let Ok(identity) = ClassIdentity::new(caller_function_name) {
+        if crate::class_registry::get_class(&identity).is_some() {
+            return Some(identity);
+        }
     }
     if let Some(owner) = crate::class_registry::class_names()
         .into_iter()
@@ -110,23 +124,26 @@ fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<Strin
     if let Some((class_name, method_name)) = caller_function_name.rsplit_once('.') {
         if !class_name.is_empty()
             && !method_name.is_empty()
-            && crate::class_registry::get_class(class_name).is_some()
+            && ClassIdentity::new(class_name)
+                .ok()
+                .and_then(|identity| crate::class_registry::get_class(&identity))
+                .is_some()
         {
-            return Some(class_name.to_string());
+            return ClassIdentity::new(class_name).ok();
         }
     }
     None
 }
 
 fn access_permitted(
-    owner: &str,
+    owner: &ClassIdentity,
     access: &runmat_types::MemberAccess,
     caller_function_name: Option<&str>,
 ) -> bool {
     match access {
         runmat_types::MemberAccess::Public => true,
         runmat_types::MemberAccess::Private => {
-            caller_class_for_function(caller_function_name).as_deref() == Some(owner)
+            caller_class_for_function(caller_function_name).as_ref() == Some(owner)
         }
         runmat_types::MemberAccess::Protected => caller_class_for_function(caller_function_name)
             .is_some_and(|caller_class| {
@@ -190,9 +207,10 @@ pub async fn load_member_with_context(
                     return call_object_member_subsref(Value::Object(obj), field).await;
                 }
             }
-            if let Some((p, owner)) =
-                crate::class_registry::lookup_property(&obj.class_name, &field)
-            {
+            if let Some((p, owner)) = crate::class_registry::lookup_property(
+                &obj.class_name,
+                &runmat_types::MemberName::from(field.as_str()),
+            ) {
                 if p.is_static {
                     return Err(mex(
                         "RunMat:PropertyStaticAccess",
@@ -224,9 +242,10 @@ pub async fn load_member_with_context(
                 Ok(v)
             } else if let Some(v) = obj.properties.get(&field) {
                 Ok(v.clone())
-            } else if let Some((p2, owner)) =
-                crate::class_registry::lookup_property(&obj.class_name, &field)
-            {
+            } else if let Some((p2, owner)) = crate::class_registry::lookup_property(
+                &obj.class_name,
+                &runmat_types::MemberName::from(field.as_str()),
+            ) {
                 if !access_permitted(&owner, &p2.get_access, caller_function_name) {
                     return Err(mex(
                         IDENT_PROPERTY_PRIVATE_ACCESS,
@@ -354,11 +373,13 @@ pub async fn load_member_dynamic_with_context(
 }
 
 pub fn load_static_member(
-    cls: &str,
+    cls: &ClassIdentity,
     field: &str,
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
-    if let Some((p, owner)) = crate::class_registry::lookup_property(cls, field) {
+    if let Some((p, owner)) =
+        crate::class_registry::lookup_property(cls, &runmat_types::MemberName::from(field))
+    {
         if !p.is_static {
             return Err(mex(
                 "RunMat:PropertyStaticAccess",
@@ -380,7 +401,9 @@ pub fn load_static_member(
                 Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
             ))
         }
-    } else if let Some((m, _owner)) = crate::class_registry::lookup_method(cls, field) {
+    } else if let Some((m, _owner)) =
+        crate::class_registry::lookup_method(cls, &runmat_types::MethodName::from(field))
+    {
         if !m.is_static {
             return Err(mex(
                 "RunMat:MethodStaticAccess",
@@ -393,14 +416,14 @@ pub fn load_static_member(
             captures: vec![],
         }))
     } else if crate::class_registry::class_has_enumeration_member(cls, field) {
-        let mut value = runmat_value::ObjectInstance::new(cls.to_string());
+        let mut value = runmat_value::ObjectInstance::new(cls.clone());
         value.properties.insert(
             "__enum_member__".to_string(),
             Value::String(field.to_string()),
         );
         Ok(Value::Object(value))
     } else {
-        let qualified = external_qualified_display_name(cls, field);
+        let qualified = external_qualified_display_name(cls.display_name(), field);
         if runmat_builtins::builtin_functions()
             .iter()
             .any(|b| b.name == qualified)
@@ -441,9 +464,10 @@ where
                     return call_object_member_subsasgn(Value::Object(obj), field, rhs).await;
                 }
             }
-            if let Some((p, owner)) =
-                crate::class_registry::lookup_property(&obj.class_name, &field)
-            {
+            if let Some((p, owner)) = crate::class_registry::lookup_property(
+                &obj.class_name,
+                &runmat_types::MemberName::from(field.as_str()),
+            ) {
                 if p.is_static {
                     return Err(mex(
                         "RunMat:PropertyStaticAccess",
@@ -499,7 +523,10 @@ where
             }
         }
         Value::ClassRef(cls) => {
-            if let Some((p, owner)) = crate::class_registry::lookup_property(&cls, &field) {
+            if let Some((p, owner)) = crate::class_registry::lookup_property(
+                &cls,
+                &runmat_types::MemberName::from(field.as_str()),
+            ) {
                 if !p.is_static {
                     return Err(mex(
                         "RunMat:PropertyStaticAccess",
@@ -675,7 +702,7 @@ fn is_possible_graphics_handle_value(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{is_possible_graphics_handle_value, load_member, load_static_member, store_member};
-    use runmat_types::MemberAccess;
+    use runmat_types::{ClassIdentity, MemberAccess};
     use runmat_value::{IntValue, ObjectArray, ObjectInstance, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -692,9 +719,9 @@ mod tests {
         )));
     }
 
-    fn unique_class_name(prefix: &str) -> String {
+    fn unique_class_name(prefix: &str) -> ClassIdentity {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!("{}_{}", prefix, id)
+        ClassIdentity::from(format!("{}_{}", prefix, id))
     }
 
     #[test]
@@ -702,7 +729,7 @@ mod tests {
         let values = ["first", "second"]
             .into_iter()
             .map(|name| {
-                let mut object = ObjectInstance::new("matlab.unittest.TestResult".into());
+                let mut object = ObjectInstance::new("matlab.unittest.TestResult");
                 object
                     .properties
                     .insert("Name".into(), Value::String(name.into()));
@@ -729,9 +756,9 @@ mod tests {
 
         let mut parent_properties = HashMap::new();
         parent_properties.insert(
-            "version".to_string(),
+            "version".into(),
             crate::class_registry::RuntimeProperty {
-                name: "version".to_string(),
+                name: "version".into(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
@@ -766,9 +793,9 @@ mod tests {
 
         let mut parent_properties = HashMap::new();
         parent_properties.insert(
-            "version".to_string(),
+            "version".into(),
             crate::class_registry::RuntimeProperty {
-                name: "version".to_string(),
+                name: "version".into(),
                 is_static: true,
                 is_constant: false,
                 is_dependent: false,
@@ -813,14 +840,14 @@ mod tests {
 
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
-            "build".to_string(),
+            "build".into(),
             crate::class_registry::RuntimeMethod {
-                name: "build".to_string(),
+                name: "build".into(),
                 is_static: true,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: "build_impl".to_string(),
+                function_name: "build_impl".into(),
                 implicit_class_argument: None,
             },
         );
@@ -852,14 +879,14 @@ mod tests {
 
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
-            "subsref".to_string(),
+            "subsref".into(),
             crate::class_registry::RuntimeMethod {
-                name: "subsref".to_string(),
+                name: "subsref".into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: "OverIdx.subsref".to_string(),
+                function_name: "OverIdx.subsref".into(),
                 implicit_class_argument: None,
             },
         );
@@ -890,14 +917,14 @@ mod tests {
 
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
-            "subsasgn".to_string(),
+            "subsasgn".into(),
             crate::class_registry::RuntimeMethod {
-                name: "subsasgn".to_string(),
+                name: "subsasgn".into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: "OverIdx.subsasgn".to_string(),
+                function_name: "OverIdx.subsasgn".into(),
                 implicit_class_argument: None,
             },
         );

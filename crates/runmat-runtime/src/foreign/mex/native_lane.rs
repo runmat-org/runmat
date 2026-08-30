@@ -1885,11 +1885,11 @@ public:
         let lane = NativeMexLane::spawn().expect("start async property native lane");
         let metadata = futures::executor::block_on(lane.load(&artifact.module))
             .expect("load async property fixture");
-        let mut first = runmat_value::ObjectInstance::new("FixtureValue".into());
+        let mut first = runmat_value::ObjectInstance::new("FixtureValue");
         first
             .properties
             .insert("Value".into(), runmat_value::Value::Num(2.0));
-        let mut second = runmat_value::ObjectInstance::new("FixtureValue".into());
+        let mut second = runmat_value::ObjectInstance::new("FixtureValue");
         second
             .properties
             .insert("Value".into(), runmat_value::Value::Num(4.0));

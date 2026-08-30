@@ -101,7 +101,7 @@ fn cantilever_linear_static() -> AnalysisModel {
         frame: ReferenceFrame::Global,
         materials: vec![MaterialModel {
             material_id: "mat_steel".to_string(),
-            name: "Steel".to_string(),
+            name: "Steel".into(),
             mechanical: MaterialMechanicalModel {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
@@ -525,7 +525,7 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
     model.materials = vec![
         MaterialModel {
             material_id: "mat_soft_polymer".to_string(),
-            name: "Soft Polymer".to_string(),
+            name: "Soft Polymer".into(),
             mechanical: MaterialMechanicalModel {
                 youngs_modulus_pa: 1.4e9,
                 poisson_ratio: 0.39,
@@ -542,7 +542,7 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
         },
         MaterialModel {
             material_id: "mat_aluminum".to_string(),
-            name: "Aluminum".to_string(),
+            name: "Aluminum".into(),
             mechanical: MaterialMechanicalModel {
                 youngs_modulus_pa: 69e9,
                 poisson_ratio: 0.33,
@@ -940,7 +940,7 @@ fn multi_material_assembly() -> AnalysisModel {
     model.materials = vec![
         MaterialModel {
             material_id: "mat_steel".to_string(),
-            name: "Steel".to_string(),
+            name: "Steel".into(),
             mechanical: MaterialMechanicalModel {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
@@ -957,7 +957,7 @@ fn multi_material_assembly() -> AnalysisModel {
         },
         MaterialModel {
             material_id: "mat_aluminum".to_string(),
-            name: "Aluminum".to_string(),
+            name: "Aluminum".into(),
             mechanical: MaterialMechanicalModel {
                 youngs_modulus_pa: 69e9,
                 poisson_ratio: 0.33,
@@ -974,7 +974,7 @@ fn multi_material_assembly() -> AnalysisModel {
         },
         MaterialModel {
             material_id: "mat_polymer".to_string(),
-            name: "Polymer".to_string(),
+            name: "Polymer".into(),
             mechanical: MaterialMechanicalModel {
                 youngs_modulus_pa: 3.2e9,
                 poisson_ratio: 0.37,

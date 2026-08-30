@@ -9,6 +9,7 @@ const INTEGER_CONSTRUCTORS: [&str; 8] = [
 ];
 
 fn object_of_class<'a>(values: &'a [Value], class_name: &str) -> &'a runmat_value::ObjectInstance {
+    let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     values
         .iter()
         .find_map(|value| match value {
@@ -155,7 +156,7 @@ fn feedback_gains_and_feof_file_ids_accept_every_runmat_integer_extension_class(
             .iter()
             .any(|value| matches!(value, Value::Bool(false))));
         assert!(values.iter().any(|value| {
-            matches!(value, Value::Object(object) if object.class_name.eq_ignore_ascii_case("tf"))
+            matches!(value, Value::Object(object) if object.class_name.is(runmat_types::standard::TRANSFER_FUNCTION))
         }));
     }
 }

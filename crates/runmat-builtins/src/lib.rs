@@ -1,8 +1,6 @@
 pub use inventory;
 mod class_declarations;
-pub use class_declarations::{
-    standard_class_declaration, standard_class_is_subclass, GPU_ARRAY_PUBLIC_METHODS,
-};
+pub use class_declarations::{standard_class_declaration, standard_class_is_subclass};
 pub mod catalog;
 pub use catalog::*;
 mod catalog_fingerprint;
@@ -126,7 +124,7 @@ pub enum Type {
     /// Scalar or array object type with compatible class and shape facts.
     Object {
         /// Fully qualified class name when statically known.
-        class_name: Option<String>,
+        class_name: Option<runmat_types::ClassIdentity>,
         /// MATLAB shape; None means dynamic and individual dimensions may be unknown.
         shape: Option<Vec<Option<usize>>>,
     },
@@ -422,8 +420,8 @@ mod type_tests {
     #[test]
     fn object_array_type_preserves_class_and_shape() {
         let values = vec![
-            Value::Object(ObjectInstance::new("pkg.Result".into())),
-            Value::Object(ObjectInstance::new("pkg.Result".into())),
+            Value::Object(ObjectInstance::new("pkg.Result")),
+            Value::Object(ObjectInstance::new("pkg.Result")),
         ];
         let array = ObjectArray::new("pkg.Result", values, vec![1, 2]).expect("object array");
         assert!(matches!(
@@ -431,7 +429,7 @@ mod type_tests {
             Type::Object {
                 class_name: Some(name),
                 shape: Some(shape)
-            } if name == "pkg.Result" && shape == vec![Some(1), Some(2)]
+            } if name.display_name() == "pkg.Result" && shape == vec![Some(1), Some(2)]
         ));
     }
 }

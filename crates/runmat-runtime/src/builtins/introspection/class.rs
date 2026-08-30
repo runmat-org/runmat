@@ -127,13 +127,14 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
             if runmat_accelerate_api::handle_is_explicit(handle) {
                 "gpuArray".to_string()
             } else {
-                crate::builtins::common::gpu_helpers::expected_gpu_class_name(
+                crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
                     runmat_accelerate_api::handle_precision(handle),
                     runmat_accelerate_api::handle_integer_type(handle),
                     runmat_accelerate_api::handle_is_logical(handle),
                 )
-                .unwrap_or("double")
-                .to_string()
+                .unwrap_or_else(|| runmat_types::standard::DOUBLE.owned())
+                .display_name()
+                .to_owned()
             }
         }
         Value::FunctionHandle(_)
@@ -141,16 +142,10 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_) => "function_handle".to_string(),
-        Value::HandleObject(handle) => {
-            if handle.class_name.is_empty() {
-                "handle".to_string()
-            } else {
-                handle.class_name.clone()
-            }
-        }
+        Value::HandleObject(handle) => handle.class_name.to_string(),
         Value::Listener(_) => "event.listener".to_string(),
         Value::ObjectArray(array) => array.class_name().to_string(),
-        Value::Object(obj) => obj.class_name.clone(),
+        Value::Object(obj) => obj.class_name.to_string(),
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),
         Value::OutputList(_) => "output_list".to_string(),
@@ -365,9 +360,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn class_reports_handle_class_names() {
+    fn class_reports_handle_class_identitys() {
         let fallback = HandleRef {
-            class_name: String::new(),
+            class_name: runmat_types::standard::HANDLE.into(),
             target: test_handle_target(),
             valid: false,
         };
@@ -386,7 +381,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn class_reports_object_and_listener_classes() {
-        let object = ObjectInstance::new("pkg.Point".into());
+        let object = ObjectInstance::new("pkg.Point");
         let obj_name = class_builtin(Value::Object(object)).expect("class object");
         assert_eq!(obj_name, "pkg.Point");
 

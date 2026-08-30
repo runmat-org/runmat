@@ -486,12 +486,12 @@ mod tests {
     fn class_and_static_property_state_is_session_owned() {
         fn class(name: &str) -> crate::class_registry::RuntimeClass {
             crate::class_registry::RuntimeClass {
-                name: name.to_string(),
+                name: name.into(),
                 parent: None,
                 properties: std::collections::HashMap::from([(
-                    "answer".to_string(),
+                    "answer".into(),
                     crate::class_registry::RuntimeProperty {
-                        name: "answer".to_string(),
+                        name: "answer".into(),
                         is_static: true,
                         is_constant: false,
                         is_dependent: false,
@@ -506,27 +506,28 @@ mod tests {
 
         let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let only_first = runmat_types::ClassIdentity::from("OnlyFirst");
         {
             let _scope = RuntimeContextGuard::enter(first.clone());
             crate::class_registry::register_class(class("OnlyFirst"));
             crate::class_registry::set_static_property_value(
-                "OnlyFirst",
+                &only_first,
                 "answer",
                 runmat_value::Value::Num(1.0),
             );
         }
         {
             let _scope = RuntimeContextGuard::enter(second);
-            assert!(crate::class_registry::get_class("OnlyFirst").is_none());
+            assert!(crate::class_registry::get_class(&only_first).is_none());
             assert!(
-                crate::class_registry::get_static_property_value("OnlyFirst", "answer").is_none()
+                crate::class_registry::get_static_property_value(&only_first, "answer").is_none()
             );
         }
         {
             let _scope = RuntimeContextGuard::enter(first);
-            assert!(crate::class_registry::get_class("OnlyFirst").is_some());
+            assert!(crate::class_registry::get_class(&only_first).is_some());
             assert_eq!(
-                crate::class_registry::get_static_property_value("OnlyFirst", "answer"),
+                crate::class_registry::get_static_property_value(&only_first, "answer"),
                 Some(runmat_value::Value::Num(1.0))
             );
         }
@@ -539,17 +540,29 @@ mod tests {
         {
             let _scope = RuntimeContextGuard::enter(first.clone());
             crate::testing::ensure_testing_classes();
-            assert!(crate::class_registry::get_class(crate::testing::TEST_CASE_CLASS).is_some());
+            assert!(
+                crate::class_registry::get_class(&crate::testing::TEST_CASE_CLASS.owned())
+                    .is_some()
+            );
         }
         {
             let _scope = RuntimeContextGuard::enter(second.clone());
-            assert!(crate::class_registry::get_class(crate::testing::TEST_CASE_CLASS).is_none());
+            assert!(
+                crate::class_registry::get_class(&crate::testing::TEST_CASE_CLASS.owned())
+                    .is_none()
+            );
             crate::testing::ensure_testing_classes();
-            assert!(crate::class_registry::get_class(crate::testing::TEST_CASE_CLASS).is_some());
+            assert!(
+                crate::class_registry::get_class(&crate::testing::TEST_CASE_CLASS.owned())
+                    .is_some()
+            );
         }
         {
             let _scope = RuntimeContextGuard::enter(first);
-            assert!(crate::class_registry::get_class(crate::testing::TEST_CASE_CLASS).is_some());
+            assert!(
+                crate::class_registry::get_class(&crate::testing::TEST_CASE_CLASS.owned())
+                    .is_some()
+            );
         }
     }
 

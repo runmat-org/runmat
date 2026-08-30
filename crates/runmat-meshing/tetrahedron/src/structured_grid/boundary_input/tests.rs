@@ -109,19 +109,19 @@ fn boundary_input_keeps_boundary_regions_out_of_material_regions() {
     geometry.regions = vec![
         Region {
             region_id: "fixed_face".to_string(),
-            name: "fixed face".to_string(),
+            name: "fixed face".into(),
             tag: Some("fixed".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "load_face".to_string(),
-            name: "load face".to_string(),
+            name: "load face".into(),
             tag: Some("load".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "body".to_string(),
-            name: "body".to_string(),
+            name: "body".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
@@ -214,7 +214,7 @@ fn cube_geometry_with_shared_vertices() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "region_all".to_string(),
-            name: "all".to_string(),
+            name: "all".into(),
             tag: None,
             cad_ownership: None,
         }],

@@ -391,7 +391,7 @@ impl LossPayload {
                     dlarray: false,
                 })
             }
-            Value::Object(object) if object.class_name == "dlarray" => {
+            Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => {
                 let data = object.properties.get("Data").ok_or_else(|| {
                     deep_learning_error("crossentropy", "crossentropy: dlarray is missing Data")
                 })?;

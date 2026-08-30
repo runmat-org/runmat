@@ -1,16 +1,41 @@
 use std::collections::HashMap;
 
-use runmat_types::{DistributionScheme, LabCount, WorkerGridOrientation};
+use runmat_types::{CodistributorClass, DistributionScheme, LabCount, WorkerGridOrientation};
 use runmat_value::{ObjectInstance, Tensor, Value};
 
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
-pub const ONE_DIMENSIONAL_CLASS: &str = "codistributor1d";
-pub const TWO_DIMENSIONAL_CLASS: &str = "codistributor2dbc";
+pub const ONE_DIMENSIONAL_CLASS: runmat_types::StaticClassIdentity =
+    CodistributorClass::OneDimensional.identity();
+pub const TWO_DIMENSIONAL_CLASS: runmat_types::StaticClassIdentity =
+    CodistributorClass::TwoDimensionalBlockCyclic.identity();
 
-pub fn is_supported_class(class_name: &str) -> bool {
-    matches!(class_name, ONE_DIMENSIONAL_CLASS | TWO_DIMENSIONAL_CLASS)
+#[derive(Clone, Copy)]
+enum CodistributorProperty {
+    Dimension,
+    Partition,
+    GlobalSize,
+    WorkerGrid,
+    BlockSize,
+    Orientation,
+}
+
+impl CodistributorProperty {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Dimension => "Dimension",
+            Self::Partition => "Partition",
+            Self::GlobalSize => "GlobalSize",
+            Self::WorkerGrid => "WorkerGrid",
+            Self::BlockSize => "BlockSize",
+            Self::Orientation => "Orientation",
+        }
+    }
+}
+
+pub fn is_supported_class(class_name: &runmat_types::ClassIdentity) -> bool {
+    CodistributorClass::from_identity(class_name).is_some()
 }
 
 pub fn is_codistributor(value: &Value) -> bool {
@@ -22,7 +47,7 @@ pub fn declared_global_shape(value: &Value) -> Result<Vec<u64>, RuntimeError> {
         return Err(error("globalIndices requires a codistributor object"));
     };
     validate_definition(object)?;
-    optional_vector_property(object, "GlobalSize")?
+    optional_vector_property(object, CodistributorProperty::GlobalSize)?
         .ok_or_else(|| error("globalIndices requires a complete codistributor"))
 }
 
@@ -82,7 +107,7 @@ pub fn resolve_local_parts(
         None => {
             resolve_one_dimensional_local_parts(None, local_shapes, labs, validate_across_workers)
         }
-        Some(Value::Object(object)) if object.class_name == ONE_DIMENSIONAL_CLASS => {
+        Some(Value::Object(object)) if object.class_name.is(ONE_DIMENSIONAL_CLASS) => {
             validate_definition(object)?;
             resolve_one_dimensional_local_parts(
                 Some(object),
@@ -91,10 +116,10 @@ pub fn resolve_local_parts(
                 validate_across_workers,
             )
         }
-        Some(Value::Object(object)) if object.class_name == TWO_DIMENSIONAL_CLASS => {
+        Some(Value::Object(object)) if object.class_name.is(TWO_DIMENSIONAL_CLASS) => {
             validate_definition(object)?;
-            let global_shape =
-                optional_vector_property(object, "GlobalSize")?.ok_or_else(|| {
+            let global_shape = optional_vector_property(object, CodistributorProperty::GlobalSize)?
+                .ok_or_else(|| {
                     error("codistributor2dbc must declare GlobalSize for local-part construction")
                 })?;
             let scheme = resolve_two_dimensional(object, &global_shape, labs)?;
@@ -126,7 +151,7 @@ fn resolve_one_dimensional_local_parts(
     validate_across_workers: bool,
 ) -> Result<(Vec<u64>, DistributionScheme), RuntimeError> {
     let dimension = object
-        .map(|object| optional_positive_property(object, "Dimension"))
+        .map(|object| optional_positive_property(object, CodistributorProperty::Dimension))
         .transpose()?
         .flatten()
         .unwrap_or_else(|| {
@@ -163,14 +188,16 @@ fn resolve_one_dimensional_local_parts(
             .ok_or_else(|| error("codistributed.build global extent overflowed"))
     })?;
     if let Some(object) = object {
-        if let Some(declared) = optional_vector_property(object, "GlobalSize")? {
+        if let Some(declared) = optional_vector_property(object, CodistributorProperty::GlobalSize)?
+        {
             if declared != global_shape {
                 return Err(error(
                     "codistributed.build local shapes disagree with the declared GlobalSize",
                 ));
             }
         }
-        if let Some(declared) = optional_vector_property(object, "Partition")? {
+        if let Some(declared) = optional_vector_property(object, CodistributorProperty::Partition)?
+        {
             if declared.len() != labs.0 as usize
                 || (validate_across_workers && declared != partition)
             {
@@ -225,46 +252,58 @@ pub fn is_complete(value: &Value) -> Result<bool, RuntimeError> {
         return Err(error("isComplete requires a codistributor object"));
     };
     validate_definition(object)?;
-    Ok(optional_vector_property(object, "GlobalSize")?.is_some())
+    Ok(optional_vector_property(object, CodistributorProperty::GlobalSize)?.is_some())
 }
 
 pub fn validate_definition(object: &ObjectInstance) -> Result<(), RuntimeError> {
-    const ONE_DIMENSIONAL_PROPERTIES: &[&str] = &["Dimension", "Partition", "GlobalSize"];
-    const TWO_DIMENSIONAL_PROPERTIES: &[&str] =
-        &["WorkerGrid", "BlockSize", "Orientation", "GlobalSize"];
-    let expected = match object.class_name.as_str() {
-        ONE_DIMENSIONAL_CLASS => ONE_DIMENSIONAL_PROPERTIES,
-        TWO_DIMENSIONAL_CLASS => TWO_DIMENSIONAL_PROPERTIES,
+    const ONE_DIMENSIONAL_PROPERTIES: &[CodistributorProperty] = &[
+        CodistributorProperty::Dimension,
+        CodistributorProperty::Partition,
+        CodistributorProperty::GlobalSize,
+    ];
+    const TWO_DIMENSIONAL_PROPERTIES: &[CodistributorProperty] = &[
+        CodistributorProperty::WorkerGrid,
+        CodistributorProperty::BlockSize,
+        CodistributorProperty::Orientation,
+        CodistributorProperty::GlobalSize,
+    ];
+    let expected = match CodistributorClass::from_identity(&object.class_name) {
+        Some(CodistributorClass::OneDimensional) => ONE_DIMENSIONAL_PROPERTIES,
+        Some(CodistributorClass::TwoDimensionalBlockCyclic) => TWO_DIMENSIONAL_PROPERTIES,
         _ => return Err(error("unsupported codistributor class")),
     };
     if object.dynamic_properties.is_some()
         || object.properties.len() != expected.len()
         || expected
             .iter()
-            .any(|property| !object.properties.contains_key(*property))
+            .any(|property| !object.properties.contains_key(property.name()))
     {
         return Err(error(
             "codistributor properties do not match the immutable class schema",
         ));
     }
-    match object.class_name.as_str() {
-        ONE_DIMENSIONAL_CLASS => {
-            optional_positive_property(object, "Dimension")?;
-            optional_vector_property(object, "Partition")?;
-            optional_vector_property(object, "GlobalSize")?;
+    match CodistributorClass::from_identity(&object.class_name) {
+        Some(CodistributorClass::OneDimensional) => {
+            optional_positive_property(object, CodistributorProperty::Dimension)?;
+            optional_vector_property(object, CodistributorProperty::Partition)?;
+            optional_vector_property(object, CodistributorProperty::GlobalSize)?;
         }
-        TWO_DIMENSIONAL_CLASS => {
-            if let Some(values) = optional_vector_property(object, "WorkerGrid")? {
+        Some(CodistributorClass::TwoDimensionalBlockCyclic) => {
+            if let Some(values) =
+                optional_vector_property(object, CodistributorProperty::WorkerGrid)?
+            {
                 pair_from_values(&values, "worker grid")?;
             }
-            optional_positive_property(object, "BlockSize")?;
+            optional_positive_property(object, CodistributorProperty::BlockSize)?;
             parse_orientation(
                 object
                     .properties
-                    .get("Orientation")
+                    .get(CodistributorProperty::Orientation.name())
                     .expect("validated property set"),
             )?;
-            if let Some(values) = optional_vector_property(object, "GlobalSize")? {
+            if let Some(values) =
+                optional_vector_property(object, CodistributorProperty::GlobalSize)?
+            {
                 pair_from_values(&values, "global size")?;
             }
         }
@@ -315,18 +354,21 @@ pub fn two_dimensional(arguments: &[Value]) -> Result<Value, RuntimeError> {
         .transpose()?;
     let mut properties = HashMap::new();
     properties.insert(
-        "WorkerGrid".into(),
+        CodistributorProperty::WorkerGrid.name().into(),
         worker_grid.map_or_else(empty_vector, |value| {
             vector_value(value.map(u64::from).to_vec())
         }),
     );
     properties.insert(
-        "BlockSize".into(),
+        CodistributorProperty::BlockSize.name().into(),
         block_size.map_or_else(empty_vector, exact_scalar),
     );
-    properties.insert("Orientation".into(), orientation_value(orientation));
     properties.insert(
-        "GlobalSize".into(),
+        CodistributorProperty::Orientation.name().into(),
+        orientation_value(orientation),
+    );
+    properties.insert(
+        CodistributorProperty::GlobalSize.name().into(),
         global_shape.map_or_else(empty_vector, |value| {
             vector_value(value.map(u64::from).to_vec())
         }),
@@ -359,12 +401,21 @@ pub fn from_scheme(
         } => {
             let mut properties = HashMap::new();
             properties.insert(
-                "WorkerGrid".into(),
+                CodistributorProperty::WorkerGrid.name().into(),
                 vector_value(worker_grid.map(u64::from).to_vec()),
             );
-            properties.insert("BlockSize".into(), exact_scalar(*block_size));
-            properties.insert("Orientation".into(), orientation_value(*orientation));
-            properties.insert("GlobalSize".into(), vector_value(global_shape.to_vec()));
+            properties.insert(
+                CodistributorProperty::BlockSize.name().into(),
+                exact_scalar(*block_size),
+            );
+            properties.insert(
+                CodistributorProperty::Orientation.name().into(),
+                orientation_value(*orientation),
+            );
+            properties.insert(
+                CodistributorProperty::GlobalSize.name().into(),
+                vector_value(global_shape.to_vec()),
+            );
             object(TWO_DIMENSIONAL_CLASS, properties)
         }
         DistributionScheme::Replicated
@@ -388,9 +439,13 @@ pub fn resolve(
         return Err(error("redistribute requires a codistributor object"));
     };
     validate_definition(object)?;
-    match object.class_name.as_str() {
-        ONE_DIMENSIONAL_CLASS => resolve_one_dimensional(object, global_shape, labs),
-        TWO_DIMENSIONAL_CLASS => resolve_two_dimensional(object, global_shape, labs),
+    match CodistributorClass::from_identity(&object.class_name) {
+        Some(CodistributorClass::OneDimensional) => {
+            resolve_one_dimensional(object, global_shape, labs)
+        }
+        Some(CodistributorClass::TwoDimensionalBlockCyclic) => {
+            resolve_two_dimensional(object, global_shape, labs)
+        }
         _ => Err(error(
             "redistribute requires a codistributor1d or codistributor2dbc object",
         )),
@@ -402,20 +457,21 @@ fn resolve_one_dimensional(
     global_shape: &[u64],
     labs: LabCount,
 ) -> Result<DistributionScheme, RuntimeError> {
-    let dimension = optional_positive_property(object, "Dimension")?.unwrap_or_else(|| {
-        global_shape
-            .iter()
-            .rposition(|extent| *extent != 1)
-            .map(|index| index as u64 + 1)
-            .unwrap_or(if global_shape.len() >= 2 { 2 } else { 1 })
-    });
+    let dimension = optional_positive_property(object, CodistributorProperty::Dimension)?
+        .unwrap_or_else(|| {
+            global_shape
+                .iter()
+                .rposition(|extent| *extent != 1)
+                .map(|index| index as u64 + 1)
+                .unwrap_or(if global_shape.len() >= 2 { 2 } else { 1 })
+        });
     let dimension_index = usize::try_from(dimension)
         .ok()
         .and_then(|value| value.checked_sub(1))
         .filter(|value| *value < global_shape.len())
         .ok_or_else(|| error("codistributor1d dimension lies outside the global size"))?;
     validate_declared_shape(object, global_shape)?;
-    let partition = optional_vector_property(object, "Partition")?
+    let partition = optional_vector_property(object, CodistributorProperty::Partition)?
         .unwrap_or_else(|| default_partition(global_shape[dimension_index], labs));
     let partition_extent = partition.iter().try_fold(0_u64, |sum, length| {
         sum.checked_add(*length)
@@ -442,7 +498,7 @@ fn resolve_two_dimensional(
         return Err(error("codistributor2dbc can distribute only matrices"));
     }
     validate_declared_shape(object, global_shape)?;
-    let grid = optional_vector_property(object, "WorkerGrid")?
+    let grid = optional_vector_property(object, CodistributorProperty::WorkerGrid)?
         .map(|values| pair_from_values(&values, "worker grid"))
         .transpose()?
         .unwrap_or_else(|| default_worker_grid(labs));
@@ -451,10 +507,11 @@ fn resolve_two_dimensional(
             "worker grid must contain exactly one position per lab",
         ));
     }
-    let block_size = optional_positive_property(object, "BlockSize")?.unwrap_or(64);
+    let block_size =
+        optional_positive_property(object, CodistributorProperty::BlockSize)?.unwrap_or(64);
     let orientation = object
         .properties
-        .get("Orientation")
+        .get(CodistributorProperty::Orientation.name())
         .map(parse_orientation)
         .transpose()?
         .unwrap_or(WorkerGridOrientation::Row);
@@ -472,21 +529,24 @@ fn one_dimensional_object(
 ) -> Value {
     let mut properties = HashMap::new();
     properties.insert(
-        "Dimension".into(),
+        CodistributorProperty::Dimension.name().into(),
         dimension.map_or_else(empty_vector, exact_scalar),
     );
     properties.insert(
-        "Partition".into(),
+        CodistributorProperty::Partition.name().into(),
         partition.map_or_else(empty_vector, vector_value),
     );
     properties.insert(
-        "GlobalSize".into(),
+        CodistributorProperty::GlobalSize.name().into(),
         global_shape.map_or_else(empty_vector, vector_value),
     );
     object(ONE_DIMENSIONAL_CLASS, properties)
 }
 
-fn object(class_name: &str, properties: HashMap<String, Value>) -> Value {
+fn object(
+    class_name: runmat_types::StaticClassIdentity,
+    properties: HashMap<String, Value>,
+) -> Value {
     Value::Object(ObjectInstance {
         class_name: class_name.into(),
         properties,
@@ -610,8 +670,9 @@ fn orientation_value(orientation: WorkerGridOrientation) -> Value {
 
 fn optional_positive_property(
     object: &ObjectInstance,
-    name: &str,
+    property: CodistributorProperty,
 ) -> Result<Option<u64>, RuntimeError> {
+    let name = property.name();
     let Some(value) = object.properties.get(name) else {
         return Err(error(format!(
             "{} is missing its {name} property",
@@ -627,8 +688,9 @@ fn optional_positive_property(
 
 fn optional_vector_property(
     object: &ObjectInstance,
-    name: &str,
+    property: CodistributorProperty,
 ) -> Result<Option<Vec<u64>>, RuntimeError> {
+    let name = property.name();
     let Some(value) = object.properties.get(name) else {
         return Err(error(format!(
             "{} is missing its {name} property",
@@ -643,7 +705,9 @@ fn optional_vector_property(
 }
 
 fn validate_declared_shape(object: &ObjectInstance, shape: &[u64]) -> Result<(), RuntimeError> {
-    if optional_vector_property(object, "GlobalSize")?.is_some_and(|declared| declared != shape) {
+    if optional_vector_property(object, CodistributorProperty::GlobalSize)?
+        .is_some_and(|declared| declared != shape)
+    {
         return Err(error(
             "codistributor global size does not match the distributed value",
         ));

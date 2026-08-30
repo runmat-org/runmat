@@ -1,53 +1,68 @@
 use runmat_types::{
-    BuiltinId, CallableIdentity, ClassKind, ExternalClassDeclaration, ExternalMethodDeclaration,
-    MemberAccess, MethodAttributes, MethodName, QualifiedName, SymbolName,
+    standard, BuiltinId, CallableIdentity, ClassIdentity, ClassKind, ExternalClassDeclaration,
+    ExternalMethodDeclaration, MemberAccess, MethodAttributes, MethodName, QualifiedName,
+    StaticClassIdentity, StaticMethodName, SymbolName,
 };
 
-pub const GPU_ARRAY_PUBLIC_METHODS: &[&str] = &[
-    "arrayfun",
-    "existsOnGPU",
-    "gather",
-    "isgpuarray",
-    "isUnderlyingType",
-    "ndims",
-    "pagefun",
-    "size",
-    "underlyingType",
+const GPU_ARRAY_METHODS: &[StaticMethodName] = &[
+    StaticMethodName::new("arrayfun"),
+    StaticMethodName::new("existsOnGPU"),
+    StaticMethodName::new("gather"),
+    StaticMethodName::new("isgpuarray"),
+    StaticMethodName::new("isUnderlyingType"),
+    StaticMethodName::new("ndims"),
+    StaticMethodName::new("pagefun"),
+    StaticMethodName::new("size"),
+    StaticMethodName::new("underlyingType"),
 ];
 
 /// Return immutable standard-library class metadata used during composition.
 /// Mutable runtime registrations and static property values are intentionally
 /// not visible through this interface.
-pub fn standard_class_declaration(name: &str) -> Option<ExternalClassDeclaration> {
-    if name == "gpuArray" {
+pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalClassDeclaration> {
+    if identity.is(standard::GPU_ARRAY) {
         return Some(ExternalClassDeclaration {
-            name: qualified(name),
+            name: identity.qualified_name(),
             parent: None,
             kind: ClassKind::Value,
             is_sealed: false,
             is_abstract: false,
             properties: Vec::new(),
-            methods: GPU_ARRAY_PUBLIC_METHODS
+            methods: GPU_ARRAY_METHODS
                 .iter()
                 .map(|method| ExternalMethodDeclaration {
-                    name: MethodName((*method).to_owned()),
+                    name: method.owned(),
                     attributes: MethodAttributes::default(),
                     is_static: false,
                     callable: CallableIdentity::ExternalName(qualified(&format!(
-                        "gpuArray.{method}"
+                        "{}.{}",
+                        standard::GPU_ARRAY,
+                        method.display_name()
                     ))),
                     implicit_class_argument: None,
                 })
                 .collect(),
         });
     }
-    let primitive = [
-        "double", "single", "logical", "int8", "int16", "int32", "int64", "uint8", "uint16",
-        "uint32", "uint64",
+    let primitives = [
+        standard::DOUBLE,
+        standard::SINGLE,
+        standard::LOGICAL,
+        standard::INT8,
+        standard::INT16,
+        standard::INT32,
+        standard::INT64,
+        standard::UINT8,
+        standard::UINT16,
+        standard::UINT32,
+        standard::UINT64,
     ];
-    if primitive.contains(&name) {
+    if let Some(primitive) = primitives
+        .into_iter()
+        .find(|candidate| identity.is(*candidate))
+    {
         return Some(ExternalClassDeclaration {
-            name: qualified(name),
+            name: identity.qualified_name(),
             parent: None,
             kind: ClassKind::Value,
             is_sealed: false,
@@ -61,19 +76,23 @@ pub fn standard_class_declaration(name: &str) -> Option<ExternalClassDeclaration
                 },
                 is_static: true,
                 callable: CallableIdentity::Builtin(BuiltinId("zeros".into())),
-                implicit_class_argument: Some(name.to_owned()),
+                implicit_class_argument: Some(primitive.display_name().to_owned()),
             }],
         });
     }
-    let (parent, kind) = match name {
-        "handle" => (None, ClassKind::Handle),
-        "dynamicprops" => (Some("handle"), ClassKind::Handle),
-        "matlab.metadata.Property" => (None, ClassKind::Value),
-        "matlab.metadata.DynamicProperty" => (Some("handle"), ClassKind::Handle),
-        "matlab.unittest.TestCase" => (Some("handle"), ClassKind::Handle),
-        _ => return None,
+    let (parent, kind) = if identity.is(standard::HANDLE) {
+        (None, ClassKind::Handle)
+    } else if identity.is(standard::DYNAMIC_PROPERTIES)
+        || identity.is(standard::METADATA_DYNAMIC_PROPERTY)
+        || identity.is(standard::UNIT_TEST_CASE)
+    {
+        (Some(standard::HANDLE), ClassKind::Handle)
+    } else if identity.is(standard::METADATA_PROPERTY) {
+        (None, ClassKind::Value)
+    } else {
+        return None;
     };
-    let methods = if name == "matlab.metadata.DynamicProperty" {
+    let methods = if identity.is(standard::METADATA_DYNAMIC_PROPERTY) {
         vec![ExternalMethodDeclaration {
             name: MethodName("delete".into()),
             attributes: MethodAttributes::default(),
@@ -87,8 +106,8 @@ pub fn standard_class_declaration(name: &str) -> Option<ExternalClassDeclaration
         Vec::new()
     };
     Some(ExternalClassDeclaration {
-        name: qualified(name),
-        parent: parent.map(qualified),
+        name: identity.qualified_name(),
+        parent: parent.map(qualified_static),
         kind,
         is_sealed: false,
         is_abstract: false,
@@ -97,19 +116,22 @@ pub fn standard_class_declaration(name: &str) -> Option<ExternalClassDeclaration
     })
 }
 
-pub fn standard_class_is_subclass(class_name: &str, ancestor_name: &str) -> bool {
-    let mut current = Some(class_name.to_owned());
+pub fn standard_class_is_subclass(
+    class_name: &ClassIdentity,
+    ancestor_name: &ClassIdentity,
+) -> bool {
+    let mut current = Some(class_name.clone());
     let mut visited = std::collections::BTreeSet::new();
     while let Some(name) = current {
         if !visited.insert(name.clone()) {
             return false;
         }
-        if name == ancestor_name {
+        if &name == ancestor_name {
             return true;
         }
         current = standard_class_declaration(&name)
             .and_then(|declaration| declaration.parent)
-            .and_then(|name| name.display_name());
+            .and_then(|name| ClassIdentity::from_qualified_name(&name).ok());
     }
     false
 }
@@ -122,15 +144,25 @@ fn qualified(name: &str) -> QualifiedName {
     )
 }
 
+fn qualified_static(name: StaticClassIdentity) -> QualifiedName {
+    name.owned().qualified_name()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn primitive_and_handle_metadata_is_deterministic() {
-        let double = standard_class_declaration("double").unwrap();
+        let double = standard_class_declaration(&standard::DOUBLE.owned()).unwrap();
         assert_eq!(double.methods[0].name.0, "zeros");
-        assert!(standard_class_is_subclass("dynamicprops", "handle"));
-        assert!(!standard_class_is_subclass("double", "handle"));
+        assert!(standard_class_is_subclass(
+            &standard::DYNAMIC_PROPERTIES.owned(),
+            &standard::HANDLE.owned()
+        ));
+        assert!(!standard_class_is_subclass(
+            &standard::DOUBLE.owned(),
+            &standard::HANDLE.owned()
+        ));
     }
 }

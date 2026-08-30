@@ -1,8 +1,9 @@
 use runmat_gc_api::GcHandle;
+use runmat_types::ClassIdentity;
 
 #[derive(Debug, Clone)]
 pub struct HandleRef {
-    pub class_name: String,
+    pub class_name: ClassIdentity,
     pub target: GcHandle,
     pub valid: bool,
 }

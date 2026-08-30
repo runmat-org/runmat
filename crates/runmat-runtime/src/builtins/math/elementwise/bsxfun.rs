@@ -1220,7 +1220,7 @@ mod tests {
         let row = Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap();
         let result = call(
             Value::BoundFunctionHandle {
-                name: "scaled_add".to_string(),
+                name: "scaled_add".into(),
                 function: 7,
             },
             Value::Tensor(column),
@@ -1304,7 +1304,7 @@ mod tests {
         )));
         let err = call(
             Value::BoundFunctionHandle {
-                name: "bad".to_string(),
+                name: "bad".into(),
                 function: 9,
             },
             Value::Num(1.0),

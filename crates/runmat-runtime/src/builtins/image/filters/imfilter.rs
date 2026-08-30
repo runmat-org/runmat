@@ -277,23 +277,25 @@ enum ImageOutputClass {
 #[derive(Clone)]
 struct ProtectedGpuMetadata {
     numeric: crate::builtins::math::fft::common::GpuMetadataSnapshot,
-    class_name: Option<String>,
+    class_identity: Option<runmat_types::ClassIdentity>,
     transpose: Option<runmat_accelerate_api::TransposeInfo>,
 }
 
 fn protected_gpu_metadata(handle: &GpuTensorHandle) -> ProtectedGpuMetadata {
     ProtectedGpuMetadata {
         numeric: gpu_metadata_snapshot(handle),
-        class_name: runmat_accelerate_api::handle_class_name(handle),
+        class_identity: runmat_accelerate_api::handle_class_identity(handle),
         transpose: runmat_accelerate_api::handle_transpose_info(handle),
     }
 }
 
 fn restore_protected_gpu_metadata(handle: &GpuTensorHandle, metadata: ProtectedGpuMetadata) {
     restore_gpu_metadata(handle, metadata.numeric);
-    match metadata.class_name {
-        Some(class_name) => runmat_accelerate_api::set_handle_class_name(handle, class_name),
-        None => runmat_accelerate_api::clear_handle_class_name(handle),
+    match metadata.class_identity {
+        Some(class_identity) => {
+            runmat_accelerate_api::set_handle_class_identity(handle, class_identity)
+        }
+        None => runmat_accelerate_api::clear_handle_class_identity(handle),
     }
     match metadata.transpose {
         Some(transpose) => runmat_accelerate_api::record_handle_transpose(
@@ -1459,7 +1461,7 @@ pub(crate) mod tests {
             _options: &'a ImfilterOptions,
         ) -> AccelProviderFuture<'a, GpuTensorHandle> {
             runmat_accelerate_api::set_handle_logical(image, true);
-            runmat_accelerate_api::set_handle_class_name(image, "single");
+            runmat_accelerate_api::set_handle_class_identity(image, "single");
             runmat_accelerate_api::clear_handle_transpose(image);
             Box::pin(async move { Ok(image.clone()) })
         }
@@ -1706,7 +1708,7 @@ pub(crate) mod tests {
                 shape: &[2, 2],
             })
             .expect("image upload");
-        runmat_accelerate_api::set_handle_class_name(&image, "double");
+        runmat_accelerate_api::set_handle_class_identity(&image, "double");
         runmat_accelerate_api::record_handle_transpose(&image, 2, 2);
         let image = image.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
 
@@ -1729,8 +1731,8 @@ pub(crate) mod tests {
         assert_eq!(runmat_accelerate_api::handle_integer_type(&image), None);
         assert!(!runmat_accelerate_api::handle_is_logical(&image));
         assert_eq!(
-            runmat_accelerate_api::handle_class_name(&image).as_deref(),
-            Some("double")
+            runmat_accelerate_api::handle_class_identity(&image),
+            Some(runmat_types::standard::DOUBLE.owned())
         );
         assert_eq!(
             runmat_accelerate_api::handle_transpose_info(&image)

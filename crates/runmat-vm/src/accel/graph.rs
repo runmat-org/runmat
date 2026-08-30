@@ -606,9 +606,7 @@ impl<'a> GraphBuilder<'a> {
         let span = InstrSpan { start: pc, end: pc };
         let mut node = AccelNode {
             id: node_id,
-            label: AccelNodeLabel::Builtin {
-                name: name.to_string(),
-            },
+            label: AccelNodeLabel::Builtin { name: name.into() },
             category: info.category,
             inputs: inputs.clone(),
             outputs: Vec::new(),
@@ -736,9 +734,7 @@ impl<'a> GraphBuilder<'a> {
         let span = InstrSpan { start: pc, end: pc };
         let mut node = AccelNode {
             id: node_id,
-            label: AccelNodeLabel::Builtin {
-                name: name.to_string(),
-            },
+            label: AccelNodeLabel::Builtin { name: name.into() },
             category: category.clone(),
             inputs: inputs.clone(),
             outputs: Vec::new(),
@@ -1051,6 +1047,7 @@ impl<'a> GraphBuilder<'a> {
         };
         if let Some(value) = folded {
             if let Some(out_info) = self.values.get_mut(out_value as usize) {
+                out_info.update_type(&Type::Num);
                 out_info.constant = Some(value);
             }
         }

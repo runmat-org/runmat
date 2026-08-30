@@ -147,7 +147,10 @@ pub(crate) fn simple_rvalue_inference(
             runmat_types::FactInference::exact(scalar_fact(ValueKindFact::Object(
                 runmat_types::ObjectFact {
                     class: None,
-                    runtime_class: Some(class_name.clone()),
+                    runtime_class: Some(
+                        runmat_types::ClassIdentity::from_qualified_name(class_name)
+                            .expect("MIR object literals carry canonical class names"),
+                    ),
                     properties,
                     properties_complete: true,
                     handle_semantics: None,

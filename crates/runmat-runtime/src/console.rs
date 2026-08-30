@@ -179,13 +179,13 @@ pub fn install_forwarder(forwarder: Option<Arc<StreamForwarder>>) {
 pub fn record_value_output(label: Option<&str>, value: &Value) {
     with_console_state(|state| state.last_value_output = Some(value.clone()));
     let value_text = match value {
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::datetime_display_text(value)
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| value.to_string())
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_display_text(value)
                 .ok()
                 .flatten()

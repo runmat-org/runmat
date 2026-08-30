@@ -80,9 +80,12 @@ pub(super) fn test_case_lineage(
         else {
             return Lineage::NotTestCase;
         };
-        if parent.eq_ignore_ascii_case("matlab.unittest.TestCase")
-            || runmat_builtins::standard_class_is_subclass(parent, "matlab.unittest.TestCase")
-        {
+        let parent_identity = runmat_types::ClassIdentity::new(parent).ok();
+        let test_case = runmat_types::standard::UNIT_TEST_CASE.owned();
+        if parent_identity.as_ref().is_some_and(|identity| {
+            identity == &test_case
+                || runmat_builtins::standard_class_is_subclass(identity, &test_case)
+        }) {
             lineage.reverse();
             return Lineage::TestCase(lineage);
         }

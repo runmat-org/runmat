@@ -26,7 +26,8 @@ use crate::{
     OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN, OBJECT_SUBSREF_METHOD,
 };
 
-pub(crate) const MEMOIZED_FUNCTION_CLASS: &str = "MemoizedFunction";
+pub(crate) const MEMOIZED_FUNCTION_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("MemoizedFunction");
 pub const MEMOIZE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
@@ -268,7 +269,7 @@ pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
                 matches!(
                     target_value,
                     Value::Object(object)
-                        if object.class_name == MEMOIZED_FUNCTION_CLASS
+                        if object.class_name.is(MEMOIZED_FUNCTION_CLASS)
                             && object.properties.get(FUNCTION_PROPERTY) == Some(&function)
                             && matches!(
                                 object.properties.get(crate::HANDLE_VALID_FLAG_PROPERTY),
@@ -395,7 +396,7 @@ pub(crate) async fn clear_all_memoized_caches_builtin() -> BuiltinResult<Value> 
                 let Value::Object(object) = target_value else {
                     return false;
                 };
-                if object.class_name != MEMOIZED_FUNCTION_CLASS {
+                if !object.class_name.is(MEMOIZED_FUNCTION_CLASS) {
                     return false;
                 }
                 reset_object_cache(object).is_ok()
@@ -407,7 +408,7 @@ pub(crate) async fn clear_all_memoized_caches_builtin() -> BuiltinResult<Value> 
 }
 
 fn ensure_memoized_function_class_registered() {
-    if crate::class_registry::get_class(MEMOIZED_FUNCTION_CLASS).is_some() {
+    if crate::class_registry::get_class(&MEMOIZED_FUNCTION_CLASS.owned()).is_some() {
         return;
     }
 
@@ -426,9 +427,9 @@ fn ensure_memoized_function_class_registered() {
         ),
     ] {
         properties.insert(
-            name.to_string(),
+            name.into(),
             crate::class_registry::RuntimeProperty {
-                name: name.to_string(),
+                name: name.into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -442,26 +443,29 @@ fn ensure_memoized_function_class_registered() {
     let mut methods = HashMap::new();
     for (method_name, function_name) in [
         (OBJECT_SUBSREF_METHOD, "MemoizedFunction.subsref"),
-        ("clearCache", "clearCache"),
-        ("stats", "stats"),
+        (
+            runmat_types::StaticMethodName::new("clearCache"),
+            "clearCache",
+        ),
+        (runmat_types::StaticMethodName::new("stats"), "stats"),
     ] {
         methods.insert(
-            method_name.to_string(),
+            method_name.into(),
             crate::class_registry::RuntimeMethod {
-                name: method_name.to_string(),
+                name: method_name.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: function_name.to_string(),
+                function_name: function_name.into(),
                 implicit_class_argument: None,
             },
         );
     }
 
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: MEMOIZED_FUNCTION_CLASS.to_string(),
-        parent: Some("handle".to_string()),
+        name: MEMOIZED_FUNCTION_CLASS.into(),
+        parent: Some(runmat_types::standard::HANDLE.into()),
         properties,
         methods,
     });
@@ -485,7 +489,7 @@ fn canonicalize_memoized_function(function: Value) -> BuiltinResult<Value> {
 
 fn handle_from_target(target: runmat_gc::GcHandle) -> Value {
     Value::HandleObject(HandleRef {
-        class_name: MEMOIZED_FUNCTION_CLASS.to_string(),
+        class_name: MEMOIZED_FUNCTION_CLASS.into(),
         target,
         valid: true,
     })
@@ -991,8 +995,8 @@ fn value_equal_for_cache(lhs: &Value, rhs: &Value) -> bool {
         (Value::OutputList(a), Value::OutputList(b)) => values_equal_for_cache(a, b),
         (Value::FunctionHandle(a), Value::FunctionHandle(b))
         | (Value::ExternalFunctionHandle(a), Value::ExternalFunctionHandle(b))
-        | (Value::MethodFunctionHandle(a), Value::MethodFunctionHandle(b))
-        | (Value::ClassRef(a), Value::ClassRef(b)) => a == b,
+        | (Value::MethodFunctionHandle(a), Value::MethodFunctionHandle(b)) => a == b,
+        (Value::ClassRef(a), Value::ClassRef(b)) => a == b,
         (Value::Symbolic(a), Value::Symbolic(b)) => a == b,
         (
             Value::BoundFunctionHandle {
@@ -1309,7 +1313,7 @@ mod tests {
 
     fn memoized() -> Value {
         block_on(memoize_builtin(Value::BoundFunctionHandle {
-            name: "step".to_string(),
+            name: "step".into(),
             function: 42,
         }))
         .expect("memoized function")
@@ -1347,7 +1351,7 @@ mod tests {
     #[test]
     fn memoized_state_reads_enabled_from_typed_integer_tensor_storage() {
         let function = Value::BoundFunctionHandle {
-            name: "step".to_string(),
+            name: "step".into(),
             function: 42,
         };
         let enabled =
@@ -1362,7 +1366,7 @@ mod tests {
             .insert(ENABLED_PROPERTY.to_string(), Value::Tensor(enabled));
         let target = runmat_gc::gc_allocate(Value::Object(object)).expect("target");
         let handle = HandleRef {
-            class_name: MEMOIZED_FUNCTION_CLASS.to_string(),
+            class_name: MEMOIZED_FUNCTION_CLASS.into(),
             target,
             valid: true,
         };
@@ -1872,7 +1876,7 @@ mod tests {
         )))
         .expect("payload allocation");
         let payload = Value::HandleObject(HandleRef {
-            class_name: "PayloadHandle".to_string(),
+            class_name: "PayloadHandle".into(),
             target: payload_target,
             valid: true,
         });

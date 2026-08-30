@@ -22,7 +22,7 @@ use crate::builtins::control::type_resolvers::impulse_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "impulse";
-const TF_CLASS: &str = "tf";
+const TF_CLASS: runmat_types::StaticClassIdentity = runmat_types::StaticClassIdentity::new("tf");
 const EPS: f64 = 1.0e-12;
 const DEFAULT_POINTS: usize = 100;
 const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
@@ -398,7 +398,7 @@ impl TfSystem {
                 format!("expected a dynamic system model, got {gathered:?}"),
             ));
         };
-        if object.class_name != TF_CLASS {
+        if !object.class_name.is(TF_CLASS) {
             return Err(impulse_error_with_detail(
                 &IMPULSE_ERROR_UNSUPPORTED_MODEL,
                 format!(

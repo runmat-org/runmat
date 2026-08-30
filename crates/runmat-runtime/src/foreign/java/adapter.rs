@@ -583,7 +583,7 @@ impl JavaAdapter {
         } else {
             discover_jvm(&self.discovery.borrow()).ok()
         };
-        let mut status = ObjectInstance::new("matlab.javaclient.JavaEnvironment".into());
+        let mut status = ObjectInstance::new("matlab.javaclient.JavaEnvironment");
         status.properties.insert(
             "Version".into(),
             Value::String(

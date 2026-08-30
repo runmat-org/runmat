@@ -95,12 +95,10 @@ fn infer_exponential(
             return finish_fixed(entry, request, output, diagnostics);
         }
         ValueKindFact::Object(object) => {
-            let tabular = object
-                .runtime_class
-                .as_ref()
-                .and_then(|class| class.display_name())
-                .is_some_and(|class| matches!(class.as_str(), "table" | "timetable"));
-            if tabular {
+            if object.runtime_class.as_ref().is_some_and(|class| {
+                class.is(runmat_types::standard::TABLE)
+                    || class.is(runmat_types::standard::TIMETABLE)
+            }) {
                 object.properties.clear();
                 object.properties_complete = false;
                 output.alias = AliasFact::Unique;

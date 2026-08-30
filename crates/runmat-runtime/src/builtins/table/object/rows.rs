@@ -39,11 +39,11 @@ pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
         Value::LogicalArray(array) => Ok(array.shape.first().copied().unwrap_or(array.data.len())),
         Value::Cell(cell) => Ok(cell.rows),
         Value::CharArray(array) => Ok(array.rows),
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .map(|tensor| tensor.rows())
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .map(|tensor| tensor.rows())
         }
@@ -236,7 +236,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                 .map(Value::Cell)
                 .map_err(invalid_variable)
         }
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             let tensor = crate::builtins::datetime::serials_from_datetime_value(value)?;
             let selected = select_rows(&Value::Tensor(tensor), rows)?;
             match selected {
@@ -249,7 +249,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                 _ => unreachable!("select_rows tensor branch returns tensor"),
             }
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             let tensor = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
             let selected = select_rows(&Value::Tensor(tensor), rows)?;
             match selected {

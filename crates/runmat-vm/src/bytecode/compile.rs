@@ -1870,9 +1870,7 @@ mod tests {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
-                label: runmat_accelerate::graph::AccelNodeLabel::Builtin {
-                    name: "sum".to_string(),
-                },
+                label: runmat_accelerate::graph::AccelNodeLabel::Builtin { name: "sum".into() },
                 category: runmat_accelerate::graph::AccelOpCategory::Reduction,
                 inputs: vec![0],
                 outputs: vec![1],
@@ -2361,9 +2359,7 @@ mod tests {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
-                label: runmat_accelerate::graph::AccelNodeLabel::Builtin {
-                    name: "sum".to_string(),
-                },
+                label: runmat_accelerate::graph::AccelNodeLabel::Builtin { name: "sum".into() },
                 category: runmat_accelerate::graph::AccelOpCategory::Reduction,
                 inputs: vec![0],
                 outputs: vec![1],
@@ -2412,9 +2408,7 @@ mod tests {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
-                label: runmat_accelerate::graph::AccelNodeLabel::Builtin {
-                    name: "sum".to_string(),
-                },
+                label: runmat_accelerate::graph::AccelNodeLabel::Builtin { name: "sum".into() },
                 category: runmat_accelerate::graph::AccelOpCategory::Reduction,
                 inputs: vec![0],
                 outputs: vec![1],
@@ -5310,7 +5304,8 @@ y = x^[1 2; 3 4];\n",
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile should succeed");
         assert!(bytecode.instructions.iter().any(|instr| match instr {
             Instr::CreateObjectLiteral { class_name, fields } => {
-                class_name == "Point" && fields.as_slice() == ["x".to_string(), "y".to_string()]
+                class_name.is(runmat_types::StaticClassIdentity::new("Point"))
+                    && fields.as_slice() == ["x".to_string(), "y".to_string()]
             }
             _ => false,
         }));

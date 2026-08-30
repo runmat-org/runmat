@@ -959,7 +959,7 @@ impl Callable {
     fn resolved_semantic_handle(name: &str) -> Option<Self> {
         let function = user_functions::resolve_semantic_function_by_name(name)?;
         Some(Callable::Closure(Closure {
-            function_name: name.to_string(),
+            function_name: name.into(),
             bound_function: Some(function),
             captures: Vec::new(),
         }))
@@ -1029,13 +1029,9 @@ impl Callable {
                     return Ok(callable);
                 }
                 if crate::is_well_formed_qualified_name(name) {
-                    return Ok(Callable::ExternalName {
-                        name: name.to_string(),
-                    });
+                    return Ok(Callable::ExternalName { name: name.into() });
                 }
-                Ok(Callable::Builtin {
-                    name: name.to_string(),
-                })
+                Ok(Callable::Builtin { name: name.into() })
             }
         } else {
             let name = trimmed.to_ascii_lowercase();
@@ -1964,7 +1960,7 @@ pub(crate) mod tests {
         )));
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
         let handle = Value::BoundFunctionHandle {
-            name: "arrayfun_target".to_string(),
+            name: "arrayfun_target".into(),
             function: 78,
         };
 
@@ -2114,7 +2110,7 @@ pub(crate) mod tests {
                 (name == "pkg.callback").then_some(187)
             })));
         let callable = Callable::from_function(Value::Closure(Closure {
-            function_name: "pkg.callback".to_string(),
+            function_name: "pkg.callback".into(),
             bound_function: None,
             captures: vec![Value::Num(5.0)],
         }))
@@ -2144,7 +2140,7 @@ pub(crate) mod tests {
             }),
         ));
         let callable = Callable::Closure(Closure {
-            function_name: "pkg.callback".to_string(),
+            function_name: "pkg.callback".into(),
             bound_function: None,
             captures: vec![Value::Num(5.0)],
         });

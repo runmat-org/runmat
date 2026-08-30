@@ -3,6 +3,7 @@ use runmat_accelerate_api::{
     HostNumericDataView, HostNumericTensorOwned, HostNumericTensorView, HostTensorOwned,
     IntegerElementType, NumericElementType, ProviderPrecision,
 };
+use runmat_types::{standard, ClassIdentity};
 use runmat_value::{
     ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
 };
@@ -75,7 +76,7 @@ pub struct GpuHandleMetadataSnapshot {
     descriptor: runmat_accelerate_api::GpuTensorDescriptor,
     logical: bool,
     transpose: Option<runmat_accelerate_api::TransposeInfo>,
-    class_name: Option<String>,
+    class_identity: Option<ClassIdentity>,
     provenance: Option<runmat_accelerate_api::GpuHandleProvenance>,
 }
 
@@ -84,7 +85,7 @@ pub fn snapshot_handle_metadata(handle: &GpuTensorHandle) -> GpuHandleMetadataSn
         descriptor: handle.descriptor,
         logical: runmat_accelerate_api::handle_is_logical(handle),
         transpose: runmat_accelerate_api::handle_transpose_info(handle),
-        class_name: runmat_accelerate_api::handle_class_name(handle),
+        class_identity: runmat_accelerate_api::handle_class_identity(handle),
         provenance: runmat_accelerate_api::handle_provenance(handle),
     }
 }
@@ -98,9 +99,11 @@ pub fn restore_handle_metadata(handle: &GpuTensorHandle, snapshot: &GpuHandleMet
         }
         None => runmat_accelerate_api::clear_handle_transpose(handle),
     }
-    match snapshot.class_name.as_deref() {
-        Some(class_name) => runmat_accelerate_api::set_handle_class_name(handle, class_name),
-        None => runmat_accelerate_api::clear_handle_class_name(handle),
+    match &snapshot.class_identity {
+        Some(class_identity) => {
+            runmat_accelerate_api::set_handle_class_identity(handle, class_identity.clone())
+        }
+        None => runmat_accelerate_api::clear_handle_class_identity(handle),
     }
     runmat_accelerate_api::mark_residency(handle);
 }
@@ -125,29 +128,20 @@ impl Drop for HandleMetadataRestoreGuard<'_> {
     }
 }
 
-pub fn expected_gpu_class_name(
+pub fn expected_gpu_class_identity(
     precision: Option<ProviderPrecision>,
     integer: Option<IntegerElementType>,
     logical: bool,
-) -> Option<&'static str> {
+) -> Option<ClassIdentity> {
     if logical {
-        return Some("logical");
+        return Some(standard::LOGICAL.owned());
     }
     if let Some(integer) = integer {
-        return Some(match integer {
-            IntegerElementType::I8 => "int8",
-            IntegerElementType::I16 => "int16",
-            IntegerElementType::I32 => "int32",
-            IntegerElementType::I64 => "int64",
-            IntegerElementType::U8 => "uint8",
-            IntegerElementType::U16 => "uint16",
-            IntegerElementType::U32 => "uint32",
-            IntegerElementType::U64 => "uint64",
-        });
+        return Some(NumericElementType::from(integer).class_identity());
     }
     precision.map(|precision| match precision {
-        ProviderPrecision::F32 => "single",
-        ProviderPrecision::F64 => "double",
+        ProviderPrecision::F32 => standard::SINGLE.owned(),
+        ProviderPrecision::F64 => standard::DOUBLE.owned(),
     })
 }
 
@@ -157,10 +151,9 @@ pub fn gpu_class_metadata_matches(
     integer: Option<IntegerElementType>,
     logical: bool,
 ) -> bool {
-    let expected = expected_gpu_class_name(precision, integer, logical);
-    runmat_accelerate_api::handle_class_name(handle)
-        .as_deref()
-        .is_none_or(|actual| expected == Some(actual))
+    let expected = expected_gpu_class_identity(precision, integer, logical);
+    runmat_accelerate_api::handle_class_identity(handle)
+        .is_none_or(|actual| expected.as_ref() == Some(&actual))
 }
 
 fn integer_element_type(storage: &IntegerStorage) -> IntegerElementType {
@@ -182,10 +175,9 @@ pub(crate) fn expected_handle_numeric_element_type(
     let precision = runmat_accelerate_api::handle_precision(handle);
     let integer = runmat_accelerate_api::handle_integer_type(handle);
     let logical = runmat_accelerate_api::handle_is_logical(handle);
-    let expected_class = expected_gpu_class_name(precision, integer, logical);
-    if runmat_accelerate_api::handle_class_name(handle)
-        .as_deref()
-        .is_some_and(|actual| expected_class != Some(actual))
+    let expected_class = expected_gpu_class_identity(precision, integer, logical);
+    if runmat_accelerate_api::handle_class_identity(handle)
+        .is_some_and(|actual| expected_class.as_ref() != Some(&actual))
     {
         return Err("class metadata contradicts the physical payload metadata".into());
     }
@@ -1115,7 +1107,7 @@ mod preserving_download_tests {
                 provider,
                 contract
             ));
-            runmat_accelerate_api::set_handle_class_name(&output, "single");
+            runmat_accelerate_api::set_handle_class_identity(&output, "single");
             assert!(!unary_gpu_output_matches(
                 &output, &input, provider, contract
             ));
@@ -1269,8 +1261,8 @@ mod preserving_download_tests {
             };
             assert!(runmat_accelerate_api::handle_is_logical(&logical_handle));
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&logical_handle).as_deref(),
-                Some("logical")
+                runmat_accelerate_api::handle_class_identity(&logical_handle),
+                Some(runmat_types::standard::LOGICAL.owned())
             );
             let gathered = block_on(crate::dispatcher::gather_if_needed_async(
                 &Value::GpuTensor(logical_handle.clone()),
@@ -1456,7 +1448,7 @@ mod preserving_download_tests {
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
             Box::pin(async move {
                 runmat_accelerate_api::set_handle_logical(handle, true);
-                runmat_accelerate_api::set_handle_class_name(handle, "logical");
+                runmat_accelerate_api::set_handle_class_identity(handle, "logical");
                 Ok(runmat_accelerate_api::HostTensorOwned {
                     data: vec![1.0],
                     shape: handle.shape.clone(),
@@ -1583,7 +1575,7 @@ mod preserving_download_tests {
             ),
         };
         runmat_accelerate_api::set_handle_logical(&handle, false);
-        runmat_accelerate_api::set_handle_class_name(&handle, "double");
+        runmat_accelerate_api::set_handle_class_identity(&handle, "double");
         let result = block_on(download_value_preserving_residency_async(
             &MutatingDownloadProvider,
             &handle,
@@ -1592,8 +1584,8 @@ mod preserving_download_tests {
         assert!(matches!(result, Value::Tensor(_)));
         assert!(!runmat_accelerate_api::handle_is_logical(&handle));
         assert_eq!(
-            runmat_accelerate_api::handle_class_name(&handle).as_deref(),
-            Some("double")
+            runmat_accelerate_api::handle_class_identity(&handle),
+            Some(runmat_types::standard::DOUBLE.owned())
         );
     }
 

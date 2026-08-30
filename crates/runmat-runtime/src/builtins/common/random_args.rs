@@ -11,26 +11,11 @@ pub(crate) fn validate_constructor_gpu_output(
     expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
     expected_logical: bool,
 ) -> Result<runmat_accelerate_api::GpuTensorHandle, String> {
-    let expected_class = if expected_logical {
-        "logical"
-    } else if let Some(integer) = expected_integer {
-        match integer {
-            runmat_accelerate_api::IntegerElementType::I8 => "int8",
-            runmat_accelerate_api::IntegerElementType::I16 => "int16",
-            runmat_accelerate_api::IntegerElementType::I32 => "int32",
-            runmat_accelerate_api::IntegerElementType::I64 => "int64",
-            runmat_accelerate_api::IntegerElementType::U8 => "uint8",
-            runmat_accelerate_api::IntegerElementType::U16 => "uint16",
-            runmat_accelerate_api::IntegerElementType::U32 => "uint32",
-            runmat_accelerate_api::IntegerElementType::U64 => "uint64",
-        }
-    } else {
-        match expected_precision {
-            Some(runmat_accelerate_api::ProviderPrecision::F32) => "single",
-            Some(runmat_accelerate_api::ProviderPrecision::F64) => "double",
-            None => "",
-        }
-    };
+    let expected_class = crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
+        expected_precision,
+        expected_integer,
+        expected_logical,
+    );
     let expected_element = expected_integer
         .map(runmat_accelerate_api::NumericElementType::from)
         .or_else(|| {
@@ -43,7 +28,7 @@ pub(crate) fn validate_constructor_gpu_output(
                 }
             })
         });
-    let existing_class = runmat_accelerate_api::handle_class_name(&output);
+    let existing_class = runmat_accelerate_api::handle_class_identity(&output);
     let valid = output.device_id == provider.device_id()
         && output.shape == expected_shape
         && runmat_accelerate_api::provider_for_handle(&output)
@@ -52,8 +37,8 @@ pub(crate) fn validate_constructor_gpu_output(
         && output.descriptor.element_type == expected_element
         && (!runmat_accelerate_api::handle_is_logical(&output) || expected_logical)
         && existing_class
-            .as_deref()
-            .is_none_or(|class_name| class_name == expected_class);
+            .as_ref()
+            .is_none_or(|class_identity| Some(class_identity) == expected_class.as_ref());
     if !valid {
         let _ = provider.free(&output);
         return Err(format!(
@@ -61,7 +46,9 @@ pub(crate) fn validate_constructor_gpu_output(
         ));
     }
     runmat_accelerate_api::set_handle_logical(&output, expected_logical);
-    runmat_accelerate_api::set_handle_class_name(&output, expected_class);
+    let expected_class = expected_class
+        .ok_or_else(|| format!("{label}: expected numeric class metadata is missing"))?;
+    runmat_accelerate_api::set_handle_class_identity(&output, expected_class);
     runmat_accelerate_api::mark_handle_explicit(&mut output);
     Ok(output)
 }

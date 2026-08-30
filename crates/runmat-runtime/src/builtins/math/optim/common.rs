@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle {
-                name: "decay".to_string(),
+                name: "decay".into(),
                 function: 42,
             }
         );
@@ -710,7 +710,7 @@ mod tests {
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle {
-                name: "pkg.decay".to_string(),
+                name: "pkg.decay".into(),
                 function: 43,
             }
         );
@@ -737,7 +737,7 @@ mod tests {
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle {
-                name: "decay".to_string(),
+                name: "decay".into(),
                 function: 45,
             }
         );
@@ -753,7 +753,7 @@ mod tests {
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle {
-                name: "decay".to_string(),
+                name: "decay".into(),
                 function: 145,
             }
         );
@@ -771,7 +771,7 @@ mod tests {
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle {
-                name: "pkg.decay".to_string(),
+                name: "pkg.decay".into(),
                 function: 46,
             }
         );
@@ -789,7 +789,7 @@ mod tests {
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle {
-                name: "pkg.decay".to_string(),
+                name: "pkg.decay".into(),
                 function: 146,
             }
         );
@@ -806,7 +806,7 @@ mod tests {
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle {
-                name: "decay".to_string(),
+                name: "decay".into(),
                 function: 47,
             }
         );
@@ -823,7 +823,7 @@ mod tests {
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle {
-                name: "decay".to_string(),
+                name: "decay".into(),
                 function: 147,
             }
         );
@@ -836,7 +836,7 @@ mod tests {
                 (name == "decay").then_some(48)
             })));
         let raw = Value::Closure(Closure {
-            function_name: "decay".to_string(),
+            function_name: "decay".into(),
             bound_function: None,
             captures: vec![Value::Num(9.0)],
         });
@@ -844,7 +844,7 @@ mod tests {
         assert_eq!(
             canonical,
             Value::Closure(Closure {
-                function_name: "decay".to_string(),
+                function_name: "decay".into(),
                 bound_function: Some(48),
                 captures: vec![Value::Num(9.0)],
             })
@@ -854,7 +854,7 @@ mod tests {
     #[test]
     fn callback_handle_canonicalizer_keeps_name_only_closure_without_resolver() {
         let raw = Value::Closure(Closure {
-            function_name: "decay".to_string(),
+            function_name: "decay".into(),
             bound_function: None,
             captures: vec![Value::Num(9.0)],
         });

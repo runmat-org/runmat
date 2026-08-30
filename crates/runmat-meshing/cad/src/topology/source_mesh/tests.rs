@@ -51,7 +51,7 @@ fn topology_separates_boundary_regions_from_material_regions() {
     let mut geometry = cube_geometry();
     geometry.regions.push(Region {
         region_id: "body".to_string(),
-        name: "body".to_string(),
+        name: "body".into(),
         tag: Some("material".to_string()),
         cad_ownership: None,
     });
@@ -125,13 +125,13 @@ fn cube_geometry() -> GeometryAsset {
         regions: vec![
             Region {
                 region_id: "root".to_string(),
-                name: "root".to_string(),
+                name: "root".into(),
                 tag: None,
                 cad_ownership: None,
             },
             Region {
                 region_id: "tip".to_string(),
-                name: "tip".to_string(),
+                name: "tip".into(),
                 tag: None,
                 cad_ownership: None,
             },

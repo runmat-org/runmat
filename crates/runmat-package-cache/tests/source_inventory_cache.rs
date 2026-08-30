@@ -38,7 +38,7 @@ fn source_inventory_is_cached_by_tree_and_schema_with_verified_bytes() {
             entries: vec![SourceInventoryEntry {
                 source_root: NormalizedRelativePath::new("src").unwrap(),
                 relative_path: NormalizedRelativePath::new("main.m").unwrap(),
-                qualified_name: "main".to_string(),
+                qualified_name: "main".into(),
                 package_path: None,
                 class_name: None,
                 class_qualified_name: None,

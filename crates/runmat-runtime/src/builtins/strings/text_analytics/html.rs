@@ -14,7 +14,8 @@ use runmat_value::{CellArray, ObjectInstance, StringArray, StructValue, Value};
 use crate::builtins::strings::core::compat::{scalar_text, text_items};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
-const HTML_TREE_CLASS: &str = "htmlTree";
+const HTML_TREE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("htmlTree");
 const MISSING: &str = "<missing>";
 
 const EXTRACT_HTML_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
@@ -1641,7 +1642,7 @@ struct OpenElement {
 
 fn parse_html_tree(html: &str) -> BuiltinResult<HtmlNode> {
     let mut stack = vec![OpenElement {
-        name: "document".to_string(),
+        name: "document".into(),
         attrs: BTreeMap::new(),
         children: Vec::new(),
         start: 0,
@@ -1720,7 +1721,7 @@ fn parse_html_tree(html: &str) -> BuiltinResult<HtmlNode> {
     } else {
         let raw = html.to_string();
         Ok(HtmlNode::Element(HtmlElement {
-            name: "html".to_string(),
+            name: "html".into(),
             attrs: BTreeMap::new(),
             children: root.children,
             raw,
@@ -2238,7 +2239,7 @@ mod tests {
         let Value::Object(object) = tree else {
             panic!("expected object");
         };
-        assert_eq!(object.class_name, HTML_TREE_CLASS);
+        assert!(object.class_name.is(HTML_TREE_CLASS));
         assert_eq!(
             object.properties.get("Name"),
             Some(&Value::String("HTML".to_string()))

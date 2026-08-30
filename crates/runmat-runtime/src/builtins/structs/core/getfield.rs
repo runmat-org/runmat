@@ -1381,7 +1381,10 @@ fn get_struct_field(struct_value: &StructValue, name: &str) -> BuiltinResult<Val
 }
 
 async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
-    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(
+        &obj.class_name,
+        &runmat_types::MemberName::from(name),
+    ) {
         if prop.is_static {
             return Err(getfield_error_with_message(
                 format!(
@@ -1421,7 +1424,10 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
         return Ok(value.clone());
     }
 
-    if let Some((prop, _owner)) = crate::class_registry::lookup_property(&obj.class_name, name) {
+    if let Some((prop, _owner)) = crate::class_registry::lookup_property(
+        &obj.class_name,
+        &runmat_types::MemberName::from(name),
+    ) {
         if prop.get_access == MemberAccess::Private {
             return Err(getfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
@@ -2283,15 +2289,15 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let class_name = "runmat.unittest.GetfieldDependent";
         let mut def = crate::class_registry::RuntimeClass {
-            name: class_name.to_string(),
+            name: class_name.into(),
             parent: None,
             properties: std::collections::HashMap::new(),
             methods: std::collections::HashMap::new(),
         };
         def.properties.insert(
-            "p".to_string(),
+            "p".into(),
             crate::class_registry::RuntimeProperty {
-                name: "p".to_string(),
+                name: "p".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: true,
@@ -2318,15 +2324,15 @@ pub(crate) mod tests {
         let child_name = "runmat.unittest.GetfieldDependentChild";
 
         let mut parent = crate::class_registry::RuntimeClass {
-            name: parent_name.to_string(),
+            name: parent_name.into(),
             parent: None,
             properties: std::collections::HashMap::new(),
             methods: std::collections::HashMap::new(),
         };
         parent.properties.insert(
-            "p".to_string(),
+            "p".into(),
             crate::class_registry::RuntimeProperty {
-                name: "p".to_string(),
+                name: "p".into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: true,
@@ -2338,8 +2344,8 @@ pub(crate) mod tests {
         crate::class_registry::register_class(parent);
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child_name.to_string(),
-            parent: Some(parent_name.to_string()),
+            name: child_name.into(),
+            parent: Some(parent_name.into()),
             properties: std::collections::HashMap::new(),
             methods: std::collections::HashMap::new(),
         });
@@ -2359,7 +2365,7 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocate target");
         let handle = HandleRef {
-            class_name: "Demo".to_string(),
+            class_name: "Demo".into(),
             target,
             valid: false,
         };
@@ -2379,8 +2385,8 @@ pub(crate) mod tests {
         let listener = Listener {
             id: 9,
             target,
-            target_class_name: "EventTarget".to_string(),
-            event_name: "tick".to_string(),
+            target_class_name: "EventTarget".into(),
+            event_name: "tick".into(),
             callback,
             enabled: true,
             valid: true,
@@ -2412,8 +2418,8 @@ pub(crate) mod tests {
         let listener = Listener {
             id: 10,
             target,
-            target_class_name: "EventTarget".to_string(),
-            event_name: "tick".to_string(),
+            target_class_name: "EventTarget".into(),
+            event_name: "tick".into(),
             callback,
             enabled: false,
             valid: false,

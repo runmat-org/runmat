@@ -1,6 +1,9 @@
 use runmat_builtins::{ResolveContext, Type};
 use runmat_value::{ObjectInstance, Value};
 
+const CODE_COVERAGE_PLUGIN_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.plugins.CodeCoveragePlugin");
+
 use crate::BuiltinResult;
 
 #[runmat_macros::runtime_builtin(
@@ -21,7 +24,7 @@ fn test_runner_plugin(args: Vec<Value>) -> BuiltinResult<Value> {
         );
     }
     Ok(Value::Object(ObjectInstance::new(
-        "matlab.unittest.plugins.TestRunnerPlugin".into(),
+        runmat_types::standard::UNIT_TEST_RUNNER_PLUGIN,
     )))
 }
 
@@ -94,7 +97,7 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
             "CodeCoveragePlugin.forFolder requires at least one folder",
         ));
     }
-    let mut object = ObjectInstance::new("matlab.unittest.plugins.CodeCoveragePlugin".into());
+    let mut object = ObjectInstance::new(CODE_COVERAGE_PLUGIN_CLASS);
     let count = folders.len();
     object.properties.insert(
         "Folders".into(),
@@ -112,7 +115,7 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
 
 fn code_coverage_plugin_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Object {
-        class_name: Some("matlab.unittest.plugins.CodeCoveragePlugin".into()),
+        class_name: Some(CODE_COVERAGE_PLUGIN_CLASS.into()),
         shape: Some(vec![Some(1), Some(1)]),
     }
 }
@@ -147,10 +150,7 @@ mod tests {
         let Value::Object(plugin) = plugin else {
             panic!("coverage plugin must be an object");
         };
-        assert_eq!(
-            plugin.class_name,
-            "matlab.unittest.plugins.CodeCoveragePlugin"
-        );
+        assert!(plugin.class_name.is(CODE_COVERAGE_PLUGIN_CLASS));
         assert_eq!(
             plugin.properties.get("IncludingSubfolders"),
             Some(&Value::Bool(true))

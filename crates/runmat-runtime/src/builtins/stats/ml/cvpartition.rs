@@ -19,7 +19,8 @@ use crate::builtins::common::{random, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const CVPARTITION_NAME: &str = "cvpartition";
-const CVPARTITION_CLASS: &str = "cvpartition";
+const CVPARTITION_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("cvpartition");
 const TEST_SETS_PROPERTY: &str = "__RunMatCvPartitionTestSets";
 const ACTIVE_ROWS_PROPERTY: &str = "__RunMatCvPartitionActiveRows";
 const MAX_MATERIALIZED_MASK_CELLS: usize = 10_000_000;

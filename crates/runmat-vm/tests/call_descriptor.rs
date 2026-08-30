@@ -461,7 +461,7 @@ fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::Closure(Closure {
-            function_name: "inc".to_string(),
+            function_name: "inc".into(),
             bound_function: None,
             captures: vec![Value::Num(10.0)],
         }),
@@ -490,7 +490,7 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::Closure(Closure {
-            function_name: "inc".to_string(),
+            function_name: "inc".into(),
             bound_function: Some(4242),
             captures: vec![Value::Num(10.0)],
         }),
@@ -734,7 +734,7 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::BoundFunctionHandle {
-            name: "inc".to_string(),
+            name: "inc".into(),
             function: 4242,
         },
         vec![Value::Num(2.0)],

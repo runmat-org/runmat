@@ -141,33 +141,26 @@ fn value_has_public_method(receiver: &Value, method_name: &str) -> bool {
         return false;
     }
 
-    let class_name = match receiver_class_name(receiver) {
-        Some(class_name) if !class_name.is_empty() => class_name,
-        _ => return false,
+    let Some(class_name) = receiver_class_name(receiver) else {
+        return false;
     };
 
-    crate::class_registry::lookup_method(&class_name, method_name)
+    crate::class_registry::lookup_method(&class_name, &runmat_types::MethodName::from(method_name))
         .is_some_and(|(method, _owner)| matches!(method.access, MemberAccess::Public))
 }
 
-fn receiver_class_name(receiver: &Value) -> Option<String> {
+fn receiver_class_name(receiver: &Value) -> Option<runmat_types::ClassIdentity> {
     match receiver {
-        Value::ObjectArray(array) => Some(array.class_name().to_string()),
+        Value::ObjectArray(array) => Some(array.class_name().clone()),
         Value::Object(object) => Some(object.class_name.clone()),
-        Value::HandleObject(handle) => {
-            if handle.class_name.is_empty() {
-                Some("handle".to_string())
-            } else {
-                Some(handle.class_name.clone())
-            }
-        }
+        Value::HandleObject(handle) => Some(handle.class_name.clone()),
         Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle) => {
-            Some("gpuArray".to_string())
+            Some(runmat_types::standard::GPU_ARRAY.into())
         }
         Value::GpuTensor(_) => None,
-        Value::Listener(Listener { .. }) => Some("event.listener".to_string()),
+        Value::Listener(Listener { .. }) => Some(runmat_types::standard::EVENT_LISTENER.into()),
         Value::ClassRef(_) => None,
-        Value::MException(MException { .. }) => Some("MException".to_string()),
+        Value::MException(MException { .. }) => Some(runmat_types::standard::MEXCEPTION.into()),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => None,
         _ => None,
     }
@@ -195,7 +188,7 @@ mod tests {
         is_static: bool,
     ) -> crate::class_registry::RuntimeMethod {
         crate::class_registry::RuntimeMethod {
-            name: name.to_string(),
+            name: name.into(),
             is_static,
             is_abstract: false,
             is_sealed: false,
@@ -211,38 +204,32 @@ mod tests {
 
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
-            "inherited".to_string(),
+            "inherited".into(),
             method("inherited", MemberAccess::Public, false),
         );
         parent_methods.insert(
-            "hidden".to_string(),
+            "hidden".into(),
             method("hidden", MemberAccess::Private, false),
         );
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: parent.clone(),
+            name: parent.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: parent_methods,
         });
 
         let mut child_methods = HashMap::new();
+        child_methods.insert("run".into(), method("run", MemberAccess::Public, false));
+        child_methods.insert("make".into(), method("make", MemberAccess::Public, true));
         child_methods.insert(
-            "run".to_string(),
-            method("run", MemberAccess::Public, false),
-        );
-        child_methods.insert(
-            "make".to_string(),
-            method("make", MemberAccess::Public, true),
-        );
-        child_methods.insert(
-            "secret".to_string(),
+            "secret".into(),
             method("secret", MemberAccess::Protected, false),
         );
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child.clone(),
-            parent: Some(parent.clone()),
+            name: child.clone().into(),
+            parent: Some(parent.clone().into()),
             properties: HashMap::new(),
             methods: child_methods,
         });
@@ -259,7 +246,7 @@ mod tests {
             runmat_gc::gc_allocate(Value::Object(ObjectInstance::new(class_name.to_string())))
                 .expect("gc allocation");
         Value::HandleObject(HandleRef {
-            class_name: class_name.to_string(),
+            class_name: class_name.into(),
             target,
             valid: true,
         })
@@ -331,7 +318,7 @@ mod tests {
             Value::String("inherited".to_string())
         ));
         assert!(!call(
-            Value::ClassRef(child),
+            Value::ClassRef(child.into()),
             Value::String("run".to_string())
         ));
     }
