@@ -4,13 +4,11 @@
 //! gated RunMat integer, logical, and character extensions. GPU fallbacks preserve the owner.
 
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
+#[cfg(test)]
+use runmat_builtins::EXPM1_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, EXPM1_CHARACTER_INPUT_EXTENSION, EXPM1_ERROR_INTERNAL,
+    EXPM1_ERROR_INVALID_INPUT, EXPM1_INTEGER_INPUT_EXTENSION, EXPM1_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -23,7 +21,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::expm1")]
@@ -55,89 +52,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "expm1";
 
-const EXPM1_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Elementwise exp(x)-1 result.",
-}];
-const EXPM1_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
-}];
-const EXPM1_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = expm1(X)",
-    inputs: &EXPM1_INPUTS,
-    outputs: &EXPM1_OUTPUT,
-}];
-const EXPM1_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EXPM1.INVALID_INPUT",
-    identifier: Some("RunMat:expm1:InvalidInput"),
-    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
-    message: "expm1: invalid input",
-};
-const EXPM1_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EXPM1.INTERNAL",
-    identifier: Some("RunMat:expm1:Internal"),
-    when: "Internal tensor construction or provider interaction failed.",
-    message: "expm1: internal error",
-};
-const EXPM1_ERRORS: [BuiltinErrorDescriptor; 2] = [EXPM1_ERROR_INVALID_INPUT, EXPM1_ERROR_INTERNAL];
-
-const EXPM1_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "expm1-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "expm1 with integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Expm1IntegerInputExtension"),
-};
-const EXPM1_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "expm1-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "expm1 with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Expm1LogicalInputExtension"),
-};
-const EXPM1_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "expm1-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "expm1 with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Expm1CharacterInputExtension"),
-};
-const EXPM1_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    EXPM1_INTEGER_INPUT_EXTENSION,
-    EXPM1_LOGICAL_INPUT_EXTENSION,
-    EXPM1_CHARACTER_INPUT_EXTENSION,
-];
-
-const EXPM1_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are accepted only in RunMat extension mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53].",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = expm1(integer_X)",
-        inputs: &EXPM1_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The RunMat-only overload validates exact binary64 conversion before accurate exponentiation. Resident integer input gathers exactly through its owning provider; the double result is restored only when that provider physically supports binary64, otherwise it remains a host double.",
-    }];
-pub const EXPM1_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &EXPM1_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &EXPM1_ERRORS,
-};
-
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -158,14 +72,7 @@ fn expm1_error_with_detail(
 
 #[runtime_builtin(
     name = "expm1",
-    category = "math/elementwise",
-    summary = "Compute exp(x)-1 element-wise with near-zero accuracy.",
-    keywords = "expm1,exp(x)-1,exponential,elementwise,gpu,precision",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::expm1::EXPM1_DESCRIPTOR),
-    extensions(EXPM1_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::elementwise::expm1::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::expm1"
 )]
 async fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
@@ -233,38 +140,65 @@ fn ensure_expm1_extensions(value: &Value) -> BuiltinResult<()> {
 }
 
 async fn expm1_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
         expm1_error_with_detail(&EXPM1_ERROR_INTERNAL, "GPU provider unavailable for input")
     })?;
+    if gpu_helpers::expected_handle_numeric_element_type(&handle).is_err() {
+        return Err(expm1_error_with_detail(
+            &EXPM1_ERROR_INTERNAL,
+            "GPU input class metadata contradicts its physical storage",
+        ));
+    }
+    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
+        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        let tensor = gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        let gathered = gpu_helpers::gather_tensor_async(&handle).await;
+        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        let tensor = gathered.map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
         let output = expm1_tensor(tensor)?;
         if provider.precision() != runmat_accelerate_api::ProviderPrecision::F64 {
             return Ok(tensor::tensor_into_value(output));
         }
-        return restore_real_gpu_output(provider, &handle, &output);
+        return restore_real_gpu_output(
+            provider,
+            &handle,
+            &output,
+            Some(runmat_accelerate_api::ProviderPrecision::F64),
+            input_provenance,
+        );
     }
     if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
-        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
-            .await
-            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        let gathered_result =
+            gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await;
+        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        let gathered =
+            gathered_result.map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
         let result = expm1_host_value(gathered)?;
-        return restore_gpu_value(provider, &handle, result);
+        return restore_gpu_value(provider, &handle, result, input_provenance);
     }
-    match provider.unary_expm1(&handle).await {
-        Ok(out) if valid_real_gpu_output(&out, &handle, provider) => {
+    let provider_result = provider.unary_expm1(&handle).await;
+    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+    match provider_result {
+        Ok(mut out)
+            if valid_real_gpu_output(
+                &out,
+                &handle,
+                provider,
+                runmat_accelerate_api::handle_precision(&handle),
+            ) =>
+        {
+            runmat_accelerate_api::set_handle_provenance(&mut out, input_provenance);
             return Ok(gpu_helpers::resident_gpu_value(out));
         }
         Ok(out) => {
-            free_rejected_gpu_output(&out, &handle);
+            gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
             return Err(expm1_error_with_detail(
                 &EXPM1_ERROR_INTERNAL,
                 "provider unary_expm1 returned malformed output",
             ));
         }
-        Err(err) if is_unsupported_provider_hook(&err) => {}
+        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err, "unary_expm1") => {}
         Err(err) => {
             return Err(expm1_error_with_detail(
                 &EXPM1_ERROR_INTERNAL,
@@ -272,11 +206,17 @@ async fn expm1_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             ));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    let gathered = gpu_helpers::gather_tensor_async(&handle).await;
+    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+    let tensor = gathered.map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     let output = expm1_tensor(tensor)?;
-    restore_real_gpu_output(provider, &handle, &output)
+    restore_real_gpu_output(
+        provider,
+        &handle,
+        &output,
+        runmat_accelerate_api::handle_precision(&handle),
+        input_provenance,
+    )
 }
 
 fn expm1_real(value: Value) -> BuiltinResult<Value> {
@@ -458,20 +398,23 @@ fn restore_real_gpu_output(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     input: &GpuTensorHandle,
     tensor: &Tensor,
+    precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    provenance: runmat_accelerate_api::GpuHandleProvenance,
 ) -> BuiltinResult<Value> {
-    let output = gpu_helpers::upload_tensor(provider, tensor).map_err(|err| {
+    let mut output = gpu_helpers::upload_tensor(provider, tensor).map_err(|err| {
         expm1_error_with_detail(
             &EXPM1_ERROR_INTERNAL,
             format!("failed to restore fallback result to input provider: {err}"),
         )
     })?;
-    if !valid_real_gpu_output(&output, input, provider) {
-        free_rejected_gpu_output(&output, input);
+    if !valid_real_gpu_output(&output, input, provider, precision) {
+        gpu_helpers::free_unprotected_exact_owner(&output, &[input]);
         return Err(expm1_error_with_detail(
             &EXPM1_ERROR_INTERNAL,
             "provider upload returned malformed fallback output",
         ));
     }
+    runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
     Ok(gpu_helpers::resident_gpu_value(output))
 }
 
@@ -479,34 +422,49 @@ fn restore_gpu_value(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     input: &GpuTensorHandle,
     value: Value,
+    provenance: runmat_accelerate_api::GpuHandleProvenance,
 ) -> BuiltinResult<Value> {
     match value {
         Value::ComplexTensor(tensor) => {
-            let output = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|err| {
-                expm1_error_with_detail(
-                    &EXPM1_ERROR_INTERNAL,
-                    format!("failed to restore complex result to input provider: {err}"),
-                )
-            })?;
+            let mut output =
+                gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|err| {
+                    expm1_error_with_detail(
+                        &EXPM1_ERROR_INTERNAL,
+                        format!("failed to restore complex result to input provider: {err}"),
+                    )
+                })?;
             if !valid_complex_gpu_output(&output, input, provider) {
-                free_rejected_gpu_output(&output, input);
+                gpu_helpers::free_unprotected_exact_owner(&output, &[input]);
                 return Err(expm1_error_with_detail(
                     &EXPM1_ERROR_INTERNAL,
                     "provider upload returned malformed complex fallback output",
                 ));
             }
+            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
             Ok(gpu_helpers::complex_gpu_value(output))
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], input.shape.clone())
                 .map_err(|err| expm1_error_with_detail(&EXPM1_ERROR_INTERNAL, err))?;
-            restore_gpu_value(provider, input, Value::ComplexTensor(tensor))
+            restore_gpu_value(provider, input, Value::ComplexTensor(tensor), provenance)
         }
-        Value::Tensor(tensor) => restore_real_gpu_output(provider, input, &tensor),
+        Value::Tensor(tensor) => restore_real_gpu_output(
+            provider,
+            input,
+            &tensor,
+            runmat_accelerate_api::handle_precision(input),
+            provenance,
+        ),
         Value::Num(value) => {
             let tensor = Tensor::new(vec![value], input.shape.clone())
                 .map_err(|err| expm1_error_with_detail(&EXPM1_ERROR_INTERNAL, err))?;
-            restore_real_gpu_output(provider, input, &tensor)
+            restore_real_gpu_output(
+                provider,
+                input,
+                &tensor,
+                runmat_accelerate_api::handle_precision(input),
+                provenance,
+            )
         }
         other => Err(expm1_error_with_detail(
             &EXPM1_ERROR_INTERNAL,
@@ -519,10 +477,20 @@ fn valid_real_gpu_output(
     output: &GpuTensorHandle,
     input: &GpuTensorHandle,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    precision: Option<runmat_accelerate_api::ProviderPrecision>,
 ) -> bool {
-    valid_gpu_output(output, input, provider, GpuTensorStorage::Real)
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
+    gpu_helpers::unary_gpu_output_matches(
+        output,
+        input,
+        provider,
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: GpuTensorStorage::Real,
+            precision,
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        },
+    )
 }
 
 fn valid_complex_gpu_output(
@@ -530,49 +498,18 @@ fn valid_complex_gpu_output(
     input: &GpuTensorHandle,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
 ) -> bool {
-    valid_gpu_output(
+    gpu_helpers::unary_gpu_output_matches(
         output,
         input,
         provider,
-        GpuTensorStorage::ComplexInterleaved,
-    ) && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-}
-
-fn valid_gpu_output(
-    output: &GpuTensorHandle,
-    input: &GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    storage: GpuTensorStorage,
-) -> bool {
-    output.shape == input.shape
-        && output.device_id == input.device_id
-        && !gpu_handles_alias(output, input)
-        && runmat_accelerate_api::handle_precision(output)
-            == runmat_accelerate_api::handle_precision(input)
-        && runmat_accelerate_api::handle_storage(output) == storage
-        && runmat_accelerate_api::provider_for_handle(output)
-            .filter(|owner| owner.device_id() == output.device_id)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
-}
-
-fn free_rejected_gpu_output(output: &GpuTensorHandle, input: &GpuTensorHandle) {
-    if gpu_handles_alias(output, input) {
-        return;
-    }
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(output)
-        .filter(|owner| owner.device_id() == output.device_id)
-    {
-        let _ = owner.free(output);
-    }
-}
-
-fn is_unsupported_provider_hook(err: &anyhow::Error) -> bool {
-    err.to_string().contains("unary_expm1 not supported")
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: GpuTensorStorage::ComplexInterleaved,
+            precision: runmat_accelerate_api::handle_precision(input),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        },
+    )
 }
 
 fn expm1_complex_parts(re: f64, im: f64) -> (f64, f64) {
@@ -620,7 +557,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
@@ -647,33 +583,6 @@ pub(crate) mod tests {
     fn expm1_string_rejected_with_stable_identifier() {
         let err = expm1_builtin(Value::from("bad")).expect_err("expected input error");
         assert_eq!(err.identifier(), EXPM1_ERROR_INVALID_INPUT.identifier);
-    }
-
-    #[test]
-    fn expm1_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn expm1_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -953,14 +862,20 @@ pub(crate) mod tests {
                 &Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap(),
             )
             .unwrap();
-            assert!(valid_real_gpu_output(&output, &input, provider));
-            assert!(!valid_real_gpu_output(&input, &input, provider));
+            let precision = runmat_accelerate_api::handle_precision(&input);
+            assert!(valid_real_gpu_output(&output, &input, provider, precision));
+            assert!(!valid_real_gpu_output(&input, &input, provider, precision));
             let mut wrong_shape = output.clone();
             wrong_shape.shape = vec![1, 2];
-            assert!(!valid_real_gpu_output(&wrong_shape, &input, provider));
+            assert!(!valid_real_gpu_output(
+                &wrong_shape,
+                &input,
+                provider,
+                precision
+            ));
             output.descriptor.storage =
                 Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-            assert!(!valid_real_gpu_output(&output, &input, provider));
+            assert!(!valid_real_gpu_output(&output, &input, provider, precision));
         });
     }
 

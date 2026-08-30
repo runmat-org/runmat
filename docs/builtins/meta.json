@@ -43246,39 +43246,64 @@
       ]
     },
     {
+      "name": "expm1",
+      "output_mode": "Fixed",
       "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = expm1(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise exp(X)-1 result with the input floating-point class and shape."
+            }
+          ]
+        }
+      ],
       "errors": [
         {
           "code": "RM.EXPM1.INVALID_INPUT",
           "identifier": "RunMat:expm1:InvalidInput",
-          "message": "expm1: invalid input",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data."
+          "when": "Input cannot be interpreted as numeric, logical, character, or complex data.",
+          "message": "expm1: invalid input"
         },
         {
           "code": "RM.EXPM1.INTERNAL",
           "identifier": "RunMat:expm1:Internal",
-          "message": "expm1: internal error",
-          "when": "Internal tensor construction or provider interaction failed."
+          "when": "Internal tensor construction or provider interaction fails.",
+          "message": "expm1: internal error"
         }
       ],
       "extensions": [
         {
-          "description": "expm1 with integer input is a RunMat extension",
-          "error_identifier": "RunMat:compatibility:Expm1IntegerInputExtension",
           "id": "expm1-integer-input",
-          "mode": "RunMatOnly"
+          "mode": "RunMatOnly",
+          "description": "expm1 with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Expm1IntegerInputExtension"
         },
         {
-          "description": "expm1 with logical input is a RunMat extension",
-          "error_identifier": "RunMat:compatibility:Expm1LogicalInputExtension",
           "id": "expm1-logical-input",
-          "mode": "RunMatOnly"
+          "mode": "RunMatOnly",
+          "description": "expm1 with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Expm1LogicalInputExtension"
         },
         {
-          "description": "expm1 with character input is a RunMat extension",
-          "error_identifier": "RunMat:compatibility:Expm1CharacterInputExtension",
           "id": "expm1-character-input",
-          "mode": "RunMatOnly"
+          "mode": "RunMatOnly",
+          "description": "expm1 with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Expm1CharacterInputExtension"
         }
       ],
       "integer_capabilities": [
@@ -43308,31 +43333,6 @@
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
           "notes": "The RunMat-only overload validates exact binary64 conversion before accurate exponentiation. Resident integer input gathers exactly through its owning provider; the double result is restored only when that provider physically supports binary64, otherwise it remains a host double."
-        }
-      ],
-      "name": "expm1",
-      "output_mode": "Fixed",
-      "signatures": [
-        {
-          "inputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
-              "name": "X",
-              "ty": "Any"
-            }
-          ],
-          "label": "Y = expm1(X)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Elementwise exp(x)-1 result.",
-              "name": "Y",
-              "ty": "NumericArray"
-            }
-          ]
         }
       ]
     },
