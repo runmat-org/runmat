@@ -1551,6 +1551,56 @@ fn analysis_store_preserves_typed_floating_conversion_and_like_contracts() {
 }
 
 #[test]
+fn analysis_store_preserves_typed_numeric_component_identities_classes_and_shapes() {
+    for (name, expected_class) in [
+        ("conj", NumericClass::UInt16),
+        ("real", NumericClass::Single),
+        ("imag", NumericClass::UInt64),
+    ] {
+        let source = match name {
+            "conj" => "function y = f(); y = conj(uint16([1, 2, 3])); end",
+            "real" => "function y = f(); y = real(single([1, 2, 3])); end",
+            "imag" => "function y = f(); y = imag(uint64([1, 2, 3])); end",
+            _ => unreachable!(),
+        };
+        let (body, store) = analyze_single_body(source);
+        let builtin = body
+            .blocks
+            .iter()
+            .flat_map(|block| block.statements.iter())
+            .find_map(|statement| match &statement.kind {
+                MirStmtKind::Assign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } => match &call.callee {
+                    MirCallee::Static(CallableIdentity::Builtin(id)) if id.0 == name => Some(id),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("statically resolved numeric component builtin");
+        assert_eq!(builtin, &runmat_types::BuiltinId(name.into()), "{name}");
+
+        let output = output_fact(&body, &store);
+        assert_eq!(
+            output.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: expected_class,
+                domain: NumericDomain::Real,
+            }),
+            "{name}"
+        );
+        assert_eq!(
+            output.shape,
+            ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+            },
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn analysis_store_attaches_catalog_contract_diagnostics_to_source() {
     let mir = lower_mir("function y = f(); y = zeros(2, \"bogus\"); end");
     let store = analyze_assembly(&mir);

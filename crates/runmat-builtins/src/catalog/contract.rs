@@ -52,6 +52,14 @@ pub enum MathInferenceRule {
     Exp,
     NumericConversion(runmat_types::NumericClass),
     NumericConversionWithLike(runmat_types::NumericClass),
+    NumericComponent(NumericComponentRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum NumericComponentRule {
+    Conjugate,
+    ImaginaryPart,
+    RealPart,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

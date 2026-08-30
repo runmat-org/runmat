@@ -1,6 +1,7 @@
 mod acceleration;
 mod aggregate;
 mod array;
+mod complex_components;
 mod exp;
 mod floating_conversions;
 mod gpuarray;
@@ -14,6 +15,7 @@ mod parallel_data;
 pub use acceleration::*;
 pub use aggregate::*;
 pub use array::*;
+pub use complex_components::*;
 pub use exp::*;
 pub use floating_conversions::*;
 pub use gpuarray::*;
