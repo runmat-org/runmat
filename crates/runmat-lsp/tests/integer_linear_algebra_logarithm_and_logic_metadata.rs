@@ -10,9 +10,22 @@ const CAPABILITY_NAMES: [&str; 25] = [
 #[test]
 fn linear_algebra_logarithm_and_logic_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert!(!builtin.integer_capabilities.is_empty(), "{name}");
-        assert!(builtin.integer_audit.is_none(), "{name}");
+        let catalog = runmat_builtins::builtin_catalog_entry_by_name(name);
+        let binding = runmat_builtins::builtin_function_by_name(name);
+        let integer_capabilities = catalog.map_or_else(
+            || {
+                binding
+                    .unwrap_or_else(|| panic!("{name}: catalog entry or runtime binding"))
+                    .integer_capabilities
+            },
+            |entry| entry.integer_capabilities,
+        );
+        let integer_audit = catalog.map_or_else(
+            || binding.and_then(|binding| binding.integer_audit),
+            |entry| entry.integer_audit,
+        );
+        assert!(!integer_capabilities.is_empty(), "{name}");
+        assert!(integer_audit.is_none(), "{name}");
     }
 }
 

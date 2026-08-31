@@ -4259,6 +4259,7 @@ mod tests {
             ("log(2);", "Y = log(X)"),
             ("log1p(2);", "Y = log1p(X)"),
             ("log2(8);", "Y = log2(X)"),
+            ("log2(8);", "[F,E] = log2(X)"),
             ("log10(100);", "Y = log10(X)"),
             ("sqrt(4);", "Y = sqrt(X)"),
         ];

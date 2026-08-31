@@ -1,9 +1,9 @@
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, LogarithmBase};
 use runmat_types::{
-    AliasFact, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact, LiteralValue,
-    MutationFact, NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact, ValueFact,
-    ValueKindFact, ViewFact,
+    infer_call, AliasFact, CallContract, CallInference, CallRequest, ContiguityFact, DynamicReason,
+    LayoutFact, LiteralValue, MutationFact, NumericClass, NumericDomain, NumericFact,
+    ResidencyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
 };
 
 pub(super) fn infer_exp(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -135,6 +135,147 @@ pub(super) fn infer_logarithm(
         LogarithmBase::Natural => "log",
         LogarithmBase::Common => "log10",
     };
+    let (output, diagnostics) =
+        infer_logarithm_value(request, name, matches!(base, LogarithmBase::Natural));
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+pub(super) fn infer_log2(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let requested = request.outputs.requested.known_count();
+    if requested == Some(2) {
+        return infer_log2_dissection(request, entry);
+    }
+
+    let (value_output, mut diagnostics) = infer_logarithm_value(request, "log2", false);
+    let exponent_output = log2_dissection_output(
+        request.arguments.first(),
+        &mut diagnostics,
+        requested.is_none(),
+    );
+    let mut contract = CallContract::fixed(vec![value_output, exponent_output]);
+    contract.effects = entry.contract.effect_set();
+    contract.capabilities = entry.contract.capability_set();
+    let mut inference = infer_call(&contract, request);
+    diagnostics.append(&mut inference.diagnostics);
+    inference.diagnostics = diagnostics;
+    inference
+}
+
+fn infer_log2_dissection(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let mut diagnostics = Vec::new();
+    let output = log2_dissection_output(request.arguments.first(), &mut diagnostics, true);
+    if request.arguments.len() > 1 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-LOG2-ARITY",
+            "log2 accepts exactly one input",
+            1,
+        ));
+    }
+    let mut contract = CallContract::fixed(vec![output.clone(), output]);
+    contract.effects = entry.contract.effect_set();
+    contract.capabilities = entry.contract.capability_set();
+    let mut inference = infer_call(&contract, request);
+    diagnostics.append(&mut inference.diagnostics);
+    inference.diagnostics = diagnostics;
+    inference
+}
+
+fn log2_dissection_output(
+    input: Option<&ValueFact>,
+    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+    diagnose_invalid: bool,
+) -> ValueFact {
+    let Some(input) = input else {
+        if diagnose_invalid {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-LOG2-ARITY",
+                "log2 requires exactly one input",
+                0,
+            ));
+        }
+        return ValueFact::unknown(DynamicReason::RuntimeValue);
+    };
+    if matches!(input.residency, ResidencyFact::Device { .. }) {
+        if diagnose_invalid {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-LOG2-GPU-DISSECTION",
+                "two-output log2 does not support GPU-resident input",
+                0,
+            ));
+        }
+        return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+    }
+    if matches!(input.storage, StorageFact::Sparse) {
+        if diagnose_invalid {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-LOG2-SPARSE",
+                "log2 does not currently accept sparse input",
+                0,
+            ));
+        }
+        return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+    }
+
+    let mut output = input.clone();
+    match &mut output.kind {
+        ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Complex => {
+            if diagnose_invalid {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-LOG2-COMPLEX-DISSECTION",
+                    "two-output log2 requires real input under the current compatibility pin",
+                    0,
+                ));
+            }
+            return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+        ValueKindFact::Numeric(numeric) => {
+            if !matches!(numeric.class, NumericClass::Double | NumericClass::Single) {
+                numeric.class = NumericClass::Double;
+            }
+            numeric.domain = NumericDomain::Real;
+            materialize_output(&mut output);
+        }
+        ValueKindFact::Logical | ValueKindFact::Character => {
+            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
+            materialize_output(&mut output);
+        }
+        ValueKindFact::Object(object)
+            if object.runtime_class.as_ref().is_some_and(|class| {
+                class.is(runmat_types::standard::TABLE)
+                    || class.is(runmat_types::standard::TIMETABLE)
+            }) =>
+        {
+            object.properties.clear();
+            object.properties_complete = false;
+            output.alias = AliasFact::Unique;
+            output.mutation = MutationFact::ValueSemantics;
+        }
+        ValueKindFact::Object(_) | ValueKindFact::Unknown if !diagnose_invalid => {
+            preserve_shape_on_dynamic_input(&mut output);
+        }
+        _ => {
+            if diagnose_invalid {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-LOG2-DISSECTION-INPUT",
+                    "two-output log2 requires real single, double, or supported tabular input",
+                    0,
+                ));
+            }
+            output = ValueFact::unknown(if diagnose_invalid {
+                DynamicReason::UnsupportedRepresentation
+            } else {
+                DynamicReason::RuntimeValue
+            });
+        }
+    }
+    output
+}
+
+fn infer_logarithm_value(
+    request: &CallRequest,
+    name: &str,
+    accepts_symbolic: bool,
+) -> (ValueFact, Vec<runmat_types::InferenceDiagnostic>) {
     let mut diagnostics = Vec::new();
     let Some(input) = request.arguments.first() else {
         diagnostics.push(argument_error(
@@ -142,12 +283,7 @@ pub(super) fn infer_logarithm(
             format!("{name} requires exactly one input"),
             0,
         ));
-        return finish_fixed(
-            entry,
-            request,
-            ValueFact::unknown(DynamicReason::RuntimeValue),
-            diagnostics,
-        );
+        return (ValueFact::unknown(DynamicReason::RuntimeValue), diagnostics);
     };
     if request.arguments.len() > 1 {
         diagnostics.push(argument_error(
@@ -162,9 +298,7 @@ pub(super) fn infer_logarithm(
             format!("{name} does not currently accept sparse input"),
             0,
         ));
-        return finish_fixed(
-            entry,
-            request,
+        return (
             ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
             diagnostics,
         );
@@ -228,7 +362,7 @@ pub(super) fn infer_logarithm(
             changes_class = true;
             materialize_output(&mut output);
         }
-        ValueKindFact::Symbolic if matches!(base, LogarithmBase::Natural) => {
+        ValueKindFact::Symbolic if accepts_symbolic => {
             materialize_output_preserving_storage(&mut output);
         }
         ValueKindFact::Object(object)
@@ -253,7 +387,7 @@ pub(super) fn infer_logarithm(
                 "RM-CATALOG-LOGARITHM-INPUT",
                 format!(
                     "{name} requires numeric, logical, character, or supported tabular input{}",
-                    if matches!(base, LogarithmBase::Natural) {
+                    if accepts_symbolic {
                         ", or a symbolic expression"
                     } else {
                         ""
@@ -267,7 +401,7 @@ pub(super) fn infer_logarithm(
     if changes_class && matches!(output.residency, ResidencyFact::Device { .. }) {
         output.residency = ResidencyFact::Unknown;
     }
-    finish_fixed(entry, request, output, diagnostics)
+    (output, diagnostics)
 }
 
 fn logarithm_literal_domain(literal: &LiteralValue) -> Option<NumericDomain> {

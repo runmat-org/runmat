@@ -51,6 +51,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::Log1p) => {
             math_unary::infer_log1p(request, entry)
         }
+        BuiltinInferenceRule::Math(MathInferenceRule::Log2) => {
+            math_unary::infer_log2(request, entry)
+        }
         BuiltinInferenceRule::Math(MathInferenceRule::Logarithm(base)) => {
             math_unary::infer_logarithm(request, entry, base)
         }

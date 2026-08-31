@@ -1783,6 +1783,57 @@ fn analysis_store_preserves_logarithm_identities_classes_shapes_and_literal_doma
 }
 
 #[test]
+fn analysis_store_preserves_log2_requested_output_contract() {
+    let (body, store) =
+        analyze_single_body("function [f,e] = dissect(); [f,e] = log2(single([1,-3])); end");
+    let call = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            MirStmtKind::MultiAssign {
+                value: MirRvalue::Call(call),
+                ..
+            } if matches!(
+                &call.callee,
+                MirCallee::Static(CallableIdentity::Builtin(id)) if id.0 == "log2"
+            ) =>
+            {
+                Some(call)
+            }
+            _ => None,
+        })
+        .expect("statically resolved log2 multi-output call");
+    assert_eq!(
+        call.requested_outputs,
+        runmat_hir::RequestedOutputCount::Exactly(2)
+    );
+    assert_eq!(body.abi.fixed_outputs.len(), 2);
+    for output in &body.abi.fixed_outputs {
+        let local = body
+            .locals
+            .iter()
+            .find(|local| local.binding == Some(*output))
+            .expect("output binding local")
+            .id;
+        let fact = final_local_fact(&body, &store, local);
+        assert_eq!(
+            fact.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                domain: NumericDomain::Real,
+            })
+        );
+        assert_eq!(
+            fact.shape,
+            ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(1), DimensionFact::Known(2)]
+            }
+        );
+    }
+}
+
+#[test]
 fn analysis_store_keeps_log1p_shape_but_not_a_false_domain_proof() {
     let (body, store) = analyze_single_body("function y = f(); y = log1p(single([0, 1, 2])); end");
     let output = output_fact(&body, &store);

@@ -15200,6 +15200,43 @@ fn distributed_builtin_policy_maps_admitted_operations_and_materializes_gather()
 }
 
 #[test]
+fn distributed_builtin_mapping_preserves_each_requested_log2_output() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = single([1, -3]); distributedSource = distributed(source); [fraction, exponent] = log2(distributedSource); gatheredFraction = gather(fraction); gatheredExponent = gather(exponent);",
+    )
+    .expect("execute two-output distributed log2");
+    let variables = session.get_variables();
+    let Some(runmat_value::Value::Distributed(fraction)) = variables.get("fraction") else {
+        panic!("fraction must retain a distributed handle");
+    };
+    let Some(runmat_value::Value::Distributed(exponent)) = variables.get("exponent") else {
+        panic!("exponent must retain a distributed handle");
+    };
+    assert_ne!(fraction.id, exponent.id);
+    assert_eq!(fraction.scheme, exponent.scheme);
+    assert_eq!(
+        variables
+            .get("gatheredFraction")
+            .and_then(|value| match value {
+                runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+                _ => None,
+            }),
+        Some(&[0.5, -0.75][..])
+    );
+    assert_eq!(
+        variables
+            .get("gatheredExponent")
+            .and_then(|value| match value {
+                runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+                _ => None,
+            }),
+        Some(&[1.0, 2.0][..])
+    );
+}
+
+#[test]
 fn distributed_builtin_policy_rejects_unclassified_operations() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(
