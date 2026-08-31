@@ -32,6 +32,7 @@ import { fileURLToPath } from "url";
  * @property {string} category
  * @property {boolean} isPlotExample
  * @property {string} authority
+ * @property {string} compatibility
  * @property {string} harness
  * @property {unknown} verification
  */
@@ -42,6 +43,7 @@ import { fileURLToPath } from "url";
  * @property {string} stdoutText
  * @property {string} valueText
  * @property {string} errorText
+ * @property {string} errorIdentifier
  * @property {string} [figurePngBase64]
  * @property {string} [figureImageError]
  */
@@ -141,6 +143,9 @@ writeFileSync(markdownReportPath, reportMarkdown, "utf8");
 console.log(`Wrote consolidated reports to:
   HTML: ${reportPath}
   Markdown: ${markdownReportPath}`);
+if (rows.some((row) => !row.matches)) {
+    process.exitCode = 1;
+}
 
 function findRepoRoot(startDir) {
     let current = startDir;
@@ -221,6 +226,7 @@ function collectCases(documents) {
                 continue;
             }
             const harness = typeof example.harness === "string" ? example.harness : "LegacyBrowser";
+            const compatibility = typeof example.compatibility === "string" ? example.compatibility : "RunMat";
             const verification = example.verification;
             const isPlotExample = is_plot_example(category);
             const hasExpectedOutput = typeof example.output === "string";
@@ -246,6 +252,7 @@ function collectCases(documents) {
                 category,
                 isPlotExample,
                 authority,
+                compatibility,
                 harness,
                 verification
             });
@@ -293,7 +300,7 @@ function matchesVerification(testCase, result, normalizedExpected, normalizedAct
             const identifier = expected && typeof expected === "object" ? expected.identifier : "";
             return typeof identifier === "string"
                 && identifier.length > 0
-                && Boolean(result?.errorText?.includes(identifier));
+                && result?.errorIdentifier === identifier;
         }
         if ("Figure" in verification) {
             return !hasExecutionError && Boolean(imagePath);
@@ -529,6 +536,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "  let stdoutText = \"\";",
         "  let valueText = \"\";",
         "  let errorText = \"\";",
+        "  let errorIdentifier = \"\";",
         "  let figurePngBase64 = \"\";",
         "  let figureImageError = \"\";",
         "  let plotSurfaceId = null;",
@@ -620,7 +628,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "    const session = await module.initRunMat({",
         "      telemetryConsent: false,",
         "      enableGpu: true,",
-        "      languageCompat: \"matlab\",",
+        "      languageCompat: \"runmat\",",
         "      fsProvider: fsProvider || undefined",
         "    });",
         "    try {",
@@ -636,9 +644,9 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "    }",
         "    try {",
         "      try {",
-        "        await Promise.resolve(session.execute(\"cd('/')\"));",
+        "        await Promise.resolve(session.executeRequest({ source: { kind: \"text\", name: \"<example-setup>\", text: \"cd('/')\" }, compatibility: testCase.compatibility.toLowerCase() }));",
         "      } catch (err) {}",
-        "      const execResult = await Promise.resolve(session.execute(testCase.input));",
+        "      const execResult = await Promise.resolve(session.executeRequest({ source: { kind: \"text\", name: `<builtin-example:${testCase.builtin}>`, text: testCase.input }, compatibility: testCase.compatibility.toLowerCase() }));",
         "      if (execResult && Array.isArray(execResult.stdout)) {",
         "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\\n\");",
         "      }",
@@ -647,6 +655,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "      }",
         "      if (execResult && execResult.error != null) {",
         "        errorText = normalizeErrorText(execResult.error);",
+        "        if (typeof execResult.error.identifier === \"string\") errorIdentifier = execResult.error.identifier;",
         "      }",
         "      if (testCase.isPlotExample === true) {",
         "        try {",
@@ -689,7 +698,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "  } catch (err) {",
         "    errorText = err instanceof Error ? err.message : String(err);",
         "  }",
-        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText, figurePngBase64, figureImageError });",
+        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText, errorIdentifier, figurePngBase64, figureImageError });",
         "};"
     ].join("\n");
     return `<!doctype html>

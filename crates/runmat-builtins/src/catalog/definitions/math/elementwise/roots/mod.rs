@@ -1,9 +1,12 @@
+mod documentation;
+
+use self::documentation::{REALSQRT_DOCUMENTATION, SQRT_DOCUMENTATION};
 use super::support::{unary_numeric_catalog_entry, UnaryNumericCatalogSpec};
 use crate::{
     BuiltinBindingDeclaration, BuiltinCatalogEntry, BuiltinCatalogIdentity,
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
@@ -78,15 +81,7 @@ const SQRT_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BI
 pub const SQRT_CATALOG_ENTRY: BuiltinCatalogEntry =
     unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
         identity: BuiltinCatalogIdentity { name: "sqrt" },
-        documentation: BuiltinDocumentation {
-            summary: "Compute principal square roots elementwise.",
-            keywords: &["sqrt", "square root", "elementwise", "complex", "gpu"],
-            related: &["realsqrt", "nthroot", "power"],
-            introduced: None,
-            status: None,
-            examples: &[],
-            ..BuiltinDocumentation::EMPTY
-        },
+        documentation: SQRT_DOCUMENTATION,
         descriptor: &SQRT_DESCRIPTOR,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Root(RootKind::Principal)),
         bindings: &SQRT_BINDINGS,
@@ -167,15 +162,7 @@ const REALSQRT_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAUL
 pub const REALSQRT_CATALOG_ENTRY: BuiltinCatalogEntry =
     unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
         identity: BuiltinCatalogIdentity { name: "realsqrt" },
-        documentation: BuiltinDocumentation {
-            summary: "Compute real square roots and reject values that require complex results.",
-            keywords: &["realsqrt", "square root", "real", "elementwise", "gpu"],
-            related: &["sqrt", "nthroot"],
-            introduced: None,
-            status: None,
-            examples: &[],
-            ..BuiltinDocumentation::EMPTY
-        },
+        documentation: REALSQRT_DOCUMENTATION,
         descriptor: &REALSQRT_DESCRIPTOR,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Root(RootKind::RealOnly)),
         bindings: &REALSQRT_BINDINGS,

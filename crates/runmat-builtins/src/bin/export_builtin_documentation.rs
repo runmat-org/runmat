@@ -235,6 +235,7 @@ fn catalog_document(entry: &runmat_builtins::BuiltinCatalogEntry) -> Value {
                 "description": example.title,
                 "input": example.program,
                 "output": example.display_output,
+                "compatibility": example.compatibility,
                 "harness": example.harness,
                 "verification": example.verification,
             })
@@ -274,10 +275,40 @@ fn catalog_document(entry: &runmat_builtins::BuiltinCatalogEntry) -> Value {
         json!(documentation.example_exemption),
     );
     object.insert("faqs".into(), json!(documentation.faqs));
-    object.insert("links".into(), json!(documentation.links));
+    object.insert(
+        "links".into(),
+        Value::Array(
+            documentation
+                .links
+                .iter()
+                .map(|link| {
+                    let url = match link.target {
+                        BuiltinDocumentationLinkTarget::Builtin(name) => format!("./{name}"),
+                        BuiltinDocumentationLinkTarget::Documentation(url)
+                        | BuiltinDocumentationLinkTarget::Source(url)
+                        | BuiltinDocumentationLinkTarget::External(url) => url.to_string(),
+                    };
+                    json!({ "label": link.label, "url": url })
+                })
+                .collect(),
+        ),
+    );
     object.insert("related".into(), Value::Array(related));
     object.insert("media".into(), json!(documentation.media));
     object.insert("evidence".into(), json!(documentation.evidence));
+    if let Some(source) = documentation
+        .evidence
+        .implementation
+        .iter()
+        .find_map(|link| {
+            let BuiltinDocumentationLinkTarget::Source(url) = link.target else {
+                return None;
+            };
+            Some(json!({ "label": link.label, "url": url }))
+        })
+    {
+        object.insert("source".into(), source);
+    }
     object.insert("introduced".into(), json!(documentation.introduced));
     object.insert("status".into(), json!(documentation.status));
     object.insert(

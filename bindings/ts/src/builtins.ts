@@ -1,8 +1,25 @@
 export type BuiltinDocExample = {
+  id?: string;
   description?: string;
   label?: string;
   input?: string;
   output?: string;
+  compatibility?: "RunMat" | "Matlab" | "Strict";
+  harness?:
+    | "Portable"
+    | "Native"
+    | "Browser"
+    | "BrowserGraphics"
+    | "NativeFilesystem"
+    | "NativeLoopbackNetwork"
+    | "Wgpu"
+    | "NativeForeignRuntime"
+    | "InteractiveHost";
+  verification?:
+    | "Succeeds"
+    | { Assertions: { source: string } }
+    | { ExpectedError: { identifier: string } }
+    | { Figure: { minimum_figures: number; assertions: string } };
   image?: string;
   image_webp?: string;
   matlab_script?: string;
@@ -11,6 +28,21 @@ export type BuiltinDocExample = {
 export type BuiltinDocFAQ = {
   question: string;
   answer: string;
+};
+
+export type BuiltinDocSection = {
+  heading: string;
+  paragraphs: string[];
+};
+
+export type BuiltinDocEvidence = {
+  implementation: Array<{ label: string; target: unknown }>;
+  verification: Array<{
+    kind: "UnitTest" | "IntegrationTest" | "BrowserTest" | "ProviderTest" | "ConformanceTest" | "Validation";
+    label: string;
+    location: string;
+  }>;
+  notes: string[];
 };
 
 export type BuiltinDocLink = {
@@ -46,6 +78,7 @@ export type BuiltinDoc = {
   // weakening the types of the normalized fields below.
   [metadata: string]: unknown;
   key: string;
+  authority?: "catalog" | "legacy_sidecar";
   title: string;
   slug: string;
   aliases?: string[];
@@ -56,11 +89,15 @@ export type BuiltinDoc = {
   hero_image?: string | null;
   description?: string;
   behaviors?: string[];
+  sections?: BuiltinDocSection[];
   extended_capabilities?: string[];
   examples?: Array<BuiltinDocExample | string>;
   faqs?: BuiltinDocFAQ[];
   links?: BuiltinDocLink[];
   source?: BuiltinDocLink | BuiltinDocLink[];
+  evidence?: BuiltinDocEvidence;
+  example_exemption?: string | null;
+  catalog?: Record<string, unknown>;
   gpu_residency?: string;
   gpu_behavior?: string[];
   options?: string[];
