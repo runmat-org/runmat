@@ -89521,7 +89521,7 @@
     },
     {
       "name": "log2",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
@@ -89532,7 +89532,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric, logical, char, or complex input."
+              "description": "Single or double real/complex input or a supported table; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -89541,7 +89541,35 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Elementwise base-2 logarithm result."
+              "description": "Elementwise base-2 logarithm, promoted to complex for negative real input."
+            }
+          ]
+        },
+        {
+          "label": "[F,E] = log2(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Single or double real/complex input or a supported table; integer, logical, and character forms are RunMat-only extensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real floating-point fraction with the same class and shape as the supported input."
+            },
+            {
+              "name": "E",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real floating-point exponent satisfying X = F .* 2.^E."
             }
           ]
         }
@@ -89550,14 +89578,32 @@
         {
           "code": "RM.LOG2.INVALID_INPUT",
           "identifier": "RunMat:log2:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
+          "when": "Input cannot be interpreted as supported numeric, logical, character, or table data.",
           "message": "log2: invalid input"
         },
         {
           "code": "RM.LOG2.INTERNAL",
           "identifier": "RunMat:log2:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
+          "when": "Internal tensor construction, table mapping, or provider interaction fails.",
           "message": "log2: internal error"
+        },
+        {
+          "code": "RM.LOG2.COMPLEX_DISSECTION",
+          "identifier": "RunMat:log2:ComplexDissection",
+          "when": "Complex input is supplied to the two-output floating-point dissection form.",
+          "message": "log2: two-output dissection requires real input"
+        },
+        {
+          "code": "RM.LOG2.GPU_DISSECTION",
+          "identifier": "RunMat:log2:GpuDissectionUnsupported",
+          "when": "A GPU-resident input is supplied to the two-output floating-point dissection form.",
+          "message": "log2: two-output dissection does not support gpuArray input"
+        },
+        {
+          "code": "RM.LOG2.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:log2:TooManyOutputs",
+          "when": "More than two outputs are requested.",
+          "message": "log2: at most two outputs are available"
         },
         {
           "code": "RM.LOG2.PROVIDER_OWNERSHIP_MISMATCH",
@@ -89610,7 +89656,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "RunMat mode promotes all eight integer classes to the binary64 logarithm domain."
+              "notes": "All eight integer classes are accepted only in RunMat mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53]."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -89618,7 +89664,34 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "This is a gated RunMat extension; resident integer inputs gather exactly from their owning provider."
+          "notes": "The RunMat-only overload validates exact binary64 conversion before computation. Negative real values produce complex double output; resident values gather through their exact owner."
+        },
+        {
+          "form": "[F,E] = log2(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are accepted only in RunMat mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53]."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The RunMat-only dissection validates exact binary64 conversion and returns host double fraction and exponent arrays."
         }
       ]
     },

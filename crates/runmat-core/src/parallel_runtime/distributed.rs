@@ -240,10 +240,10 @@ impl RuntimeDistributedService for CoreDistributedService {
                 ))
             });
         }
-        if request.requested_outputs != 1 || request.arguments.len() != 1 {
+        if request.outputs.len() != request.requested_outputs || request.arguments.len() != 1 {
             return Box::pin(async {
                 Err(error(
-                    "partition-local unary execution requires one input and one output",
+                    "partition-local unary execution requires one input and one fact per requested output",
                 ))
             });
         }
@@ -263,14 +263,14 @@ impl RuntimeDistributedService for CoreDistributedService {
                     .map(runmat_runtime::value_fact::value_fact)
                     .collect(),
                 literals: runmat_types::LiteralContext::default(),
-                outputs: runmat_types::OutputSelection::new(
-                    runmat_types::RequestedOutputCount::One,
-                ),
+                outputs: runmat_types::OutputSelection::new(match request.requested_outputs {
+                    0 => runmat_types::RequestedOutputCount::Zero,
+                    1 => runmat_types::RequestedOutputCount::One,
+                    count => runmat_types::RequestedOutputCount::Exactly(count),
+                }),
             },
         );
-        if !inference.diagnostics.is_empty()
-            || inference.outputs.as_slice() != [request.output.clone()]
-        {
+        if !inference.diagnostics.is_empty() || inference.outputs != request.outputs {
             return Box::pin(async {
                 Err(error(
                     "distributed builtin request disagrees with canonical output inference",
@@ -307,7 +307,9 @@ impl RuntimeDistributedService for CoreDistributedService {
         };
         let store = Rc::clone(&self.store);
         Box::pin(async move {
-            let mut outputs = Vec::new();
+            let mut partition_outputs = (0..request.requested_outputs)
+                .map(|_| Vec::new())
+                .collect::<Vec<Vec<OwnedPartition>>>();
             for part in parts? {
                 let input =
                     runmat_runtime::execution::value_codec::decode_inline_value(&part.value)
@@ -318,38 +320,61 @@ impl RuntimeDistributedService for CoreDistributedService {
                     request.requested_outputs,
                 )
                 .await?;
-                outputs.push(OwnedPartition {
-                    layout: part.layout,
-                    value: runmat_runtime::execution::value_codec::encode_inline_value(&value)
-                        .map_err(error)?,
-                });
+                let values = split_partition_outputs(value, request.requested_outputs)?;
+                for (index, value) in values.into_iter().enumerate() {
+                    partition_outputs[index].push(OwnedPartition {
+                        layout: part.layout.clone(),
+                        value: runmat_runtime::execution::value_codec::encode_inline_value(&value)
+                            .map_err(error)?,
+                    });
+                }
             }
-            let handle = DistributedValueHandle {
-                id: DistributedObjectId::derive(&[
-                    b"partition-local-map-v1",
-                    source.scope_id.bytes(),
-                    source.id.bytes(),
-                    request.builtin.0.as_bytes(),
-                ]),
-                contract: source.contract,
-                owner: source.owner,
-                scope_id: source.scope_id,
-                generation,
-                pool: source.pool,
-                partition_count: source.partition_count,
-                value: request.output,
-                global_shape: source.global_shape,
-                scheme: source.scheme,
-                materializable: source.materializable,
-            };
             let layouts = layouts?;
-            for output in outputs {
-                store
-                    .borrow_mut()
-                    .insert_local_coordinated(handle.clone(), layouts.clone(), output)
-                    .map_err(error)?;
+            let mut values = Vec::with_capacity(request.requested_outputs);
+            for (index, (fact, outputs)) in request
+                .outputs
+                .into_iter()
+                .zip(partition_outputs)
+                .enumerate()
+            {
+                let output_index = u64::try_from(index)
+                    .map_err(|_| error("distributed output index exceeds portable range"))?
+                    .to_le_bytes();
+                let output_count = u64::try_from(request.requested_outputs)
+                    .map_err(|_| error("distributed output count exceeds portable range"))?
+                    .to_le_bytes();
+                let handle = DistributedValueHandle {
+                    id: DistributedObjectId::derive(&[
+                        b"partition-local-map-v2",
+                        source.scope_id.bytes(),
+                        source.id.bytes(),
+                        request.builtin.0.as_bytes(),
+                        &output_count,
+                        &output_index,
+                    ]),
+                    contract: source.contract,
+                    owner: source.owner,
+                    scope_id: source.scope_id,
+                    generation,
+                    pool: source.pool.clone(),
+                    partition_count: source.partition_count,
+                    value: fact,
+                    global_shape: source.global_shape.clone(),
+                    scheme: source.scheme.clone(),
+                    materializable: source.materializable,
+                };
+                for output in outputs {
+                    store
+                        .borrow_mut()
+                        .insert_local_coordinated(handle.clone(), layouts.clone(), output)
+                        .map_err(error)?;
+                }
+                values.push(Value::Distributed(Box::new(handle)));
             }
-            Ok(Value::Distributed(Box::new(handle)))
+            Ok(match values.len() {
+                1 => values.pop().expect("one distributed output was created"),
+                _ => Value::OutputList(values),
+            })
         })
     }
 
@@ -559,6 +584,25 @@ async fn materialize(
     let parts = decode_parts(parts?)?;
     runmat_runtime::parallel::distribution::materialize_partitions(&shape, &handle.scheme, &parts)
         .await
+}
+
+fn split_partition_outputs(
+    value: Value,
+    requested_outputs: usize,
+) -> Result<Vec<Value>, RuntimeError> {
+    match (requested_outputs, value) {
+        (0, _) => Ok(Vec::new()),
+        (1, Value::OutputList(mut values)) if values.len() == 1 => Ok(vec![values.remove(0)]),
+        (1, value) => Ok(vec![value]),
+        (count, Value::OutputList(values)) if values.len() == count => Ok(values),
+        (count, Value::OutputList(values)) => Err(error(format!(
+            "partition-local builtin returned {} outputs for {count} requested outputs",
+            values.len()
+        ))),
+        (count, _) => Err(error(format!(
+            "partition-local builtin returned one value for {count} requested outputs"
+        ))),
+    }
 }
 
 fn decode_parts(

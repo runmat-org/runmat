@@ -53,6 +53,7 @@ pub enum MathInferenceRule {
     Exp,
     Expm1,
     Log1p,
+    Log2,
     Logarithm(LogarithmBase),
     NumericConversion(runmat_types::NumericClass),
     NumericConversionWithLike(runmat_types::NumericClass),

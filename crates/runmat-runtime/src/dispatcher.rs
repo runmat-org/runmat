@@ -432,19 +432,20 @@ async fn try_distributed_builtin(
                 .with_identifier("RunMat:parallel:DistributedInputContract")
                 .build());
             }
-            let output = inference.outputs.into_iter().next().ok_or_else(|| {
-                build_runtime_error(format!(
-                    "{name}: distributed execution requires one statically described output"
+            if inference.outputs.len() != requested_outputs {
+                return Err(build_runtime_error(format!(
+                    "{name}: distributed execution described {} outputs for {requested_outputs} requested outputs",
+                    inference.outputs.len()
                 ))
                 .with_identifier("RunMat:parallel:DistributedOutputContract")
-                .build()
-            })?;
+                .build());
+            }
             service
                 .invoke(crate::context::RuntimeDistributedCallRequest {
                     builtin: runmat_types::BuiltinId(name.into()),
                     arguments: args.to_vec(),
                     requested_outputs,
-                    output,
+                    outputs: inference.outputs,
                     invocation: context.service_ports().collective().map_or(
                         crate::context::RuntimeDistributedInvocation::Client,
                         |collective| {

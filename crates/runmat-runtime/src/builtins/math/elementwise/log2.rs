@@ -7,26 +7,25 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, LOG2_CHARACTER_EXTENSION, LOG2_ERROR_COMPLEX_DISSECTION,
+    LOG2_ERROR_GPU_COMPLEX_INPUT, LOG2_ERROR_GPU_DISSECTION, LOG2_ERROR_INTERNAL,
+    LOG2_ERROR_INVALID_INPUT, LOG2_ERROR_PROVIDER_OWNERSHIP, LOG2_ERROR_TOO_MANY_OUTPUTS,
+    LOG2_INTEGER_EXTENSION, LOG2_LOGICAL_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, ObjectInstance, StructValue, Tensor,
+    Value,
+};
 
 use super::log::{log_complex_parts, log_complex_parts_f32};
 use super::logarithm_common::{probe_gpu_complex_requirement, GpuComplexRequirement};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const IMAG_EPS: f64 = 1e-12;
@@ -53,118 +52,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "log2",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: Some(FusionKernelTemplate {
-        scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("log2({input})"))
-        },
-    }),
+    elementwise: None,
     reduction: None,
-    emits_nan: false,
-    notes: "Fusion planner emits WGSL `log2` calls; providers can override with fused kernels when available.",
+    emits_nan: true,
+    notes: "Fusion is disabled because one-output real inputs can require complex promotion and the two-output form has a distinct host-only contract.",
 };
 
 const BUILTIN_NAME: &str = "log2";
-
-const LOG2_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "log2-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "log2 with integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Log2IntegerInputExtension"),
-};
-const LOG2_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "log2-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "log2 with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Log2LogicalInputExtension"),
-};
-const LOG2_CHARACTER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "log2-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "log2 with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Log2CharacterInputExtension"),
-};
-pub const LOG2_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    LOG2_INTEGER_EXTENSION,
-    LOG2_LOGICAL_EXTENSION,
-    LOG2_CHARACTER_EXTENSION,
-];
-const LOG2_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "RunMat mode promotes all eight integer classes to the binary64 logarithm domain.",
-}];
-pub const LOG2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
-    form: "Y = log2(integer_X)", inputs: &LOG2_INTEGER_INPUTS,
-    computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-    output_class: BuiltinIntegerOutputClassRule::Double,
-    overflow: BuiltinIntegerOverflowRule::NotApplicable,
-    backend: BuiltinIntegerBackendRule::GatherFallback,
-    overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-    notes: "This is a gated RunMat extension; resident integer inputs gather exactly from their owning provider.",
-}];
-
-const LOG2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Elementwise base-2 logarithm result.",
-}];
-const LOG2_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric, logical, char, or complex input.",
-}];
-const LOG2_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = log2(X)",
-    inputs: &LOG2_INPUTS,
-    outputs: &LOG2_OUTPUT,
-}];
-const LOG2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOG2.INVALID_INPUT",
-    identifier: Some("RunMat:log2:InvalidInput"),
-    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
-    message: "log2: invalid input",
-};
-const LOG2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOG2.INTERNAL",
-    identifier: Some("RunMat:log2:Internal"),
-    when: "Internal tensor construction or provider interaction failed.",
-    message: "log2: internal error",
-};
-const LOG2_ERROR_PROVIDER_OWNERSHIP: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOG2.PROVIDER_OWNERSHIP_MISMATCH",
-    identifier: Some("RunMat:gpu:ProviderOwnershipMismatch"),
-    when: "A resident input has no exact owning provider.",
-    message: "log2: resident input has no exact owning provider",
-};
-const LOG2_ERROR_GPU_COMPLEX_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOG2.GPU_COMPLEX_INPUT_REQUIRED",
-    identifier: Some("RunMat:log2:GpuComplexInputRequired"),
-    when: "Explicitly resident real input would require a complex result.",
-    message: "log2: real gpuArray input must be explicitly complex when the result can be complex",
-};
-const LOG2_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    LOG2_ERROR_INVALID_INPUT,
-    LOG2_ERROR_INTERNAL,
-    LOG2_ERROR_PROVIDER_OWNERSHIP,
-    LOG2_ERROR_GPU_COMPLEX_INPUT,
-];
-pub const LOG2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOG2_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOG2_ERRORS,
-};
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
@@ -186,19 +80,34 @@ fn log2_error_with_detail(
 
 #[runtime_builtin(
     name = "log2",
-    category = "math/elementwise",
-    summary = "Base-2 logarithm of scalars, vectors, matrices, or N-D tensors.",
-    keywords = "log2,base-2 logarithm,elementwise,gpu,complex",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::log2::LOG2_DESCRIPTOR),
-    extensions(crate::builtins::math::elementwise::log2::LOG2_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::elementwise::log2::LOG2_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::log2"
 )]
 async fn log2_builtin(value: Value) -> BuiltinResult<Value> {
+    let output_count = crate::output_count::current_output_count().unwrap_or(1);
+    if output_count > 2 {
+        return Err(log2_error_with_detail(
+            &LOG2_ERROR_TOO_MANY_OUTPUTS,
+            format!("requested {output_count}"),
+        ));
+    }
+    if output_count == 2 {
+        let (fraction, exponent) = log2_dissection(value).await?;
+        return Ok(Value::OutputList(vec![fraction, exponent]));
+    }
+    let result = log2_value(value).await?;
+    if output_count == 0 {
+        return Ok(Value::OutputList(Vec::new()));
+    }
+    Ok(result)
+}
+
+async fn log2_value(value: Value) -> BuiltinResult<Value> {
     ensure_log2_extensions(&value).await?;
     match value {
+        Value::Object(object) if crate::builtins::table::is_tabular_object(&object) => {
+            log2_table_value(object).await
+        }
         Value::GpuTensor(handle) => log2_gpu(handle).await,
         Value::Complex(re, im) => {
             let (r, i) = log2_complex_parts(re, im);
@@ -208,6 +117,10 @@ async fn log2_builtin(value: Value) -> BuiltinResult<Value> {
             crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "log2")?;
             log2_complex_tensor(ct)
         }
+        Value::SparseTensor(_) => Err(log2_error_with_detail(
+            &LOG2_ERROR_INVALID_INPUT,
+            "sparse input is not currently supported",
+        )),
         Value::CharArray(ca) => log2_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(log2_error_with_detail(
             &LOG2_ERROR_INVALID_INPUT,
@@ -215,6 +128,163 @@ async fn log2_builtin(value: Value) -> BuiltinResult<Value> {
         )),
         other => log2_real(other),
     }
+}
+
+async fn log2_dissection(value: Value) -> BuiltinResult<(Value, Value)> {
+    ensure_log2_extensions(&value).await?;
+    match value {
+        Value::Object(object) if crate::builtins::table::is_tabular_object(&object) => {
+            log2_table_dissection(object).await
+        }
+        Value::GpuTensor(_) => Err(log2_error_with_detail(
+            &LOG2_ERROR_GPU_DISSECTION,
+            "GPU-resident input is unsupported",
+        )),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(log2_error_with_detail(
+            &LOG2_ERROR_COMPLEX_DISSECTION,
+            "complex input is rejected by the current compatibility release",
+        )),
+        Value::SparseTensor(_) => Err(log2_error_with_detail(
+            &LOG2_ERROR_INVALID_INPUT,
+            "sparse input is not currently supported",
+        )),
+        Value::CharArray(chars) => log2_char_dissection(chars),
+        Value::String(_) | Value::StringArray(_) => Err(log2_error_with_detail(
+            &LOG2_ERROR_INVALID_INPUT,
+            "expected real numeric input",
+        )),
+        other => log2_real_dissection(other),
+    }
+}
+
+async fn log2_table_dissection(object: ObjectInstance) -> BuiltinResult<(Value, Value)> {
+    let variables = crate::builtins::table::table_variables(&object)
+        .map_err(|error| log2_error_with_detail(&LOG2_ERROR_INVALID_INPUT, error.message()))?;
+    let mut fractions = StructValue::new();
+    let mut exponents = StructValue::new();
+    for (name, value) in variables.fields {
+        let (fraction, exponent) = Box::pin(log2_dissection(value)).await.map_err(|error| {
+            log2_error_with_detail(
+                &LOG2_ERROR_INVALID_INPUT,
+                format!(
+                    "table variable {name} does not support log2 dissection: {}",
+                    error.message()
+                ),
+            )
+        })?;
+        fractions.insert(name.clone(), fraction);
+        exponents.insert(name, exponent);
+    }
+    let fractions = crate::builtins::table::table_replace_variables_like(&object, fractions)
+        .map_err(|error| log2_error_with_detail(&LOG2_ERROR_INTERNAL, error.message()))?;
+    let exponents = crate::builtins::table::table_replace_variables_like(&object, exponents)
+        .map_err(|error| log2_error_with_detail(&LOG2_ERROR_INTERNAL, error.message()))?;
+    Ok((fractions, exponents))
+}
+
+fn log2_char_dissection(chars: CharArray) -> BuiltinResult<(Value, Value)> {
+    let values = chars
+        .data
+        .iter()
+        .map(|character| *character as u32 as f64)
+        .collect();
+    let tensor = Tensor::new(values, vec![chars.rows, chars.cols])
+        .map_err(|error| builtin_error(format!("log2: {error}")))?;
+    log2_tensor_dissection(tensor)
+}
+
+fn log2_real_dissection(value: Value) -> BuiltinResult<(Value, Value)> {
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
+        .map_err(|error| log2_error_with_detail(&LOG2_ERROR_INVALID_INPUT, &error))?;
+    log2_tensor_dissection(tensor)
+}
+
+fn log2_tensor_dissection(tensor: Tensor) -> BuiltinResult<(Value, Value)> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| builtin_error(format!("log2: {error}")))?;
+    match storage {
+        NumericStorage::F32(values) => {
+            let (fractions, exponents): (Vec<_>, Vec<_>) =
+                values.into_iter().map(dissection_f32).unzip();
+            dissection_values(
+                NumericStorage::F32(fractions),
+                NumericStorage::F32(exponents),
+                shape,
+            )
+        }
+        NumericStorage::F64(values) => {
+            let (fractions, exponents): (Vec<_>, Vec<_>) =
+                values.into_iter().map(dissection_f64).unzip();
+            dissection_values(
+                NumericStorage::F64(fractions),
+                NumericStorage::F64(exponents),
+                shape,
+            )
+        }
+        storage => {
+            let values = promote_integer_storage_to_log2_domain(storage);
+            let (fractions, exponents): (Vec<_>, Vec<_>) =
+                values.into_iter().map(dissection_f64).unzip();
+            dissection_values(
+                NumericStorage::F64(fractions),
+                NumericStorage::F64(exponents),
+                shape,
+            )
+        }
+    }
+}
+
+fn dissection_f64(value: f64) -> (f64, f64) {
+    if value == 0.0 || !value.is_finite() {
+        return (value, 0.0);
+    }
+    let (fraction, exponent) = libm::frexp(value);
+    (fraction, f64::from(exponent))
+}
+
+fn dissection_f32(value: f32) -> (f32, f32) {
+    if value == 0.0 || !value.is_finite() {
+        return (value, 0.0);
+    }
+    let (fraction, exponent) = libm::frexpf(value);
+    (fraction, exponent as f32)
+}
+
+fn dissection_values(
+    fractions: NumericStorage,
+    exponents: NumericStorage,
+    shape: Vec<usize>,
+) -> BuiltinResult<(Value, Value)> {
+    let fraction = Tensor::from_numeric_storage(fractions, shape.clone())
+        .map_err(|error| builtin_error(format!("log2: {error}")))?;
+    let exponent = Tensor::from_numeric_storage(exponents, shape)
+        .map_err(|error| builtin_error(format!("log2: {error}")))?;
+    Ok((
+        tensor::tensor_into_value(fraction),
+        tensor::tensor_into_value(exponent),
+    ))
+}
+
+async fn log2_table_value(object: ObjectInstance) -> BuiltinResult<Value> {
+    let variables = crate::builtins::table::table_variables(&object)
+        .map_err(|error| log2_error_with_detail(&LOG2_ERROR_INVALID_INPUT, error.message()))?;
+    let mut output = StructValue::new();
+    for (name, value) in variables.fields {
+        let transformed = Box::pin(log2_value(value)).await.map_err(|error| {
+            log2_error_with_detail(
+                &LOG2_ERROR_INVALID_INPUT,
+                format!(
+                    "table variable {name} does not support log2: {}",
+                    error.message()
+                ),
+            )
+        })?;
+        output.insert(name, transformed);
+    }
+    crate::builtins::table::table_replace_variables_like(&object, output)
+        .map_err(|error| log2_error_with_detail(&LOG2_ERROR_INTERNAL, error.message()))
 }
 
 async fn ensure_log2_extensions(value: &Value) -> BuiltinResult<()> {
@@ -530,11 +600,16 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::LOG2_DESCRIPTOR;
     use runmat_value::{IntegerStorage, LogicalArray, StringArray, Tensor, Value};
 
     fn log2_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::log2_builtin(value))
+    }
+
+    fn log2_with_outputs(value: Value, count: usize) -> BuiltinResult<Value> {
+        let _guard = crate::output_count::push_output_count(Some(count));
+        log2_builtin(value)
     }
 
     #[test]
@@ -545,6 +620,11 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = log2(X)"));
+        assert!(labels.contains(&"[F,E] = log2(X)"));
+        assert_eq!(
+            LOG2_DESCRIPTOR.output_mode,
+            runmat_builtins::BuiltinOutputMode::ByRequestedOutputCount
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -624,30 +704,116 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn log2_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
+    fn log2_two_output_dissection_preserves_special_values_shape_and_double_class() {
+        let values = vec![
+            0.0,
+            -0.0,
+            1.0,
+            std::f64::consts::PI,
+            -3.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+        let input = Tensor::new(values, vec![2, 4]).unwrap();
+        let Value::OutputList(outputs) =
+            log2_with_outputs(Value::Tensor(input), 2).expect("log2 dissection")
+        else {
+            panic!("expected two outputs");
+        };
+        let [Value::Tensor(fraction), Value::Tensor(exponent)] = outputs.as_slice() else {
+            panic!("expected tensor outputs");
+        };
+        assert_eq!(fraction.shape, vec![2, 4]);
+        assert_eq!(exponent.shape, vec![2, 4]);
         assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
+            fraction.materialize_f64()[..5],
+            [0.0, -0.0, 0.5, libm::frexp(std::f64::consts::PI).0, -0.75]
         );
+        assert_eq!(exponent.materialize_f64()[..5], [0.0, 0.0, 1.0, 2.0, 2.0]);
+        assert_eq!(fraction.materialize_f64()[5], f64::INFINITY);
+        assert_eq!(fraction.materialize_f64()[6], f64::NEG_INFINITY);
+        assert!(fraction.materialize_f64()[7].is_nan());
+        assert_eq!(exponent.materialize_f64()[5..], [0.0, 0.0, 0.0]);
     }
 
     #[test]
-    fn log2_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
+    fn log2_two_output_dissection_preserves_single_class() {
+        let input = Tensor::from_f32(vec![1.0, -3.0], vec![1, 2]).unwrap();
+        let Value::OutputList(outputs) =
+            log2_with_outputs(Value::Tensor(input), 2).expect("log2 dissection")
+        else {
+            panic!("expected two outputs");
+        };
+        let [Value::Tensor(fraction), Value::Tensor(exponent)] = outputs.as_slice() else {
+            panic!("expected tensor outputs");
+        };
+        assert_eq!(fraction.as_f32_slice(), Some(&[0.5, -0.75][..]));
+        assert_eq!(exponent.as_f32_slice(), Some(&[1.0, 2.0][..]));
+    }
+
+    #[test]
+    fn log2_one_and_two_output_forms_map_table_variables() {
+        let input = crate::builtins::table::table_from_columns(
+            vec!["Double".into(), "Single".into()],
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, -3.0], vec![2, 1]).unwrap()),
+                Value::Tensor(Tensor::from_f32(vec![1.0, -3.0], vec![2, 1]).unwrap()),
+            ],
+        )
+        .unwrap();
+
+        let Value::Object(logarithms) = log2_builtin(input.clone()).expect("table log2") else {
+            panic!("expected table logarithms");
+        };
+        assert!(crate::builtins::table::is_tabular_object(&logarithms));
+
+        let Value::OutputList(outputs) =
+            log2_with_outputs(input, 2).expect("table log2 dissection")
+        else {
+            panic!("expected two table outputs");
+        };
+        let [Value::Object(fractions), Value::Object(exponents)] = outputs.as_slice() else {
+            panic!("expected two table outputs");
+        };
+        for output in [fractions, exponents] {
+            assert!(crate::builtins::table::is_tabular_object(output));
+            let variables = crate::builtins::table::table_variables(output).unwrap();
+            assert_eq!(variables.fields.len(), 2);
+            assert!(matches!(
+                variables.fields.get("Single"),
+                Some(Value::Tensor(tensor))
+                    if tensor.numeric_dtype() == runmat_value::NumericDType::F32
+            ));
+        }
+    }
+
+    #[test]
+    fn log2_two_output_dissection_rejects_complex_and_gpu_inputs() {
+        let complex_error =
+            log2_with_outputs(Value::Complex(2.0, 0.0), 2).expect_err("complex class must reject");
+        assert_eq!(
+            complex_error.identifier(),
+            LOG2_ERROR_COMPLEX_DISSECTION.identifier
         );
-        assert_eq!(out, Type::Num);
+
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
+            let gpu_error = log2_with_outputs(Value::GpuTensor(handle), 2)
+                .expect_err("GPU dissection must reject");
+            assert_eq!(gpu_error.identifier(), LOG2_ERROR_GPU_DISSECTION.identifier);
+        });
+    }
+
+    #[test]
+    fn log2_output_count_contract_handles_zero_and_rejects_more_than_two() {
+        assert_eq!(
+            log2_with_outputs(Value::Num(8.0), 0).unwrap(),
+            Value::OutputList(Vec::new())
+        );
+        let error = log2_with_outputs(Value::Num(8.0), 3).expect_err("too many outputs");
+        assert_eq!(error.identifier(), LOG2_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
