@@ -53,10 +53,17 @@ pub enum MathInferenceRule {
     Exp,
     Expm1,
     Log1p,
+    Logarithm(LogarithmBase),
     NumericConversion(runmat_types::NumericClass),
     NumericConversionWithLike(runmat_types::NumericClass),
     NumericComponent(NumericComponentRule),
     Signum,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LogarithmBase {
+    Natural,
+    Common,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

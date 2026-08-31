@@ -89241,7 +89241,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric, logical, char, or complex input."
+              "description": "Single or double real/complex input or a supported table; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -89250,7 +89250,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Elementwise natural-log result."
+              "description": "Elementwise natural-log result, promoted to complex for negative real input."
             }
           ]
         }
@@ -89259,13 +89259,13 @@
         {
           "code": "RM.LOG.INVALID_INPUT",
           "identifier": "RunMat:log:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
+          "when": "Input cannot be interpreted as supported numeric, logical, character, or table data.",
           "message": "log: invalid input"
         },
         {
           "code": "RM.LOG.INTERNAL",
           "identifier": "RunMat:log:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
+          "when": "Internal tensor construction, table mapping, or provider interaction fails.",
           "message": "log: internal error"
         }
       ],
@@ -89313,7 +89313,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "Accepted only in RunMat mode and only inside the exact binary64 integer interval."
+              "notes": "All eight integer classes are accepted only in RunMat mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53]."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -89321,7 +89321,7 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Resident integer input is downloaded exactly through its owner before entering the double logarithm domain."
+          "notes": "The RunMat-only overload validates exact binary64 conversion before computation. Negative real values produce complex double output; resident values gather through their exact owner."
         }
       ]
     },
@@ -89338,7 +89338,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric, logical, char, or complex input."
+              "description": "Single or double real/complex input or a supported table; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -89347,7 +89347,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Elementwise base-10 logarithm result."
+              "description": "Elementwise base-10 logarithm, promoted to complex for negative real input."
             }
           ]
         }
@@ -89356,13 +89356,13 @@
         {
           "code": "RM.LOG10.INVALID_INPUT",
           "identifier": "RunMat:log10:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
+          "when": "Input cannot be interpreted as supported numeric, logical, character, or table data.",
           "message": "log10: invalid input"
         },
         {
           "code": "RM.LOG10.INTERNAL",
           "identifier": "RunMat:log10:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
+          "when": "Internal tensor construction, table mapping, or provider interaction fails.",
           "message": "log10: internal error"
         }
       ],
@@ -89410,7 +89410,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "Accepted only in RunMat mode and inside the exact binary64 integer interval."
+              "notes": "All eight integer classes are accepted only in RunMat mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53]."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -89418,60 +89418,83 @@
           "overflow": "NotApplicable",
           "backend": "GatherFallback",
           "overload": "ElementwiseShapePreserving",
-          "notes": "Resident integer input is downloaded exactly through its owner before double-domain computation."
+          "notes": "The RunMat-only overload validates exact binary64 conversion before computation. Negative real values produce complex double output; resident values gather through their exact owner."
         }
       ]
     },
     {
+      "name": "log1p",
+      "output_mode": "Fixed",
       "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "Y = log1p(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise log(1+X) result, promoted to complex when a real value is below -1."
+            }
+          ]
+        }
+      ],
       "errors": [
         {
           "code": "RM.LOG1P.INVALID_INPUT",
           "identifier": "RunMat:log1p:InvalidInput",
-          "message": "log1p: invalid input",
-          "when": "Input cannot be interpreted as supported numeric, logical, or character data."
+          "when": "Input cannot be interpreted as supported numeric, logical, or character data.",
+          "message": "log1p: invalid input"
         },
         {
           "code": "RM.LOG1P.INTERNAL",
           "identifier": "RunMat:log1p:Internal",
-          "message": "log1p: internal error",
-          "when": "Internal tensor construction or provider interaction fails."
+          "when": "Internal tensor construction or provider interaction fails.",
+          "message": "log1p: internal error"
         }
       ],
       "extensions": [
         {
-          "description": "log1p with integer input is a RunMat extension",
-          "error_identifier": "RunMat:compatibility:Log1pIntegerInputExtension",
           "id": "log1p-integer-input",
-          "mode": "RunMatOnly"
+          "mode": "RunMatOnly",
+          "description": "log1p with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log1pIntegerInputExtension"
         },
         {
-          "description": "log1p with logical input is a RunMat extension",
-          "error_identifier": "RunMat:compatibility:Log1pLogicalInputExtension",
           "id": "log1p-logical-input",
-          "mode": "RunMatOnly"
+          "mode": "RunMatOnly",
+          "description": "log1p with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log1pLogicalInputExtension"
         },
         {
-          "description": "log1p with character input is a RunMat extension",
-          "error_identifier": "RunMat:compatibility:Log1pCharacterInputExtension",
           "id": "log1p-character-input",
-          "mode": "RunMatOnly"
+          "mode": "RunMatOnly",
+          "description": "log1p with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log1pCharacterInputExtension"
         },
         {
-          "description": "complex promotion from an explicit real gpuArray is a RunMat extension",
-          "error_identifier": "RunMat:compatibility:Log1pExplicitGpuComplexExtension",
           "id": "log1p-explicit-real-gpu-complex-promotion",
-          "mode": "RunMatOnly"
+          "mode": "RunMatOnly",
+          "description": "complex promotion from an explicit real gpuArray is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Log1pExplicitGpuComplexExtension"
         }
       ],
       "integer_capabilities": [
         {
-          "backend": "GatherFallback",
-          "computation_domain": "FloatingPoint",
           "form": "Y = log1p(integer_X)",
           "inputs": [
             {
-              "availability": "RunMatOnly",
+              "name": "X",
               "classes": [
                 "Int8",
                 "Int16",
@@ -89482,40 +89505,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "X",
-              "notes": "All eight integer classes are accepted only in RunMat mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53].",
-              "scalar_double": "NotApplicable"
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are accepted only in RunMat mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53]."
             }
           ],
-          "notes": "The RunMat-only overload validates exact binary64 conversion before logarithmic computation. Real values below -1 produce complex double output; resident values gather through their exact owner and are restored only when physically representable.",
+          "computation_domain": "FloatingPoint",
           "output_class": "Double",
           "overflow": "NotApplicable",
-          "overload": "ElementwiseShapePreserving"
-        }
-      ],
-      "name": "log1p",
-      "output_mode": "Fixed",
-      "signatures": [
-        {
-          "inputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
-              "name": "X",
-              "ty": "Any"
-            }
-          ],
-          "label": "Y = log1p(X)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Elementwise log(1+X) result, promoted to complex when a real value is below -1.",
-              "name": "Y",
-              "ty": "NumericArray"
-            }
-          ]
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The RunMat-only overload validates exact binary64 conversion before logarithmic computation. Real values below -1 produce complex double output; resident values gather through their exact owner and are restored only when physically representable."
         }
       ]
     },
@@ -95534,23 +95534,46 @@
       ]
     },
     {
+      "name": "metaclass",
+      "output_mode": "Fixed",
       "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "mc = metaclass(object)",
+          "inputs": [
+            {
+              "name": "object",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Object or value whose runtime class metadata is requested."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mc",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Meta-class reference for the input value's runtime class."
+            }
+          ]
+        }
+      ],
       "errors": [
         {
           "code": "RM.METACLASS.INVALID_CLASS_NAME",
           "identifier": "RunMat:InvalidClassName",
-          "message": "metaclass: invalid class name",
-          "when": "The runtime class name cannot be represented as a canonical class identity."
+          "when": "The runtime class name cannot be represented as a canonical class identity.",
+          "message": "metaclass: invalid class name"
         }
       ],
       "integer_capabilities": [
         {
-          "backend": "HostAndGpu",
-          "computation_domain": "Structural",
           "form": "mc = metaclass(integer_object)",
           "inputs": [
             {
-              "availability": "Documented",
+              "name": "object",
               "classes": [
                 "Int8",
                 "Int16",
@@ -95561,40 +95584,17 @@
                 "Uint32",
                 "Uint64"
               ],
-              "name": "object",
-              "notes": "Integer scalars and arrays are ordinary MATLAB values whose runtime class metadata preserves exact signedness and width; payload data is not inspected.",
-              "scalar_double": "NotApplicable"
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer scalars and arrays are ordinary MATLAB values whose runtime class metadata preserves exact signedness and width; payload data is not inspected."
             }
           ],
-          "notes": "RunMat returns its ClassRef representation of matlab.metadata.Class. Explicit resident values report gpuArray metadata while automatic residency remains transparent, both without gathering payload bytes.",
+          "computation_domain": "Structural",
           "output_class": "NotApplicable",
           "overflow": "NotApplicable",
-          "overload": "FunctionSpecific"
-        }
-      ],
-      "name": "metaclass",
-      "output_mode": "Fixed",
-      "signatures": [
-        {
-          "inputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Object or value whose runtime class metadata is requested.",
-              "name": "object",
-              "ty": "Any"
-            }
-          ],
-          "label": "mc = metaclass(object)",
-          "outputs": [
-            {
-              "arity": "Required",
-              "default": null,
-              "description": "Meta-class reference for the input value's runtime class.",
-              "name": "mc",
-              "ty": "Any"
-            }
-          ]
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat returns its ClassRef representation of matlab.metadata.Class. Explicit resident values report gpuArray metadata while automatic residency remains transparent, both without gathering payload bytes."
         }
       ]
     },

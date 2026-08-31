@@ -17,7 +17,8 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
-use super::log::{detect_gpu_requires_complex, log_complex_parts, log_complex_parts_f32};
+use super::log::{log_complex_parts, log_complex_parts_f32};
+use super::logarithm_common::{probe_gpu_complex_requirement, GpuComplexRequirement};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -265,45 +266,59 @@ async fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build()
     })?;
+    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    match probe_gpu_complex_requirement(owner, &handle, 0.0)
+        .await
+        .map_err(|error| log2_error_with_detail(&LOG2_ERROR_INTERNAL, error.to_string()))?
     {
-        let provider = owner;
-        match detect_gpu_requires_complex(provider, &handle).await {
-            Ok(false) => {
-                if let Ok(mut out) = provider.unary_log2(&handle).await {
-                    if valid_log2_output(&out, &handle, provider) {
-                        runmat_accelerate_api::set_handle_provenance(
-                            &mut out,
-                            runmat_accelerate_api::handle_provenance(&handle)
-                                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-                        );
-                        return Ok(gpu_helpers::resident_gpu_value(out));
-                    }
+        GpuComplexRequirement::NotRequired => {
+            let provider_result = owner.unary_log2(&handle).await;
+            gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+            match provider_result {
+                Ok(mut out) if valid_log2_output(&out, &handle, owner) => {
+                    runmat_accelerate_api::set_handle_provenance(
+                        &mut out,
+                        runmat_accelerate_api::handle_provenance(&handle)
+                            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+                    );
+                    return Ok(gpu_helpers::resident_gpu_value(out));
+                }
+                Ok(out) => {
                     gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
+                    return Err(log2_error_with_detail(
+                        &LOG2_ERROR_INTERNAL,
+                        "provider returned malformed log2 output",
+                    ));
+                }
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) => {
+                    return Err(log2_error_with_detail(
+                        &LOG2_ERROR_INTERNAL,
+                        format!("provider unary_log2 failed: {error}"),
+                    ));
                 }
             }
-            Ok(true) => {
-                if runmat_accelerate_api::handle_is_explicit(&handle) {
-                    return Err(build_runtime_error(LOG2_ERROR_GPU_COMPLEX_INPUT.message)
-                        .with_builtin(BUILTIN_NAME)
-                        .with_identifier(
-                            LOG2_ERROR_GPU_COMPLEX_INPUT
-                                .identifier
-                                .expect("log2 complex-input descriptor identifier"),
-                        )
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build());
-                }
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
-                    .await
-                    .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-                return log2_tensor(tensor);
+        }
+        GpuComplexRequirement::Required => {
+            gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+            if runmat_accelerate_api::handle_is_explicit(&handle) {
+                return Err(build_runtime_error(LOG2_ERROR_GPU_COMPLEX_INPUT.message)
+                    .with_builtin(BUILTIN_NAME)
+                    .with_identifier(
+                        LOG2_ERROR_GPU_COMPLEX_INPUT
+                            .identifier
+                            .expect("log2 complex-input descriptor identifier"),
+                    )
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build());
             }
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(err);
-                }
-                // Fall through to host fallback below.
-            }
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            return log2_tensor(tensor);
+        }
+        GpuComplexRequirement::Unknown => {
+            gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle)

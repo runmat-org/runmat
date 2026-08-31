@@ -26,6 +26,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::math::elementwise::logarithm_common::{
+    probe_gpu_complex_requirement, GpuComplexRequirement,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const IMAG_EPS: f64 = 1e-12;
@@ -187,7 +190,7 @@ async fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
             match provider_result {
                 Ok(output) => return validate_log1p_gpu_output(provider, &handle, output),
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error, "unary_log1p") => {}
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
                 Err(error) => {
                     return Err(log1p_error_with_detail(
                         &LOG1P_ERROR_INTERNAL,
@@ -246,73 +249,13 @@ fn validate_log1p_gpu_output(
     Ok(gpu_helpers::resident_gpu_value(out))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GpuComplexRequirement {
-    Required,
-    NotRequired,
-    Unknown,
-}
-
 async fn detect_gpu_complex_requirement(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<GpuComplexRequirement> {
-    if handle.shape.iter().product::<usize>() == 0 {
-        return Ok(GpuComplexRequirement::NotRequired);
-    }
-    let input_metadata = gpu_helpers::snapshot_handle_metadata(handle);
-    let min_result = provider.reduce_min(handle).await;
-    gpu_helpers::restore_handle_metadata(handle, &input_metadata);
-    let min_handle = match min_result {
-        Ok(handle) => handle,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error, "reduce_min") => {
-            return Ok(GpuComplexRequirement::Unknown)
-        }
-        Err(error) => {
-            return Err(log1p_error_with_detail(
-                &LOG1P_ERROR_INTERNAL,
-                format!("provider reduce_min failed: {error}"),
-            ))
-        }
-    };
-    if gpu_helpers::same_gpu_handle(&min_handle, handle) {
-        return Err(log1p_error_with_detail(
-            &LOG1P_ERROR_INTERNAL,
-            "provider reduce_min aliased its input",
-        ));
-    }
-    if min_handle.device_id != handle.device_id
-        || gpu_helpers::exact_provider_for_handle(&min_handle)
-            .is_none_or(|owner| !std::ptr::eq(owner, provider))
-        || runmat_accelerate_api::handle_storage(&min_handle) != GpuTensorStorage::Real
-        || runmat_accelerate_api::handle_precision(&min_handle)
-            != runmat_accelerate_api::handle_precision(handle)
-        || runmat_accelerate_api::handle_integer_type(&min_handle).is_some()
-        || runmat_accelerate_api::handle_is_logical(&min_handle)
-        || min_handle.shape.iter().product::<usize>() != 1
-    {
-        gpu_helpers::free_unprotected_exact_owner(&min_handle, &[handle]);
-        return Err(log1p_error_with_detail(
-            &LOG1P_ERROR_INTERNAL,
-            "provider reduce_min returned malformed output",
-        ));
-    }
-    let host = gpu_helpers::download_floating_projection_async(provider, &min_handle).await;
-    gpu_helpers::free_unprotected_exact_owner(&min_handle, &[handle]);
-    let host = host.map_err(|error| {
-        log1p_error_with_detail(
-            &LOG1P_ERROR_INTERNAL,
-            format!("provider reduce_min download failed: {error}"),
-        )
-    })?;
-    if host.data.iter().any(|value| value.is_nan()) {
-        return Ok(GpuComplexRequirement::Unknown);
-    }
-    if host.data.iter().any(|value| *value < -1.0) {
-        Ok(GpuComplexRequirement::Required)
-    } else {
-        Ok(GpuComplexRequirement::NotRequired)
-    }
+    probe_gpu_complex_requirement(provider, handle, -1.0)
+        .await
+        .map_err(|error| log1p_error_with_detail(&LOG1P_ERROR_INTERNAL, error.to_string()))
 }
 
 fn log1p_real(value: Value) -> BuiltinResult<Value> {

@@ -141,7 +141,7 @@ async fn angle_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     "provider unary_angle returned malformed output",
                 ));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error, "unary_angle") => {}
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {
                 return Err(builtin_error_with_detail(
                     &ANGLE_ERROR_INTERNAL,

@@ -361,11 +361,11 @@ pub fn free_unprotected_exact_owner(handle: &GpuTensorHandle, protected: &[&GpuT
     }
 }
 
-/// Return whether an optional provider hook reported the API's canonical
+/// Return whether an optional provider hook reported the API's typed
 /// unsupported-operation result. Other provider failures must remain visible
 /// instead of silently changing the execution path.
-pub fn provider_hook_is_unsupported(error: &anyhow::Error, hook: &str) -> bool {
-    error.to_string() == format!("{hook} not supported by provider")
+pub fn provider_hook_is_unsupported(error: &anyhow::Error) -> bool {
+    runmat_accelerate_api::is_unsupported_provider_operation(error)
 }
 
 /// Download a GPU tensor handle to host memory, returning a dense `Tensor`.
