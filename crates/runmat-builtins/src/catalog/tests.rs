@@ -135,6 +135,29 @@ fn validation_rejects_incomplete_canonical_documentation() {
 }
 
 #[test]
+fn root_documentation_is_catalog_owned_and_executable() {
+    for (name, expected_examples, expected_faqs) in [("sqrt", 6, 7), ("realsqrt", 5, 5)] {
+        let entry = builtin_catalog_entry_by_name(name).expect("root catalog entry");
+        let documentation = &entry.documentation;
+        assert_eq!(
+            documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(documentation.examples.len(), expected_examples);
+        assert_eq!(documentation.faqs.len(), expected_faqs);
+        assert!(documentation
+            .sections
+            .iter()
+            .any(|section| section.heading == "GPU execution"));
+        assert!(!documentation.evidence.implementation.is_empty());
+        assert!(!documentation.evidence.verification.is_empty());
+        assert!(documentation.examples.iter().all(|example| {
+            example.compatibility == BuiltinExampleCompatibility::RunMat && !example.id.is_empty()
+        }));
+    }
+}
+
+#[test]
 fn migrated_registry_is_valid_and_case_insensitive() {
     let errors = validate_builtin_catalog(builtin_catalog_entries());
     assert!(errors.is_empty(), "catalog errors: {errors:#?}");

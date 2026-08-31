@@ -15,6 +15,13 @@ pub enum BuiltinExampleHarness {
     InteractiveHost,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinExampleCompatibility {
+    RunMat,
+    Matlab,
+    Strict,
+}
+
 /// Semantic oracle for a documentation example. Presentation output is kept
 /// separately so formatting changes do not silently redefine correctness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -39,6 +46,7 @@ pub struct BuiltinExample {
     pub title: &'static str,
     pub program: &'static str,
     pub display_output: Option<&'static str>,
+    pub compatibility: BuiltinExampleCompatibility,
     pub harness: BuiltinExampleHarness,
     pub verification: BuiltinExampleVerification,
 }

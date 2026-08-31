@@ -29,6 +29,7 @@ export interface Example {
   description: string;
   input: string;
   output?: string;
+  compatibility?: "RunMat" | "Matlab" | "Strict";
   harness?:
     | "Portable"
     | "Native"
