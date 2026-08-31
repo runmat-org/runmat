@@ -1,9 +1,9 @@
 //! MATLAB-compatible `full` conversion for sparse matrix values.
 
-use runmat_builtins::catalog::definitions::{
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{
     FULL_ERROR_INTERNAL, FULL_ERROR_INVALID_INPUT, FULL_INTEGER_SPARSE_EXTENSION,
 };
-use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{SparseTensor, Value};
 
@@ -158,8 +158,8 @@ pub(crate) mod tests {
         AccelProvider as _, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
         HostTensorView,
     };
-    use runmat_builtins::catalog::definitions::{FULL_EXTENSIONS, FULL_INTEGER_CAPABILITIES};
     use runmat_builtins::BuiltinIntegerInputAvailability;
+    use runmat_builtins::{FULL_EXTENSIONS, FULL_INTEGER_CAPABILITIES};
     use runmat_value::{CellArray, IntegerStorage, SparseTensor, Tensor, Value};
 
     fn run_full(value: Value) -> BuiltinResult<Value> {

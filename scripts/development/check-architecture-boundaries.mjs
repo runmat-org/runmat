@@ -138,5 +138,21 @@ for (const symbol of [
   }
 }
 
+const catalogModule = read("crates/runmat-builtins/src/catalog/mod.rs");
+if (/\bpub\s+mod\s+entries\s*;/.test(catalogModule)) {
+  fail("runmat-builtins must keep its physical catalog entry tree private");
+}
+for (const { path: sourcePath, text } of allRust) {
+  if (
+    !sourcePath.startsWith("crates/runmat-builtins/") &&
+    /runmat_builtins::catalog::entries\b/.test(text)
+  ) {
+    fail(`${sourcePath} depends on the private physical catalog entry tree`);
+  }
+}
+if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/definitions"))) {
+  fail("the obsolete parallel catalog definitions tree must not return");
+}
+
 if (failed) process.exit(1);
 console.log("crate architecture boundaries are valid");

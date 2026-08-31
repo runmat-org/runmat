@@ -5,11 +5,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::catalog::definitions::{
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{
     GATHER_CONTAINER_EXTENSION, GATHER_ERROR_NOT_ENOUGH_INPUTS, GATHER_ERROR_OUTPUT_COUNT_MISMATCH,
     GATHER_ERROR_TOO_MANY_OUTPUTS,
 };
-use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 

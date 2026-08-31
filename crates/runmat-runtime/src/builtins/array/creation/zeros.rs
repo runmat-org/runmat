@@ -4,12 +4,12 @@ use runmat_accelerate_api::{
     GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
     ProviderPrecision,
 };
-use runmat_builtins::catalog::definitions::{
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{
     ZEROS_COLUMN_SIZE_VECTOR_EXTENSION, ZEROS_ERROR_CLASS_CONFLICT, ZEROS_ERROR_LIKE_DUPLICATE,
     ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE, ZEROS_ERROR_UNRECOGNIZED_OPTION,
     ZEROS_IMPLICIT_PROTOTYPE_EXTENSION, ZEROS_RESIDENT_SIZE_EXTENSION,
 };
-use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
