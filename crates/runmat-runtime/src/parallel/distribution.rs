@@ -2,7 +2,7 @@ use runmat_execution::{DistributedPartitionLayout, PartitionRange, PartitionSele
 use runmat_types::{DistributionScheme, LabCount, LabRank};
 use runmat_value::{
     CellArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, LogicalArray, NumericStorage,
-    SparseTensor, Tensor, Value,
+    Tensor, Value,
 };
 
 use crate::indexing::plan::build_index_plan;
@@ -564,17 +564,7 @@ fn zero_like(prototype: &Value, shape: &[usize]) -> Result<Value, RuntimeError> 
                 .map_err(error)
         }
         Value::SparseTensor(value) if shape.len() == 2 => {
-            let sparse = if value.is_logical() {
-                SparseTensor::zeros_logical(shape[0], shape[1])
-            } else if value.is_complex() {
-                SparseTensor::zeros_complex(shape[0], shape[1])
-            } else if let Some(storage) = value.integer_storage() {
-                SparseTensor::zeros_with_integer_storage(shape[0], shape[1], storage)
-            } else if value.numeric_dtype() == Some(runmat_value::NumericDType::F32) {
-                SparseTensor::zeros_f32(shape[0], shape[1])
-            } else {
-                SparseTensor::zeros(shape[0], shape[1])
-            };
+            let sparse = value.zeros_like(shape[0], shape[1]);
             Ok(Value::SparseTensor(sparse))
         }
         Value::LogicalArray(_) => Ok(Value::LogicalArray(LogicalArray::zeros(shape.to_vec()))),

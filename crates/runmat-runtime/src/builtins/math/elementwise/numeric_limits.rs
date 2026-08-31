@@ -1,292 +1,335 @@
 //! MATLAB-compatible numeric limit query builtins.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    FloatingLimitKind, IntegerLimitKind, NUMERIC_LIMIT_ERROR_INTERNAL,
+    NUMERIC_LIMIT_ERROR_INVALID_CLASS, NUMERIC_LIMIT_ERROR_INVALID_SYNTAX,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, SparseTensor,
+    Tensor, Value,
 };
 
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const INPUTS_CLASS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "classname",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric class name.",
-}];
-
-const INPUTS_FLOAT_CLASS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "classname",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Numeric class name.",
-}];
-
-const INPUTS_LIKE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Like keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Integer prototype whose class and complexity are copied.",
-    },
-];
-
-const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Limit value.",
-}];
-
-const FLOAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "value = limit()",
-        inputs: &[],
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = limit(classname)",
-        inputs: &INPUTS_FLOAT_CLASS,
-        outputs: &OUTPUT_VALUE,
-    },
-];
-
-const INTMIN_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "value = intmin()",
-        inputs: &[],
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = intmin(classname)",
-        inputs: &INPUTS_CLASS,
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = intmin(like=prototype)",
-        inputs: &INPUTS_LIKE,
-        outputs: &OUTPUT_VALUE,
-    },
-];
-
-const INTMAX_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "value = intmax()",
-        inputs: &[],
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = intmax(classname)",
-        inputs: &INPUTS_CLASS,
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = intmax(like=prototype)",
-        inputs: &INPUTS_LIKE,
-        outputs: &OUTPUT_VALUE,
-    },
-];
-
-const ERROR_INVALID_CLASS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NUMERIC_LIMITS.INVALID_CLASS",
-    identifier: Some("RunMat:numericLimits:InvalidClass"),
-    when: "The requested class is not supported by the limit query.",
-    message: "numeric limit: unsupported class",
-};
-
-const ERROR_INVALID_SYNTAX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NUMERIC_LIMITS.INVALID_SYNTAX",
-    identifier: Some("RunMat:numericLimits:InvalidSyntax"),
-    when: "The arguments do not match a documented class-name or like-prototype form.",
-    message: "numeric limit: invalid syntax",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_CLASS, ERROR_INVALID_SYNTAX];
-const FLOAT_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_CLASS];
-
-pub const FLOAT_LIMIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FLOAT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FLOAT_ERRORS,
-};
-
-pub const INTMIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INTMIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const INTMAX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INTMAX_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const INTEGER_LIMIT_LIKE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "prototype",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The prototype selects one of the eight integer classes and may be real or structurally complex.",
-    }];
-
-pub const INTMAX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "value = intmax('like', integer_prototype)",
-        inputs: &INTEGER_LIMIT_LIKE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Returns the exact maximum of the prototype class as a scalar and preserves prototype complexity and documented gpuArray residency where the provider representation supports it.",
-    }];
-
-pub const INTMIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "value = intmin('like', integer_prototype)",
-        inputs: &INTEGER_LIMIT_LIKE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Returns the exact minimum of the prototype class as a scalar and preserves prototype complexity and documented gpuArray residency where the provider representation supports it.",
-    }];
-
 #[runtime_builtin(
     name = "intmax",
-    category = "math/elementwise",
-    summary = "Return the largest value of an integer class.",
-    keywords = "intmax,integer,limits",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::INTMAX_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::math::elementwise::numeric_limits::INTMAX_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn intmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    integer_limit(rest, LimitKind::Maximum, "intmax")
+    integer_limit(rest, IntegerLimitKind::Maximum, "intmax")
 }
 
 #[runtime_builtin(
     name = "intmin",
-    category = "math/elementwise",
-    summary = "Return the smallest value of an integer class.",
-    keywords = "intmin,integer,limits",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::INTMIN_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::math::elementwise::numeric_limits::INTMIN_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn intmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    integer_limit(rest, LimitKind::Minimum, "intmin")
+    integer_limit(rest, IntegerLimitKind::Minimum, "intmin")
 }
 
 #[runtime_builtin(
     name = "realmax",
-    category = "math/elementwise",
-    summary = "Return the largest finite floating-point value.",
-    keywords = "realmax,float,limits,double,single",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::FLOAT_LIMIT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn realmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    match parse_floating_class(rest.first(), "realmax")? {
-        runmat_types::NumericClass::Double => Ok(Value::Num(f64::MAX)),
-        runmat_types::NumericClass::Single => Ok(Value::Num(f32::MAX as f64)),
-        _ => unreachable!("floating class parser admits only double and single"),
-    }
+    floating_limit(rest, FloatingLimitKind::LargestFinite, "realmax")
 }
 
 #[runtime_builtin(
     name = "realmin",
-    category = "math/elementwise",
-    summary = "Return the smallest positive normalized floating-point value.",
-    keywords = "realmin,float,limits,double,single",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::FLOAT_LIMIT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn realmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    match parse_floating_class(rest.first(), "realmin")? {
-        runmat_types::NumericClass::Double => Ok(Value::Num(f64::MIN_POSITIVE)),
-        runmat_types::NumericClass::Single => Ok(Value::Num(f32::MIN_POSITIVE as f64)),
-        _ => unreachable!("floating class parser admits only double and single"),
-    }
+    floating_limit(rest, FloatingLimitKind::SmallestNormal, "realmin")
 }
 
 #[runtime_builtin(
     name = "flintmax",
-    category = "math/elementwise",
-    summary = "Return the largest consecutive integer in a floating-point class.",
-    keywords = "flintmax,float,limits,double,single",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::FLOAT_LIMIT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn flintmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    match parse_floating_class(rest.first(), "flintmax")? {
-        runmat_types::NumericClass::Double => Ok(Value::Num(2f64.powi(53))),
-        runmat_types::NumericClass::Single => Ok(Value::Num(2f64.powi(24))),
-        _ => unreachable!("floating class parser admits only double and single"),
+    floating_limit(
+        rest,
+        FloatingLimitKind::LargestConsecutiveInteger,
+        "flintmax",
+    )
+}
+
+fn floating_limit(
+    args: Vec<Value>,
+    kind: FloatingLimitKind,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    match args.as_slice() {
+        [] => floating_limit_value(
+            runmat_types::NumericClass::Double,
+            false,
+            false,
+            kind,
+            builtin,
+        ),
+        [class] if text_value(class).is_some() => {
+            let text = text_value(class).expect("guarded text value");
+            let class = parse_floating_class_name(&text, builtin)?;
+            floating_limit_value(class, false, false, kind, builtin)
+        }
+        [keyword, prototype]
+            if text_value(keyword).is_some_and(|text| text.eq_ignore_ascii_case("like")) =>
+        {
+            floating_limit_like(prototype, kind, builtin)
+        }
+        _ => Err(limit_syntax_error(
+            builtin,
+            "expected no arguments, a floating-point class name, or \"like\", prototype",
+        )),
     }
 }
 
-fn parse_floating_class(
-    value: Option<&Value>,
+fn parse_floating_class_name(
+    text: &str,
     builtin: &'static str,
 ) -> BuiltinResult<runmat_types::NumericClass> {
-    let Some(value) = value else {
-        return Ok(runmat_types::NumericClass::Double);
-    };
-    let text = text_value(value).ok_or_else(|| {
-        limit_error(
-            builtin,
-            "class name must be a string scalar or character vector",
-        )
-    })?;
-    let class = runmat_types::NumericClass::from_class_name(text.trim())
+    runmat_types::NumericClass::from_class_name(text.trim())
         .filter(|class| {
             matches!(
                 class,
                 runmat_types::NumericClass::Double | runmat_types::NumericClass::Single
             )
         })
-        .ok_or_else(|| limit_error(builtin, format!("unsupported float class '{text}'")))?;
-    Ok(class)
+        .ok_or_else(|| {
+            limit_error(
+                builtin,
+                format!("unsupported floating-point class '{text}'"),
+            )
+        })
 }
 
-#[derive(Clone, Copy)]
-enum LimitKind {
-    Minimum,
-    Maximum,
+fn floating_limit_like(
+    prototype: &Value,
+    kind: FloatingLimitKind,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    match prototype {
+        Value::Num(_) => floating_limit_value(
+            runmat_types::NumericClass::Double,
+            false,
+            false,
+            kind,
+            builtin,
+        ),
+        Value::Tensor(tensor) => floating_limit_value(
+            floating_class(tensor.numeric_dtype(), builtin)?,
+            false,
+            false,
+            kind,
+            builtin,
+        ),
+        Value::Complex(_, _) => floating_limit_value(
+            runmat_types::NumericClass::Double,
+            true,
+            false,
+            kind,
+            builtin,
+        ),
+        Value::ComplexTensor(tensor) => floating_limit_value(
+            floating_class(tensor.numeric_dtype(), builtin)?,
+            true,
+            false,
+            kind,
+            builtin,
+        ),
+        Value::SparseTensor(tensor) => {
+            let class = floating_class(
+                tensor
+                    .numeric_dtype()
+                    .ok_or_else(|| invalid_floating_prototype(builtin))?,
+                builtin,
+            )?;
+            floating_limit_value(class, tensor.is_complex(), true, kind, builtin)
+        }
+        Value::GpuTensor(handle) => floating_gpu_limit_like(handle, kind, builtin),
+        _ => Err(invalid_floating_prototype(builtin)),
+    }
 }
 
-fn integer_limit(args: Vec<Value>, kind: LimitKind, builtin: &'static str) -> BuiltinResult<Value> {
+fn floating_class(
+    dtype: NumericDType,
+    builtin: &'static str,
+) -> BuiltinResult<runmat_types::NumericClass> {
+    match dtype {
+        NumericDType::F64 => Ok(runmat_types::NumericClass::Double),
+        NumericDType::F32 => Ok(runmat_types::NumericClass::Single),
+        _ => Err(invalid_floating_prototype(builtin)),
+    }
+}
+
+fn floating_limit_value(
+    class: runmat_types::NumericClass,
+    complex: bool,
+    sparse: bool,
+    kind: FloatingLimitKind,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let shape = vec![1, 1];
+    match (class, complex, sparse) {
+        (runmat_types::NumericClass::Double, false, false) => {
+            Ok(Value::Num(floating_limit_f64(kind)))
+        }
+        (runmat_types::NumericClass::Single, false, false) => {
+            Tensor::from_f32(vec![floating_limit_f32(kind)], shape)
+                .map(Value::Tensor)
+                .map_err(|error| internal_limit_error(builtin, error))
+        }
+        (runmat_types::NumericClass::Double, true, false) => {
+            Ok(Value::Complex(floating_limit_f64(kind), 0.0))
+        }
+        (runmat_types::NumericClass::Single, true, false) => {
+            ComplexTensor::from_f32(vec![(floating_limit_f32(kind), 0.0)], shape)
+                .map(Value::ComplexTensor)
+                .map_err(|error| internal_limit_error(builtin, error))
+        }
+        (runmat_types::NumericClass::Double, false, true) => {
+            SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![floating_limit_f64(kind)])
+                .map(Value::SparseTensor)
+                .map_err(|error| internal_limit_error(builtin, error))
+        }
+        (runmat_types::NumericClass::Single, false, true) => {
+            SparseTensor::new_f32(1, 1, vec![0, 1], vec![0], vec![floating_limit_f32(kind)])
+                .map(Value::SparseTensor)
+                .map_err(|error| internal_limit_error(builtin, error))
+        }
+        (runmat_types::NumericClass::Double, true, true) => SparseTensor::new_complex(
+            1,
+            1,
+            vec![0, 1],
+            vec![0],
+            vec![(floating_limit_f64(kind), 0.0)],
+        )
+        .map(Value::SparseTensor)
+        .map_err(|error| internal_limit_error(builtin, error)),
+        (runmat_types::NumericClass::Single, true, true) => SparseTensor::new_complex_f32(
+            1,
+            1,
+            vec![0, 1],
+            vec![0],
+            vec![(floating_limit_f32(kind), 0.0)],
+        )
+        .map(Value::SparseTensor)
+        .map_err(|error| internal_limit_error(builtin, error)),
+        _ => Err(invalid_floating_prototype(builtin)),
+    }
+}
+
+fn floating_limit_f64(kind: FloatingLimitKind) -> f64 {
+    match kind {
+        FloatingLimitKind::SmallestNormal => f64::MIN_POSITIVE,
+        FloatingLimitKind::LargestFinite => f64::MAX,
+        FloatingLimitKind::LargestConsecutiveInteger => 2f64.powi(53),
+    }
+}
+
+fn floating_limit_f32(kind: FloatingLimitKind) -> f32 {
+    match kind {
+        FloatingLimitKind::SmallestNormal => f32::MIN_POSITIVE,
+        FloatingLimitKind::LargestFinite => f32::MAX,
+        FloatingLimitKind::LargestConsecutiveInteger => 2f32.powi(24),
+    }
+}
+
+fn floating_gpu_limit_like(
+    prototype: &runmat_accelerate_api::GpuTensorHandle,
+    kind: FloatingLimitKind,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
+
+    let precision = runmat_accelerate_api::handle_precision(prototype)
+        .ok_or_else(|| invalid_floating_prototype(builtin))?;
+    let storage = runmat_accelerate_api::handle_storage(prototype);
+    if !matches!(
+        storage,
+        GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
+    ) || runmat_accelerate_api::handle_integer_type(prototype).is_some()
+        || runmat_accelerate_api::handle_is_logical(prototype)
+        || !gpu_helpers::gpu_class_metadata_matches(prototype, Some(precision), None, false)
+    {
+        return Err(limit_error(
+            builtin,
+            "floating-point gpuArray prototype has contradictory class metadata",
+        ));
+    }
+    let provider = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
+        limit_error(
+            builtin,
+            "floating-point gpuArray prototype has no registered provider",
+        )
+    })?;
+    let shape = vec![1, 1];
+    let output = match (precision, storage) {
+        (ProviderPrecision::F64, GpuTensorStorage::Real) => gpu_helpers::upload_tensor(
+            provider,
+            &Tensor::new(vec![floating_limit_f64(kind)], shape.clone())
+                .map_err(|error| internal_limit_error(builtin, error))?,
+        ),
+        (ProviderPrecision::F32, GpuTensorStorage::Real) => gpu_helpers::upload_tensor(
+            provider,
+            &Tensor::from_f32(vec![floating_limit_f32(kind)], shape.clone())
+                .map_err(|error| internal_limit_error(builtin, error))?,
+        ),
+        (ProviderPrecision::F64, GpuTensorStorage::ComplexInterleaved) => {
+            gpu_helpers::upload_complex_tensor(
+                provider,
+                &ComplexTensor::new(vec![(floating_limit_f64(kind), 0.0)], shape.clone())
+                    .map_err(|error| internal_limit_error(builtin, error))?,
+            )
+            .map_err(|error| error.message().to_string())
+        }
+        (ProviderPrecision::F32, GpuTensorStorage::ComplexInterleaved) => {
+            gpu_helpers::upload_complex_tensor(
+                provider,
+                &ComplexTensor::from_f32(vec![(floating_limit_f32(kind), 0.0)], shape.clone())
+                    .map_err(|error| internal_limit_error(builtin, error))?,
+            )
+            .map_err(|error| error.message().to_string())
+        }
+    }
+    .map_err(|error| {
+        internal_limit_error(builtin, format!("GPU limit creation failed: {error}"))
+    })?;
+    let valid = output.shape == shape
+        && output.device_id == prototype.device_id
+        && !gpu_helpers::same_gpu_handle(prototype, &output)
+        && gpu_helpers::exact_provider_for_handle(&output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(&output) == storage
+        && runmat_accelerate_api::handle_precision(&output) == Some(precision)
+        && gpu_helpers::gpu_class_metadata_matches(&output, Some(precision), None, false);
+    if !valid {
+        gpu_helpers::free_unprotected_exact_owner(&output, &[prototype]);
+        return Err(internal_limit_error(
+            builtin,
+            "GPU limit creation returned an invalid provider result",
+        ));
+    }
+    let mut output = output;
+    let provenance = runmat_accelerate_api::handle_provenance(prototype)
+        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+    runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+    Ok(gpu_helpers::resident_gpu_value(output))
+}
+
+fn integer_limit(
+    args: Vec<Value>,
+    kind: IntegerLimitKind,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
     match args.as_slice() {
         [] => Ok(Value::Int(limit_scalar(NumericDType::I32, kind))),
         [class] if text_value(class).is_some() => {
@@ -311,14 +354,14 @@ fn integer_limit(args: Vec<Value>, kind: LimitKind, builtin: &'static str) -> Bu
         }
         _ => Err(limit_syntax_error(
             builtin,
-            "expected no arguments, an integer class name, or like=integerPrototype",
+            "expected no arguments, an integer class name, or \"like\", prototype",
         )),
     }
 }
 
 fn integer_limit_like(
     prototype: &Value,
-    kind: LimitKind,
+    kind: IntegerLimitKind,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match prototype {
@@ -347,9 +390,12 @@ fn integer_limit_like(
             let Some(element_type) = runmat_accelerate_api::handle_integer_type(handle) else {
                 return Err(invalid_integer_prototype(builtin));
             };
-            if runmat_accelerate_api::handle_storage(handle)
-                != runmat_accelerate_api::GpuTensorStorage::Real
-                || runmat_accelerate_api::handle_precision(handle).is_some()
+            let prototype_storage = runmat_accelerate_api::handle_storage(handle);
+            if !matches!(
+                prototype_storage,
+                runmat_accelerate_api::GpuTensorStorage::Real
+                    | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            ) || runmat_accelerate_api::handle_precision(handle).is_some()
                 || runmat_accelerate_api::handle_is_logical(handle)
                 || !gpu_helpers::gpu_class_metadata_matches(handle, None, Some(element_type), false)
             {
@@ -358,18 +404,9 @@ fn integer_limit_like(
                     "integer gpuArray prototype has contradictory class metadata",
                 ));
             }
-            if runmat_accelerate_api::handle_storage(handle)
-                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-            {
-                return Err(limit_error(
-                    builtin,
-                    "complex integer gpuArray prototypes are not supported by the current provider representation",
-                ));
-            }
             let dtype = dtype_from_integer_element_type(element_type);
             let storage = IntegerStorage::from_scalar(limit_scalar(dtype, kind));
             let shape = [1usize, 1usize];
-            let view = integer_tensor_view(&storage, &shape);
             let provider = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
                 limit_error(
                     builtin,
@@ -379,7 +416,25 @@ fn integer_limit_like(
             let provenance = runmat_accelerate_api::handle_provenance(handle)
                 .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             let input_metadata = gpu_helpers::snapshot_handle_metadata(handle);
-            let output = provider.upload_integer(&view);
+            let output = match prototype_storage {
+                runmat_accelerate_api::GpuTensorStorage::Real => {
+                    let view = integer_tensor_view(&storage, &shape);
+                    provider
+                        .upload_integer(&view)
+                        .map_err(|error| error.to_string())
+                }
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => {
+                    let imaginary = storage.zeros_like(1);
+                    let complex = ComplexTensor::new_integer(
+                        IntegerComplexStorage::new(storage, imaginary)
+                            .map_err(|error| internal_limit_error(builtin, error))?,
+                        shape.to_vec(),
+                    )
+                    .map_err(|error| internal_limit_error(builtin, error))?;
+                    gpu_helpers::upload_complex_tensor(provider, &complex)
+                        .map_err(|error| error.message().to_string())
+                }
+            };
             gpu_helpers::restore_handle_metadata(handle, &input_metadata);
             let output = output.map_err(|error| {
                 limit_error(builtin, format!("GPU limit creation failed: {error}"))
@@ -389,8 +444,7 @@ fn integer_limit_like(
                 && !gpu_helpers::same_gpu_handle(handle, &output)
                 && gpu_helpers::exact_provider_for_handle(&output)
                     .is_some_and(|owner| std::ptr::eq(owner, provider))
-                && runmat_accelerate_api::handle_storage(&output)
-                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_storage(&output) == prototype_storage
                 && runmat_accelerate_api::handle_integer_type(&output) == Some(element_type)
                 && runmat_accelerate_api::handle_precision(&output).is_none()
                 && !runmat_accelerate_api::handle_is_logical(&output)
@@ -424,24 +478,24 @@ fn text_value(value: &Value) -> Option<String> {
     }
 }
 
-fn limit_scalar(dtype: NumericDType, kind: LimitKind) -> IntValue {
+fn limit_scalar(dtype: NumericDType, kind: IntegerLimitKind) -> IntValue {
     match (dtype, kind) {
-        (NumericDType::I8, LimitKind::Minimum) => IntValue::I8(i8::MIN),
-        (NumericDType::I8, LimitKind::Maximum) => IntValue::I8(i8::MAX),
-        (NumericDType::I16, LimitKind::Minimum) => IntValue::I16(i16::MIN),
-        (NumericDType::I16, LimitKind::Maximum) => IntValue::I16(i16::MAX),
-        (NumericDType::I32, LimitKind::Minimum) => IntValue::I32(i32::MIN),
-        (NumericDType::I32, LimitKind::Maximum) => IntValue::I32(i32::MAX),
-        (NumericDType::I64, LimitKind::Minimum) => IntValue::I64(i64::MIN),
-        (NumericDType::I64, LimitKind::Maximum) => IntValue::I64(i64::MAX),
-        (NumericDType::U8, LimitKind::Minimum) => IntValue::U8(0),
-        (NumericDType::U8, LimitKind::Maximum) => IntValue::U8(u8::MAX),
-        (NumericDType::U16, LimitKind::Minimum) => IntValue::U16(0),
-        (NumericDType::U16, LimitKind::Maximum) => IntValue::U16(u16::MAX),
-        (NumericDType::U32, LimitKind::Minimum) => IntValue::U32(0),
-        (NumericDType::U32, LimitKind::Maximum) => IntValue::U32(u32::MAX),
-        (NumericDType::U64, LimitKind::Minimum) => IntValue::U64(0),
-        (NumericDType::U64, LimitKind::Maximum) => IntValue::U64(u64::MAX),
+        (NumericDType::I8, IntegerLimitKind::Minimum) => IntValue::I8(i8::MIN),
+        (NumericDType::I8, IntegerLimitKind::Maximum) => IntValue::I8(i8::MAX),
+        (NumericDType::I16, IntegerLimitKind::Minimum) => IntValue::I16(i16::MIN),
+        (NumericDType::I16, IntegerLimitKind::Maximum) => IntValue::I16(i16::MAX),
+        (NumericDType::I32, IntegerLimitKind::Minimum) => IntValue::I32(i32::MIN),
+        (NumericDType::I32, IntegerLimitKind::Maximum) => IntValue::I32(i32::MAX),
+        (NumericDType::I64, IntegerLimitKind::Minimum) => IntValue::I64(i64::MIN),
+        (NumericDType::I64, IntegerLimitKind::Maximum) => IntValue::I64(i64::MAX),
+        (NumericDType::U8, IntegerLimitKind::Minimum) => IntValue::U8(0),
+        (NumericDType::U8, IntegerLimitKind::Maximum) => IntValue::U8(u8::MAX),
+        (NumericDType::U16, IntegerLimitKind::Minimum) => IntValue::U16(0),
+        (NumericDType::U16, IntegerLimitKind::Maximum) => IntValue::U16(u16::MAX),
+        (NumericDType::U32, IntegerLimitKind::Minimum) => IntValue::U32(0),
+        (NumericDType::U32, IntegerLimitKind::Maximum) => IntValue::U32(u32::MAX),
+        (NumericDType::U64, IntegerLimitKind::Minimum) => IntValue::U64(0),
+        (NumericDType::U64, IntegerLimitKind::Maximum) => IntValue::U64(u64::MAX),
         (NumericDType::F32 | NumericDType::F64, _) => {
             unreachable!("limit_scalar is only called for integer dtypes")
         }
@@ -489,9 +543,13 @@ fn invalid_integer_prototype(builtin: &'static str) -> RuntimeError {
     )
 }
 
+fn invalid_floating_prototype(builtin: &'static str) -> RuntimeError {
+    limit_error(builtin, "like prototype must have class double or single")
+}
+
 fn limit_syntax_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin(builtin);
-    if let Some(identifier) = ERROR_INVALID_SYNTAX.identifier {
+    if let Some(identifier) = NUMERIC_LIMIT_ERROR_INVALID_SYNTAX.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -499,7 +557,15 @@ fn limit_syntax_error(builtin: &'static str, message: impl Into<String>) -> Runt
 
 fn limit_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin(builtin);
-    if let Some(identifier) = ERROR_INVALID_CLASS.identifier {
+    if let Some(identifier) = NUMERIC_LIMIT_ERROR_INVALID_CLASS.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn internal_limit_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(builtin);
+    if let Some(identifier) = NUMERIC_LIMIT_ERROR_INTERNAL.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -573,11 +639,11 @@ mod tests {
             assert_eq!(
                 intmin_builtin(vec![Value::from("like"), Value::Tensor(prototype.clone())])
                     .unwrap(),
-                Value::Int(limit_scalar(dtype, LimitKind::Minimum))
+                Value::Int(limit_scalar(dtype, IntegerLimitKind::Minimum))
             );
             assert_eq!(
                 intmax_builtin(vec![Value::from("like"), Value::Tensor(prototype)]).unwrap(),
-                Value::Int(limit_scalar(dtype, LimitKind::Maximum))
+                Value::Int(limit_scalar(dtype, IntegerLimitKind::Maximum))
             );
         }
     }
@@ -711,13 +777,161 @@ mod tests {
     #[test]
     fn floating_limits_support_single_and_double() {
         assert_eq!(realmax_builtin(Vec::new()).unwrap(), Value::Num(f64::MAX));
+        for (output, expected) in [
+            (
+                realmin_builtin(vec![Value::from("single")]).unwrap(),
+                f32::MIN_POSITIVE,
+            ),
+            (
+                flintmax_builtin(vec![Value::from("single")]).unwrap(),
+                2f32.powi(24),
+            ),
+        ] {
+            let Value::Tensor(output) = output else {
+                panic!("single limit must retain native single storage")
+            };
+            assert_eq!(output.as_f32_slice(), Some([expected].as_slice()));
+            assert_eq!(output.shape, vec![1, 1]);
+        }
+    }
+
+    #[test]
+    fn floating_limit_like_preserves_complexity_and_sparse_single_storage() {
+        let complex = ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
+        let output = realmax_builtin(vec![Value::from("like"), Value::ComplexTensor(complex)])
+            .expect("complex single like form");
+        let Value::ComplexTensor(output) = output else {
+            panic!("expected complex single scalar")
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.shape, vec![1, 1]);
+
+        let sparse = SparseTensor::new_f32(2, 2, vec![0, 1, 1], vec![0], vec![3.0]).unwrap();
+        let output = realmin_builtin(vec![Value::from("like"), Value::SparseTensor(sparse)])
+            .expect("sparse single like form");
+        let Value::SparseTensor(output) = output else {
+            panic!("expected sparse single scalar")
+        };
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(output.as_f32_slice(), Some([f32::MIN_POSITIVE].as_slice()));
+        assert_eq!((output.rows, output.cols), (1, 1));
+
+        let sparse =
+            SparseTensor::new_complex_f32(2, 1, vec![0, 1], vec![1], vec![(3.0, -4.0)]).unwrap();
+        let output = flintmax_builtin(vec![Value::from("like"), Value::SparseTensor(sparse)])
+            .expect("sparse complex single like form");
+        let Value::SparseTensor(output) = output else {
+            panic!("expected sparse complex single scalar")
+        };
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F32));
+        assert!(output.is_complex());
         assert_eq!(
-            realmin_builtin(vec![Value::from("single")]).unwrap(),
-            Value::Num(f32::MIN_POSITIVE as f64)
+            output.as_complex_f32_slice(),
+            Some([runmat_value::ComplexElement(2f32.powi(24), 0.0)].as_slice())
         );
+    }
+
+    #[test]
+    fn floating_limit_like_preserves_resident_single_representation_and_intent() {
+        test_support::with_f32_test_provider(|provider| {
+            let prototype = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).expect("prototype");
+            let mut handle = gpu_helpers::upload_tensor(provider, &prototype).expect("upload");
+            runmat_accelerate_api::set_handle_provenance(
+                &mut handle,
+                runmat_accelerate_api::GpuHandleProvenance::Explicit,
+            );
+
+            let output =
+                realmax_builtin(vec![Value::from("like"), Value::GpuTensor(handle.clone())])
+                    .expect("resident realmax like");
+            let Value::GpuTensor(output) = output else {
+                panic!("expected resident single output")
+            };
+            assert_eq!(output.shape, vec![1, 1]);
+            assert_eq!(output.device_id, handle.device_id);
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                runmat_accelerate_api::GpuTensorStorage::Real
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&output),
+                Some(runmat_accelerate_api::ProviderPrecision::F32)
+            );
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                &Value::GpuTensor(output.clone()),
+            ))
+            .expect("gather");
+            let Value::Tensor(gathered) = gathered else {
+                panic!("expected gathered single tensor")
+            };
+            assert_eq!(gathered.as_f32_slice(), Some([f32::MAX].as_slice()));
+            provider.free(&handle).ok();
+            provider.free(&output).ok();
+        });
+
+        test_support::with_f32_test_provider(|provider| {
+            let prototype =
+                ComplexTensor::from_f32(vec![(1.0, -2.0)], vec![1, 1]).expect("prototype");
+            let handle = gpu_helpers::upload_complex_tensor(provider, &prototype).expect("upload");
+            let output =
+                flintmax_builtin(vec![Value::from("like"), Value::GpuTensor(handle.clone())])
+                    .expect("resident complex flintmax like");
+            let Value::GpuTensor(output) = output else {
+                panic!("expected resident complex single output")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&output),
+                Some(runmat_accelerate_api::ProviderPrecision::F32)
+            );
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(
+                &Value::GpuTensor(output.clone()),
+            ))
+            .expect("gather");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected gathered complex single tensor")
+            };
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(
+                gathered.as_f32_slice(),
+                Some([runmat_value::ComplexElement(2f32.powi(24), 0.0)].as_slice())
+            );
+            provider.free(&handle).ok();
+            provider.free(&output).ok();
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn floating_limit_like_preserves_wgpu_single_class_and_value() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let prototype = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("prototype");
+        let handle = gpu_helpers::upload_tensor(provider, &prototype).expect("upload");
+
+        let output = realmin_builtin(vec![Value::from("like"), Value::GpuTensor(handle.clone())])
+            .expect("WGPU realmin like");
+        let Value::GpuTensor(output) = output else {
+            panic!("expected resident single output")
+        };
         assert_eq!(
-            flintmax_builtin(vec![Value::from("single")]).unwrap(),
-            Value::Num(2f64.powi(24))
+            runmat_accelerate_api::handle_precision(&output),
+            Some(runmat_accelerate_api::ProviderPrecision::F32)
         );
+        let gathered = block_on(provider.download(&output)).expect("download");
+        assert_eq!(gathered.data, vec![f64::from(f32::MIN_POSITIVE)]);
+        assert_eq!(gathered.shape, vec![1, 1]);
+        provider.free(&handle).ok();
+        provider.free(&output).ok();
     }
 }

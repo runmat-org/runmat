@@ -189,8 +189,8 @@ fn sparse_scalar_value(
 
     if sparse.is_complex() {
         let scalar = match sparse.complex_at(row, col) {
-            Some(value) => SparseTensor::new_complex(1, 1, vec![0, 1], vec![0], vec![value]),
-            None => Ok(SparseTensor::zeros_complex(1, 1)),
+            Some(value) => sparse.new_complex_like(1, 1, vec![0, 1], vec![0], vec![value]),
+            None => Ok(sparse.zeros_like(1, 1)),
         }
         .map_err(map_slice_shape_error)?;
         return Ok(Value::SparseTensor(scalar));
@@ -222,17 +222,7 @@ fn checked_sparse_numel(sparse: &SparseTensor) -> Result<usize, RuntimeError> {
 }
 
 fn sparse_zeros_like(sparse: &SparseTensor, rows: usize, cols: usize) -> SparseTensor {
-    if sparse.is_logical() {
-        SparseTensor::zeros_logical(rows, cols)
-    } else if let Some(storage) = sparse.integer_storage() {
-        SparseTensor::zeros_with_integer_storage(rows, cols, storage)
-    } else if sparse.is_complex() {
-        SparseTensor::zeros_complex(rows, cols)
-    } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
-        SparseTensor::zeros_f32(rows, cols)
-    } else {
-        SparseTensor::zeros(rows, cols)
-    }
+    sparse.zeros_like(rows, cols)
 }
 
 fn typed_sparse_from_column_entries(
@@ -284,13 +274,15 @@ fn linear_sparse_slice(
                 row_indices,
                 storage.clone(),
             )
-        } else if let Some(values) = sparse.as_complex_f64_slice() {
-            SparseTensor::new_complex(
+        } else if sparse.is_complex() {
+            sparse.new_complex_like(
                 total,
                 1,
                 vec![0, sparse.nnz()],
                 row_indices,
-                values.iter().copied().map(Into::into).collect(),
+                sparse
+                    .materialize_complex_f64()
+                    .map_err(map_slice_shape_error)?,
             )
         } else if let Some(values) = sparse.as_f32_slice() {
             SparseTensor::new_f32(
@@ -403,7 +395,7 @@ fn linear_sparse_slice(
                 col_entries[out_col].push((out_row, value));
             }
         }
-        return sparse_complex_from_column_entries(out_rows, out_cols, col_entries);
+        return sparse_complex_from_column_entries(sparse, out_rows, out_cols, col_entries);
     }
 
     if sparse.numeric_dtype() == Some(NumericDType::F32) {
@@ -499,6 +491,7 @@ fn sparse_f32_from_column_entries(
 }
 
 fn sparse_complex_from_column_entries(
+    prototype: &SparseTensor,
     rows: usize,
     cols: usize,
     mut col_entries: Vec<Vec<(usize, (f64, f64))>>,
@@ -517,7 +510,8 @@ fn sparse_complex_from_column_entries(
         }
         col_ptrs.push(values.len());
     }
-    let sparse = SparseTensor::new_complex(rows, cols, col_ptrs, row_indices, values)
+    let sparse = prototype
+        .new_complex_like(rows, cols, col_ptrs, row_indices, values)
         .map_err(map_slice_shape_error)?;
     Ok(Value::SparseTensor(sparse))
 }
@@ -635,17 +629,17 @@ fn matrix_sparse_slice(
         return sparse_logical_from_column_rows(out_rows, out_cols, col_rows);
     }
 
-    if let Some(values) = sparse.as_complex_f64_slice() {
+    if sparse.is_complex() {
         let mut col_entries = vec![Vec::new(); out_cols];
         for (out_col, &col) in cols.iter().enumerate() {
             let base_col = col - 1;
             let start = sparse.col_ptrs[base_col];
             let end = sparse.col_ptrs[base_col + 1];
-            for (&base_row, value) in sparse.row_indices[start..end]
-                .iter()
-                .zip(&values[start..end])
-            {
-                let value = (*value).into();
+            for (index, &base_row) in sparse.row_indices[start..end].iter().enumerate() {
+                let value = sparse
+                    .complex_value_at(start + index)
+                    .expect("complex sparse storage is consistent")
+                    .into();
                 if all_rows {
                     col_entries[out_col].push((base_row, value));
                 } else if let Some(output_rows) = row_positions.get(&base_row) {
@@ -661,13 +655,13 @@ fn matrix_sparse_slice(
                 .and_then(|entries| entries.first())
                 .map(|(_, value)| *value);
             let scalar = match value {
-                Some(value) => SparseTensor::new_complex(1, 1, vec![0, 1], vec![0], vec![value]),
-                None => Ok(SparseTensor::zeros_complex(1, 1)),
+                Some(value) => sparse.new_complex_like(1, 1, vec![0, 1], vec![0], vec![value]),
+                None => Ok(sparse.zeros_like(1, 1)),
             }
             .map_err(map_slice_shape_error)?;
             return Ok(Value::SparseTensor(scalar));
         }
-        return sparse_complex_from_column_entries(out_rows, out_cols, col_entries);
+        return sparse_complex_from_column_entries(sparse, out_rows, out_cols, col_entries);
     }
 
     if let Some(values) = sparse.as_f32_slice() {
@@ -867,9 +861,9 @@ pub fn read_sparse_slice_from_plan(
             }
             col_ptrs.push(complex_values.len());
         }
-        let out =
-            SparseTensor::new_complex(out_rows, out_cols, col_ptrs, row_indices, complex_values)
-                .map_err(map_slice_shape_error)?;
+        let out = sparse
+            .new_complex_like(out_rows, out_cols, col_ptrs, row_indices, complex_values)
+            .map_err(map_slice_shape_error)?;
         return Ok(Value::SparseTensor(out));
     }
     for out_col in 0..out_cols {
@@ -1127,8 +1121,8 @@ mod tests {
     use crate::indexing::selectors::SliceSelector;
     use futures::executor::block_on;
     use runmat_value::{
-        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericScalar,
-        SparseTensor, StringArray, Tensor, Value,
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType,
+        NumericScalar, SparseTensor, StringArray, Tensor, Value,
     };
 
     #[test]
@@ -1261,6 +1255,36 @@ mod tests {
         assert!(empty.is_complex());
         assert_eq!(empty.shape(), vec![0, 1]);
         assert_eq!(empty.nnz(), 0);
+    }
+
+    #[test]
+    fn sparse_slice_plan_preserves_complex_single_storage() {
+        let sparse = SparseTensor::new_complex_f32(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(1.0, 2.0), (3.0, -4.0)],
+        )
+        .expect("complex single sparse");
+        let plan = IndexPlan::new(vec![0, 3, 1, 2], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let Value::SparseTensor(output) =
+            read_sparse_slice_from_plan(&sparse, &plan).expect("slice")
+        else {
+            panic!("expected sparse output");
+        };
+        assert!(output.is_complex());
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F32));
+
+        let empty_plan = IndexPlan::new(Vec::new(), vec![0, 1], vec![0], 1, vec![2, 2]);
+        let Value::SparseTensor(empty) =
+            read_sparse_slice_from_plan(&sparse, &empty_plan).expect("empty slice")
+        else {
+            panic!("expected sparse output");
+        };
+        assert!(empty.is_complex());
+        assert_eq!(empty.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(empty.shape(), vec![0, 1]);
     }
 
     #[test]

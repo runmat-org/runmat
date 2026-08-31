@@ -224,7 +224,10 @@ fn sparse_all_finite(sparse: &SparseTensor) -> bool {
     if sparse.integer_storage().is_some() || sparse.is_logical() {
         return true;
     }
-    if let Some(values) = sparse.as_complex_f64_slice() {
+    if sparse.is_complex() {
+        let values = sparse
+            .materialize_complex_f64()
+            .expect("complex sparse storage");
         return values
             .iter()
             .all(|value| value.0.is_finite() && value.1.is_finite());

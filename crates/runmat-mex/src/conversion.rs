@@ -468,6 +468,10 @@ fn sparse_to_mx(value: &SparseTensor, mode: MxApiMode) -> Result<MxArray, MxConv
                 }
             }
         }
+    } else if value.complex_f32_host_buffer().is_some() {
+        return Err(MxConversionError::new(
+            "the current C Matrix boundary does not represent complex-single sparse storage",
+        ));
     } else {
         MxSparseValues::Numeric(
             value
@@ -1053,6 +1057,17 @@ mod tests {
         assert!(!separate.data_pointer().is_null());
         assert!(!separate.imaginary_pointer().is_null());
         assert_eq!(value_from_mx(&separate).unwrap(), original);
+    }
+
+    #[test]
+    fn sparse_complex_single_reports_the_matrix_boundary_limit_explicitly() {
+        let sparse = SparseTensor::new_complex_f32(1, 1, vec![0, 1], vec![0], vec![(1.0, -2.0)])
+            .expect("complex single sparse value");
+        let error = value_to_mx(&Value::SparseTensor(sparse), MxApiMode::InterleavedComplex)
+            .expect_err("the current matrix boundary has no complex-single sparse representation");
+        assert!(error
+            .to_string()
+            .contains("does not represent complex-single sparse storage"));
     }
 
     #[test]

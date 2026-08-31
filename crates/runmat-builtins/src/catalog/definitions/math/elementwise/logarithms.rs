@@ -1,10 +1,9 @@
-use super::elementwise::{unary_numeric_catalog_entry, UnaryNumericCatalogSpec};
+use super::support::{unary_numeric_catalog_entry, UnaryNumericCatalogSpec};
 use crate::{
-    BuiltinBindingAvailability, BuiltinBindingDeclaration, BuiltinBindingIdentity,
-    BuiltinCatalogEntry, BuiltinCatalogIdentity, BuiltinCompletionPolicy, BuiltinDescriptor,
-    BuiltinDocumentation, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
-    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinBindingDeclaration, BuiltinCatalogEntry, BuiltinCatalogIdentity,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
@@ -103,13 +102,7 @@ pub const LOG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         notes: "The RunMat-only overload validates exact binary64 conversion before computation. Negative real values produce complex double output; resident values gather through their exact owner.",
     }];
 
-const LOG_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
-    identity: BuiltinBindingIdentity {
-        builtin: BuiltinCatalogIdentity { name: "log" },
-        variant: "default",
-    },
-    availability: BuiltinBindingAvailability::Required,
-}];
+const LOG_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 pub const LOG_CATALOG_ENTRY: BuiltinCatalogEntry =
     unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
         identity: BuiltinCatalogIdentity { name: "log" },
@@ -131,6 +124,8 @@ pub const LOG_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_audit: None,
         fusion: BuiltinFusionPolicy::Never,
     });
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&LOG_CATALOG_ENTRY, &LOG10_CATALOG_ENTRY];
 
 const LOG10_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -221,13 +216,7 @@ pub const LOG10_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
         notes: "The RunMat-only overload validates exact binary64 conversion before computation. Negative real values produce complex double output; resident values gather through their exact owner.",
     }];
-const LOG10_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
-    identity: BuiltinBindingIdentity {
-        builtin: BuiltinCatalogIdentity { name: "log10" },
-        variant: "default",
-    },
-    availability: BuiltinBindingAvailability::Required,
-}];
+const LOG10_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 pub const LOG10_CATALOG_ENTRY: BuiltinCatalogEntry =
     unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
         identity: BuiltinCatalogIdentity { name: "log10" },

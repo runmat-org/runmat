@@ -1,18 +1,31 @@
 {
   "title": "intmax",
   "category": "math/elementwise",
-  "keywords": ["intmax", "integer", "limits"],
+  "keywords": ["intmax", "integer", "limits", "gpu", "distributed"],
   "summary": "Return the largest value of an integer class.",
-  "gpu_support": { "elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Scalar metadata query." },
-  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline" },
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "The like form creates a scalar on the prototype's exact GPU owner and preserves its integer class and complexity." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline" },
   "requires_feature": null,
-  "tested": { "unit": "builtins::math::elementwise::numeric_limits::tests", "integration": null },
-  "description": "`intmax` returns the largest representable value for an integer class. With no class name, RunMat follows MATLAB's `int32` default.",
-  "behaviors": ["Supports int8, int16, int32, int64, uint8, uint16, uint32, and uint64 class names."],
-  "examples": [{ "description": "Default integer maximum", "input": "intmax", "output": "ans = int32(2147483647)" }],
-  "faqs": [{ "question": "What is the default class?", "answer": "`int32`." }],
-  "links": [{ "label": "intmin", "url": "./intmin" }],
+  "tested": { "unit": "builtins::math::elementwise::numeric_limits::tests", "integration": "numeric_limit_contracts", "gpu": "builtins::math::elementwise::numeric_limits::tests::integer_limit_like_preserves_wgpu_class_and_wide_value" },
+  "description": "`intmax` returns the largest value representable by an integer class. The default class is `int32`. `intmax(\"like\", prototype)` selects the class, complexity, and applicable placement from an integer prototype.",
+  "behaviors": [
+    "Class-name forms support int8, int16, int32, int64, uint8, uint16, uint32, and uint64.",
+    "The result is a 1-by-1 scalar in the selected integer class. Wide int64 and uint64 bounds remain exact.",
+    "A real or complex integer prototype selects the matching class and complexity. The imaginary component of a complex result is zero.",
+    "A gpuArray prototype produces a new scalar on the same registered provider and device without gathering the prototype.",
+    "A distributed prototype produces a distributed scalar with the same distribution scheme and does not materialize the full source value."
+  ],
+  "examples": [
+    { "description": "Query the default integer maximum", "input": "limit = intmax", "output": "limit = int32(2147483647)" },
+    { "description": "Query the exact uint64 maximum", "input": "limit = intmax(\"uint64\")", "output": "limit = uint64(18446744073709551615)" },
+    { "description": "Match an integer prototype", "input": "prototype = uint16([1 2 3]);\nlimit = intmax(\"like\", prototype)", "output": "limit = uint16(65535)" }
+  ],
+  "faqs": [
+    { "question": "What is the default class?", "answer": "`int32`." },
+    { "question": "Does the like form copy the prototype shape?", "answer": "No. It always returns a 1-by-1 scalar; it copies the integer class, complexity, and applicable placement." }
+  ],
+  "links": [{ "label": "intmin", "url": "./intmin" }, { "label": "flintmax", "url": "./flintmax" }],
   "source": { "label": "`crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits.rs" },
-  "gpu_residency": "The result is host-resident.",
-  "gpu_behavior": ["No GPU kernels are launched."]
+  "gpu_residency": "The class-name forms return host scalars. The like form preserves an integer gpuArray prototype's exact provider, device, storage kind, and provenance.",
+  "gpu_behavior": ["The like form uploads only the scalar result. It does not download or otherwise materialize the prototype."]
 }

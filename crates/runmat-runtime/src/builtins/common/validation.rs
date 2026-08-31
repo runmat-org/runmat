@@ -796,7 +796,7 @@ pub fn value_is_finite(value: &Value) -> bool {
             .all(|v| v.is_finite()),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) if t.is_complex() => t
-            .as_complex_f64_slice()
+            .materialize_complex_f64()
             .expect("complex sparse storage")
             .iter()
             .all(|value| value.0.is_finite() && value.1.is_finite()),
@@ -896,7 +896,7 @@ pub fn value_is_real(value: &Value) -> bool {
             .all(IntValue::is_zero),
         Value::ComplexTensor(t) => t.materialize_f64().iter().all(|(_, im)| *im == 0.0),
         Value::SparseTensor(t) if t.is_complex() => t
-            .as_complex_f64_slice()
+            .materialize_complex_f64()
             .expect("complex sparse storage")
             .iter()
             .all(|value| value.1 == 0.0),
@@ -931,7 +931,7 @@ pub fn value_is_integer(value: &Value) -> bool {
             .all(|v| v.is_finite() && v.fract() == 0.0),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) if t.is_complex() => t
-            .as_complex_f64_slice()
+            .materialize_complex_f64()
             .expect("complex sparse storage")
             .iter()
             .all(|value| {
@@ -966,7 +966,7 @@ pub fn value_is_non_nan(value: &Value) -> bool {
         Value::Tensor(t) => tensor::tensor_values_f64_cow(t).iter().all(|v| !v.is_nan()),
         Value::SparseTensor(t) if t.integer_storage().is_some() => true,
         Value::SparseTensor(t) if t.is_complex() => t
-            .as_complex_f64_slice()
+            .materialize_complex_f64()
             .expect("complex sparse storage")
             .iter()
             .all(|value| !value.0.is_nan() && !value.1.is_nan()),
@@ -1960,7 +1960,8 @@ fn sparse_atoms(t: &SparseTensor) -> Result<Vec<ValidationAtom>, RuntimeError> {
         }
         return Ok(out);
     }
-    if let Some(values) = t.as_complex_f64_slice() {
+    if t.is_complex() {
+        let values = t.materialize_complex_f64().expect("complex sparse storage");
         out.extend(
             values
                 .iter()
@@ -2153,7 +2154,7 @@ fn numeric_values_all(value: &Value, pred: impl Fn(f64) -> bool) -> bool {
             }) && (storage.len() >= numel || pred(0.0))
         }
         Value::SparseTensor(t) if t.is_complex() => {
-            let values = t.as_complex_f64_slice().expect("complex sparse storage");
+            let values = t.materialize_complex_f64().expect("complex sparse storage");
             let numel = t.rows.saturating_mul(t.cols);
             values.iter().all(|value| value.1 == 0.0 && pred(value.0))
                 && (values.len() >= numel || pred(0.0))

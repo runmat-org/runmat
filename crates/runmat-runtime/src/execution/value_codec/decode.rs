@@ -259,6 +259,14 @@ fn decode_sparse(value: &SparseValue, path: &str) -> Result<Value, ValueCodecErr
                 .collect();
             SparseTensor::new_complex(rows, columns, column_offsets, row_indices, values)
         }
+        ElementType::ComplexF32 => {
+            let components = decode_f32(&value.little_endian_data, path)?;
+            let values = components
+                .chunks_exact(2)
+                .map(|pair| (pair[0], pair[1]))
+                .collect();
+            SparseTensor::new_complex_f32(rows, columns, column_offsets, row_indices, values)
+        }
         ElementType::Logical => {
             if value.little_endian_data.iter().any(|entry| *entry != 1) {
                 return Err(ValueCodecError::invalid(
@@ -268,8 +276,7 @@ fn decode_sparse(value: &SparseValue, path: &str) -> Result<Value, ValueCodecErr
             }
             SparseTensor::new_logical(rows, columns, column_offsets, row_indices)
         }
-        ElementType::ComplexF32
-        | ElementType::ComplexI8
+        ElementType::ComplexI8
         | ElementType::ComplexI16
         | ElementType::ComplexI32
         | ElementType::ComplexI64

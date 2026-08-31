@@ -233,6 +233,11 @@ impl RuntimeDistributedService for CoreDistributedService {
                 ))
             });
         };
+        if entry.placement.distributed
+            == runmat_builtins::BuiltinDistributedPolicy::ScalarLikePrototype
+        {
+            return invoke_scalar_like_prototype(Rc::clone(&self.store), request, entry);
+        }
         if entry.placement.distributed != runmat_builtins::BuiltinDistributedPolicy::MapUnary {
             return Box::pin(async {
                 Err(error(
@@ -262,7 +267,7 @@ impl RuntimeDistributedService for CoreDistributedService {
                     .iter()
                     .map(runmat_runtime::value_fact::value_fact)
                     .collect(),
-                literals: runmat_types::LiteralContext::default(),
+                literals: request.literals.clone(),
                 outputs: runmat_types::OutputSelection::new(match request.requested_outputs {
                     0 => runmat_types::RequestedOutputCount::Zero,
                     1 => runmat_types::RequestedOutputCount::One,
@@ -396,6 +401,166 @@ impl RuntimeDistributedService for CoreDistributedService {
             });
         Box::pin(async move { result })
     }
+}
+
+fn invoke_scalar_like_prototype(
+    store: Rc<RefCell<DistributedStore>>,
+    request: RuntimeDistributedCallRequest,
+    entry: &'static runmat_builtins::BuiltinCatalogEntry,
+) -> RuntimeServiceFuture<Result<Value, RuntimeError>> {
+    if request.requested_outputs != 1 || request.outputs.len() != 1 || request.arguments.len() != 2
+    {
+        return Box::pin(async {
+            Err(error(
+                "distributed scalar-like execution requires a like option, one prototype, and one output",
+            ))
+        });
+    }
+    let Value::Distributed(handle) = &request.arguments[1] else {
+        return Box::pin(async {
+            Err(error(
+                "distributed scalar-like execution requires a distributed prototype",
+            ))
+        });
+    };
+    let inference = runmat_builtins::infer_partition_local_call(
+        entry,
+        &runmat_types::CallRequest {
+            arguments: request
+                .arguments
+                .iter()
+                .map(runmat_runtime::value_fact::value_fact)
+                .collect(),
+            literals: request.literals.clone(),
+            outputs: runmat_types::OutputSelection::new(runmat_types::RequestedOutputCount::One),
+        },
+    );
+    if !inference.diagnostics.is_empty() || inference.outputs != request.outputs {
+        return Box::pin(async {
+            Err(error(
+                "distributed scalar-like request disagrees with canonical output inference",
+            ))
+        });
+    }
+
+    let source = (**handle).clone();
+    let generation = match source.generation.checked_add(1) {
+        Some(generation) => generation,
+        None => {
+            return Box::pin(async { Err(error("distributed scalar-like generation overflowed")) })
+        }
+    };
+    Box::pin(async move {
+        let keyword = request.arguments[0].clone();
+        let scalar = match &request.invocation {
+            RuntimeDistributedInvocation::Client => {
+                let part = store
+                    .borrow()
+                    .cloned_parts(&source)
+                    .map_err(error)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| error("distributed prototype has no partitions"))?;
+                let prototype =
+                    runmat_runtime::execution::value_codec::decode_inline_value(&part.value)
+                        .map_err(error)?;
+                runmat_runtime::call_builtin_async_with_outputs(
+                    &request.builtin.0,
+                    &[keyword, prototype],
+                    1,
+                )
+                .await?
+            }
+            RuntimeDistributedInvocation::Worker(context) => {
+                if context.gang.pool != source.pool
+                    || context.gang.scope_id != source.scope_id
+                    || context.gang.labs != source.partition_count
+                {
+                    return Err(error(
+                        "distributed scalar-like invocation disagrees with its admitted worker context",
+                    ));
+                }
+                let part = store
+                    .borrow()
+                    .local_part(&source, context.rank)
+                    .cloned()
+                    .map_err(error)?;
+                let prototype =
+                    runmat_runtime::execution::value_codec::decode_inline_value(&part.value)
+                        .map_err(error)?;
+                runmat_runtime::call_builtin_async_with_outputs(
+                    &request.builtin.0,
+                    &[keyword, prototype],
+                    1,
+                )
+                .await?
+            }
+        };
+
+        let value = request
+            .outputs
+            .into_iter()
+            .next()
+            .expect("one scalar-like output fact was validated");
+        let handle = DistributedValueHandle {
+            id: DistributedObjectId::derive(&[
+                b"partition-local-scalar-like-v1",
+                source.scope_id.bytes(),
+                source.id.bytes(),
+                request.builtin.0.as_bytes(),
+            ]),
+            contract: source.contract,
+            owner: source.owner,
+            scope_id: source.scope_id,
+            generation,
+            pool: source.pool.clone(),
+            partition_count: source.partition_count,
+            value,
+            global_shape: vec![1, 1],
+            scheme: source.scheme.clone(),
+            materializable: source.materializable,
+        };
+
+        match request.invocation {
+            RuntimeDistributedInvocation::Client => {
+                let (_, parts) = runmat_runtime::parallel::distribution::partition_value(
+                    &scalar,
+                    &source.scheme,
+                    source.partition_count,
+                )
+                .await?;
+                store
+                    .borrow_mut()
+                    .insert(handle.clone(), encode_parts(parts)?)
+                    .map_err(error)?;
+            }
+            RuntimeDistributedInvocation::Worker(context) => {
+                let (_, layouts, local) =
+                    runmat_runtime::parallel::distribution::partition_local_value(
+                        &scalar,
+                        &source.scheme,
+                        source.partition_count,
+                        context.rank,
+                    )
+                    .await?;
+                let payload =
+                    runmat_runtime::execution::value_codec::encode_inline_value(&local.value)
+                        .map_err(error)?;
+                store
+                    .borrow_mut()
+                    .insert_local_coordinated(
+                        handle.clone(),
+                        layouts,
+                        OwnedPartition {
+                            layout: local.layout,
+                            value: payload,
+                        },
+                    )
+                    .map_err(error)?;
+            }
+        }
+        Ok(Value::Distributed(Box::new(handle)))
+    })
 }
 
 async fn create_value(

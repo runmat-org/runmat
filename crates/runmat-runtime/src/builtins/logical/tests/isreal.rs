@@ -178,7 +178,7 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
     let flag = match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
         Value::Tensor(_) => true,
-        Value::SparseTensor(_) => true,
+        Value::SparseTensor(sparse) => !sparse.is_complex(),
         Value::LogicalArray(_) => true,
         Value::CharArray(_) => true,
         // FIXME: Symbolic expressions should be inspected for complex markers (e.g., 'i', 'j')
@@ -235,8 +235,8 @@ pub(crate) mod tests {
     use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntegerComplexStorage,
-        IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, StructValue,
-        SymbolicExpr, Tensor,
+        IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, SparseTensor,
+        StructValue, SymbolicExpr, Tensor,
     };
 
     fn run_isreal(value: Value) -> BuiltinResult<Value> {
@@ -299,6 +299,22 @@ pub(crate) mod tests {
         assert_eq!(complex, Value::Bool(false));
         assert_eq!(complex_zero_imag, Value::Bool(false));
         assert_eq!(tensor_flag, Value::Bool(false));
+    }
+
+    #[test]
+    fn isreal_reports_sparse_complex_storage_independently_of_values() {
+        let complex_single = SparseTensor::new_complex_f32(
+            1,
+            1,
+            vec![0, 1],
+            vec![0],
+            vec![(f32::MIN_POSITIVE, 0.0)],
+        )
+        .expect("complex sparse single");
+        assert_eq!(
+            run_isreal(Value::SparseTensor(complex_single)).expect("isreal"),
+            Value::Bool(false)
+        );
     }
 
     #[test]

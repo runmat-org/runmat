@@ -246,6 +246,20 @@ fn encode_sparse(value: &SparseTensor, path: &str) -> Result<SparseValue, ValueC
                 })
                 .collect(),
         )
+    } else if let Some(values) = value.as_complex_f32_slice() {
+        (
+            ElementType::ComplexF32,
+            values
+                .iter()
+                .flat_map(|value| {
+                    let (real, imaginary) = (*value).into();
+                    real.to_bits()
+                        .to_le_bytes()
+                        .into_iter()
+                        .chain(imaginary.to_bits().to_le_bytes())
+                })
+                .collect(),
+        )
     } else if value.is_logical() {
         (ElementType::Logical, vec![1; value.nnz()])
     } else {

@@ -7,7 +7,8 @@ fn public_migrated_numeric_descriptors_are_unique() {
     let _ = runmat_runtime::object_property_getter_name("__descriptor_registry_probe");
     for name in [
         "angle", "conj", "double", "expm1", "imag", "int8", "int16", "int32", "int64", "log",
-        "log1p", "log2", "log10", "real", "sign", "single", "uint8", "uint16", "uint32", "uint64",
+        "flintmax", "intmax", "intmin", "log1p", "log2", "log10", "real", "realmax", "realmin",
+        "sign", "single", "uint8", "uint16", "uint32", "uint64",
     ] {
         let catalog_count = runmat_builtins::builtin_catalog_entries()
             .iter()
