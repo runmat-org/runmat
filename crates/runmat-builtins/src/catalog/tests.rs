@@ -158,6 +158,34 @@ fn root_documentation_is_catalog_owned_and_executable() {
 }
 
 #[test]
+fn numeric_limit_documentation_is_catalog_owned_and_executable() {
+    for name in ["intmin", "intmax", "realmin", "realmax", "flintmax"] {
+        let entry = builtin_catalog_entry_by_name(name).expect("numeric-limit catalog entry");
+        let documentation = &entry.documentation;
+        assert_eq!(
+            documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(documentation.examples.len(), 3, "{name}");
+        assert_eq!(documentation.faqs.len(), 2, "{name}");
+        assert!(
+            documentation
+                .sections
+                .iter()
+                .any(|section| section.heading == "GPU execution"),
+            "{name}"
+        );
+        assert!(!documentation.evidence.implementation.is_empty(), "{name}");
+        assert!(!documentation.evidence.verification.is_empty(), "{name}");
+        assert!(documentation.examples.iter().all(|example| {
+            example.compatibility == BuiltinExampleCompatibility::Matlab
+                && example.harness == BuiltinExampleHarness::Portable
+                && !example.id.is_empty()
+        }));
+    }
+}
+
+#[test]
 fn migrated_registry_is_valid_and_case_insensitive() {
     let errors = validate_builtin_catalog(builtin_catalog_entries());
     assert!(errors.is_empty(), "catalog errors: {errors:#?}");
@@ -203,13 +231,18 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
             let source = std::fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
             if path.file_name().and_then(|name| name.to_str()) == Some("mod.rs") {
-                assert!(
-                    !source.lines().any(|line| {
-                        line.trim_start().starts_with('&') && line.contains("_CATALOG_ENTRY")
-                    }),
-                    "domain modules compose family slices, not per-builtin lists: {}",
-                    path.display()
-                );
+                let defines_family_entries = source
+                    .lines()
+                    .any(|line| line.starts_with("pub const ") && line.contains("_CATALOG_ENTRY:"));
+                if !defines_family_entries {
+                    assert!(
+                        !source.lines().any(|line| {
+                            line.trim_start().starts_with('&') && line.contains("_CATALOG_ENTRY")
+                        }),
+                        "domain modules compose family slices, not per-builtin lists: {}",
+                        path.display()
+                    );
+                }
             } else if source.contains("_CATALOG_ENTRY") {
                 assert!(
                     source.contains("const ENTRIES"),

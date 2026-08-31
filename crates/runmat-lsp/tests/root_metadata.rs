@@ -4,10 +4,31 @@ use runmat_lsp::core::analysis::{
 };
 
 #[test]
-fn root_signatures_come_from_the_canonical_catalog() {
+fn migrated_signatures_and_documentation_come_from_the_canonical_catalog() {
     for (name, source, expected) in [
         ("sqrt", "x=sqrt(single(4));", "Y = sqrt(X)"),
         ("realsqrt", "x=realsqrt(single(4));", "Y = realsqrt(X)"),
+        ("intmin", "x=intmin(\"int16\");", "value = intmin(typename)"),
+        (
+            "intmax",
+            "x=intmax(\"uint16\");",
+            "value = intmax(typename)",
+        ),
+        (
+            "realmin",
+            "x=realmin(\"single\");",
+            "value = realmin(typename)",
+        ),
+        (
+            "realmax",
+            "x=realmax(\"single\");",
+            "value = realmax(typename)",
+        ),
+        (
+            "flintmax",
+            "x=flintmax(\"single\");",
+            "value = flintmax(typename)",
+        ),
     ] {
         let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
         assert!(analysis.syntax_error.is_none(), "{source}");
