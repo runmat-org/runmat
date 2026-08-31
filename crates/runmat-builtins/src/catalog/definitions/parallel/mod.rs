@@ -65,6 +65,7 @@ macro_rules! parallel_entry {
                 introduced: None,
                 status: None,
                 examples: &[],
+                ..BuiltinDocumentation::EMPTY
             },
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
@@ -206,6 +207,7 @@ macro_rules! parallel_data_entry {
                 introduced: None,
                 status: None,
                 examples: &[],
+                ..BuiltinDocumentation::EMPTY
             },
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
@@ -253,6 +255,7 @@ macro_rules! codistributor_entry {
                 introduced: None,
                 status: None,
                 examples: &[],
+                ..BuiltinDocumentation::EMPTY
             },
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {

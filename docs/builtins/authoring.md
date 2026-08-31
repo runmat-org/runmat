@@ -1,41 +1,48 @@
 # Authoring Builtins
 
-Runtime builtins should be easy to discover, easy to call from the VM/JIT, and explicit about their semantic contract. A builtin implementation is not complete just because a Rust function exists; it also needs registration metadata, tests, and clear behavior for errors, output counts, GPU values, and unsupported argument forms.
+A builtin is complete when its catalog contract, runtime implementation, documentation, examples, and verification agree. The compiler and tooling read the dependency-light catalog without linking the runtime. The runtime supplies executable bindings and is validated against the same stable builtin identities.
 
 ## Registration Flow
 
 ```mermaid
 flowchart TD
-  Rust["Rust builtin function"]
-  Macro["#[runtime_builtin]"]
-  Inventory["runmat-builtins inventory"]
-  Lookup["builtin_function_by_name()"]
+  Catalog["runmat-builtins catalog entry"]
+  Contract["descriptor / contract / placement / link"]
+  Docs["documentation / examples / evidence"]
+  Static["HIR / MIR / LSP / AOT / WASM"]
+  Rust["runmat-runtime implementation"]
+  Binding["#[runtime_builtin] binding identity"]
+  Validation["catalog ↔ runtime validation"]
   Runtime["runtime dispatcher"]
-  Descriptor["BuiltinDescriptor"]
-  Docs["BuiltinDoc"]
-  Tooling["LSP / docs / validation"]
+  Products["website / TypeScript / example verifier"]
 
-  Rust --> Macro
-  Macro --> Inventory --> Lookup --> Runtime
-  Macro --> Descriptor --> Tooling
-  Macro --> Docs --> Tooling
+  Catalog --> Contract --> Static
+  Catalog --> Docs --> Static
+  Docs --> Products
+  Rust --> Binding --> Validation
+  Catalog --> Validation --> Runtime
 ```
 
-Most runtime builtins live under `crates/runmat-runtime/src/builtins/<category>`. The category module should re-export its child modules through the existing `builtins/mod.rs` tree so inventory registration is linked into native and WASM builds.
+Catalog families live under `crates/runmat-builtins/src/catalog/definitions/<category>` and mirror the runtime domain tree. Each family owns its local `ENTRIES` slice; domain modules compose families, and the root composes domains. Adding a builtin does not require a second global name list. Substantial prose may live in a focused documentation module within the same family so contract files do not become godfiles.
 
-## Macro Contract
+Executable implementations live under `crates/runmat-runtime/src/builtins/<category>`. Category modules re-export their children through the existing runtime tree so native and WASM builds link the required bindings.
 
-Use `#[runtime_builtin]` for runtime-visible functions. The macro records the MATLAB name, documentation string, optional descriptor, type information, and acceleration tags.
+## Catalog and Binding Contract
+
+The catalog owns identity, signatures, requested-output inference, diagnostics, effects, capabilities, placement, linking, compatibility, documentation, and examples. Runtime code implements the contract and declares only the binding identity needed to join executable code to its catalog entry. Catalog validation rejects missing, duplicate, and undeclared bindings.
+
+Use `#[runtime_builtin]` for runtime-visible implementations. Do not add descriptors, documentation, type rules, placement rules, or capability metadata to the runtime annotation for a catalog-backed builtin.
 
 When adding a builtin, provide:
 
-| Item | Requirement |
+| Catalog item | Requirement |
 | --- | --- |
-| `name` | The MATLAB-visible function name. |
-| `builtin_path` | The module path used by registration helpers, especially for WASM registration. |
-| `doc` | Short human-readable documentation for tooling. |
-| `descriptor` | A `BuiltinDescriptor` when the builtin has user-facing signatures, output modes, or structured errors. |
-| acceleration tags | Use only when the builtin has a real GPU/fusion implementation path. |
+| identity | The source-visible function identity, resolved once and retained through HIR, MIR, bytecode, Native IR, artifacts, and runtime dispatch. |
+| descriptor | Public signatures, output-count behavior, completion policy, and stable errors. |
+| contract | Requested-output-aware inference, effects, capabilities, compatibility, purity, and dynamic reasons. |
+| placement and link | Portability, residency, acceleration/fusion eligibility, distributed policy, reachability, and artifact requirements. |
+| documentation | Complete public prose, related resources, media, examples, and verification evidence. |
+| binding | The runtime implementation variant associated with the catalog identity. |
 
 ## Descriptors
 
@@ -62,9 +69,33 @@ For cohort work, use `scripts/development/integer-capability-audit.sh queue` to 
 
 After exporting live descriptors for a completed cohort, use `scripts/development/integer-capability-catalog-sync.sh --live LIVE.json --in-place NAME...` to replace or add exactly those 8–25 checked records. The command rejects missing live or duplicate names, proves the canonical target records equal the live export, proves every non-target checked record is unchanged, and prints the before/after hashes required by the cohort closure record; use `--output` instead of `--in-place` when reviewing the candidate file before replacement.
 
+## Documentation and Examples
+
+`BuiltinDocumentation` is the canonical public documentation source for a migrated identity. Do not add a second JSON record or repeat machine facts in prose. Signatures, arguments, outputs, errors, compatibility, GPU/fusion behavior, and availability are rendered from their typed catalog fields. Documentation content supplies the summary, detailed explanation, behaviors, options, limitations, FAQs, related resources, media, and implementation notes that help a user apply the function correctly.
+
+Every public builtin needs a useful example unless an explicit reviewed exemption explains why one cannot be provided. Each `BuiltinExample` has:
+
+- a stable ID within its builtin;
+- a title and complete RunMat program;
+- optional presentation output for the documentation page;
+- an execution harness such as portable native/browser, browser graphics, native filesystem, loopback networking, WGPU, or a foreign runtime;
+- a semantic verification policy: successful execution, postcondition assertions, a stable expected error identifier, or figure assertions.
+
+Presentation output is not the correctness oracle. Prefer assertions that verify values, classes, shapes, residency, or other documented behavior. Error examples verify identifiers. Host-dependent examples use deterministic fixtures and isolated resources.
+
+Run the opt-in example inventory separately from ordinary Cargo tests:
+
+```bash
+node scripts/runtime/verify-builtin-examples.mjs
+```
+
+The runner consumes the deterministic catalog documentation export, applies declared harnesses and resource ceilings, and writes machine-readable and human-readable reports. Filters are useful for local iteration, but cohort and final closure use the complete affected inventory.
+
+During the C00–C07 catalog migration, an unmigrated identity may still use its existing `docs/builtins/reference/*.json` sidecar. The transitional exporter makes that ownership explicit and rejects an identity that claims canonical catalog documentation while retaining a sidecar. Delete the sidecar in the same change that imports and improves its content. The sidecar path and migration mode disappear after the final identity moves.
+
 ## Runtime Semantics
 
-Builtins receive and return `runmat_builtins::Value`. Keep MATLAB compatibility at the boundary:
+Builtins receive and return `runmat_value::Value`. Keep MATLAB compatibility at the boundary:
 
 - Preserve scalar versus array behavior.
 - Respect requested output count for multi-output functions.
@@ -108,7 +139,9 @@ Prefer deterministic tests. For filesystem, networking, and random-number builti
 
 When adding or changing a builtin:
 
-1. Update `crates/runmat-runtime/LIBRARY.md`.
-2. Update the table in [Builtins](/docs/runtime/builtins) if the docs are not generated from that file.
-3. Add or update descriptor metadata if user-facing signatures changed.
-4. Link implementation-specific behavior to the relevant runtime section instead of duplicating internals here.
+1. Update its canonical catalog contract and domain-local documentation.
+2. Add or update typed, separately runnable examples and focused semantic tests.
+3. Update the runtime implementation and binding without duplicating catalog metadata.
+4. Run catalog validation, the affected example inventory, native/WASM parity, and any declared provider or host harness.
+5. Regenerate product documentation and confirm that a second generation has no diff.
+6. Update broader runtime guides only when the change affects concepts beyond the builtin reference page.

@@ -173,6 +173,7 @@ macro_rules! define_floating_conversion {
                     introduced: None,
                     status: None,
                     examples: &[],
+                    ..BuiltinDocumentation::EMPTY
                 },
                 descriptor: &DESCRIPTOR,
                 contract: BuiltinContractDeclaration {

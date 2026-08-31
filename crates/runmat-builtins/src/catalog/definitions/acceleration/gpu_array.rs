@@ -333,7 +333,8 @@ pub const GPUARRAY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         related: &["gather"],
         introduced: None,
         status: None,
-        examples: &["G = gpuArray([1 2 3], 'single');"],
+        examples: &[],
+        ..BuiltinDocumentation::EMPTY
     },
     descriptor: &GPUARRAY_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

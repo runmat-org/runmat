@@ -27,6 +27,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     introduced: None,
     status: None,
     examples: &[],
+    ..BuiltinDocumentation::EMPTY
 };
 const PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
     portability: BuiltinPortability::NativeAndWasm,
@@ -86,6 +87,19 @@ const SECOND: BuiltinCatalogEntry = BuiltinCatalogEntry {
     ..PILOT
 };
 
+const INCOMPLETE_CANONICAL_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    summary: "Incomplete canonical documentation.",
+    ..BuiltinDocumentation::EMPTY
+};
+const INCOMPLETE_CANONICAL: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    identity: BuiltinCatalogIdentity {
+        name: "incompleteCanonical",
+    },
+    documentation: INCOMPLETE_CANONICAL_DOCUMENTATION,
+    ..PILOT
+};
+
 #[test]
 fn valid_catalog_has_stable_order_independent_fingerprint() {
     assert!(validate_builtin_catalog(&[&PILOT, &SECOND]).is_empty());
@@ -104,6 +118,20 @@ fn validation_rejects_duplicate_catalog_and_binding_identities() {
     assert!(errors
         .iter()
         .any(|error| error.message == "duplicate builtin binding identity"));
+}
+
+#[test]
+fn validation_rejects_incomplete_canonical_documentation() {
+    let errors = validate_builtin_catalog(&[&INCOMPLETE_CANONICAL]);
+    assert!(errors
+        .iter()
+        .any(|error| error.message == "canonical documentation description must not be empty"));
+    assert!(errors
+        .iter()
+        .any(|error| error.message == "canonical documentation keywords must not be empty"));
+    assert!(errors.iter().any(|error| {
+        error.message == "canonical documentation requires examples or one explicit exemption"
+    }));
 }
 
 #[test]

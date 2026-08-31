@@ -112,6 +112,7 @@ macro_rules! define_integer_conversion {
                     introduced: None,
                     status: None,
                     examples: &[],
+                ..BuiltinDocumentation::EMPTY
                 },
                 descriptor: &DESCRIPTOR,
                 contract: BuiltinContractDeclaration {

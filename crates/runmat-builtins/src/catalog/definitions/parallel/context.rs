@@ -71,6 +71,7 @@ macro_rules! context_entry {
                 introduced: None,
                 status: None,
                 examples: &[],
+                ..BuiltinDocumentation::EMPTY
             },
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {

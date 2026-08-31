@@ -85,6 +85,7 @@ pub const SQRT_CATALOG_ENTRY: BuiltinCatalogEntry =
             introduced: None,
             status: None,
             examples: &[],
+            ..BuiltinDocumentation::EMPTY
         },
         descriptor: &SQRT_DESCRIPTOR,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Root(RootKind::Principal)),
@@ -173,6 +174,7 @@ pub const REALSQRT_CATALOG_ENTRY: BuiltinCatalogEntry =
             introduced: None,
             status: None,
             examples: &[],
+            ..BuiltinDocumentation::EMPTY
         },
         descriptor: &REALSQRT_DESCRIPTOR,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Root(RootKind::RealOnly)),

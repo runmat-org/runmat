@@ -120,6 +120,7 @@ pub const ABS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         introduced: None,
         status: None,
         examples: &[],
+        ..BuiltinDocumentation::EMPTY
     },
     descriptor: &ABS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
