@@ -60,6 +60,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::Logarithm(base)) => {
             math_unary::infer_logarithm(request, entry, base)
         }
+        BuiltinInferenceRule::Math(MathInferenceRule::Root(kind)) => {
+            math_unary::infer_root(request, entry, kind)
+        }
         BuiltinInferenceRule::Math(MathInferenceRule::NumericLimit(rule)) => {
             infer_numeric_limit(request, entry, rule)
         }

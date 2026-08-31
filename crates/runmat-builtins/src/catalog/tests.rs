@@ -2266,3 +2266,147 @@ fn feval_contract_preserves_known_callable_outputs_and_dynamic_effects() {
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEVAL-ARITY"));
 }
+
+#[test]
+fn root_contracts_distinguish_principal_promotion_from_real_domain_validation() {
+    use runmat_types::{
+        CallRequest, CertaintyFact, DynamicReason, LiteralContext, LiteralValue, NumericClass,
+        NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact,
+        ValueFact, ValueKindFact,
+    };
+
+    let request = |input, literal| CallRequest {
+        arguments: vec![input],
+        literals: LiteralContext::new(vec![literal]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let sqrt = builtin_catalog_entry_by_name("sqrt").expect("sqrt entry");
+    let realsqrt = builtin_catalog_entry_by_name("realsqrt").expect("realsqrt entry");
+    assert_eq!(
+        sqrt.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::Root(RootKind::Principal))
+    );
+    assert_eq!(
+        realsqrt.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::Root(RootKind::RealOnly))
+    );
+    assert_eq!(sqrt.placement.fusion, BuiltinFusionPolicy::Never);
+    assert_eq!(realsqrt.placement.fusion, BuiltinFusionPolicy::Never);
+
+    let single = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    let promoted = infer_catalog_call(sqrt, &request(single.clone(), LiteralValue::Number(-4.0)));
+    assert!(promoted.diagnostics.is_empty());
+    assert_eq!(
+        promoted.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        })
+    );
+    assert_eq!(promoted.outputs[0].shape, single.shape);
+
+    let dynamic = infer_catalog_call(sqrt, &request(single.clone(), LiteralValue::Unknown));
+    assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(dynamic.outputs[0].shape, single.shape);
+    assert_eq!(
+        dynamic.outputs[0].certainty,
+        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
+    );
+
+    let invalid_domain = infer_catalog_call(realsqrt, &request(single, LiteralValue::Number(-4.0)));
+    assert!(invalid_domain
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-REALSQRT-DOMAIN"));
+
+    let symbolic = ValueFact::scalar(ValueKindFact::Symbolic);
+    let symbolic_root = infer_catalog_call(sqrt, &request(symbolic.clone(), LiteralValue::Unknown));
+    assert!(symbolic_root.diagnostics.is_empty());
+    assert_eq!(symbolic_root.outputs[0], symbolic);
+}
+
+#[test]
+fn root_contracts_preserve_only_supported_storage_and_classes() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+        OutputSelection, RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact,
+        ValueKindFact,
+    };
+
+    let request = |input| CallRequest {
+        arguments: vec![input],
+        literals: LiteralContext::new(vec![LiteralValue::Unknown]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let sqrt = builtin_catalog_entry_by_name("sqrt").expect("sqrt entry");
+    let realsqrt = builtin_catalog_entry_by_name("realsqrt").expect("realsqrt entry");
+    let mut sparse_single = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(4), Some(2)]),
+        StorageFact::Sparse,
+    );
+    sparse_single.residency = ResidencyFact::Device {
+        provider: Some("sparse-provider".into()),
+    };
+    let preserved = infer_catalog_call(realsqrt, &request(sparse_single.clone()));
+    assert!(preserved.diagnostics.is_empty());
+    assert_eq!(preserved.outputs[0].kind, sparse_single.kind);
+    assert_eq!(preserved.outputs[0].shape, sparse_single.shape);
+    assert_eq!(preserved.outputs[0].storage, StorageFact::Sparse);
+    assert_eq!(preserved.outputs[0].residency, ResidencyFact::Host);
+
+    let sparse_principal = infer_catalog_call(sqrt, &request(sparse_single));
+    assert!(sparse_principal
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-SQRT-SPARSE"));
+
+    let integer_real = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt16,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), Some(4)]),
+        StorageFact::Dense,
+    );
+    let integer_sqrt = infer_catalog_call(sqrt, &request(integer_real.clone()));
+    assert_eq!(
+        integer_sqrt.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    );
+    let integer_realsqrt = infer_catalog_call(realsqrt, &request(integer_real));
+    assert!(integer_realsqrt
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-REALSQRT-INPUT"));
+
+    let mut resident = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    resident.residency = ResidencyFact::Device {
+        provider: Some("root-provider".into()),
+    };
+    let resident_result = infer_catalog_call(
+        realsqrt,
+        &CallRequest {
+            arguments: vec![resident],
+            literals: LiteralContext::new(vec![LiteralValue::Number(4.0)]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(resident_result.outputs[0].residency, ResidencyFact::Unknown);
+}

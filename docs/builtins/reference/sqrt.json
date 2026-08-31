@@ -20,7 +20,7 @@
     "notes": "Falls back to the host implementation when the provider lacks unary_sqrt or when the result requires complex values."
   },
   "fusion": {
-    "elementwise": true,
+    "elementwise": false,
     "reduction": false,
     "max_inputs": 1,
     "constants": "inline"
@@ -213,8 +213,9 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/sqrt.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/sqrt.rs"
   },
-  "gpu_residency": "You typically do **not** need to call `gpuArray` manually. The acceleration planner and fusion engine keep tensors on the GPU when profitable. If your data contains negative values, RunMat automatically gathers the tensor, produces the complex result on the host, and keeps residency metadata in sync. You can still use `gpuArray`/`gather` to mirror MathWorks MATLAB workflows.",
+  "gpu_residency": "You typically do **not** need to call `gpuArray` manually. The acceleration planner keeps tensors on the GPU when profitable. If your data contains negative values, RunMat automatically gathers the tensor and produces the complex result on the host. You can still use `gpuArray` and `gather` when explicit placement is useful.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors on the GPU when the active provider implements both `unary_sqrt` and `reduce_min`, allowing the runtime to prove that every element is non-negative before launching the kernel. When the dataset contains negative values (and therefore requires complex promotion) or when either hook is missing, RunMat gathers the data to the host, computes the MATLAB-compatible result, and updates residency metadata so subsequent operations see the correct value."
+    "RunMat Accelerate keeps tensors on the GPU when the active provider implements both `unary_sqrt` and `reduce_min`, allowing the runtime to prove that every element is nonnegative before launching the kernel. When the data contains negative values or either hook is missing, RunMat gathers the value and computes the principal result on the host.",
+    "`sqrt` is a fusion sink because a negative real input must promote the whole result to complex storage; a real-only shader expression would produce NaN instead."
   ]
 }

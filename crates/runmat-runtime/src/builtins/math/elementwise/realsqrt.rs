@@ -6,14 +6,13 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, REALSQRT_ERROR_DOMAIN, REALSQRT_ERROR_INTERNAL,
+    REALSQRT_ERROR_INVALID_INPUT,
 };
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    REALSQRT_DESCRIPTOR, REALSQRT_ERROR_DOMAIN as ERROR_DOMAIN,
+    REALSQRT_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, NumericStorage, SparseTensor, Tensor, Value};
@@ -23,82 +22,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "realsqrt";
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &[],
-    availability: BuiltinIntegerInputAvailability::Rejected,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "The public input classes are single and double; host, sparse, and resident integer values reject by class before domain evaluation or provider sqrt dispatch.",
-}];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = realsqrt(X)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "realsqrt has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers.",
-    }];
-
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Real elementwise square-root result.",
-}];
-
-const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Real single or double numeric input.",
-}];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = realsqrt(X)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT,
-}];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REALSQRT.INVALID_INPUT",
-    identifier: Some("RunMat:realsqrt:InvalidInput"),
-    when: "Input is not real single or double numeric data.",
-    message: "realsqrt: invalid input",
-};
-
-const ERROR_DOMAIN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REALSQRT.DOMAIN",
-    identifier: Some("RunMat:realsqrt:ComplexResult"),
-    when: "At least one real input value is negative and would require a complex result.",
-    message: "realsqrt: input must be nonnegative",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REALSQRT.INTERNAL",
-    identifier: Some("RunMat:realsqrt:Internal"),
-    when: "Internal tensor construction or provider interaction failed.",
-    message: "realsqrt: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 3] = [ERROR_INVALID_INPUT, ERROR_DOMAIN, ERROR_INTERNAL];
-
-pub const REALSQRT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::realsqrt")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -134,20 +60,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "realsqrt",
-    category = "math/elementwise",
-    summary = "Compute real square roots and reject values that require complex results.",
-    keywords = "realsqrt,square root,real,elementwise,gpu",
-    accel = "unary",
-    type_resolver(realsqrt_type),
-    descriptor(crate::builtins::math::elementwise::realsqrt::REALSQRT_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::elementwise::realsqrt::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::realsqrt"
 )]
 async fn realsqrt_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => realsqrt_gpu(handle).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(error_with_detail(
-            &ERROR_INVALID_INPUT,
+            &REALSQRT_ERROR_INVALID_INPUT,
             "complex input is not supported",
         )),
         Value::SparseTensor(sparse) => realsqrt_sparse(sparse),
@@ -157,30 +77,23 @@ async fn realsqrt_builtin(value: Value) -> BuiltinResult<Value> {
         | Value::CharArray(_)
         | Value::String(_)
         | Value::StringArray(_) => Err(error_with_detail(
-            &ERROR_INVALID_INPUT,
+            &REALSQRT_ERROR_INVALID_INPUT,
             "expected real single or double input",
         )),
         other => realsqrt_real(other),
     }
 }
 
-fn realsqrt_type(args: &[Type], context: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::Int | Type::Bool | Type::Logical { .. }) => Type::Unknown,
-        _ => numeric_unary_type(args, context),
-    }
-}
-
 async fn realsqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
         return Err(error_with_detail(
-            &ERROR_INVALID_INPUT,
+            &REALSQRT_ERROR_INVALID_INPUT,
             "integer gpuArray input is not supported",
         ));
     }
     if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
         return Err(error_with_detail(
-            &ERROR_INVALID_INPUT,
+            &REALSQRT_ERROR_INVALID_INPUT,
             "complex gpuArray input is not supported",
         ));
     }
@@ -189,7 +102,7 @@ async fn realsqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         match gpu_has_negative_input(provider, &handle).await {
             Ok(true) => {
                 return Err(error_with_detail(
-                    &ERROR_DOMAIN,
+                    &REALSQRT_ERROR_DOMAIN,
                     "gpuArray contains negative values",
                 ));
             }
@@ -235,7 +148,7 @@ async fn gpu_has_negative_input(
 
 fn realsqrt_real(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
+        .map_err(|detail| error_with_detail(&REALSQRT_ERROR_INVALID_INPUT, detail))?;
     realsqrt_tensor(tensor)
 }
 
@@ -243,7 +156,7 @@ fn realsqrt_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let shape = tensor.shape.clone();
     let storage = tensor
         .into_numeric_storage()
-        .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
+        .map_err(|detail| error_with_detail(&REALSQRT_ERROR_INTERNAL, detail))?;
     let output = match storage {
         NumericStorage::F64(values) => {
             ensure_nonnegative(&values)?;
@@ -265,20 +178,20 @@ fn realsqrt_tensor(tensor: Tensor) -> BuiltinResult<Value> {
         }
         _ => {
             return Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
+                &REALSQRT_ERROR_INVALID_INPUT,
                 "expected real single or double input",
             ))
         }
     };
     let out = Tensor::from_numeric_storage(output, shape)
-        .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
+        .map_err(|detail| error_with_detail(&REALSQRT_ERROR_INTERNAL, detail))?;
     Ok(tensor_into_realsqrt_value(out))
 }
 
 fn realsqrt_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
-    if sparse.integer_storage().is_some() || sparse.is_logical() {
+    if sparse.integer_storage().is_some() || sparse.is_logical() || sparse.is_complex() {
         return Err(error_with_detail(
-            &ERROR_INVALID_INPUT,
+            &REALSQRT_ERROR_INVALID_INPUT,
             "expected real single or double input",
         ));
     }
@@ -308,7 +221,7 @@ fn realsqrt_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
     };
     output
         .map(Value::SparseTensor)
-        .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))
+        .map_err(|detail| error_with_detail(&REALSQRT_ERROR_INTERNAL, detail))
 }
 
 fn tensor_into_realsqrt_value(tensor: Tensor) -> Value {
@@ -322,7 +235,7 @@ fn tensor_into_realsqrt_value(tensor: Tensor) -> Value {
 fn ensure_nonnegative(values: &[f64]) -> BuiltinResult<()> {
     if values.iter().any(|&value| value < 0.0) {
         return Err(error_with_detail(
-            &ERROR_DOMAIN,
+            &REALSQRT_ERROR_DOMAIN,
             "input contains negative values",
         ));
     }
@@ -332,7 +245,7 @@ fn ensure_nonnegative(values: &[f64]) -> BuiltinResult<()> {
 fn ensure_nonnegative_f32(values: &[f32]) -> BuiltinResult<()> {
     if values.iter().any(|&value| value < 0.0) {
         return Err(error_with_detail(
-            &ERROR_DOMAIN,
+            &REALSQRT_ERROR_DOMAIN,
             "input contains negative values",
         ));
     }
@@ -356,7 +269,7 @@ fn canonical_zero_f32(value: f32) -> f32 {
 }
 
 fn internal_error(detail: impl std::fmt::Display) -> RuntimeError {
-    error_with_detail(&ERROR_INTERNAL, detail)
+    error_with_detail(&REALSQRT_ERROR_INTERNAL, detail)
 }
 
 fn error_with_detail(
@@ -390,39 +303,6 @@ mod tests {
     #[test]
     fn descriptor_covers_core_form() {
         assert_eq!(REALSQRT_DESCRIPTOR.signatures[0].label, "Y = realsqrt(X)");
-    }
-
-    #[test]
-    fn type_resolver_preserves_shape() {
-        let out = realsqrt_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn type_resolver_rejects_known_integer_and_logical_inputs() {
-        assert_eq!(
-            realsqrt_type(&[Type::Int], &ResolveContext::new(Vec::new())),
-            Type::Unknown
-        );
-        assert_eq!(
-            realsqrt_type(
-                &[Type::Logical {
-                    shape: Some(vec![Some(1), Some(2)]),
-                }],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Unknown
-        );
     }
 
     #[test]
@@ -568,6 +448,15 @@ mod tests {
     }
 
     #[test]
+    fn sparse_complex_inputs_reject_without_discarding_imaginary_storage() {
+        let sparse =
+            SparseTensor::new_complex_f32(2, 1, vec![0, 1], vec![1], vec![(4.0, 3.0)]).unwrap();
+
+        let err = call(Value::SparseTensor(sparse)).unwrap_err();
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
     fn sparse_typed_integer_values_are_rejected_by_class() {
         let sparse = SparseTensor::new_integer(
             3,
@@ -655,5 +544,37 @@ mod tests {
             let err = call(Value::GpuTensor(handle)).unwrap_err();
             assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
         });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn realsqrt_wgpu_matches_cpu_for_nonnegative_values() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let tensor = Tensor::new(vec![0.0, 1.0, 4.0, 9.0], vec![4, 1]).unwrap();
+        let expected = tensor
+            .materialize_f64()
+            .iter()
+            .map(|value| value.sqrt())
+            .collect::<Vec<_>>();
+        let handle = runmat_accelerate_api::provider()
+            .expect("WGPU provider")
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &tensor.materialize_f64(),
+                shape: &tensor.shape,
+            })
+            .expect("upload");
+        let output = block_on(realsqrt_gpu(handle)).expect("realsqrt");
+        let gathered = test_support::gather(output).expect("gather");
+        let tolerance = match runmat_accelerate_api::provider().unwrap().precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+        };
+        assert_eq!(gathered.shape, tensor.shape);
+        for (actual, expected) in gathered.materialize_f64().iter().zip(expected) {
+            assert!((actual - expected).abs() < tolerance);
+        }
     }
 }
