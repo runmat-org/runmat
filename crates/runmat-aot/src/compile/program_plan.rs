@@ -244,12 +244,13 @@ fn retained_builtin_bindings(
             ));
         }
         bindings.extend(entry.bindings.iter().map(|binding| {
+            let identity = entry.binding_identity(binding);
             runmat_native_codegen::aot::AotBuiltinBinding {
-                name: binding.identity.builtin.name.to_string(),
-                variant: binding.identity.variant.to_string(),
+                name: identity.builtin.name.to_string(),
+                variant: identity.variant.to_string(),
                 native_symbol: runmat_builtins::native_binding_symbol(
-                    binding.identity.builtin.name,
-                    binding.identity.variant,
+                    identity.builtin.name,
+                    identity.variant,
                 ),
             }
         }));
@@ -294,8 +295,8 @@ mod tests {
     fn closed_world_maps_catalog_bindings_to_stable_native_symbols() {
         for name in [
             "abs", "angle", "conj", "double", "exp", "expm1", "imag", "int8", "int16", "int32",
-            "int64", "log", "log10", "log1p", "log2", "real", "sign", "single", "uint8", "uint16",
-            "uint32", "uint64",
+            "flintmax", "int64", "intmax", "intmin", "log", "log10", "log1p", "log2", "real",
+            "realmax", "realmin", "sign", "single", "uint8", "uint16", "uint32", "uint64",
         ] {
             let bindings =
                 retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report(name))

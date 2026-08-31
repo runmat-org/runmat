@@ -1,18 +1,31 @@
 {
   "title": "intmin",
   "category": "math/elementwise",
-  "keywords": ["intmin", "integer", "limits"],
+  "keywords": ["intmin", "integer", "limits", "gpu", "distributed"],
   "summary": "Return the smallest value of an integer class.",
-  "gpu_support": { "elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Scalar metadata query." },
-  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "inline" },
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "The like form creates a scalar on the prototype's exact GPU owner and preserves its integer class and complexity." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline" },
   "requires_feature": null,
-  "tested": { "unit": "builtins::math::elementwise::numeric_limits::tests", "integration": null },
-  "description": "`intmin` returns the smallest representable value for an integer class. Unsigned classes return zero.",
-  "behaviors": ["Supports int8, int16, int32, int64, uint8, uint16, uint32, and uint64 class names."],
-  "examples": [{ "description": "Unsigned integer minimum", "input": "intmin('uint16')", "output": "ans = uint16(0)" }],
-  "faqs": [{ "question": "What is the default class?", "answer": "`int32`." }],
-  "links": [{ "label": "intmax", "url": "./intmax" }],
+  "tested": { "unit": "builtins::math::elementwise::numeric_limits::tests", "integration": "numeric_limit_contracts", "gpu": "builtins::math::elementwise::numeric_limits::tests::integer_limit_like_preserves_wgpu_class_and_wide_value" },
+  "description": "`intmin` returns the smallest value representable by an integer class. The default class is `int32`. Unsigned classes return zero. `intmin(\"like\", prototype)` selects the class, complexity, and applicable placement from an integer prototype.",
+  "behaviors": [
+    "Class-name forms support int8, int16, int32, int64, uint8, uint16, uint32, and uint64.",
+    "The result is a 1-by-1 scalar in the selected integer class. Signed minima remain exact and unsigned minima are zero.",
+    "A real or complex integer prototype selects the matching class and complexity. The imaginary component of a complex result is zero.",
+    "A gpuArray prototype produces a new scalar on the same registered provider and device without gathering the prototype.",
+    "A distributed prototype produces a distributed scalar with the same distribution scheme and does not materialize the full source value."
+  ],
+  "examples": [
+    { "description": "Query the int16 minimum", "input": "limit = intmin(\"int16\")", "output": "limit = int16(-32768)" },
+    { "description": "Query an unsigned minimum", "input": "limit = intmin(\"uint16\")", "output": "limit = uint16(0)" },
+    { "description": "Match an integer prototype", "input": "prototype = int64([1 2 3]);\nlimit = intmin(\"like\", prototype)", "output": "limit = int64(-9223372036854775808)" }
+  ],
+  "faqs": [
+    { "question": "What is the default class?", "answer": "`int32`." },
+    { "question": "Does the like form copy the prototype shape?", "answer": "No. It always returns a 1-by-1 scalar; it copies the integer class, complexity, and applicable placement." }
+  ],
+  "links": [{ "label": "intmax", "url": "./intmax" }, { "label": "flintmax", "url": "./flintmax" }],
   "source": { "label": "`crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits.rs" },
-  "gpu_residency": "The result is host-resident.",
-  "gpu_behavior": ["No GPU kernels are launched."]
+  "gpu_residency": "The class-name forms return host scalars. The like form preserves an integer gpuArray prototype's exact provider, device, storage kind, and provenance.",
+  "gpu_behavior": ["The like form uploads only the scalar result. It does not download or otherwise materialize the prototype."]
 }

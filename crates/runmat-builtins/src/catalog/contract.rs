@@ -55,6 +55,7 @@ pub enum MathInferenceRule {
     Log1p,
     Log2,
     Logarithm(LogarithmBase),
+    NumericLimit(NumericLimitRule),
     NumericConversion(runmat_types::NumericClass),
     NumericConversionWithLike(runmat_types::NumericClass),
     NumericComponent(NumericComponentRule),
@@ -65,6 +66,25 @@ pub enum MathInferenceRule {
 pub enum LogarithmBase {
     Natural,
     Common,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum NumericLimitRule {
+    Integer(IntegerLimitKind),
+    Floating(FloatingLimitKind),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum IntegerLimitKind {
+    Minimum,
+    Maximum,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum FloatingLimitKind {
+    SmallestNormal,
+    LargestFinite,
+    LargestConsecutiveInteger,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

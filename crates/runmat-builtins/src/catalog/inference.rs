@@ -1,7 +1,7 @@
 use super::{
     AccelerationInferenceRule, AggregateInferenceRule, ArrayInferenceRule, BuiltinCatalogEntry,
     BuiltinContractMaturity, BuiltinInferenceRule, IntrospectionInferenceRule, MathInferenceRule,
-    NumericComponentRule, ParallelInferenceRule,
+    NumericComponentRule, NumericLimitRule, ParallelInferenceRule,
 };
 use runmat_types::{
     codistributor_fact, infer_call, infer_numeric_conversion, AliasFact, CallContract,
@@ -25,6 +25,9 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
         match entry.placement.distributed {
             crate::BuiltinDistributedPolicy::MapUnary => {
                 return infer_distributed_map(entry, request, distributed);
+            }
+            crate::BuiltinDistributedPolicy::ScalarLikePrototype => {
+                return infer_distributed_scalar_like(entry, request, distributed);
             }
             crate::BuiltinDistributedPolicy::MaterializeArguments => {
                 return infer_partition_local_call(entry, request);
@@ -56,6 +59,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         }
         BuiltinInferenceRule::Math(MathInferenceRule::Logarithm(base)) => {
             math_unary::infer_logarithm(request, entry, base)
+        }
+        BuiltinInferenceRule::Math(MathInferenceRule::NumericLimit(rule)) => {
+            infer_numeric_limit(request, entry, rule)
         }
         BuiltinInferenceRule::Math(MathInferenceRule::NumericConversion(target)) => {
             infer_numeric_conversion_call(request, entry, target)
@@ -418,6 +424,178 @@ fn infer_distributed_map(
         })
         .collect();
     inference
+}
+
+fn infer_distributed_scalar_like(
+    entry: &BuiltinCatalogEntry,
+    request: &CallRequest,
+    source: DistributedFact,
+) -> CallInference {
+    let mut inference = infer_partition_local_call(entry, request);
+    inference.outputs = inference
+        .outputs
+        .into_iter()
+        .map(|value| {
+            ValueFact::scalar(ValueKindFact::Distributed(DistributedFact {
+                id: source.id,
+                owner: source.owner,
+                scheme: source.scheme.clone(),
+                value: Box::new(value),
+                materializable: source.materializable,
+            }))
+        })
+        .collect();
+    inference
+}
+
+fn infer_numeric_limit(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    rule: NumericLimitRule,
+) -> CallInference {
+    let mut diagnostics = Vec::new();
+    let default_class = match rule {
+        NumericLimitRule::Integer(_) => NumericClass::Int32,
+        NumericLimitRule::Floating(_) => NumericClass::Double,
+    };
+    let mut output = numeric_limit_scalar(default_class, NumericDomain::Real);
+
+    match request.arguments.as_slice() {
+        [] => {}
+        [class] => match request.literals.literal_args.first().and_then(literal_text) {
+            Some(name) => match NumericClass::from_class_name(&name) {
+                Some(class) if numeric_limit_accepts_class(rule, class) => {
+                    output = numeric_limit_scalar(class, NumericDomain::Real);
+                }
+                _ => {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-NUMERIC-LIMIT-CLASS",
+                        format!("{} does not support class `{name}`", entry.identity.name),
+                        0,
+                    ));
+                    output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+                }
+            },
+            None if matches!(
+                class.kind,
+                ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+            ) =>
+            {
+                output = ValueFact::unknown(DynamicReason::RuntimeValue);
+            }
+            None => {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-NUMERIC-LIMIT-CLASS",
+                    format!("{} requires a numeric class name", entry.identity.name),
+                    0,
+                ));
+                output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+            }
+        },
+        [keyword, prototype] => {
+            let keyword_literal = request.literals.literal_args.first().and_then(literal_text);
+            match keyword_literal.as_deref() {
+                Some(value) if value.eq_ignore_ascii_case("like") => {
+                    output = infer_numeric_limit_like(rule, prototype, entry, &mut diagnostics);
+                }
+                Some(_) => {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-NUMERIC-LIMIT-LIKE",
+                        format!("{} accepts only the `like` option", entry.identity.name),
+                        0,
+                    ));
+                    output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+                }
+                None if matches!(
+                    keyword.kind,
+                    ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+                ) =>
+                {
+                    output = ValueFact::unknown(DynamicReason::RuntimeValue);
+                }
+                None => {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-NUMERIC-LIMIT-LIKE",
+                        format!(
+                            "{} requires `like` before its prototype",
+                            entry.identity.name
+                        ),
+                        0,
+                    ));
+                    output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+                }
+            }
+        }
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-NUMERIC-LIMIT-ARITY",
+                format!(
+                    "{} accepts no input, a class name, or `like` and a prototype",
+                    entry.identity.name
+                ),
+                request.arguments.len().saturating_sub(1),
+            ));
+            output = ValueFact::unknown(DynamicReason::RuntimeValue);
+        }
+    }
+
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+fn numeric_limit_accepts_class(rule: NumericLimitRule, class: NumericClass) -> bool {
+    match rule {
+        NumericLimitRule::Integer(_) => {
+            !matches!(class, NumericClass::Double | NumericClass::Single)
+        }
+        NumericLimitRule::Floating(_) => {
+            matches!(class, NumericClass::Double | NumericClass::Single)
+        }
+    }
+}
+
+fn numeric_limit_scalar(class: NumericClass, domain: NumericDomain) -> ValueFact {
+    ValueFact::scalar(ValueKindFact::Numeric(NumericFact { class, domain }))
+}
+
+fn infer_numeric_limit_like(
+    rule: NumericLimitRule,
+    prototype: &ValueFact,
+    entry: &BuiltinCatalogEntry,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+) -> ValueFact {
+    let ValueKindFact::Numeric(numeric) = prototype.kind else {
+        if !matches!(prototype.kind, ValueKindFact::Unknown) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-NUMERIC-LIMIT-PROTOTYPE",
+                format!("{} requires a numeric prototype", entry.identity.name),
+                1,
+            ));
+        }
+        return ValueFact::unknown(DynamicReason::RuntimeValue);
+    };
+    if !numeric_limit_accepts_class(rule, numeric.class)
+        || matches!(rule, NumericLimitRule::Integer(_))
+            && matches!(prototype.storage, StorageFact::Sparse)
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-NUMERIC-LIMIT-PROTOTYPE",
+            format!(
+                "{} does not support this prototype representation",
+                entry.identity.name
+            ),
+            1,
+        ));
+        return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+    }
+
+    let mut output = numeric_limit_scalar(numeric.class, numeric.domain);
+    output.storage = if matches!(prototype.storage, StorageFact::Sparse) {
+        StorageFact::Sparse
+    } else {
+        StorageFact::Scalar
+    };
+    output.residency = prototype.residency.clone();
+    output
 }
 
 fn infer_parallel_data(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {

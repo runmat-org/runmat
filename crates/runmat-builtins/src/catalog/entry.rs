@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::{BuiltinEffects, BuiltinSemantics};
 
-pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 3;
+pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct BuiltinCatalogIdentity {
@@ -53,9 +53,14 @@ pub enum BuiltinBindingAvailability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BuiltinBindingDeclaration {
-    pub identity: BuiltinBindingIdentity,
+    pub variant: &'static str,
     pub availability: BuiltinBindingAvailability,
 }
+
+pub const REQUIRED_DEFAULT_BINDING: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
+    variant: "default",
+    availability: BuiltinBindingAvailability::Required,
+}];
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct BuiltinCatalogEntry {
@@ -74,6 +79,16 @@ pub struct BuiltinCatalogEntry {
 }
 
 impl BuiltinCatalogEntry {
+    pub const fn binding_identity(
+        &self,
+        binding: &BuiltinBindingDeclaration,
+    ) -> BuiltinBindingIdentity {
+        BuiltinBindingIdentity {
+            builtin: self.identity,
+            variant: binding.variant,
+        }
+    }
+
     pub fn legacy_semantics(&self) -> BuiltinSemantics {
         let effects = self.contract.effect_set();
         BuiltinSemantics {

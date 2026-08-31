@@ -141,8 +141,8 @@ fn sparse_scalar_index(sparse: &SparseTensor, indices: &[f64]) -> Result<Value, 
 
         if sparse.is_complex() {
             let result = match sparse.complex_at(row, col) {
-                Some(value) => SparseTensor::new_complex(1, 1, vec![0, 1], vec![0], vec![value]),
-                None => Ok(SparseTensor::zeros_complex(1, 1)),
+                Some(value) => sparse.new_complex_like(1, 1, vec![0, 1], vec![0], vec![value]),
+                None => Ok(sparse.zeros_like(1, 1)),
             }
             .map_err(indexing_error)?;
             return Ok(Value::SparseTensor(result));

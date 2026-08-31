@@ -1,16 +1,16 @@
 use crate::{
-    ArrayInferenceRule, BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingAvailability,
-    BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
-    BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
-    BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
-    BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, ALL_INTEGER_CLASSES,
+    ArrayInferenceRule, BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration,
+    BuiltinCatalogEntry, BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy,
+    BuiltinInferenceRule, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinLinkContract,
+    BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinPlacementContract, BuiltinPortability, BuiltinPurity,
+    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
+    ALL_INTEGER_CLASSES,
 };
 use runmat_types::EffectKind;
 
@@ -186,13 +186,7 @@ pub const FULL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &FULL_ERRORS,
 };
 
-const FULL_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
-    identity: BuiltinBindingIdentity {
-        builtin: BuiltinCatalogIdentity { name: "full" },
-        variant: "default",
-    },
-    availability: BuiltinBindingAvailability::Required,
-}];
+const FULL_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const FULL_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
 pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -238,6 +232,8 @@ pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FULL_CATALOG_ENTRY, &ZEROS_CATALOG_ENTRY];
 
 const ZEROS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
@@ -387,13 +383,7 @@ pub const ZEROS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ZEROS_ERRORS,
 };
-const ZEROS_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
-    identity: BuiltinBindingIdentity {
-        builtin: BuiltinCatalogIdentity { name: "zeros" },
-        variant: "default",
-    },
-    availability: BuiltinBindingAvailability::Required,
-}];
+const ZEROS_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const ZEROS_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const ZEROS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     identity: BuiltinCatalogIdentity { name: "zeros" },

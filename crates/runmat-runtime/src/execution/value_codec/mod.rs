@@ -180,6 +180,36 @@ mod tests {
         assert_eq!(values[1].1.to_bits(), 0x7ff8_0000_0000_0042);
         assert_eq!(values[2], runmat_value::ComplexElement(-4.0, 5.0));
 
+        let complex_single = Value::SparseTensor(
+            SparseTensor::new_complex_f32(
+                2,
+                1,
+                vec![0, 2],
+                vec![0, 1],
+                vec![(1.25, -2.5), (3.75, 4.5)],
+            )
+            .unwrap(),
+        );
+        let Value::SparseTensor(decoded) =
+            decode_inline_value(&encode_inline_value(&complex_single).unwrap()).unwrap()
+        else {
+            panic!("expected sparse complex single value");
+        };
+        assert_eq!(
+            decoded.numeric_dtype(),
+            Some(runmat_value::NumericDType::F32)
+        );
+        assert_eq!(
+            decoded.as_complex_f32_slice(),
+            Some(
+                [
+                    runmat_value::ComplexElement(1.25, -2.5),
+                    runmat_value::ComplexElement(3.75, 4.5),
+                ]
+                .as_slice()
+            )
+        );
+
         let logical = Value::SparseTensor(
             SparseTensor::new_logical(3, 2, vec![0, 2, 3], vec![0, 2, 1]).unwrap(),
         );

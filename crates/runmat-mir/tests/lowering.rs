@@ -1834,6 +1834,35 @@ fn analysis_store_preserves_log2_requested_output_contract() {
 }
 
 #[test]
+fn analysis_store_preserves_numeric_limit_identity_and_literal_class() {
+    for (name, class_name, expected_class) in [
+        ("intmin", "uint64", NumericClass::UInt64),
+        ("intmax", "int16", NumericClass::Int16),
+        ("realmin", "single", NumericClass::Single),
+        ("realmax", "single", NumericClass::Single),
+        ("flintmax", "double", NumericClass::Double),
+    ] {
+        let source = format!("function y = f(); y = {name}('{class_name}'); end");
+        let (body, store) = analyze_single_body(&source);
+        let call = first_call(&body);
+        assert!(matches!(
+            &call.callee,
+            MirCallee::Static(CallableIdentity::Builtin(id)) if id.0 == name
+        ));
+        let output = output_fact(&body, &store);
+        assert_eq!(
+            output.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: expected_class,
+                domain: NumericDomain::Real,
+            }),
+            "{name}"
+        );
+        assert_eq!(output.shape, ShapeFact::Scalar, "{name}");
+    }
+}
+
+#[test]
 fn analysis_store_keeps_log1p_shape_but_not_a_false_domain_proof() {
     let (body, store) = analyze_single_body("function y = f(); y = log1p(single([0, 1, 2])); end");
     let output = output_fact(&body, &store);

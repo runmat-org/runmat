@@ -43,6 +43,9 @@ pub enum BuiltinDistributedPolicy {
     InspectHandles,
     MaterializeArguments,
     MapUnary,
+    /// Construct a distributed scalar whose class, complexity, sparsity, and
+    /// distribution owner are selected by a distributed `like` prototype.
+    ScalarLikePrototype,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

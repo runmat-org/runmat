@@ -1,6 +1,5 @@
 use crate::{
-    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingAvailability,
-    BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
+    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinCatalogEntry, BuiltinCatalogIdentity,
     BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
     BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinFusionPolicy,
     BuiltinInferenceRule, BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode,
@@ -88,13 +87,7 @@ macro_rules! context_entry {
             },
             placement: PLACEMENT,
             link: LINK,
-            bindings: &[BuiltinBindingDeclaration {
-                identity: BuiltinBindingIdentity {
-                    builtin: BuiltinCatalogIdentity { name: $name },
-                    variant: "default",
-                },
-                availability: BuiltinBindingAvailability::Required,
-            }],
+            bindings: &crate::REQUIRED_DEFAULT_BINDING,
             extensions: &[],
             integer_capabilities: &[],
             integer_audit: None,
@@ -131,3 +124,10 @@ context_entry!(
     "Return the number of workers in the current SPMD group.",
     SIZE_DESCRIPTOR
 );
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
+    &SPMD_INDEX_CATALOG_ENTRY,
+    &SPMD_SIZE_CATALOG_ENTRY,
+    &LABINDEX_CATALOG_ENTRY,
+    &NUMLABS_CATALOG_ENTRY,
+];

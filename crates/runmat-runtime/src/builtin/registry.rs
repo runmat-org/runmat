@@ -73,15 +73,16 @@ pub fn validate_runtime_builtin_registry() -> Vec<RuntimeBuiltinRegistryError> {
             });
         }
         for binding in entry.bindings {
-            declared.insert(binding.identity);
-            let count = actual_counts.get(&binding.identity).copied().unwrap_or(0);
+            let identity = entry.binding_identity(binding);
+            declared.insert(identity);
+            let count = actual_counts.get(&identity).copied().unwrap_or(0);
             if matches!(
                 binding.availability,
                 runmat_builtins::BuiltinBindingAvailability::Required
             ) && count != 1
             {
                 errors.push(registry_error(
-                    &binding.identity,
+                    &identity,
                     "required runtime binding is not registered exactly once",
                 ));
             }

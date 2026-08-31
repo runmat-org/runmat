@@ -405,7 +405,8 @@ async fn try_distributed_builtin(
                 .await
                 .map(Some)
         }
-        runmat_builtins::BuiltinDistributedPolicy::MapUnary => {
+        runmat_builtins::BuiltinDistributedPolicy::MapUnary
+        | runmat_builtins::BuiltinDistributedPolicy::ScalarLikePrototype => {
             let (context, service) = distributed_service(name)?;
             for argument in args {
                 if let Value::Distributed(handle) = argument {
@@ -413,11 +414,12 @@ async fn try_distributed_builtin(
                 }
             }
             let requested_outputs = output_count.unwrap_or(1);
+            let literals = distributed_literal_context(args);
             let inference = runmat_builtins::infer_partition_local_call(
                 entry,
                 &runmat_types::CallRequest {
                     arguments: args.iter().map(crate::value_fact::value_fact).collect(),
-                    literals: runmat_types::LiteralContext::default(),
+                    literals: literals.clone(),
                     outputs: runmat_types::OutputSelection::new(match requested_outputs {
                         0 => runmat_types::RequestedOutputCount::Zero,
                         1 => runmat_types::RequestedOutputCount::One,
@@ -444,6 +446,7 @@ async fn try_distributed_builtin(
                 .invoke(crate::context::RuntimeDistributedCallRequest {
                     builtin: runmat_types::BuiltinId(name.into()),
                     arguments: args.to_vec(),
+                    literals,
                     requested_outputs,
                     outputs: inference.outputs,
                     invocation: context.service_ports().collective().map_or(
@@ -459,6 +462,23 @@ async fn try_distributed_builtin(
                 .map(Some)
         }
     }
+}
+
+fn distributed_literal_context(args: &[Value]) -> runmat_types::LiteralContext {
+    runmat_types::LiteralContext::new(
+        args.iter()
+            .map(|value| match value {
+                Value::String(value) => runmat_types::LiteralValue::String(value.clone()),
+                Value::StringArray(value) if value.data.len() == 1 => {
+                    runmat_types::LiteralValue::String(value.data[0].clone())
+                }
+                Value::CharArray(value) if value.rows == 1 => {
+                    runmat_types::LiteralValue::Character(value.data.iter().collect())
+                }
+                _ => runmat_types::LiteralValue::Unknown,
+            })
+            .collect(),
+    )
 }
 
 fn distributed_service(

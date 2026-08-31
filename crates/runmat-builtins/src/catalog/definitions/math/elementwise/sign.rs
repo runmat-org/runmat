@@ -1,9 +1,8 @@
 use crate::{
-    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingAvailability,
-    BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
-    BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
-    BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,
+    BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
+    BuiltinErrorDescriptor, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
@@ -73,13 +72,7 @@ pub const SIGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         notes: "Signed values map to -1, 0, or 1 and unsigned values to 0 or 1 in the input class. Unsupported resident hooks use an exact owner-preserving fallback.",
     }];
 
-const BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
-    identity: BuiltinBindingIdentity {
-        builtin: BuiltinCatalogIdentity { name: "sign" },
-        variant: "default",
-    },
-    availability: BuiltinBindingAvailability::Required,
-}];
+const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
 pub const SIGN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -125,3 +118,5 @@ pub const SIGN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&SIGN_CATALOG_ENTRY];

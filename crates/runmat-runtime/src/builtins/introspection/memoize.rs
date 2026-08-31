@@ -1055,15 +1055,19 @@ fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
         (Some(_), None) | (None, Some(_)) => return false,
         (None, None) => {}
     }
-    match (a.as_complex_f64_slice(), b.as_complex_f64_slice()) {
-        (Some(a), Some(b)) => {
-            return a
-                .iter()
-                .zip(b)
-                .all(|(a, b)| floats_equal_nan(a.0, b.0) && floats_equal_nan(a.1, b.1))
+    if a.is_complex() || b.is_complex() {
+        if !a.is_complex() || !b.is_complex() || a.numeric_dtype() != b.numeric_dtype() {
+            return false;
         }
-        (Some(_), None) | (None, Some(_)) => return false,
-        (None, None) => {}
+        return (0..a.nnz()).all(|index| {
+            let a = a
+                .complex_value_at(index)
+                .expect("complex sparse storage is consistent");
+            let b = b
+                .complex_value_at(index)
+                .expect("complex sparse storage is consistent");
+            floats_equal_nan(a.0, b.0) && floats_equal_nan(a.1, b.1)
+        });
     }
     if a.numeric_dtype() != b.numeric_dtype() {
         return false;
@@ -1179,13 +1183,14 @@ fn value_fingerprint(value: &Value) -> String {
                 tensor.rows, tensor.cols, tensor.col_ptrs, tensor.row_indices
             ),
             None if tensor.is_complex() => format!(
-                "sparse-complex:{}x{}:{:?}:{:?}:{:?}",
+                "sparse-complex:{}x{}:{:?}:{:?}:{:?}:{:?}",
                 tensor.rows,
                 tensor.cols,
                 tensor.col_ptrs,
                 tensor.row_indices,
+                tensor.numeric_dtype(),
                 tensor
-                    .as_complex_f64_slice()
+                    .materialize_complex_f64()
                     .expect("complex sparse storage")
             ),
             None => format!(

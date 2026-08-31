@@ -1,9 +1,8 @@
 use crate::{
-    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingAvailability,
-    BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
-    BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
-    BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,
+    BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
+    BuiltinErrorDescriptor, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
@@ -97,13 +96,7 @@ macro_rules! define_integer_conversion {
                     ),
                 }];
 
-            const BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
-                identity: BuiltinBindingIdentity {
-                    builtin: BuiltinCatalogIdentity { name: $name },
-                    variant: "default",
-                },
-                availability: BuiltinBindingAvailability::Required,
-            }];
+            const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
             const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
             pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -266,3 +259,14 @@ pub use uint8::{
     ERROR_INVALID_INPUT as UINT8_ERROR_INVALID_INPUT,
     INTEGER_CAPABILITIES as UINT8_INTEGER_CAPABILITIES,
 };
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
+    &INT8_CATALOG_ENTRY,
+    &INT16_CATALOG_ENTRY,
+    &INT32_CATALOG_ENTRY,
+    &INT64_CATALOG_ENTRY,
+    &UINT8_CATALOG_ENTRY,
+    &UINT16_CATALOG_ENTRY,
+    &UINT32_CATALOG_ENTRY,
+    &UINT64_CATALOG_ENTRY,
+];

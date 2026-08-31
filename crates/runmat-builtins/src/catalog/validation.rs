@@ -70,16 +70,13 @@ pub fn validate_builtin_catalog(
             ));
         }
         for binding in entry.bindings {
-            if binding.identity.builtin != entry.identity {
-                errors.push(error(
-                    Some(name),
-                    "binding declaration refers to a different builtin identity",
-                ));
-            }
-            if binding.identity.variant.is_empty() {
+            if binding.variant.is_empty() {
                 errors.push(error(Some(name), "binding variant must not be empty"));
             }
-            if bindings.insert(binding.identity, name).is_some() {
+            if bindings
+                .insert(entry.binding_identity(binding), name)
+                .is_some()
+            {
                 errors.push(error(Some(name), "duplicate builtin binding identity"));
             }
             if matches!(binding.availability, BuiltinBindingAvailability::Required)

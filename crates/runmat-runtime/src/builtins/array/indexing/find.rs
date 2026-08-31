@@ -574,6 +574,7 @@ enum FindValues {
     Logical(Vec<u8>),
     Integer(IntegerStorage),
     Complex(Vec<(f64, f64)>),
+    ComplexF32(Vec<(f32, f32)>),
     IntegerComplex(IntegerComplexStorage),
 }
 
@@ -962,7 +963,16 @@ fn sparse_find_values(
     if sparse.is_logical() {
         FindValues::Logical(logical_values)
     } else if sparse.is_complex() {
-        FindValues::Complex(complex_values)
+        if sparse.numeric_dtype() == Some(runmat_value::NumericDType::F32) {
+            FindValues::ComplexF32(
+                complex_values
+                    .into_iter()
+                    .map(|(real, imaginary)| (real as f32, imaginary as f32))
+                    .collect(),
+            )
+        } else {
+            FindValues::Complex(complex_values)
+        }
     } else if let Some(storage) = sparse.integer_storage() {
         FindValues::Integer(select_integer_values(storage, integer_value_indices))
     } else if sparse.as_f32_slice().is_some() {
@@ -973,8 +983,7 @@ fn sparse_find_values(
 }
 
 fn sparse_stored_value_is_nonzero(sparse: &runmat_value::SparseTensor, index: usize) -> bool {
-    if let Some(values) = sparse.as_complex_f64_slice() {
-        let value = values[index];
+    if let Some(value) = sparse.complex_value_at(index) {
         return value.0 != 0.0 || value.1 != 0.0;
     }
     !sparse
@@ -995,7 +1004,6 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
     let integer_storage = sparse.integer_storage();
     let floating_values = sparse.as_f64_slice();
     let native_single_values = sparse.as_f32_slice();
-    let native_complex_values = sparse.as_complex_f64_slice();
     let mut integer_value_indices = Vec::new();
 
     if matches!(limit, Some(0)) {
@@ -1022,8 +1030,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                         indices.push(linear_idx + 1);
                         if sparse.is_logical() {
                             logical_values.push(1);
-                        } else if let Some(native_complex_values) = native_complex_values {
-                            let value = native_complex_values[idx];
+                        } else if let Some(value) = sparse.complex_value_at(idx) {
                             complex_values.push((value.0, value.1));
                         } else if integer_storage.is_some() {
                             integer_value_indices.push(idx);
@@ -1058,8 +1065,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                         indices.push(linear_idx + 1);
                         if sparse.is_logical() {
                             logical_values.push(1);
-                        } else if let Some(native_complex_values) = native_complex_values {
-                            let value = native_complex_values[idx];
+                        } else if let Some(value) = sparse.complex_value_at(idx) {
                             complex_values.push((value.0, value.1));
                         } else if integer_storage.is_some() {
                             integer_value_indices.push(idx);
@@ -1209,6 +1215,13 @@ impl FindResult {
                     })?;
                 Ok(complex_tensor_to_value(tensor, output_provider))
             }
+            FindValues::ComplexF32(values) => {
+                let tensor = ComplexTensor::from_f32(values.clone(), vec![values.len(), 1])
+                    .map_err(|e| {
+                        find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
+                    })?;
+                Ok(complex_tensor_to_value(tensor, output_provider))
+            }
             FindValues::IntegerComplex(storage) => {
                 let tensor = ComplexTensor::new_integer(storage.clone(), vec![storage.len(), 1])
                     .map_err(|e| {
@@ -1253,7 +1266,16 @@ fn find_values_for_complex_tensor(
     values: Vec<(f64, f64)>,
 ) -> FindValues {
     let Some(storage) = tensor.integer_storage() else {
-        return FindValues::Complex(values);
+        return if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+            FindValues::ComplexF32(
+                values
+                    .into_iter()
+                    .map(|(real, imaginary)| (real as f32, imaginary as f32))
+                    .collect(),
+            )
+        } else {
+            FindValues::Complex(values)
+        };
     };
     let selected: Vec<usize> = indices.iter().map(|index| index - 1).collect();
     let real = select_integer_values(&storage.real, &selected);
@@ -1847,6 +1869,33 @@ pub(crate) mod tests {
         assert_eq!(
             values.materialize_f64(),
             vec![(0.0, 2.0), (3.0, 0.0), (-4.0, 5.0)]
+        );
+    }
+
+    #[test]
+    fn find_sparse_complex_single_preserves_component_class() {
+        let sparse = runmat_value::SparseTensor::new_complex_f32(
+            2,
+            1,
+            vec![0, 2],
+            vec![0, 1],
+            vec![(0.0, 2.0), (3.0, -4.0)],
+        )
+        .expect("complex single sparse");
+        let eval = evaluate(Value::SparseTensor(sparse), &[]).expect("find sparse");
+        let Value::ComplexTensor(values) = eval.values_value().expect("values") else {
+            panic!("expected complex sparse find values");
+        };
+        assert_eq!(values.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(
+            values.as_f32_slice(),
+            Some(
+                [
+                    runmat_value::ComplexElement(0.0, 2.0),
+                    runmat_value::ComplexElement(3.0, -4.0),
+                ]
+                .as_slice()
+            )
         );
     }
 

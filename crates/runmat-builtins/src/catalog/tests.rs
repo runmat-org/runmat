@@ -46,10 +46,7 @@ const CAPABILITIES: [CapabilityRequirement; 1] = [CapabilityRequirement::HostRun
 
 const PILOT_ID: BuiltinCatalogIdentity = BuiltinCatalogIdentity { name: "pilot" };
 const PILOT_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
-    identity: BuiltinBindingIdentity {
-        builtin: PILOT_ID,
-        variant: "default",
-    },
+    variant: "default",
     availability: BuiltinBindingAvailability::Required,
 }];
 const PILOT: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -80,10 +77,7 @@ const PILOT: BuiltinCatalogEntry = BuiltinCatalogEntry {
 
 const SECOND_ID: BuiltinCatalogIdentity = BuiltinCatalogIdentity { name: "second" };
 const SECOND_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
-    identity: BuiltinBindingIdentity {
-        builtin: SECOND_ID,
-        variant: "default",
-    },
+    variant: "default",
     availability: BuiltinBindingAvailability::Required,
 }];
 const SECOND: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -123,6 +117,90 @@ fn migrated_registry_is_valid_and_case_insensitive() {
             .inference_rule,
         BuiltinInferenceRule::Array(ArrayInferenceRule::Full)
     );
+}
+
+#[test]
+fn catalog_definitions_keep_domain_modules_out_of_the_root() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/definitions");
+    let root_files = std::fs::read_dir(&root)
+        .expect("catalog definitions directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        root_files,
+        vec![root.join("mod.rs")],
+        "builtin contract files belong in mirrored domain directories"
+    );
+}
+
+#[test]
+fn catalog_definition_families_own_registration_without_domain_builtin_lists() {
+    fn visit(directory: &std::path::Path) {
+        for entry in std::fs::read_dir(directory)
+            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+        {
+            let path = entry.expect("definition entry").path();
+            if path.is_dir() {
+                visit(&path);
+                continue;
+            }
+            if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            if path.file_name().and_then(|name| name.to_str()) == Some("mod.rs") {
+                assert!(
+                    !source.lines().any(|line| {
+                        line.trim_start().starts_with('&') && line.contains("_CATALOG_ENTRY")
+                    }),
+                    "domain modules compose family slices, not per-builtin lists: {}",
+                    path.display()
+                );
+            } else if source.contains("_CATALOG_ENTRY") {
+                assert!(
+                    source.contains("const ENTRIES"),
+                    "catalog family must register its entries beside their definitions: {}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    visit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/definitions"));
+}
+
+#[test]
+fn catalog_definition_modules_remain_focused() {
+    const MAX_LINES: usize = 500;
+
+    fn visit(directory: &std::path::Path) {
+        for entry in std::fs::read_dir(directory)
+            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+        {
+            let path = entry.expect("definition entry").path();
+            if path.is_dir() {
+                visit(&path);
+                continue;
+            }
+            if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                continue;
+            }
+
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            let line_count = source.lines().count();
+            assert!(
+                line_count <= MAX_LINES,
+                "catalog contract module has {line_count} lines; split it by builtin domain before it exceeds {MAX_LINES}: {}",
+                path.display()
+            );
+        }
+    }
+
+    visit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/definitions"));
 }
 
 #[test]
@@ -316,6 +394,100 @@ fn distributed_call_inference_preserves_the_execution_owned_value_contract() {
             domain: NumericDomain::Complex,
         })
     ));
+}
+
+#[test]
+fn numeric_limit_contracts_infer_class_representation_and_distributed_like_outputs() {
+    use runmat_types::{
+        CallRequest, DistributedFact, DistributedOwner, DistributedValueId, DistributionScheme,
+        LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        ProgramFunctionId, RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact,
+        ValueKindFact,
+    };
+
+    let class_request = |class: &str| CallRequest {
+        arguments: vec![ValueFact::scalar(ValueKindFact::String)],
+        literals: LiteralContext::new(vec![LiteralValue::String(class.into())]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    for (builtin, class) in [
+        ("intmin", NumericClass::UInt64),
+        ("intmax", NumericClass::UInt64),
+        ("realmin", NumericClass::Single),
+        ("realmax", NumericClass::Single),
+        ("flintmax", NumericClass::Single),
+    ] {
+        let source_name = if class == NumericClass::UInt64 {
+            "uint64"
+        } else {
+            "single"
+        };
+        let inference = infer_catalog_call(
+            builtin_catalog_entry_by_name(builtin).expect("numeric limit entry"),
+            &class_request(source_name),
+        );
+        assert!(inference.diagnostics.is_empty(), "{builtin}");
+        assert_eq!(
+            inference.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class,
+                domain: NumericDomain::Real,
+            })
+        );
+        assert_eq!(inference.outputs[0].shape, ShapeFact::Scalar);
+    }
+
+    let mut local = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(8), Some(2)]),
+        StorageFact::Dense,
+    );
+    local.residency = ResidencyFact::Host;
+    let distributed = DistributedFact {
+        id: DistributedValueId {
+            function: ProgramFunctionId(11),
+            ordinal: 2,
+        },
+        owner: DistributedOwner::Client(ProgramFunctionId(11)),
+        scheme: Some(DistributionScheme::Replicated),
+        value: Box::new(local),
+        materializable: true,
+    };
+    let inference = infer_catalog_call(
+        builtin_catalog_entry_by_name("realmax").expect("realmax entry"),
+        &CallRequest {
+            arguments: vec![
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::Distributed(distributed.clone())),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Keyword("like".into()),
+                LiteralValue::Unknown,
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(
+        inference.diagnostics.is_empty(),
+        "{:#?}",
+        inference.diagnostics
+    );
+    let ValueKindFact::Distributed(output) = &inference.outputs[0].kind else {
+        panic!("numeric limit like form must retain distributed placement");
+    };
+    assert_eq!(output.id, distributed.id);
+    assert_eq!(output.scheme, distributed.scheme);
+    assert_eq!(output.value.shape, ShapeFact::Scalar);
+    assert_eq!(
+        output.value.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        })
+    );
 }
 
 #[test]

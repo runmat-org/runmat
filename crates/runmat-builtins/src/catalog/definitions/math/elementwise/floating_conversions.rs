@@ -1,16 +1,16 @@
 use crate::{
-    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingAvailability,
-    BuiltinBindingDeclaration, BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinCatalogIdentity,
-    BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
-    BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
-    BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, MathInferenceRule, ALL_INTEGER_CLASSES,
+    BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,
+    BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy,
+    BuiltinInferenceRule, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinLinkContract,
+    BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinPlacementContract, BuiltinPortability, BuiltinPurity,
+    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
+    MathInferenceRule, ALL_INTEGER_CLASSES,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement, NumericClass};
 
@@ -157,13 +157,7 @@ macro_rules! define_floating_conversion {
                     notes: $backend_notes,
                 }];
 
-            const BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
-                identity: BuiltinBindingIdentity {
-                    builtin: BuiltinCatalogIdentity { name: $name },
-                    variant: "default",
-                },
-                availability: BuiltinBindingAvailability::Required,
-            }];
+            const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
             const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
             pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -267,3 +261,6 @@ pub use single::{
     INTEGER_CAPABILITIES as SINGLE_INTEGER_CAPABILITIES,
     LIKE_EXTENSION as SINGLE_LIKE_OUTPUT_EXTENSION,
 };
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] =
+    &[&DOUBLE_CATALOG_ENTRY, &SINGLE_CATALOG_ENTRY];

@@ -15237,6 +15237,58 @@ fn distributed_builtin_mapping_preserves_each_requested_log2_output() {
 }
 
 #[test]
+fn distributed_numeric_limit_like_preserves_class_without_materializing_the_prototype() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "floatingSource = distributed(single([1, 2])); floatingLimit = realmax(like=floatingSource); gatheredFloating = gather(floatingLimit); integerSource = distributed(uint64([1, 2])); integerLimit = intmax(like=integerSource); gatheredInteger = gather(integerLimit);",
+    )
+    .expect("execute distributed numeric limit like forms");
+    let variables = session.get_variables();
+    let Some(runmat_value::Value::Distributed(floating)) = variables.get("floatingLimit") else {
+        panic!("floating limit must retain a distributed handle");
+    };
+    let Some(runmat_value::Value::Distributed(integer)) = variables.get("integerLimit") else {
+        panic!("integer limit must retain a distributed handle");
+    };
+    assert_eq!(floating.global_shape, vec![1, 1]);
+    assert_eq!(integer.global_shape, vec![1, 1]);
+    assert_eq!(
+        floating.value.kind,
+        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::Single,
+            domain: runmat_types::NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        integer.value.kind,
+        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::UInt64,
+            domain: runmat_types::NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        variables
+            .get("gatheredFloating")
+            .and_then(|value| match value {
+                runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+                _ => None,
+            }),
+        Some(&[f32::MAX][..])
+    );
+    assert_eq!(
+        variables.get("gatheredInteger"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![u64::MAX]),
+                vec![1, 1],
+            )
+            .unwrap()
+        ))
+    );
+}
+
+#[test]
 fn distributed_builtin_policy_rejects_unclassified_operations() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = execute_text_request(

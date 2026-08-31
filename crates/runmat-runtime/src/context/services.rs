@@ -310,6 +310,7 @@ pub enum RuntimeDistributedInvocation {
 pub struct RuntimeDistributedCallRequest {
     pub builtin: BuiltinId,
     pub arguments: Vec<Value>,
+    pub literals: runmat_types::LiteralContext,
     pub requested_outputs: usize,
     pub outputs: Vec<runmat_types::ValueFact>,
     pub invocation: RuntimeDistributedInvocation,
