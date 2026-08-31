@@ -6,7 +6,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use runmat_builtins::catalog::definitions::{
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{
     STRUCT_ERROR_ASSEMBLE_FAILED, STRUCT_ERROR_CELL_SIZE_MISMATCH, STRUCT_ERROR_EMPTY_ARRAY_FAILED,
     STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR, STRUCT_ERROR_FIELD_NAME_EMPTY,
     STRUCT_ERROR_FIELD_NAME_SCALAR, STRUCT_ERROR_FIELD_NAME_START_CHAR,
@@ -14,7 +15,6 @@ use runmat_builtins::catalog::definitions::{
     STRUCT_ERROR_SIZE_OVERFLOW, STRUCT_ERROR_STRUCT_ARRAY_CONTENTS,
     STRUCT_ERROR_STRUCT_ARRAY_COPY_FAILED,
 };
-use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StructValue, Value};
 

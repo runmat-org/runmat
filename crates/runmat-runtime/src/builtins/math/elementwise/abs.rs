@@ -1,11 +1,11 @@
 //! MATLAB-compatible `abs` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::catalog::definitions::{
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{
     ABS_CHARACTER_INPUT_EXTENSION, ABS_ERROR_INTERNAL, ABS_ERROR_INVALID_INPUT,
     ABS_ERROR_TOO_MANY_OUTPUTS, ABS_LOGICAL_INPUT_EXTENSION,
 };
-use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
@@ -329,9 +329,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::catalog::definitions::{
-        ABS_DESCRIPTOR, ABS_EXTENSIONS, ABS_INTEGER_CAPABILITIES,
-    };
+    use runmat_builtins::{ABS_DESCRIPTOR, ABS_EXTENSIONS, ABS_INTEGER_CAPABILITIES};
 
     #[cfg(feature = "wgpu")]
     fn register_wgpu_provider_available() -> bool {

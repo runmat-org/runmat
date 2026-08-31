@@ -171,10 +171,10 @@ fn migrated_registry_is_valid_and_case_insensitive() {
 }
 
 #[test]
-fn catalog_definitions_keep_domain_modules_out_of_the_root() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/definitions");
+fn catalog_entries_keep_domain_modules_out_of_the_root() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/entries");
     let root_files = std::fs::read_dir(&root)
-        .expect("catalog definitions directory")
+        .expect("catalog entries directory")
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_file())
@@ -187,12 +187,12 @@ fn catalog_definitions_keep_domain_modules_out_of_the_root() {
 }
 
 #[test]
-fn catalog_definition_families_own_registration_without_domain_builtin_lists() {
+fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
     fn visit(directory: &std::path::Path) {
         for entry in std::fs::read_dir(directory)
             .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
         {
-            let path = entry.expect("definition entry").path();
+            let path = entry.expect("catalog entry").path();
             if path.is_dir() {
                 visit(&path);
                 continue;
@@ -213,25 +213,25 @@ fn catalog_definition_families_own_registration_without_domain_builtin_lists() {
             } else if source.contains("_CATALOG_ENTRY") {
                 assert!(
                     source.contains("const ENTRIES"),
-                    "catalog family must register its entries beside their definitions: {}",
+                    "catalog family must register entries beside their contracts: {}",
                     path.display()
                 );
             }
         }
     }
 
-    visit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/definitions"));
+    visit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/entries"));
 }
 
 #[test]
-fn catalog_definition_modules_remain_focused() {
+fn catalog_entry_modules_remain_focused() {
     const MAX_LINES: usize = 500;
 
     fn visit(directory: &std::path::Path) {
         for entry in std::fs::read_dir(directory)
             .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
         {
-            let path = entry.expect("definition entry").path();
+            let path = entry.expect("catalog entry").path();
             if path.is_dir() {
                 visit(&path);
                 continue;
@@ -251,7 +251,7 @@ fn catalog_definition_modules_remain_focused() {
         }
     }
 
-    visit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/definitions"));
+    visit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/entries"));
 }
 
 #[test]

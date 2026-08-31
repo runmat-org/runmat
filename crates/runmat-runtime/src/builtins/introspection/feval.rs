@@ -12,8 +12,8 @@ pub async fn feval_builtin_registered(f: Value, rest: Vec<Value>) -> crate::Buil
 #[cfg(test)]
 mod tests {
     use runmat_builtins::{
-        catalog::definitions::{FEVAL_EXTENSIONS, FEVAL_INTEGER_CAPABILITIES},
-        BuiltinIntegerBackendRule, BuiltinIntegerComputationDomain,
+        BuiltinIntegerBackendRule, BuiltinIntegerComputationDomain, FEVAL_EXTENSIONS,
+        FEVAL_INTEGER_CAPABILITIES,
     };
 
     #[test]

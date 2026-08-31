@@ -23,13 +23,15 @@ flowchart TD
   Catalog --> Validation --> Runtime
 ```
 
-Catalog families live under `crates/runmat-builtins/src/catalog/definitions/<category>` and mirror the runtime domain tree. Each family owns its local `ENTRIES` slice; domain modules compose families, and the root composes domains. Adding a builtin does not require a second global name list. Substantial prose may live in a focused documentation module within the same family so contract files do not become godfiles.
+Catalog families live in the private `crates/runmat-builtins/src/catalog/entries/<category>` tree. The tree follows the public builtin taxonomy, while the crate root re-exports entry constants so consumers do not depend on its physical layout. Each family owns its local `ENTRIES` slice; domain modules compose families, and the root composes domains. Adding a builtin does not require a second global name list. Substantial prose belongs in a focused `documentation.rs` sibling within the same family directory so neither contract assembly nor documentation becomes a godfile.
 
 Executable implementations live under `crates/runmat-runtime/src/builtins/<category>`. Category modules re-export their children through the existing runtime tree so native and WASM builds link the required bindings.
 
 ## Catalog and Binding Contract
 
-The catalog owns identity, signatures, requested-output inference, diagnostics, effects, capabilities, placement, linking, compatibility, documentation, and examples. Runtime code implements the contract and declares only the binding identity needed to join executable code to its catalog entry. Catalog validation rejects missing, duplicate, and undeclared bindings.
+The catalog owns identity, signatures, requested-output inference, diagnostics, effects, capabilities, placement, linking, compatibility, documentation, and examples. Runtime code implements the contract and declares only the binding variant and identity spelling needed to join executable code and emit its stable native symbol. That spelling is linkage input, not a second semantic declaration. Catalog validation rejects missing, duplicate, and undeclared bindings.
+
+The catalog and runtime trees are separate because static consumers must not link the runtime or its native dependencies. They do not contain two copies of the builtin definition: the catalog family owns every public fact, and the runtime family owns executable algorithms and backend mechanics. Runtime code imports catalog-owned diagnostics or extension records when behavior must enforce them; it must not restate those records locally.
 
 Use `#[runtime_builtin]` for runtime-visible implementations. Do not add descriptors, documentation, type rules, placement rules, or capability metadata to the runtime annotation for a catalog-backed builtin.
 

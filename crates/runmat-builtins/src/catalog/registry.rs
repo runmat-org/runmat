@@ -1,4 +1,4 @@
-use super::{definitions::DOMAIN_ENTRY_GROUPS, BuiltinCatalogEntry};
+use super::{entries::DOMAIN_ENTRY_GROUPS, BuiltinCatalogEntry};
 use std::sync::LazyLock;
 
 /// Canonical entries composed from domain-owned definition groups.
