@@ -62,3 +62,22 @@ impl NumericDType {
         }
     }
 }
+
+impl From<runmat_types::NumericClass> for NumericDType {
+    fn from(class: runmat_types::NumericClass) -> Self {
+        use runmat_types::NumericClass;
+
+        match class {
+            NumericClass::Double => Self::F64,
+            NumericClass::Single => Self::F32,
+            NumericClass::Int8 => Self::I8,
+            NumericClass::UInt8 => Self::U8,
+            NumericClass::Int16 => Self::I16,
+            NumericClass::UInt16 => Self::U16,
+            NumericClass::Int32 => Self::I32,
+            NumericClass::UInt32 => Self::U32,
+            NumericClass::Int64 => Self::I64,
+            NumericClass::UInt64 => Self::U64,
+        }
+    }
+}

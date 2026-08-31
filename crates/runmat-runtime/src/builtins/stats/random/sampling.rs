@@ -11,7 +11,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, IntValue, LogicalArray, NumericStorage, StringArray, Tensor, Value,
+    CellArray, CharArray, IntValue, LogicalArray, NumericDType, NumericStorage, StringArray,
+    Tensor, Value,
 };
 
 use crate::builtins::common::random;
@@ -2246,6 +2247,12 @@ enum BootstatRow {
     Logical(Vec<u8>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BootstatClass {
+    Numeric(NumericDType),
+    Logical,
+}
+
 impl BootstatRow {
     fn len(&self) -> usize {
         match self {
@@ -2254,10 +2261,10 @@ impl BootstatRow {
         }
     }
 
-    fn class_name(&self) -> &'static str {
+    fn class(&self) -> BootstatClass {
         match self {
-            Self::Numeric(storage) => storage.class_name(),
-            Self::Logical(_) => "logical",
+            Self::Numeric(storage) => BootstatClass::Numeric(storage.numeric_dtype()),
+            Self::Logical(_) => BootstatClass::Logical,
         }
     }
 }
@@ -2327,10 +2334,10 @@ fn assemble_bootstat(rows: Vec<BootstatRow>, nboot: usize) -> BuiltinResult<Valu
         return empty_bootstat(nboot);
     };
     let width = first.len();
-    let class_name = first.class_name();
+    let class = first.class();
     if rows
         .iter()
-        .any(|row| row.len() != width || row.class_name() != class_name)
+        .any(|row| row.len() != width || row.class() != class)
     {
         return Err(sampling_error(
             "bootstrp",

@@ -547,7 +547,7 @@ fn union_numeric(
     let a_dtype = a.numeric_dtype();
     let b_dtype = b.numeric_dtype();
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
-        if a_storage.class_name() == b_storage.class_name() {
+        if a_storage.numeric_dtype() == b_storage.numeric_dtype() {
             return if opts.rows {
                 union_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
             } else {

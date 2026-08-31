@@ -572,7 +572,7 @@ fn compose_integer_complex(real: &RealInput, imag: &RealInput) -> BuiltinResult<
 
     match (real_storage, imag_storage) {
         (Some(real_storage), Some(imag_storage))
-            if real_storage.class_name() != imag_storage.class_name() =>
+            if real_storage.numeric_dtype() != imag_storage.numeric_dtype() =>
         {
             return Err(complex_error_with_detail(
                 &COMPLEX_ERROR_INTEGER_CLASS,

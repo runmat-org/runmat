@@ -44,7 +44,7 @@ pub struct IntegerComplexStorage {
 
 impl IntegerComplexStorage {
     pub fn new(real: IntegerStorage, imag: IntegerStorage) -> Result<Self, String> {
-        if real.class_name() != imag.class_name() || real.len() != imag.len() {
+        if real.numeric_dtype() != imag.numeric_dtype() || real.len() != imag.len() {
             return Err("complex integer components must have matching class and length".into());
         }
         Ok(Self { real, imag })
@@ -60,6 +60,10 @@ impl IntegerComplexStorage {
 
     pub fn class_name(&self) -> &'static str {
         self.real.class_name()
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
+        self.real.numeric_dtype()
     }
 
     /// Tests a paired complex integer element without consulting its lossy

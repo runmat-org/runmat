@@ -452,7 +452,8 @@ fn typed_complex_integer_prototype(entries: &[CellEntry]) -> BuiltinResult<&Inte
     if entries.iter().any(|entry| {
         matches!(
             &entry.data,
-            EntryData::TypedComplexInteger(storage) if storage.class_name() != prototype.class_name()
+            EntryData::TypedComplexInteger(storage)
+                if storage.numeric_dtype() != prototype.numeric_dtype()
         )
     }) {
         return Err(cell2mat_error_with_message(
