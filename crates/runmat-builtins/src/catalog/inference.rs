@@ -48,6 +48,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::Expm1) => {
             math_unary::infer_expm1(request, entry)
         }
+        BuiltinInferenceRule::Math(MathInferenceRule::Log1p) => {
+            math_unary::infer_log1p(request, entry)
+        }
         BuiltinInferenceRule::Math(MathInferenceRule::NumericConversion(target)) => {
             infer_numeric_conversion_call(request, entry, target)
         }

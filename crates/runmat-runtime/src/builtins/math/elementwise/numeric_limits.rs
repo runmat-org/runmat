@@ -217,14 +217,10 @@ fn intmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn realmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    let class = parse_class(rest.first(), "double")?;
-    match class.as_str() {
-        "double" => Ok(Value::Num(f64::MAX)),
-        "single" => Ok(Value::Num(f32::MAX as f64)),
-        _ => Err(limit_error(
-            "realmax",
-            format!("unsupported float class '{class}'"),
-        )),
+    match parse_floating_class(rest.first(), "realmax")? {
+        runmat_types::NumericClass::Double => Ok(Value::Num(f64::MAX)),
+        runmat_types::NumericClass::Single => Ok(Value::Num(f32::MAX as f64)),
+        _ => unreachable!("floating class parser admits only double and single"),
     }
 }
 
@@ -237,14 +233,10 @@ fn realmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn realmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    let class = parse_class(rest.first(), "double")?;
-    match class.as_str() {
-        "double" => Ok(Value::Num(f64::MIN_POSITIVE)),
-        "single" => Ok(Value::Num(f32::MIN_POSITIVE as f64)),
-        _ => Err(limit_error(
-            "realmin",
-            format!("unsupported float class '{class}'"),
-        )),
+    match parse_floating_class(rest.first(), "realmin")? {
+        runmat_types::NumericClass::Double => Ok(Value::Num(f64::MIN_POSITIVE)),
+        runmat_types::NumericClass::Single => Ok(Value::Num(f32::MIN_POSITIVE as f64)),
+        _ => unreachable!("floating class parser admits only double and single"),
     }
 }
 
@@ -257,36 +249,35 @@ fn realmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn flintmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    let class = parse_class(rest.first(), "double")?;
-    match class.as_str() {
-        "double" => Ok(Value::Num(2f64.powi(53))),
-        "single" => Ok(Value::Num(2f64.powi(24))),
-        _ => Err(limit_error(
-            "flintmax",
-            format!("unsupported float class '{class}'"),
-        )),
+    match parse_floating_class(rest.first(), "flintmax")? {
+        runmat_types::NumericClass::Double => Ok(Value::Num(2f64.powi(53))),
+        runmat_types::NumericClass::Single => Ok(Value::Num(2f64.powi(24))),
+        _ => unreachable!("floating class parser admits only double and single"),
     }
 }
 
-fn parse_class(value: Option<&Value>, default: &str) -> BuiltinResult<String> {
-    match value {
-        None => Ok(default.to_string()),
-        Some(Value::String(text)) => Ok(normalize_class(text)),
-        Some(Value::CharArray(chars)) if chars.rows == 1 => {
-            Ok(normalize_class(&chars.data.iter().collect::<String>()))
-        }
-        Some(Value::StringArray(array)) if array.data.len() == 1 => {
-            Ok(normalize_class(&array.data[0]))
-        }
-        Some(_) => Err(limit_error(
-            "numeric limit",
+fn parse_floating_class(
+    value: Option<&Value>,
+    builtin: &'static str,
+) -> BuiltinResult<runmat_types::NumericClass> {
+    let Some(value) = value else {
+        return Ok(runmat_types::NumericClass::Double);
+    };
+    let text = text_value(value).ok_or_else(|| {
+        limit_error(
+            builtin,
             "class name must be a string scalar or character vector",
-        )),
-    }
-}
-
-fn normalize_class(text: &str) -> String {
-    text.trim().to_ascii_lowercase()
+        )
+    })?;
+    let class = runmat_types::NumericClass::from_class_name(text.trim())
+        .filter(|class| {
+            matches!(
+                class,
+                runmat_types::NumericClass::Double | runmat_types::NumericClass::Single
+            )
+        })
+        .ok_or_else(|| limit_error(builtin, format!("unsupported float class '{text}'")))?;
+    Ok(class)
 }
 
 #[derive(Clone, Copy)]
@@ -299,10 +290,18 @@ fn integer_limit(args: Vec<Value>, kind: LimitKind, builtin: &'static str) -> Bu
     match args.as_slice() {
         [] => Ok(Value::Int(limit_scalar(NumericDType::I32, kind))),
         [class] if text_value(class).is_some() => {
-            let class = normalize_class(&text_value(class).expect("guarded text value"));
-            let dtype = integer_dtype(&class).ok_or_else(|| {
-                limit_error(builtin, format!("unsupported integer class '{class}'"))
-            })?;
+            let text = text_value(class).expect("guarded text value");
+            let class = runmat_types::NumericClass::from_class_name(text.trim())
+                .filter(|class| {
+                    !matches!(
+                        class,
+                        runmat_types::NumericClass::Double | runmat_types::NumericClass::Single
+                    )
+                })
+                .ok_or_else(|| {
+                    limit_error(builtin, format!("unsupported integer class '{text}'"))
+                })?;
+            let dtype = NumericDType::from(class);
             Ok(Value::Int(limit_scalar(dtype, kind)))
         }
         [keyword, prototype]
@@ -323,10 +322,7 @@ fn integer_limit_like(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match prototype {
-        Value::Int(value) => Ok(Value::Int(limit_scalar(
-            integer_dtype(value.class_name()).expect("IntValue has integer dtype"),
-            kind,
-        ))),
+        Value::Int(value) => Ok(Value::Int(limit_scalar(value.numeric_dtype(), kind))),
         Value::Tensor(tensor) => {
             let dtype = tensor.numeric_dtype();
             if matches!(dtype, NumericDType::F32 | NumericDType::F64) {
@@ -424,20 +420,6 @@ fn text_value(value: &Value) -> Option<String> {
         Value::String(text) => Some(text.clone()),
         Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
         Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
-        _ => None,
-    }
-}
-
-fn integer_dtype(class: &str) -> Option<NumericDType> {
-    match class {
-        "int8" => Some(NumericDType::I8),
-        "int16" => Some(NumericDType::I16),
-        "int32" => Some(NumericDType::I32),
-        "int64" => Some(NumericDType::I64),
-        "uint8" => Some(NumericDType::U8),
-        "uint16" => Some(NumericDType::U16),
-        "uint32" => Some(NumericDType::U32),
-        "uint64" => Some(NumericDType::U64),
         _ => None,
     }
 }

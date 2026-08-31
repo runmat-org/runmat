@@ -554,10 +554,10 @@ impl KronIntegerOperand<'_> {
         }
     }
 
-    fn class_name(&self) -> &'static str {
+    fn numeric_dtype(&self) -> NumericDType {
         match self {
-            Self::Scalar(value) => value.class_name(),
-            Self::Array(storage, _) => storage.class_name(),
+            Self::Scalar(value) => value.numeric_dtype(),
+            Self::Array(storage, _) => storage.numeric_dtype(),
         }
     }
 
@@ -645,7 +645,7 @@ fn try_integer_kron(left: &Value, right: &Value) -> crate::BuiltinResult<Option<
         .expect("integer presence was checked");
 
     if let (Some(left_integer), Some(right_integer)) = (&left_integer, &right_integer) {
-        if left_integer.class_name() != right_integer.class_name() {
+        if left_integer.numeric_dtype() != right_integer.numeric_dtype() {
             return Err(kron_error_with_message(
                 "kron: integer operands must have the same integer class",
                 &KRON_ERROR_UNSUPPORTED_INPUT,

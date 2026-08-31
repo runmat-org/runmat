@@ -470,7 +470,7 @@ fn ismember_numeric_tensors(
     let a_dtype = a.numeric_dtype();
     let b_dtype = b.numeric_dtype();
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
-        if a_storage.class_name() == b_storage.class_name() {
+        if a_storage.numeric_dtype() == b_storage.numeric_dtype() {
             return if opts.rows {
                 ismember_integer_rows(&a, &b)
             } else {

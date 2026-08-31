@@ -2348,12 +2348,13 @@ mod tests {
     fn all_integer_classes_and_logical_coefficients_solve_only_in_runmat_mode() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         for storage in all_integer_coefficient_storages() {
+            let dtype = storage.numeric_dtype();
             let class = storage.class_name();
             let d = call_constructor(vec![typed_int_tensor(storage, vec![2, 2])])
                 .unwrap_or_else(|error| panic!("{class} construction failed: {error}"));
             let stored = object_to_spec(&d).expect("stored decomposition").matrix;
             assert!(
-                matches!(stored, Value::Tensor(ref tensor) if tensor.integer_storage().is_some_and(|storage| storage.class_name() == class)),
+                matches!(stored, Value::Tensor(ref tensor) if tensor.integer_storage().is_some_and(|storage| storage.numeric_dtype() == dtype)),
                 "{class} must remain exact before solve"
             );
             let result = call_mldivide(d, tensor(&[8.0, 12.0], 2, 1))

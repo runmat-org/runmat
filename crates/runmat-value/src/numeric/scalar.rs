@@ -106,15 +106,19 @@ impl IntValue {
         }
     }
     pub fn class_name(&self) -> &'static str {
+        self.numeric_dtype().class_name()
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
         match self {
-            IntValue::I8(_) => "int8",
-            IntValue::I16(_) => "int16",
-            IntValue::I32(_) => "int32",
-            IntValue::I64(_) => "int64",
-            IntValue::U8(_) => "uint8",
-            IntValue::U16(_) => "uint16",
-            IntValue::U32(_) => "uint32",
-            IntValue::U64(_) => "uint64",
+            IntValue::I8(_) => NumericDType::I8,
+            IntValue::I16(_) => NumericDType::I16,
+            IntValue::I32(_) => NumericDType::I32,
+            IntValue::I64(_) => NumericDType::I64,
+            IntValue::U8(_) => NumericDType::U8,
+            IntValue::U16(_) => NumericDType::U16,
+            IntValue::U32(_) => NumericDType::U32,
+            IntValue::U64(_) => NumericDType::U64,
         }
     }
 

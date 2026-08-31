@@ -10,8 +10,9 @@ use runmat_mir::{
     MirTerminatorKind,
 };
 use runmat_types::{
-    DimensionFact, ExecutionFact, NumericClass, NumericDomain, NumericFact, ProgramFunctionId,
-    ProgramPointId, RegionValueId, ShapeFact, ValueFact, ValueKindFact,
+    CertaintyFact, DimensionFact, DynamicReason, ExecutionFact, NumericClass, NumericDomain,
+    NumericFact, ProgramFunctionId, ProgramPointId, RegionValueId, ShapeFact, ValueFact,
+    ValueKindFact,
 };
 use std::collections::HashMap;
 
@@ -1703,6 +1704,58 @@ fn analysis_store_preserves_typed_expm1_identity_class_domain_and_shape() {
         ShapeFact::Shaped {
             dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
         }
+    );
+}
+
+#[test]
+fn analysis_store_preserves_typed_log1p_identity_and_literal_complex_domain() {
+    let (body, store) = analyze_single_body("function y = f(); y = log1p([-2, 0, 1]); end");
+    let builtin = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            } => match &call.callee {
+                MirCallee::Static(CallableIdentity::Builtin(id)) if id.0 == "log1p" => Some(id),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("statically resolved log1p builtin");
+    assert_eq!(builtin, &runmat_types::BuiltinId("log1p".into()));
+    let output = output_fact(&body, &store);
+    assert_eq!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        })
+    );
+    assert_eq!(
+        output.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
+fn analysis_store_keeps_log1p_shape_but_not_a_false_domain_proof() {
+    let (body, store) = analyze_single_body("function y = f(); y = log1p(single([0, 1, 2])); end");
+    let output = output_fact(&body, &store);
+    assert_eq!(output.kind, ValueKindFact::Unknown);
+    assert_eq!(
+        output.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+        }
+    );
+    assert_eq!(
+        output.certainty,
+        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
     );
 }
 

@@ -117,7 +117,7 @@ pub(crate) fn elementwise_value_extrema(
     let right_integer = integer_storage_and_shape(right);
     match (left_integer, right_integer) {
         (Some((left_storage, left_shape)), Some((right_storage, right_shape))) => {
-            if left_storage.class_name() != right_storage.class_name() {
+            if left_storage.numeric_dtype() != right_storage.numeric_dtype() {
                 return Ok(None);
             }
             elementwise_extrema(

@@ -1,20 +1,8 @@
 use runmat_types::{
     standard, BuiltinId, CallableIdentity, ClassIdentity, ClassKind, ExternalClassDeclaration,
-    ExternalMethodDeclaration, MemberAccess, MethodAttributes, MethodName, QualifiedName,
-    StaticClassIdentity, StaticMethodName, SymbolName,
+    ExternalMethodDeclaration, MemberAccess, MethodAttributes, QualifiedName, StaticClassIdentity,
+    StaticMethodName, SymbolName,
 };
-
-const GPU_ARRAY_METHODS: &[StaticMethodName] = &[
-    StaticMethodName::new("arrayfun"),
-    StaticMethodName::new("existsOnGPU"),
-    StaticMethodName::new("gather"),
-    StaticMethodName::new("isgpuarray"),
-    StaticMethodName::new("isUnderlyingType"),
-    StaticMethodName::new("ndims"),
-    StaticMethodName::new("pagefun"),
-    StaticMethodName::new("size"),
-    StaticMethodName::new("underlyingType"),
-];
 
 /// Return immutable standard-library class metadata used during composition.
 /// Mutable runtime registrations and static property values are intentionally
@@ -28,20 +16,23 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
             is_sealed: false,
             is_abstract: false,
             properties: Vec::new(),
-            methods: GPU_ARRAY_METHODS
-                .iter()
-                .map(|method| ExternalMethodDeclaration {
-                    name: method.owned(),
-                    attributes: MethodAttributes::default(),
-                    is_static: false,
-                    callable: CallableIdentity::ExternalName(qualified(&format!(
-                        "{}.{}",
-                        standard::GPU_ARRAY,
-                        method.display_name()
-                    ))),
-                    implicit_class_argument: None,
-                })
-                .collect(),
+            methods: vec![
+                public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("arrayfun")),
+                public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("existsOnGPU")),
+                public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("gather")),
+                public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("isgpuarray")),
+                public_instance_method(
+                    standard::GPU_ARRAY,
+                    StaticMethodName::new("isUnderlyingType"),
+                ),
+                public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("ndims")),
+                public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("pagefun")),
+                public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("size")),
+                public_instance_method(
+                    standard::GPU_ARRAY,
+                    StaticMethodName::new("underlyingType"),
+                ),
+            ],
         });
     }
     let primitives = [
@@ -69,7 +60,7 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
             is_abstract: false,
             properties: Vec::new(),
             methods: vec![ExternalMethodDeclaration {
-                name: MethodName("zeros".into()),
+                name: StaticMethodName::new("zeros").owned(),
                 attributes: MethodAttributes {
                     access: MemberAccess::Public,
                     ..MethodAttributes::default()
@@ -93,15 +84,10 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
         return None;
     };
     let methods = if identity.is(standard::METADATA_DYNAMIC_PROPERTY) {
-        vec![ExternalMethodDeclaration {
-            name: MethodName("delete".into()),
-            attributes: MethodAttributes::default(),
-            is_static: false,
-            callable: CallableIdentity::ExternalName(qualified(
-                "matlab.metadata.DynamicProperty.delete",
-            )),
-            implicit_class_argument: None,
-        }]
+        vec![public_instance_method(
+            standard::METADATA_DYNAMIC_PROPERTY,
+            StaticMethodName::new("delete"),
+        )]
     } else {
         Vec::new()
     };
@@ -136,16 +122,23 @@ pub fn standard_class_is_subclass(
     false
 }
 
-fn qualified(name: &str) -> QualifiedName {
-    QualifiedName(
-        name.split('.')
-            .map(|segment| SymbolName(segment.to_owned()))
-            .collect(),
-    )
-}
-
 fn qualified_static(name: StaticClassIdentity) -> QualifiedName {
     name.owned().qualified_name()
+}
+
+fn public_instance_method(
+    owner: StaticClassIdentity,
+    name: StaticMethodName,
+) -> ExternalMethodDeclaration {
+    let mut callable = owner.owned().qualified_name();
+    callable.0.push(SymbolName(name.display_name().to_owned()));
+    ExternalMethodDeclaration {
+        name: name.owned(),
+        attributes: MethodAttributes::default(),
+        is_static: false,
+        callable: CallableIdentity::ExternalName(callable),
+        implicit_class_argument: None,
+    }
 }
 
 #[cfg(test)]
@@ -164,5 +157,21 @@ mod tests {
             &standard::DOUBLE.owned(),
             &standard::HANDLE.owned()
         ));
+    }
+
+    #[test]
+    fn gpu_array_methods_carry_complete_typed_declarations() {
+        let declaration = standard_class_declaration(&standard::GPU_ARRAY.owned()).unwrap();
+        assert_eq!(declaration.methods.len(), 9);
+        for method in declaration.methods {
+            let CallableIdentity::ExternalName(callable) = method.callable else {
+                panic!("gpuArray method must carry a qualified callable identity");
+            };
+            let mut expected = standard::GPU_ARRAY.owned().qualified_name();
+            expected.0.push(SymbolName(method.name.0.clone()));
+            assert_eq!(callable, expected);
+            assert_eq!(method.attributes.access, MemberAccess::Public);
+            assert!(!method.is_static);
+        }
     }
 }

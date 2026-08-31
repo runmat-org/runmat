@@ -1,9 +1,9 @@
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    AliasFact, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact, MutationFact,
-    NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact, ValueFact, ValueKindFact,
-    ViewFact,
+    AliasFact, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact, LiteralValue,
+    MutationFact, NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact, ValueFact,
+    ValueKindFact, ViewFact,
 };
 
 pub(super) fn infer_exp(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -12,6 +12,158 @@ pub(super) fn infer_exp(request: &CallRequest, entry: &BuiltinCatalogEntry) -> C
 
 pub(super) fn infer_expm1(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_exponential(request, entry, ExponentialKind::Expm1)
+}
+
+pub(super) fn infer_log1p(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let mut diagnostics = Vec::new();
+    let Some(input) = request.arguments.first() else {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-LOG1P-ARITY",
+            "log1p requires exactly one input",
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+    if request.arguments.len() > 1 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-LOG1P-ARITY",
+            "log1p accepts exactly one input",
+            1,
+        ));
+    }
+    if matches!(input.storage, StorageFact::Sparse) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-LOG1P-SPARSE",
+            "log1p does not currently accept sparse input",
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    }
+
+    let mut output = input.clone();
+    let literal_domain = request
+        .literals
+        .literal_args
+        .first()
+        .and_then(log1p_literal_domain);
+    let mut changes_class = false;
+    match &input.kind {
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Complex,
+        }) if !matches!(class, NumericClass::Double | NumericClass::Single) => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-LOG1P-COMPLEX-INTEGER",
+                "log1p does not accept complex fixed-width integer input",
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Complex,
+        }) => {
+            output.kind = numeric_kind(*class, NumericDomain::Complex);
+            materialize_output(&mut output);
+        }
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Real,
+        }) => {
+            let output_class = if matches!(class, NumericClass::Double | NumericClass::Single) {
+                *class
+            } else {
+                changes_class = true;
+                NumericClass::Double
+            };
+            let domain = literal_domain.or_else(|| {
+                matches!(
+                    class,
+                    NumericClass::UInt8
+                        | NumericClass::UInt16
+                        | NumericClass::UInt32
+                        | NumericClass::UInt64
+                )
+                .then_some(NumericDomain::Real)
+            });
+            if let Some(domain) = domain {
+                output.kind = numeric_kind(output_class, domain);
+                materialize_output(&mut output);
+            } else {
+                preserve_shape_on_dynamic_input(&mut output);
+            }
+        }
+        ValueKindFact::Logical | ValueKindFact::Character => {
+            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
+            changes_class = true;
+            materialize_output(&mut output);
+        }
+        ValueKindFact::Object(_) | ValueKindFact::Unknown => {
+            preserve_shape_on_dynamic_input(&mut output);
+        }
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-LOG1P-INPUT",
+                "log1p requires numeric, logical, or character input",
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+    }
+    if changes_class && matches!(output.residency, ResidencyFact::Device { .. }) {
+        output.residency = ResidencyFact::Unknown;
+    }
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+fn log1p_literal_domain(literal: &LiteralValue) -> Option<NumericDomain> {
+    match literal {
+        LiteralValue::Number(value) => Some(log1p_real_domain(*value)),
+        LiteralValue::Real { text, .. } | LiteralValue::Integer { text, .. } => {
+            text.parse().ok().map(log1p_real_domain)
+        }
+        LiteralValue::Complex { .. } => Some(NumericDomain::Complex),
+        LiteralValue::Bool(_) | LiteralValue::Character(_) | LiteralValue::Empty => {
+            Some(NumericDomain::Real)
+        }
+        LiteralValue::Vector(values) => log1p_literal_sequence_domain(values.iter()),
+        LiteralValue::Matrix(rows) => log1p_literal_sequence_domain(rows.iter().flatten()),
+        LiteralValue::String(_)
+        | LiteralValue::Keyword(_)
+        | LiteralValue::Symbolic(_)
+        | LiteralValue::Unknown => None,
+    }
+}
+
+fn log1p_literal_sequence_domain<'a>(
+    values: impl Iterator<Item = &'a LiteralValue>,
+) -> Option<NumericDomain> {
+    let mut domain = NumericDomain::Real;
+    for value in values {
+        match log1p_literal_domain(value)? {
+            NumericDomain::Complex => domain = NumericDomain::Complex,
+            NumericDomain::Real => {}
+        }
+    }
+    Some(domain)
+}
+
+fn log1p_real_domain(value: f64) -> NumericDomain {
+    if value < -1.0 {
+        NumericDomain::Complex
+    } else {
+        NumericDomain::Real
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

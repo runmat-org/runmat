@@ -372,7 +372,7 @@ fn toeplitz_typed_integer(
     let (InputVector::TypedInteger(c), InputVector::TypedInteger(r)) = (c, r) else {
         unreachable!("typed integer branch requires typed integer vectors");
     };
-    if c.class_name() != r.class_name() {
+    if c.numeric_dtype() != r.numeric_dtype() {
         return Err(error_with_detail(
             &ERROR_INVALID_INPUT,
             "integer inputs must use one common native integer class",
@@ -413,7 +413,7 @@ fn toeplitz_typed_complex(
             "typed complex integer inputs must use the same integer class",
         ));
     };
-    if c.class_name() != r.class_name() {
+    if c.numeric_dtype() != r.numeric_dtype() {
         return Err(error_with_detail(
             &ERROR_INVALID_INPUT,
             "typed complex integer inputs must use the same integer class",

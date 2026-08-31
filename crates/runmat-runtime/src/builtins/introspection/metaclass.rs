@@ -69,7 +69,14 @@ const METACLASS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &METACLASS_OUTPUT,
 }];
 
-const METACLASS_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+const METACLASS_ERROR_INVALID_CLASS_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.METACLASS.INVALID_CLASS_NAME",
+    identifier: Some("RunMat:InvalidClassName"),
+    when: "The runtime class name cannot be represented as a canonical class identity.",
+    message: "metaclass: invalid class name",
+};
+
+const METACLASS_ERRORS: [BuiltinErrorDescriptor; 1] = [METACLASS_ERROR_INVALID_CLASS_NAME];
 
 pub const METACLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &METACLASS_SIGNATURES,
@@ -115,9 +122,14 @@ pub const METACLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1
 fn metaclass_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let class_name = class_name_for_value(&value);
     let identity = runmat_types::ClassIdentity::new(class_name).map_err(|error| {
-        crate::build_runtime_error(format!("metaclass: {error}"))
-            .with_identifier("RunMat:InvalidClassName")
-            .build()
+        let mut builder = crate::build_runtime_error(format!(
+            "{}: {error}",
+            METACLASS_ERROR_INVALID_CLASS_NAME.message
+        ));
+        if let Some(identifier) = METACLASS_ERROR_INVALID_CLASS_NAME.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
     })?;
     Ok(Value::ClassRef(identity))
 }

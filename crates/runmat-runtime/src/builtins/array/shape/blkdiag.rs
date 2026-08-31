@@ -431,7 +431,7 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
         };
 
         if let Some(existing) = prototype.as_ref() {
-            if existing.class_name() != storage.class_name() {
+            if existing.numeric_dtype() != storage.numeric_dtype() {
                 return Some(Err(error_with_detail(
                     &ERROR_INVALID_INPUT,
                     "blkdiag: typed sparse integer blocks require every input to use the same integer class",
@@ -634,7 +634,7 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
             )));
         };
         if let Some(existing) = prototype {
-            if existing.class_name() != storage.class_name() {
+            if existing.numeric_dtype() != storage.numeric_dtype() {
                 return Some(Err(error_with_detail(
                     &ERROR_INVALID_INPUT,
                     "typed complex integer blkdiag inputs must all use the same integer class",

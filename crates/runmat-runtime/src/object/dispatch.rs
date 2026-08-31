@@ -102,32 +102,8 @@ fn method_function_identity(
     )
 }
 
-fn is_operator_overload_name(name: &str) -> bool {
-    const OVERLOADS: &[runmat_types::StaticMethodName] = &[
-        runmat_types::StaticMethodName::new("plus"),
-        runmat_types::StaticMethodName::new("minus"),
-        runmat_types::StaticMethodName::new("times"),
-        runmat_types::StaticMethodName::new("mtimes"),
-        runmat_types::StaticMethodName::new("rdivide"),
-        runmat_types::StaticMethodName::new("mrdivide"),
-        runmat_types::StaticMethodName::new("ldivide"),
-        runmat_types::StaticMethodName::new("mldivide"),
-        runmat_types::StaticMethodName::new("power"),
-        runmat_types::StaticMethodName::new("mpower"),
-        runmat_types::StaticMethodName::new("uminus"),
-        runmat_types::StaticMethodName::new("uplus"),
-        runmat_types::StaticMethodName::new("lt"),
-        runmat_types::StaticMethodName::new("le"),
-        runmat_types::StaticMethodName::new("gt"),
-        runmat_types::StaticMethodName::new("ge"),
-        runmat_types::StaticMethodName::new("eq"),
-        runmat_types::StaticMethodName::new("ne"),
-        runmat_types::StaticMethodName::new("and"),
-        runmat_types::StaticMethodName::new("or"),
-        runmat_types::StaticMethodName::new("xor"),
-        runmat_types::StaticMethodName::new("not"),
-    ];
-    OVERLOADS.iter().any(|method| method.matches_text(name))
+fn is_operator_overload_method(name: &runmat_types::MethodName) -> bool {
+    runmat_types::OperatorOverloadMethod::from_name(name).is_some()
 }
 
 fn is_receiver_validation_error(err: &RuntimeError) -> bool {
@@ -226,7 +202,7 @@ async fn call_member_index_on_object_like(
     // Prevent recursive re-entry for operator overloading (e.g. builtin `plus` calling back
     // into object dispatch). If class-qualified lookup fails, surface the miss to arithmetic
     // fallback instead of resolving unqualified operator names at runtime.
-    if is_operator_overload_name(&name) {
+    if is_operator_overload_method(&method_name) {
         return call_identity_with_policy(
             qualified_identity,
             method_args,
@@ -325,7 +301,10 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
         .await
         {
             Ok(v) => Ok(v),
-            Err(err) if is_receiver_validation_error(&err) && is_operator_overload_name(&name) => {
+            Err(err)
+                if is_receiver_validation_error(&err)
+                    && is_operator_overload_method(&method_name) =>
+            {
                 call_identity_with_policy(
                     identity,
                     vec![rhs.clone(), lhs.clone()],

@@ -52,6 +52,7 @@ pub enum MathInferenceRule {
     PhaseAngle,
     Exp,
     Expm1,
+    Log1p,
     NumericConversion(runmat_types::NumericClass),
     NumericConversionWithLike(runmat_types::NumericClass),
     NumericComponent(NumericComponentRule),
