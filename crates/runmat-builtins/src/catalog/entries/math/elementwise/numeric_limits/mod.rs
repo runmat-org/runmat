@@ -1,3 +1,9 @@
+mod documentation;
+
+use self::documentation::{
+    FLINTMAX_DOCUMENTATION, INTMAX_DOCUMENTATION, INTMIN_DOCUMENTATION, REALMAX_DOCUMENTATION,
+    REALMIN_DOCUMENTATION,
+};
 use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,
     BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
@@ -155,8 +161,7 @@ const MAY_THROW: [EffectKind; 1] = [EffectKind::MayThrow];
 
 const fn entry(
     name: &'static str,
-    summary: &'static str,
-    keywords: &'static [&'static str],
+    documentation: BuiltinDocumentation,
     descriptor: &'static BuiltinDescriptor,
     rule: NumericLimitRule,
     bindings: &'static [BuiltinBindingDeclaration],
@@ -165,15 +170,7 @@ const fn entry(
     BuiltinCatalogEntry {
         identity: BuiltinCatalogIdentity { name },
         category: "math/elementwise",
-        documentation: BuiltinDocumentation {
-            summary,
-            keywords,
-            related: &["intmin", "intmax", "realmin", "realmax", "flintmax", "eps"],
-            introduced: None,
-            status: None,
-            examples: &[],
-            ..BuiltinDocumentation::EMPTY
-        },
+        documentation,
         descriptor,
         contract: BuiltinContractDeclaration {
             maturity: BuiltinContractMaturity::Complete,
@@ -210,8 +207,7 @@ const fn entry(
 
 pub const INTMIN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "intmin",
-    "Return the smallest value of an integer class.",
-    &["intmin", "integer", "limits", "like"],
+    INTMIN_DOCUMENTATION,
     &INTMIN_DESCRIPTOR,
     NumericLimitRule::Integer(IntegerLimitKind::Minimum),
     &INTMIN_BINDINGS,
@@ -219,8 +215,7 @@ pub const INTMIN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
 );
 pub const INTMAX_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "intmax",
-    "Return the largest value of an integer class.",
-    &["intmax", "integer", "limits", "like"],
+    INTMAX_DOCUMENTATION,
     &INTMAX_DESCRIPTOR,
     NumericLimitRule::Integer(IntegerLimitKind::Maximum),
     &INTMAX_BINDINGS,
@@ -228,8 +223,7 @@ pub const INTMAX_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
 );
 pub const REALMIN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "realmin",
-    "Return the smallest positive normalized floating-point value.",
-    &["realmin", "floating point", "limits", "like"],
+    REALMIN_DOCUMENTATION,
     &REALMIN_DESCRIPTOR,
     NumericLimitRule::Floating(FloatingLimitKind::SmallestNormal),
     &REALMIN_BINDINGS,
@@ -237,8 +231,7 @@ pub const REALMIN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
 );
 pub const REALMAX_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "realmax",
-    "Return the largest finite floating-point value.",
-    &["realmax", "floating point", "limits", "like"],
+    REALMAX_DOCUMENTATION,
     &REALMAX_DESCRIPTOR,
     NumericLimitRule::Floating(FloatingLimitKind::LargestFinite),
     &REALMAX_BINDINGS,
@@ -246,8 +239,7 @@ pub const REALMAX_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
 );
 pub const FLINTMAX_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "flintmax",
-    "Return the largest consecutive integer in a floating-point class.",
-    &["flintmax", "floating point", "integer precision", "like"],
+    FLINTMAX_DOCUMENTATION,
     &FLINTMAX_DESCRIPTOR,
     NumericLimitRule::Floating(FloatingLimitKind::LargestConsecutiveInteger),
     &FLINTMAX_BINDINGS,
