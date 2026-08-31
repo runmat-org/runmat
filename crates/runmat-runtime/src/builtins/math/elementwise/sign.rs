@@ -138,7 +138,7 @@ async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     "provider unary_sign returned malformed output",
                 ));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error, "unary_sign") => {}
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {
                 return Err(sign_error_with_detail(
                     &SIGN_ERROR_INTERNAL,

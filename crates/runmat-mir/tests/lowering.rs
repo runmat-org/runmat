@@ -1743,6 +1743,46 @@ fn analysis_store_preserves_typed_log1p_identity_and_literal_complex_domain() {
 }
 
 #[test]
+fn analysis_store_preserves_logarithm_identities_classes_shapes_and_literal_domains() {
+    for name in ["log", "log10"] {
+        let source = format!("function y = f(); y = {name}([-1, 1]); end");
+        let (body, store) = analyze_single_body(&source);
+        let builtin = body
+            .blocks
+            .iter()
+            .flat_map(|block| block.statements.iter())
+            .find_map(|statement| match &statement.kind {
+                MirStmtKind::Assign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } => match &call.callee {
+                    MirCallee::Static(CallableIdentity::Builtin(id)) if id.0 == name => Some(id),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("statically resolved {name} builtin"));
+        assert_eq!(builtin, &runmat_types::BuiltinId(name.into()));
+        let output = output_fact(&body, &store);
+        assert_eq!(
+            output.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Complex,
+            }),
+            "{name}"
+        );
+        assert_eq!(
+            output.shape,
+            ShapeFact::Shaped {
+                dims: vec![DimensionFact::Known(1), DimensionFact::Known(2)]
+            },
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn analysis_store_keeps_log1p_shape_but_not_a_false_domain_proof() {
     let (body, store) = analyze_single_body("function y = f(); y = log1p(single([0, 1, 2])); end");
     let output = output_fact(&body, &store);

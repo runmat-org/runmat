@@ -198,7 +198,7 @@ async fn expm1_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 "provider unary_expm1 returned malformed output",
             ));
         }
-        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err, "unary_expm1") => {}
+        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => {}
         Err(err) => {
             return Err(expm1_error_with_detail(
                 &EXPM1_ERROR_INTERNAL,

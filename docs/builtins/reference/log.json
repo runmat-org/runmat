@@ -37,6 +37,7 @@
     "In RunMat extension mode, logical values convert to doubles (`true → 1.0`, `false → 0.0`) before the logarithm is taken; compatibility mode rejects this extension.",
     "In RunMat extension mode, character arrays are interpreted as their numeric code points and return dense double tensors; compatibility mode rejects this extension.",
     "Integer input is a RunMat-only extension. All eight integer classes are accepted only when every value is exactly representable in binary64, and the result is double or complex double.",
+    "Table and timetable inputs apply `log` independently to each supported variable while preserving the container and variable names.",
     "Negative real values produce complex results: `log([-1 1])` returns `[0 + iπ, 0]`.",
     "Complex inputs follow MATLAB's definition: `log(a + bi) = log(|a + bi|) + i·atan2(b, a)`.",
     "`log(0)` returns `-Inf`, matching MATLAB's handling of the logarithm singularity at zero."

@@ -1,5 +1,5 @@
 use super::{argument_error, finish_fixed, numeric_kind};
-use crate::BuiltinCatalogEntry;
+use crate::{BuiltinCatalogEntry, LogarithmBase};
 use runmat_types::{
     AliasFact, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact, LiteralValue,
     MutationFact, NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact, ValueFact,
@@ -124,6 +124,190 @@ pub(super) fn infer_log1p(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
         output.residency = ResidencyFact::Unknown;
     }
     finish_fixed(entry, request, output, diagnostics)
+}
+
+pub(super) fn infer_logarithm(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    base: LogarithmBase,
+) -> CallInference {
+    let name = match base {
+        LogarithmBase::Natural => "log",
+        LogarithmBase::Common => "log10",
+    };
+    let mut diagnostics = Vec::new();
+    let Some(input) = request.arguments.first() else {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-LOGARITHM-ARITY",
+            format!("{name} requires exactly one input"),
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+    if request.arguments.len() > 1 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-LOGARITHM-ARITY",
+            format!("{name} accepts exactly one input"),
+            1,
+        ));
+    }
+    if matches!(input.storage, StorageFact::Sparse) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-LOGARITHM-SPARSE",
+            format!("{name} does not currently accept sparse input"),
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    }
+
+    let mut output = input.clone();
+    let literal_domain = request
+        .literals
+        .literal_args
+        .first()
+        .and_then(logarithm_literal_domain);
+    let mut changes_class = false;
+    match &input.kind {
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Complex,
+        }) if !matches!(class, NumericClass::Double | NumericClass::Single) => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-LOGARITHM-COMPLEX-INTEGER",
+                format!("{name} does not accept complex fixed-width integer input"),
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Complex,
+        }) => {
+            output.kind = numeric_kind(*class, NumericDomain::Complex);
+            materialize_output(&mut output);
+        }
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Real,
+        }) => {
+            let output_class = if matches!(class, NumericClass::Double | NumericClass::Single) {
+                *class
+            } else {
+                changes_class = true;
+                NumericClass::Double
+            };
+            let domain = literal_domain.or_else(|| {
+                matches!(
+                    class,
+                    NumericClass::UInt8
+                        | NumericClass::UInt16
+                        | NumericClass::UInt32
+                        | NumericClass::UInt64
+                )
+                .then_some(NumericDomain::Real)
+            });
+            if let Some(domain) = domain {
+                output.kind = numeric_kind(output_class, domain);
+                materialize_output(&mut output);
+            } else {
+                preserve_shape_on_dynamic_input(&mut output);
+            }
+        }
+        ValueKindFact::Logical | ValueKindFact::Character => {
+            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
+            changes_class = true;
+            materialize_output(&mut output);
+        }
+        ValueKindFact::Symbolic if matches!(base, LogarithmBase::Natural) => {
+            materialize_output_preserving_storage(&mut output);
+        }
+        ValueKindFact::Object(object)
+            if object.runtime_class.as_ref().is_some_and(|class| {
+                class.is(runmat_types::standard::TABLE)
+                    || class.is(runmat_types::standard::TIMETABLE)
+            }) =>
+        {
+            let ValueKindFact::Object(object) = &mut output.kind else {
+                unreachable!("tabular object branch preserves object fact")
+            };
+            object.properties.clear();
+            object.properties_complete = false;
+            output.alias = AliasFact::Unique;
+            output.mutation = MutationFact::ValueSemantics;
+        }
+        ValueKindFact::Object(_) | ValueKindFact::Unknown => {
+            preserve_shape_on_dynamic_input(&mut output);
+        }
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-LOGARITHM-INPUT",
+                format!(
+                    "{name} requires numeric, logical, character, or supported tabular input{}",
+                    if matches!(base, LogarithmBase::Natural) {
+                        ", or a symbolic expression"
+                    } else {
+                        ""
+                    }
+                ),
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+    }
+    if changes_class && matches!(output.residency, ResidencyFact::Device { .. }) {
+        output.residency = ResidencyFact::Unknown;
+    }
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+fn logarithm_literal_domain(literal: &LiteralValue) -> Option<NumericDomain> {
+    match literal {
+        LiteralValue::Number(value) => Some(logarithm_real_domain(*value)),
+        LiteralValue::Real { text, .. } | LiteralValue::Integer { text, .. } => {
+            text.parse().ok().map(logarithm_real_domain)
+        }
+        LiteralValue::Complex { .. } => Some(NumericDomain::Complex),
+        LiteralValue::Bool(_) | LiteralValue::Character(_) | LiteralValue::Empty => {
+            Some(NumericDomain::Real)
+        }
+        LiteralValue::Vector(values) => logarithm_literal_sequence_domain(values.iter()),
+        LiteralValue::Matrix(rows) => logarithm_literal_sequence_domain(rows.iter().flatten()),
+        LiteralValue::String(_)
+        | LiteralValue::Keyword(_)
+        | LiteralValue::Symbolic(_)
+        | LiteralValue::Unknown => None,
+    }
+}
+
+fn logarithm_literal_sequence_domain<'a>(
+    values: impl Iterator<Item = &'a LiteralValue>,
+) -> Option<NumericDomain> {
+    let mut domain = NumericDomain::Real;
+    for value in values {
+        match logarithm_literal_domain(value)? {
+            NumericDomain::Complex => domain = NumericDomain::Complex,
+            NumericDomain::Real => {}
+        }
+    }
+    Some(domain)
+}
+
+fn logarithm_real_domain(value: f64) -> NumericDomain {
+    if value < 0.0 {
+        NumericDomain::Complex
+    } else {
+        NumericDomain::Real
+    }
 }
 
 fn log1p_literal_domain(literal: &LiteralValue) -> Option<NumericDomain> {

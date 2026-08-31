@@ -25,6 +25,7 @@ pub(crate) mod log;
 pub(crate) mod log10;
 pub(crate) mod log1p;
 pub(crate) mod log2;
+mod logarithm_common;
 pub(crate) mod minus;
 pub(crate) mod nextpow2;
 pub(crate) mod numeric_limits;

@@ -1532,8 +1532,31 @@ pub type AccelDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostTensorOwne
 pub type AccelIntegerDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostIntegerTensorOwned>;
 pub type AccelNumericDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostNumericTensorOwned>;
 
+#[derive(Debug)]
+pub struct UnsupportedProviderOperation {
+    detail: &'static str,
+}
+
+impl std::fmt::Display for UnsupportedProviderOperation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.detail)
+    }
+}
+
+impl std::error::Error for UnsupportedProviderOperation {}
+
+pub fn unsupported_provider_operation(detail: &'static str) -> anyhow::Error {
+    anyhow::Error::new(UnsupportedProviderOperation { detail })
+}
+
+pub fn is_unsupported_provider_operation(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<UnsupportedProviderOperation>()
+        .is_some()
+}
+
 fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, T> {
-    Box::pin(async move { Err(anyhow::anyhow!(message)) })
+    Box::pin(async move { Err(unsupported_provider_operation(message)) })
 }
 
 /// Device/provider interface that backends implement and register into the runtime layer
@@ -5443,5 +5466,15 @@ mod tests {
             !desc.clamp_zero,
             "explicit clamp_zero=false should preserve unclamped semantics"
         );
+    }
+
+    #[test]
+    fn unsupported_provider_operations_have_typed_identity() {
+        let unsupported = unsupported_provider_operation("test operation is unavailable");
+        let ordinary = anyhow::anyhow!("test operation is unavailable");
+
+        assert!(is_unsupported_provider_operation(&unsupported));
+        assert!(!is_unsupported_provider_operation(&ordinary));
+        assert_eq!(unsupported.to_string(), "test operation is unavailable");
     }
 }
