@@ -9,6 +9,7 @@ mod log2;
 mod logarithms;
 mod numeric_conversions;
 mod numeric_limits;
+mod roots;
 mod sign;
 mod support;
 
@@ -23,6 +24,7 @@ pub use log2::*;
 pub use logarithms::*;
 pub use numeric_conversions::*;
 pub use numeric_limits::*;
+pub use roots::*;
 pub use sign::*;
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
@@ -37,5 +39,6 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     logarithms::ENTRIES,
     numeric_conversions::ENTRIES,
     numeric_limits::ENTRIES,
+    roots::ENTRIES,
     sign::ENTRIES,
 ];

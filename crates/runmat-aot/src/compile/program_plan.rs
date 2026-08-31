@@ -296,7 +296,8 @@ mod tests {
         for name in [
             "abs", "angle", "conj", "double", "exp", "expm1", "imag", "int8", "int16", "int32",
             "flintmax", "int64", "intmax", "intmin", "log", "log10", "log1p", "log2", "real",
-            "realmax", "realmin", "sign", "single", "uint8", "uint16", "uint32", "uint64",
+            "realmax", "realmin", "realsqrt", "sign", "single", "sqrt", "uint8", "uint16",
+            "uint32", "uint64",
         ] {
             let bindings =
                 retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report(name))

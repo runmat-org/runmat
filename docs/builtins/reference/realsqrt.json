@@ -36,7 +36,7 @@
     "Only real single and double numeric inputs are accepted. Logical, character, and every integer class reject before numeric coercion or provider dispatch.",
     "Sparse inputs preserve sparsity: stored values are square-rooted and unstored zeros remain zero.",
     "Negative real values raise a domain error because the result would be complex.",
-    "Complex scalar and complex tensor inputs are rejected, even if their imaginary parts are zero.",
+    "Complex scalar, dense, sparse, and GPU inputs are rejected, even if their imaginary parts are zero.",
     "NaNs and positive infinities propagate according to IEEE real square-root arithmetic."
   ],
   "examples": [

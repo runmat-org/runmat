@@ -141081,7 +141081,7 @@
         {
           "code": "RM.REALSQRT.INTERNAL",
           "identifier": "RunMat:realsqrt:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
+          "when": "Internal tensor construction or provider interaction fails.",
           "message": "realsqrt: internal error"
         }
       ],
@@ -141094,7 +141094,7 @@
               "classes": [],
               "availability": "Rejected",
               "scalar_double": "NotApplicable",
-              "notes": "The public input classes are single and double; host, sparse, and resident integer values reject by class before domain evaluation or provider sqrt dispatch."
+              "notes": "Only real single and double inputs are accepted; integer values reject by class before domain evaluation or provider dispatch."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -141102,7 +141102,7 @@
           "overflow": "NotApplicable",
           "backend": "HostAndGpu",
           "overload": "ElementwiseShapePreserving",
-          "notes": "realsqrt has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers."
+          "notes": "realsqrt has no integer overload; the empty accepted-class set intentionally prevents generic numeric coercion from admitting integers."
         }
       ]
     },
@@ -157329,7 +157329,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric, logical, char, or complex input."
+              "description": "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -157338,7 +157338,7 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Elementwise square-root result."
+              "description": "Elementwise principal square root, promoted to complex for negative real input."
             }
           ]
         }
@@ -157347,13 +157347,13 @@
         {
           "code": "RM.SQRT.INVALID_INPUT",
           "identifier": "RunMat:sqrt:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
+          "when": "Input cannot be interpreted as supported numeric, logical, character, or complex data.",
           "message": "sqrt: invalid input"
         },
         {
           "code": "RM.SQRT.INTERNAL",
           "identifier": "RunMat:sqrt:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
+          "when": "Internal tensor construction or provider interaction fails.",
           "message": "sqrt: internal error"
         }
       ],
@@ -157383,7 +157383,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "NotApplicable",
-              "notes": "The compatibility target documents single and double input. RunMat mode admits real typed integers only when every authoritative value is exactly representable at the binary64 square-root boundary; typed complex integers remain unsupported."
+              "notes": "RunMat mode accepts real typed integers whose authoritative values are exactly representable at the binary64 square-root boundary; typed complex integers remain unsupported."
             }
           ],
           "computation_domain": "FloatingPoint",
@@ -157391,7 +157391,7 @@
           "overflow": "Error",
           "backend": "GatherFallback",
           "overload": "Multiple",
-          "notes": "The result is real double for nonnegative input and complex double when any value is negative. Compatibility admission and exactness validation precede provider access or gather."
+          "notes": "The result is real double for nonnegative input and complex double when any value is negative. Exactness validation precedes provider access or gather."
         }
       ]
     },

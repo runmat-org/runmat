@@ -55,6 +55,7 @@ pub enum MathInferenceRule {
     Log1p,
     Log2,
     Logarithm(LogarithmBase),
+    Root(RootKind),
     NumericLimit(NumericLimitRule),
     NumericConversion(runmat_types::NumericClass),
     NumericConversionWithLike(runmat_types::NumericClass),
@@ -66,6 +67,12 @@ pub enum MathInferenceRule {
 pub enum LogarithmBase {
     Natural,
     Common,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum RootKind {
+    Principal,
+    RealOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

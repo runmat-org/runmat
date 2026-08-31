@@ -1440,6 +1440,27 @@ fn analysis_store_carries_typed_integer_exp_through_the_catalog_boundary() {
 }
 
 #[test]
+fn analysis_store_carries_typed_integer_sqrt_through_the_catalog_boundary() {
+    let (body, store) =
+        analyze_single_body("function y = f(); x = uint16([1, 4, 9]); y = sqrt(x); end");
+    let output = output_fact(&body, &store);
+
+    assert_eq!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        output.shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
 fn analysis_store_preserves_every_typed_integer_conversion_identity_and_result_class() {
     for (name, class) in [
         ("int8", NumericClass::Int8),

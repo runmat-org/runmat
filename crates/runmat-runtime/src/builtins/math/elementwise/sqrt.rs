@@ -5,27 +5,22 @@
 //! utilises provider hooks when available and falls back to host computation whenever complex
 //! results are required or the provider lacks the dedicated kernel.
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
+#[cfg(test)]
+use runmat_builtins::SQRT_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SQRT_ERROR_INVALID_INPUT, SQRT_INTEGER_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::symbolic::symbolic_function;
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_value::SymbolicFunction;
 
@@ -53,91 +48,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sqrt",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: Some(FusionKernelTemplate {
-        scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("sqrt({input})"))
-        },
-    }),
+    elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Fusion planner emits WGSL sqrt calls; providers may replace them with fused elementwise kernels.",
+    notes: "Fusion is disabled because negative real inputs must promote to complex output instead of producing NaN.",
 };
 
 const BUILTIN_NAME: &str = "sqrt";
-
-const SQRT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Elementwise square-root result.",
-}];
-const SQRT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric, logical, char, or complex input.",
-}];
-const SQRT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = sqrt(X)",
-    inputs: &SQRT_INPUTS,
-    outputs: &SQRT_OUTPUT,
-}];
-const SQRT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQRT.INVALID_INPUT",
-    identifier: Some("RunMat:sqrt:InvalidInput"),
-    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
-    message: "sqrt: invalid input",
-};
-const SQRT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQRT.INTERNAL",
-    identifier: Some("RunMat:sqrt:Internal"),
-    when: "Internal tensor construction or provider interaction failed.",
-    message: "sqrt: internal error",
-};
-const SQRT_ERRORS: [BuiltinErrorDescriptor; 2] = [SQRT_ERROR_INVALID_INPUT, SQRT_ERROR_INTERNAL];
-pub const SQRT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SQRT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SQRT_ERRORS,
-};
-
-const SQRT_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sqrt-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sqrt with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SqrtIntegerInputExtension"),
-};
-
-pub const SQRT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SQRT_INTEGER_INPUT_EXTENSION];
-
-const SQRT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double input. RunMat mode admits real typed integers only when every authoritative value is exactly representable at the binary64 square-root boundary; typed complex integers remain unsupported.",
-    }];
-
-pub const SQRT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sqrt(integer_X)",
-        inputs: &SQRT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The result is real double for nonnegative input and complex double when any value is negative. Compatibility admission and exactness validation precede provider access or gather.",
-    }];
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
@@ -159,14 +76,7 @@ fn sqrt_error_with_detail(
 
 #[runtime_builtin(
     name = "sqrt",
-    category = "math/elementwise",
-    summary = "Compute principal square roots element-wise across array inputs.",
-    keywords = "sqrt,square root,elementwise,gpu,complex",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::elementwise::sqrt::SQRT_DESCRIPTOR),
-    extensions(crate::builtins::math::elementwise::sqrt::SQRT_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::elementwise::sqrt::SQRT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
 async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
@@ -202,6 +112,20 @@ async fn sqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             .await
             .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
         return sqrt_tensor_real(tensor);
+    }
+    if runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved
+    {
+        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await;
+        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        let gathered =
+            gathered.map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        let result = match gathered {
+            Value::ComplexTensor(tensor) => sqrt_complex_tensor(tensor)?,
+            other => sqrt_real(other)?,
+        };
+        return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle).await {
@@ -449,8 +373,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::{CharArray, IntValue, IntegerStorage, LogicalArray, Tensor};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor};
 
     fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sqrt_builtin(value))
@@ -470,33 +393,6 @@ pub(crate) mod tests {
     fn sqrt_string_rejected_with_stable_identifier() {
         let err = sqrt_builtin(Value::from("bad")).expect_err("expected input error");
         assert_eq!(err.identifier(), SQRT_ERROR_INVALID_INPUT.identifier);
-    }
-
-    #[test]
-    fn sqrt_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn sqrt_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -749,6 +645,27 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected complex tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn sqrt_complex_gpu_gathers_without_losing_class_or_components() {
+        test_support::with_test_provider(|provider| {
+            let tensor = ComplexTensor::from_f32(vec![(3.0, 4.0), (-4.0, 0.0)], vec![1, 2])
+                .expect("complex single tensor");
+            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).expect("upload");
+            let output = sqrt_builtin(Value::GpuTensor(handle)).expect("sqrt");
+            let gathered = block_on(gpu_helpers::gather_value_async(&output)).expect("gather");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected complex tensor");
+            };
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            let values = gathered
+                .as_f32_slice()
+                .expect("native complex single storage");
+            assert_eq!(<(f32, f32)>::from(values[0]), (2.0, 1.0));
+            assert_eq!(<(f32, f32)>::from(values[1]), (0.0, 2.0));
         });
     }
 
