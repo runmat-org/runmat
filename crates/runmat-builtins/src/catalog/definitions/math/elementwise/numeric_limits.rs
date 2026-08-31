@@ -172,6 +172,7 @@ const fn entry(
             introduced: None,
             status: None,
             examples: &[],
+            ..BuiltinDocumentation::EMPTY
         },
         descriptor,
         contract: BuiltinContractDeclaration {

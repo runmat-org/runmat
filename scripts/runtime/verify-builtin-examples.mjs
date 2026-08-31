@@ -2,17 +2,16 @@
 // @ts-check
 
 import { createServer } from "http";
-import { spawn } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import {
     existsSync,
     mkdirSync,
     readFileSync,
-    readdirSync,
     statSync,
     unlinkSync,
     writeFileSync
 } from "fs";
-import { basename, dirname, extname, join, resolve } from "path";
+import { dirname, extname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 /**
@@ -32,6 +31,9 @@ import { fileURLToPath } from "url";
  * @property {number} exampleIndex
  * @property {string} category
  * @property {boolean} isPlotExample
+ * @property {string} authority
+ * @property {string} harness
+ * @property {unknown} verification
  */
 
 /**
@@ -46,7 +48,6 @@ import { fileURLToPath } from "url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = findRepoRoot(scriptDir);
-const builtinsDir = join(repoRoot, "docs", "builtins", "reference");
 const outputDir = join(repoRoot, "scripts", "example-output-reports");
 const imageOutputDir = join(outputDir, "plot-example-images");
 const reportPath = join(outputDir, "example-output-report.html");
@@ -54,6 +55,12 @@ const markdownReportPath = join(outputDir, "example-output-report.md");
 const chromeWrapper = join(repoRoot, "scripts", "runtime", "chrome-headless.sh");
 const wasmModule = join(repoRoot, "bindings", "ts", "dist", "pkg-web", "runmat_wasm_web.js");
 const wasmBinary = join(repoRoot, "bindings", "ts", "dist", "pkg-web", "runmat_wasm_web_bg.wasm");
+const documents = readBuiltinDocuments();
+
+if (process.argv.includes("--check-inventory")) {
+    printInventory(documents);
+    process.exit(0);
+}
 
 if (!existsSync(wasmModule) || !existsSync(wasmBinary)) {
     console.error("Missing wasm artifacts. Build bindings/ts dist before running this script.");
@@ -62,7 +69,7 @@ if (!existsSync(wasmModule) || !existsSync(wasmBinary)) {
     process.exit(1);
 }
 
-const cases = collectCases(builtinsDir);
+const cases = collectCases(documents);
 if (cases.length === 0) {
     console.log("No examples found to run.");
     process.exit(0);
@@ -105,7 +112,7 @@ const rows = cases.map((testCase) => {
         normalizedWasm,
         imageRelPath,
         imageError,
-        matches: testCase.hasExpectedOutput ? normalizedExpected === normalizedWasm : !hasExecutionError
+        matches: matchesVerification(testCase, result, normalizedExpected, normalizedWasm, hasExecutionError, imageRelPath)
     };
 });
 
@@ -150,23 +157,59 @@ function findRepoRoot(startDir) {
 }
 
 /**
- * @param {string} dir
+ * @returns {BuiltinMetadata[]}
+ */
+function readBuiltinDocuments() {
+    const encoded = execFileSync(
+        "cargo",
+        ["run", "--quiet", "-p", "runmat-builtins", "--bin", "export_builtin_documentation", "--", "--transition"],
+        { cwd: repoRoot, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 }
+    );
+    const payload = JSON.parse(encoded);
+    if (payload.schema_version !== 1 || !Array.isArray(payload.builtins)) {
+        throw new Error("Unsupported builtin documentation export schema");
+    }
+    return payload.builtins;
+}
+
+/**
+ * @param {BuiltinMetadata[]} documents
+ */
+function printInventory(documents) {
+    const authorities = new Map();
+    const harnesses = new Map();
+    let examples = 0;
+    for (const document of documents) {
+        const authority = typeof document.authority === "string" ? document.authority : "unknown";
+        authorities.set(authority, (authorities.get(authority) ?? 0) + 1);
+        for (const example of Array.isArray(document.examples) ? document.examples : []) {
+            examples += 1;
+            const harness = typeof example.harness === "string" ? example.harness : "LegacyBrowser";
+            harnesses.set(harness, (harnesses.get(harness) ?? 0) + 1);
+        }
+    }
+    const render = (values) => [...values.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, count]) => `${key}=${count}`)
+        .join(", ");
+    console.log(`Builtin documentation inventory: documents=${documents.length}, examples=${examples}`);
+    console.log(`Authorities: ${render(authorities)}`);
+    console.log(`Harnesses: ${render(harnesses)}`);
+}
+
+/**
+ * @param {BuiltinMetadata[]} documents
  * @returns {ExampleCase[]}
  */
-function collectCases(dir) {
-    const entries = readdirSync(dir, { withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-        .map((entry) => entry.name)
-        .sort((a, b) => a.localeCompare(b));
+function collectCases(documents) {
     /** @type {ExampleCase[]} */
     const cases = [];
     let id = 1;
 
-    for (const file of entries) {
-        const filePath = join(dir, file);
-        const raw = readFileSync(filePath, "utf8");
-        /** @type {BuiltinMetadata} */
-        const parsed = JSON.parse(raw);
+    for (const parsed of documents) {
+        const builtinKey = String(parsed.key ?? parsed.title ?? "").toLowerCase();
+        const authority = typeof parsed.authority === "string" ? parsed.authority : "unknown";
+        const file = authority === "catalog" ? `${builtinKey} (catalog)` : `${builtinKey}.json`;
         const category = typeof parsed.category === "string" ? parsed.category : "";
         if (category.startsWith("io/net")) {
             continue;
@@ -177,34 +220,86 @@ function collectCases(dir) {
             if (!example || typeof example.input !== "string" || example.input.trim().length === 0) {
                 continue;
             }
+            const harness = typeof example.harness === "string" ? example.harness : "LegacyBrowser";
+            const verification = example.verification;
             const isPlotExample = is_plot_example(category);
             const hasExpectedOutput = typeof example.output === "string";
-            if (!hasExpectedOutput && !isPlotExample) {
+            if (!hasExpectedOutput && !isPlotExample && verification === undefined) {
                 continue;
             }
-            if (hasExpectedOutput && is_comment_only_output(example.output)) {
+            if (hasExpectedOutput && is_comment_only_output(example.output) && verification === undefined) {
                 continue;
             }
             const description = typeof example.description === "string" && example.description.trim().length > 0
                 ? example.description.trim()
-                : `${parsed.title ?? basename(file, ".json")} example ${i + 1}`;
+                : `${parsed.title ?? builtinKey} example ${i + 1}`;
+            const input = appendVerificationSource(example.input, verification);
             cases.push({
                 id: id++,
-                builtin: parsed.title ?? basename(file, ".json"),
+                builtin: parsed.title ?? builtinKey,
                 file,
                 description,
-                input: example.input,
+                input,
                 expectedOutput: hasExpectedOutput ? example.output : "",
                 hasExpectedOutput,
                 exampleIndex: i,
                 category,
-                isPlotExample
+                isPlotExample,
+                authority,
+                harness,
+                verification
             });
         }
     }
 
     const filtered = applyCaseFilter(cases);
     return applyCaseLimit(filtered);
+}
+
+/**
+ * @param {string} input
+ * @param {unknown} verification
+ */
+function appendVerificationSource(input, verification) {
+    if (!verification || typeof verification !== "object" || !("Assertions" in verification)) {
+        return input;
+    }
+    const assertions = verification.Assertions;
+    if (!assertions || typeof assertions !== "object" || typeof assertions.source !== "string") {
+        return input;
+    }
+    return `${input.trimEnd()}\n${assertions.source}`;
+}
+
+/**
+ * @param {ExampleCase} testCase
+ * @param {RunnerResult | undefined} result
+ * @param {string} normalizedExpected
+ * @param {string} normalizedActual
+ * @param {boolean} hasExecutionError
+ * @param {string} imagePath
+ */
+function matchesVerification(testCase, result, normalizedExpected, normalizedActual, hasExecutionError, imagePath) {
+    const verification = testCase.verification;
+    if (verification === "Succeeds") {
+        return !hasExecutionError;
+    }
+    if (verification && typeof verification === "object") {
+        if ("Assertions" in verification) {
+            return !hasExecutionError;
+        }
+        if ("ExpectedError" in verification) {
+            const expected = verification.ExpectedError;
+            const identifier = expected && typeof expected === "object" ? expected.identifier : "";
+            return typeof identifier === "string"
+                && identifier.length > 0
+                && Boolean(result?.errorText?.includes(identifier));
+        }
+        if ("Figure" in verification) {
+            return !hasExecutionError && Boolean(imagePath);
+        }
+    }
+    return testCase.hasExpectedOutput ? normalizedExpected === normalizedActual : !hasExecutionError;
 }
 
 /**

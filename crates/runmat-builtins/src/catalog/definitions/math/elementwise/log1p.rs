@@ -126,6 +126,7 @@ pub const LOG1P_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         introduced: None,
         status: None,
         examples: &[],
+        ..BuiltinDocumentation::EMPTY
     },
     descriptor: &LOG1P_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

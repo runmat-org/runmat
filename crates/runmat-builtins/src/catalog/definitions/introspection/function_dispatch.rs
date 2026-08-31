@@ -142,6 +142,7 @@ pub const FEVAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         introduced: None,
         status: None,
         examples: &[],
+        ..BuiltinDocumentation::EMPTY
     },
     descriptor: &FEVAL_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

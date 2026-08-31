@@ -85,6 +85,7 @@ pub const SIGN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         introduced: None,
         status: None,
         examples: &[],
+        ..BuiltinDocumentation::EMPTY
     },
     descriptor: &SIGN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

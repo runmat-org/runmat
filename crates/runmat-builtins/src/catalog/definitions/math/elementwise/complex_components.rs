@@ -103,6 +103,7 @@ macro_rules! define_component_projection {
                     introduced: None,
                     status: None,
                     examples: &[],
+                    ..BuiltinDocumentation::EMPTY
                 },
                 descriptor: &DESCRIPTOR,
                 contract: BuiltinContractDeclaration {
@@ -266,6 +267,7 @@ mod conj {
             introduced: None,
             status: None,
             examples: &[],
+            ..BuiltinDocumentation::EMPTY
         },
         descriptor: &DESCRIPTOR,
         contract: BuiltinContractDeclaration {

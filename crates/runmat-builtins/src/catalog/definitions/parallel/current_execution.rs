@@ -53,6 +53,7 @@ macro_rules! current_execution_entry {
                 introduced: None,
                 status: None,
                 examples: &[],
+                ..BuiltinDocumentation::EMPTY
             },
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {

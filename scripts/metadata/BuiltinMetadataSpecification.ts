@@ -25,9 +25,25 @@ export interface Tested {
 }
 
 export interface Example {
+  id?: string;
   description: string;
   input: string;
   output?: string;
+  harness?:
+    | "Portable"
+    | "Native"
+    | "Browser"
+    | "BrowserGraphics"
+    | "NativeFilesystem"
+    | "NativeLoopbackNetwork"
+    | "Wgpu"
+    | "NativeForeignRuntime"
+    | "InteractiveHost";
+  verification?:
+    | "Succeeds"
+    | { Assertions: { source: string } }
+    | { ExpectedError: { identifier: string } }
+    | { Figure: { minimum_figures: number; assertions: string } };
 }
 
 export interface FAQ {
@@ -48,6 +64,9 @@ export interface JsonEncodeOptions {
 }
 
 export interface BuiltinMetadata {
+  key?: string;
+  module_stem?: string;
+  authority?: "catalog" | "legacy_sidecar";
   title: string;
   category: string;
   keywords: string[];

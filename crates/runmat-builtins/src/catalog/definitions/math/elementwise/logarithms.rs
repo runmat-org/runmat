@@ -113,6 +113,7 @@ pub const LOG_CATALOG_ENTRY: BuiltinCatalogEntry =
             introduced: None,
             status: None,
             examples: &[],
+            ..BuiltinDocumentation::EMPTY
         },
         descriptor: &LOG_DESCRIPTOR,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Logarithm(
@@ -234,6 +235,7 @@ pub const LOG10_CATALOG_ENTRY: BuiltinCatalogEntry =
             introduced: None,
             status: None,
             examples: &[],
+            ..BuiltinDocumentation::EMPTY
         },
         descriptor: &LOG10_DESCRIPTOR,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Logarithm(

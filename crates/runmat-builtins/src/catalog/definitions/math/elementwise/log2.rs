@@ -192,6 +192,7 @@ pub const LOG2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         introduced: None,
         status: None,
         examples: &[],
+        ..BuiltinDocumentation::EMPTY
     },
     descriptor: &LOG2_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

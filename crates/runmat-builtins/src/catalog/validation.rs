@@ -1,4 +1,7 @@
-use super::{BuiltinBindingAvailability, BuiltinCatalogEntry};
+use super::{
+    BuiltinBindingAvailability, BuiltinCatalogEntry, BuiltinDocumentationAuthority,
+    BuiltinExampleVerification,
+};
 use crate::BuiltinAsyncBehavior;
 use runmat_types::EffectKind;
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,6 +33,7 @@ pub fn validate_builtin_catalog(
         if entry.documentation.summary.is_empty() {
             errors.push(error(Some(name), "documentation summary must not be empty"));
         }
+        validate_documentation(entry, &mut errors);
         if entry.bindings.is_empty() {
             errors.push(error(
                 Some(name),
@@ -93,6 +97,76 @@ pub fn validate_builtin_catalog(
         }
     }
     errors
+}
+
+fn validate_documentation(
+    entry: &'static BuiltinCatalogEntry,
+    errors: &mut Vec<BuiltinCatalogValidationError>,
+) {
+    let name = entry.identity.name;
+    let documentation = &entry.documentation;
+    if documentation.authority != BuiltinDocumentationAuthority::Catalog {
+        return;
+    }
+    if documentation.description.trim().is_empty() {
+        errors.push(error(
+            Some(name),
+            "canonical documentation description must not be empty",
+        ));
+    }
+    if documentation.keywords.is_empty() {
+        errors.push(error(
+            Some(name),
+            "canonical documentation keywords must not be empty",
+        ));
+    }
+    if documentation.examples.is_empty() == documentation.example_exemption.is_none() {
+        errors.push(error(
+            Some(name),
+            "canonical documentation requires examples or one explicit exemption",
+        ));
+    }
+    if documentation
+        .example_exemption
+        .is_some_and(|reason| reason.trim().is_empty())
+    {
+        errors.push(error(
+            Some(name),
+            "documentation example exemption must not be empty",
+        ));
+    }
+    let mut example_ids = BTreeSet::new();
+    for example in documentation.examples {
+        if example.id.trim().is_empty() || !example_ids.insert(example.id) {
+            errors.push(error(
+                Some(name),
+                "documentation example ids must be non-empty and unique",
+            ));
+        }
+        if example.title.trim().is_empty() || example.program.trim().is_empty() {
+            errors.push(error(
+                Some(name),
+                "documentation examples require a title and program",
+            ));
+        }
+        let valid_verification = match example.verification {
+            BuiltinExampleVerification::Succeeds => true,
+            BuiltinExampleVerification::Assertions { source } => !source.trim().is_empty(),
+            BuiltinExampleVerification::ExpectedError { identifier } => {
+                !identifier.trim().is_empty()
+            }
+            BuiltinExampleVerification::Figure {
+                minimum_figures,
+                assertions,
+            } => minimum_figures > 0 && !assertions.trim().is_empty(),
+        };
+        if !valid_verification {
+            errors.push(error(
+                Some(name),
+                "documentation example verification must be complete",
+            ));
+        }
+    }
 }
 
 fn error(

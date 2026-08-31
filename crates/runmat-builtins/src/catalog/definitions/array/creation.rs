@@ -199,6 +199,7 @@ pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         introduced: None,
         status: None,
         examples: &[],
+        ..BuiltinDocumentation::EMPTY
     },
     descriptor: &FULL_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
@@ -395,6 +396,7 @@ pub const ZEROS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         introduced: None,
         status: None,
         examples: &[],
+        ..BuiltinDocumentation::EMPTY
     },
     descriptor: &ZEROS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

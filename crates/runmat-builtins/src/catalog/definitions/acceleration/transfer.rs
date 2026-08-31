@@ -135,6 +135,7 @@ pub const GATHER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         introduced: None,
         status: None,
         examples: &[],
+        ..BuiltinDocumentation::EMPTY
     },
     descriptor: &GATHER_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
