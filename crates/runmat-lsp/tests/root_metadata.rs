@@ -8,6 +8,8 @@ fn migrated_signatures_and_documentation_come_from_the_canonical_catalog() {
     for (name, source, expected) in [
         ("sqrt", "x=sqrt(single(4));", "Y = sqrt(X)"),
         ("realsqrt", "x=realsqrt(single(4));", "Y = realsqrt(X)"),
+        ("exp", "x=exp(single(1));", "Y = exp(X)"),
+        ("expm1", "x=expm1(single(1));", "Y = expm1(X)"),
         ("intmin", "x=intmin(\"int16\");", "value = intmin(typename)"),
         (
             "intmax",

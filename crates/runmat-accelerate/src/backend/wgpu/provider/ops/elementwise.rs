@@ -2164,7 +2164,8 @@ mod tests {
     use super::*;
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView,
-        HostIntegerTensorView, HostTensorView, IntegerElementType,
+        HostIntegerTensorView, HostNumericDataView, HostNumericTensorView, HostTensorView,
+        IntegerElementType,
     };
 
     async fn complex_pair(
@@ -3765,5 +3766,38 @@ mod tests {
         let complex = complex_pair(provider, &[1.0], &[2.0], &shape).await;
         assert!(provider.unary_exp(&complex).await.is_err());
         assert!(provider.unary_expm1(&complex).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn wgpu_float_hooks_report_native_precision_mismatch_as_unsupported() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        if provider.precision() == runmat_accelerate_api::ProviderPrecision::F64 {
+            return;
+        }
+        let values = [0.0_f64, 1.0];
+        let input = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&values),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("upload native f64");
+
+        for error in [
+            provider.unary_exp(&input).await.expect_err("exp mismatch"),
+            provider
+                .unary_expm1(&input)
+                .await
+                .expect_err("expm1 mismatch"),
+        ] {
+            assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+                &error
+            ));
+            assert!(error
+                .to_string()
+                .contains("precision-aware provider kernel"));
+        }
     }
 }
