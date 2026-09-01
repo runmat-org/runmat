@@ -1416,7 +1416,7 @@ fn radian_trigonometric_contracts_preserve_floating_class_and_apply_like_represe
         ValueKindFact,
     };
 
-    for name in ["sin", "cos"] {
+    for name in ["sin", "cos", "tan"] {
         let entry = builtin_catalog_entry_by_name(name).expect("trigonometric catalog entry");
         let mut input = ValueFact::proven(
             ValueKindFact::Numeric(NumericFact {
@@ -1485,7 +1485,7 @@ fn radian_trigonometric_contracts_promote_extensions_and_reject_unsupported_repr
         RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
     };
 
-    for name in ["sin", "cos"] {
+    for name in ["sin", "cos", "tan"] {
         let entry = builtin_catalog_entry_by_name(name).expect("trigonometric catalog entry");
         let infer = |input| {
             infer_catalog_call(
@@ -1551,6 +1551,89 @@ fn radian_trigonometric_contracts_promote_extensions_and_reject_unsupported_repr
             .iter()
             .any(|diagnostic| diagnostic.code == "RM-CATALOG-TRIGONOMETRIC-COMPLEX-INTEGER"));
     }
+}
+
+#[test]
+fn pi_scaled_sine_owns_exact_typed_host_contract_and_documentation() {
+    use runmat_types::{
+        CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("sinpi").expect("sinpi catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::PiScaledTrigonometric(
+            PiScaledTrigonometricFunction::Sin,
+        ))
+    );
+    assert_eq!(
+        entry.documentation.authority,
+        BuiltinDocumentationAuthority::Catalog
+    );
+    assert_eq!(entry.documentation.examples.len(), 5);
+    assert_eq!(entry.documentation.faqs.len(), 6);
+    assert_eq!(entry.bindings, REQUIRED_DEFAULT_BINDING.as_slice());
+    assert_eq!(entry.extensions.len(), 3);
+    assert_eq!(entry.integer_capabilities.len(), 1);
+
+    let mut input = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    input.residency = ResidencyFact::Device {
+        provider: Some("source-provider".into()),
+    };
+    let infer = |input| {
+        infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![input],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        )
+    };
+    let floating = infer(input.clone());
+    assert!(floating.diagnostics.is_empty());
+    assert_eq!(floating.outputs[0].kind, input.kind);
+    assert_eq!(floating.outputs[0].shape, input.shape);
+    assert_eq!(floating.outputs[0].residency, ResidencyFact::Host);
+
+    let integer = infer(ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    ));
+    assert!(integer.diagnostics.is_empty());
+    assert_eq!(
+        integer.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(integer.outputs[0].residency, ResidencyFact::Host);
+
+    let sparse = infer(ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(2)]),
+        StorageFact::Sparse,
+    ));
+    assert!(sparse
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PI-TRIGONOMETRIC-SPARSE"));
 }
 
 #[test]
