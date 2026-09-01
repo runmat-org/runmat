@@ -1,3 +1,8 @@
+use super::documentation::{
+    CODISTRIBUTED_BUILD_DOCUMENTATION, CODISTRIBUTED_DOCUMENTATION, DISTRIBUTED_DOCUMENTATION,
+    GET_CODISTRIBUTOR_DOCUMENTATION, GET_LOCAL_PART_DOCUMENTATION, GLOBAL_INDICES_DOCUMENTATION,
+    REDISTRIBUTE_DOCUMENTATION,
+};
 use super::*;
 
 const DISTRIBUTED_INPUTS: [BuiltinParamDescriptor; 1] = [ANY_REQUIRED];
@@ -130,53 +135,53 @@ pub const GLOBAL_INDICES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &LOWERING_ERRORS,
 };
 
-parallel_data_entry!(
+documented_parallel_data_entry!(
     DISTRIBUTED_CATALOG_ENTRY,
     "distributed",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Distributed),
-    "Create a distributed array.",
+    DISTRIBUTED_DOCUMENTATION,
     DISTRIBUTED_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     CODISTRIBUTED_CATALOG_ENTRY,
     "codistributed",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Codistributed),
-    "Create a codistributed array from a client value or designated worker.",
+    CODISTRIBUTED_DOCUMENTATION,
     CODISTRIBUTED_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     CODISTRIBUTED_BUILD_CATALOG_ENTRY,
     "codistributed.build",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::CodistributedBuild),
-    "Build a codistributed array from worker-local partitions.",
+    CODISTRIBUTED_BUILD_DOCUMENTATION,
     CODISTRIBUTED_BUILD_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     REDISTRIBUTE_CATALOG_ENTRY,
     "redistribute",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Redistribute),
-    "Redistribute an array with another codistributor.",
+    REDISTRIBUTE_DOCUMENTATION,
     REDISTRIBUTE_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     GET_CODISTRIBUTOR_CATALOG_ENTRY,
     "getCodistributor",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCodistributor),
-    "Return the codistributor for a distributed array.",
+    GET_CODISTRIBUTOR_DOCUMENTATION,
     GET_CODISTRIBUTOR_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     GLOBAL_INDICES_CATALOG_ENTRY,
     "globalIndices",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::GlobalIndices),
-    "Return the global indices assigned to a worker.",
+    GLOBAL_INDICES_DOCUMENTATION,
     GLOBAL_INDICES_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     GET_LOCAL_PART_CATALOG_ENTRY,
     "getLocalPart",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::LocalPart),
-    "Return the partition local to the current lab.",
+    GET_LOCAL_PART_DOCUMENTATION,
     GET_LOCAL_PART_DESCRIPTOR
 );
 

@@ -1,6 +1,7 @@
 mod codistributors;
 mod context;
 mod current_execution;
+mod distributed_arrays;
 mod futures;
 mod pools;
 
@@ -14,6 +15,11 @@ pub(super) use context::{
 };
 pub(super) use current_execution::{
     GET_CURRENT_JOB_DOCUMENTATION, GET_CURRENT_TASK_DOCUMENTATION, GET_CURRENT_WORKER_DOCUMENTATION,
+};
+pub(super) use distributed_arrays::{
+    CODISTRIBUTED_BUILD_DOCUMENTATION, CODISTRIBUTED_DOCUMENTATION, DISTRIBUTED_DOCUMENTATION,
+    GET_CODISTRIBUTOR_DOCUMENTATION, GET_LOCAL_PART_DOCUMENTATION, GLOBAL_INDICES_DOCUMENTATION,
+    REDISTRIBUTE_DOCUMENTATION,
 };
 pub(super) use futures::{
     FETCH_NEXT_DOCUMENTATION, FETCH_OUTPUTS_DOCUMENTATION, PARFEVAL_DOCUMENTATION,
