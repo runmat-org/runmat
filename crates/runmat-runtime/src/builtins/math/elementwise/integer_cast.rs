@@ -263,22 +263,12 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
             let source_logical = runmat_accelerate_api::handle_is_logical(&handle);
             let source_precision = runmat_accelerate_api::handle_precision(&handle);
             let source_storage = runmat_accelerate_api::handle_storage(&handle);
-            let source_metadata_consistent = if source_integer.is_some() {
-                matches!(
-                    source_storage,
-                    runmat_accelerate_api::GpuTensorStorage::Real
-                        | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-                ) && source_precision.is_none()
-                    && !source_logical
-            } else {
-                matches!(
-                    source_storage,
-                    runmat_accelerate_api::GpuTensorStorage::Real
-                        | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-                ) && source_precision == Some(provider.precision())
-                    && (!source_logical
-                        || source_storage == runmat_accelerate_api::GpuTensorStorage::Real)
-            };
+            let source_metadata_consistent = gpu_input_representation_is_consistent(
+                source_storage,
+                source_precision,
+                source_integer,
+                source_logical,
+            );
             if !source_metadata_consistent
                 || !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
                     &handle,
@@ -316,6 +306,28 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
                 .await
             {
                 Ok(output) => output,
+                Err(error)
+                    if crate::builtins::common::gpu_helpers::provider_hook_is_unsupported(
+                        &error,
+                    ) =>
+                {
+                    crate::builtins::common::gpu_helpers::restore_handle_metadata(
+                        &handle,
+                        &input_metadata,
+                    );
+                    let gathered = crate::builtins::common::gpu_helpers::gather_value_async(
+                        &Value::GpuTensor(handle.clone()),
+                    )
+                    .await
+                    .map_err(|error| CastError::Internal(error.message().to_string()))?;
+                    let result = cast_gathered_gpu_value(gathered, target)?;
+                    return crate::builtins::common::gpu_helpers::restore_class_preserving_value(
+                        &handle,
+                        result,
+                        target.class_name(),
+                    )
+                    .map_err(|error| CastError::Internal(error.message().to_string()));
+                }
                 Err(error) => {
                     crate::builtins::common::gpu_helpers::restore_handle_metadata(
                         &handle,
@@ -388,6 +400,49 @@ pub(crate) async fn cast_value(value: Value, target: IntegerTarget) -> Result<Va
         | Value::Composite(_) => Err(CastError::Unsupported("MException".to_string())),
         Value::Foreign(_) => Err(CastError::Unsupported("foreign".to_string())),
         Value::OutputList(_) => Err(CastError::Unsupported("OutputList".to_string())),
+    }
+}
+
+fn cast_gathered_gpu_value(value: Value, target: IntegerTarget) -> Result<Value, CastError> {
+    match value {
+        Value::Num(value) => Ok(Value::Int(target.cast_scalar(value))),
+        Value::Int(value) => Ok(Value::Int(target.cast_int(&value))),
+        Value::Bool(value) => Ok(Value::Int(target.cast_scalar(if value {
+            1.0
+        } else {
+            0.0
+        }))),
+        Value::Tensor(tensor) => cast_tensor_value(target, tensor),
+        Value::LogicalArray(array) => {
+            let tensor = tensor::logical_to_tensor(&array).map_err(CastError::Internal)?;
+            cast_tensor_value(target, tensor)
+        }
+        value @ (Value::Complex(_, _) | Value::ComplexTensor(_)) => {
+            cast_complex_value(value, target)
+        }
+        _ => Err(CastError::Internal(
+            "gather returned unsupported storage for integer conversion".into(),
+        )),
+    }
+}
+
+fn gpu_input_representation_is_consistent(
+    storage: runmat_accelerate_api::GpuTensorStorage,
+    precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    integer: Option<runmat_accelerate_api::IntegerElementType>,
+    logical: bool,
+) -> bool {
+    let supported_storage = matches!(
+        storage,
+        runmat_accelerate_api::GpuTensorStorage::Real
+            | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    );
+    if integer.is_some() {
+        supported_storage && precision.is_none() && !logical
+    } else {
+        supported_storage
+            && precision.is_some()
+            && (!logical || storage == runmat_accelerate_api::GpuTensorStorage::Real)
     }
 }
 
@@ -539,6 +594,26 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_value::SymbolicExpr;
+
+    #[test]
+    fn floating_gpu_input_accepts_either_descriptor_precision() {
+        use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
+
+        for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
+            assert!(gpu_input_representation_is_consistent(
+                GpuTensorStorage::Real,
+                Some(precision),
+                None,
+                false,
+            ));
+        }
+        assert!(!gpu_input_representation_is_consistent(
+            GpuTensorStorage::Real,
+            None,
+            None,
+            false,
+        ));
+    }
 
     #[test]
     fn uint64_to_int64_array_saturates_without_f64_rounding() {
