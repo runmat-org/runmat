@@ -225,29 +225,21 @@ macro_rules! parallel_data_entry {
 }
 
 macro_rules! codistributor_entry {
-    ($constant:ident, $name:literal, $rule:expr, $summary:literal, $descriptor:ident) => {
+    ($constant:ident, $name:literal, $rule:expr, $documentation:expr, $descriptor:ident) => {
         codistributor_entry!(
             $constant,
             $name,
             $rule,
-            $summary,
+            $documentation,
             $descriptor,
             PARALLEL_PLACEMENT
         );
     };
-    ($constant:ident, $name:literal, $rule:expr, $summary:literal, $descriptor:ident, $placement:expr) => {
+    ($constant:ident, $name:literal, $rule:expr, $documentation:expr, $descriptor:ident, $placement:expr) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
-            documentation: BuiltinDocumentation {
-                summary: $summary,
-                keywords: &["parallel", "distributed", "codistributor"],
-                related: &["redistribute"],
-                introduced: None,
-                status: None,
-                examples: &[],
-                ..BuiltinDocumentation::EMPTY
-            },
+            documentation: $documentation,
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
                 maturity: BuiltinContractMaturity::Complete,

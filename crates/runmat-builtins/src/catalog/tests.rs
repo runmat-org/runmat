@@ -738,6 +738,43 @@ fn parallel_context_documentation_is_catalog_owned_and_executable() {
 }
 
 #[test]
+fn codistributor_documentation_is_catalog_owned_and_executable() {
+    for name in [
+        "codistributor",
+        "codistributor1d",
+        "codistributor2dbc",
+        "isComplete",
+        "iscodistributed",
+    ] {
+        let entry = builtin_catalog_entry_by_name(name).expect("codistributor catalog entry");
+        let documentation = &entry.documentation;
+        assert_eq!(
+            documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(documentation.examples.len(), 2, "{name}");
+        assert_eq!(documentation.faqs.len(), 4, "{name}");
+        assert!(
+            documentation
+                .sections
+                .iter()
+                .any(|section| section.heading == "Execution placement"),
+            "{name}"
+        );
+        assert!(!documentation.evidence.implementation.is_empty(), "{name}");
+        assert!(!documentation.evidence.verification.is_empty(), "{name}");
+        assert!(documentation.examples.iter().all(|example| {
+            !example.id.is_empty()
+                && example.harness == BuiltinExampleHarness::Native
+                && matches!(
+                    example.verification,
+                    BuiltinExampleVerification::Assertions { .. }
+                )
+        }));
+    }
+}
+
+#[test]
 fn gpu_array_inference_preserves_or_converts_typed_facts_before_device_placement() {
     use runmat_types::{
         CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
