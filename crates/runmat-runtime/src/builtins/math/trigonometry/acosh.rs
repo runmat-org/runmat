@@ -6,132 +6,23 @@
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ACOSH_CHARACTER_INPUT_EXTENSION, ACOSH_ERROR_INTERNAL,
+    ACOSH_ERROR_INVALID_INPUT, ACOSH_GPU_REAL_COMPLEX_EXTENSION, ACOSH_INTEGER_INPUT_EXTENSION,
+    ACOSH_LOGICAL_INPUT_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{ACOSH_DESCRIPTOR, ACOSH_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "acosh";
-const ZERO_EPS: f64 = 1.0e-12;
-
-const ACOSH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise inverse hyperbolic cosine result.",
-}];
-
-const ACOSH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions.",
-}];
-
-const ACOSH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = acosh(X)",
-    inputs: &ACOSH_INPUTS,
-    outputs: &ACOSH_OUTPUT,
-}];
-
-const ACOSH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACOSH.INVALID_INPUT",
-    identifier: Some("RunMat:acosh:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/char/complex data.",
-    message: "acosh: invalid input",
-};
-
-const ACOSH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACOSH.INTERNAL",
-    identifier: Some("RunMat:acosh:Internal"),
-    when: "Internal gather/reduction/conversion/allocation/provider flow failed.",
-    message: "acosh: internal error",
-};
-
-const ACOSH_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACOSH.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:acosh:TooManyOutputs"),
-    when: "More than one output is requested.",
-    message: "acosh: too many output arguments",
-};
-const ACOSH_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ACOSH_ERROR_INVALID_INPUT,
-    ACOSH_ERROR_INTERNAL,
-    ACOSH_ERROR_TOO_MANY_OUTPUTS,
-];
-
-const ACOSH_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "acosh-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "acosh with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AcoshIntegerInputExtension"),
-};
-const ACOSH_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "acosh-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "acosh with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AcoshLogicalInputExtension"),
-};
-const ACOSH_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "acosh-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "acosh with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AcoshCharacterInputExtension"),
-};
-const ACOSH_GPU_REAL_COMPLEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "acosh-gpu-real-complex-promotion",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "acosh resident real input that requires complex output is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AcoshGpuRealComplexPromotionExtension"),
-};
-const ACOSH_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    ACOSH_INTEGER_INPUT_EXTENSION,
-    ACOSH_LOGICAL_INPUT_EXTENSION,
-    ACOSH_CHARACTER_INPUT_EXTENSION,
-    ACOSH_GPU_REAL_COMPLEX_EXTENSION,
-];
-const ACOSH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data domain is single/double; RunMat mode additionally accepts every real integer class.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = acosh(integer_X)",
-        inputs: &ACOSH_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Authoritative integer values enter an explicit binary64 inverse-hyperbolic-cosine boundary. Resident integer input gathers exactly and the double or complex-double result returns to the owning provider.",
-    }];
-
-pub const ACOSH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ACOSH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ACOSH_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -174,28 +65,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "acosh",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: Some(FusionKernelTemplate {
-        scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("acosh({input})"))
-        },
-    }),
+    elementwise: None,
     reduction: None,
-    emits_nan: false,
-    notes: "Fusion planner emits WGSL `acosh` calls; providers can substitute custom kernels when available.",
+    emits_nan: true,
+    notes: "Fusion is disabled because real input below one must promote to a complex result instead of producing NaN.",
 };
 
 #[runtime_builtin(
     name = "acosh",
-    category = "math/trigonometry",
-    summary = "Element-wise inverse hyperbolic cosine, with complex promotion for x < 1.",
-    keywords = "acosh,inverse hyperbolic cosine,arccosh,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::acosh::ACOSH_DESCRIPTOR),
-    extensions(ACOSH_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::trigonometry::acosh::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::acosh"
 )]
 async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -222,47 +100,49 @@ async fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {
-        return super::inverse_helpers::gather_compute_restore(
-            handle,
-            BUILTIN_NAME,
-            acosh_tensor_real,
-        )
-        .await;
+        return acosh_gather_compute_restore(handle).await;
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle).await {
-            Ok(false) => {
-                if let Ok(out) = provider.unary_acosh(&handle).await {
-                    return Ok(gpu_helpers::resident_gpu_value(out));
+        match detect_gpu_requires_complex(provider, &handle).await? {
+            Some(false) => match provider.unary_acosh(&handle).await {
+                Ok(output) => {
+                    return super::inverse_helpers::validate_real_unary_provider_output(
+                        provider,
+                        &handle,
+                        output,
+                        BUILTIN_NAME,
+                    )
                 }
-            }
-            Ok(true) => {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    &ACOSH_GPU_REAL_COMPLEX_EXTENSION,
-                    BUILTIN_NAME,
-                )?;
-                return super::inverse_helpers::gather_compute_restore(
-                    handle,
-                    BUILTIN_NAME,
-                    acosh_tensor_real,
-                )
-                .await;
-            }
-            Err(_) => {
-                // Fall back to host path below.
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) => {
+                    return Err(acosh_error_with_detail(
+                        &ACOSH_ERROR_INTERNAL,
+                        format!("provider unary_acosh failed: {error}"),
+                    ))
+                }
+            },
+            Some(true) | None => {
+                return acosh_gather_compute_restore(handle).await;
             }
         }
     }
-    super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, acosh_tensor_real).await
+    acosh_gather_compute_restore(handle).await
 }
 
 async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> BuiltinResult<bool> {
-    let min_handle = provider.reduce_min(handle).await.map_err(|e| {
-        acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, format!("reduce_min failed: {e}"))
-    })?;
+) -> BuiltinResult<Option<bool>> {
+    let min_handle = match provider.reduce_min(handle).await {
+        Ok(handle) => handle,
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) => {
+            return Err(acosh_error_with_detail(
+                &ACOSH_ERROR_INTERNAL,
+                format!("reduce_min failed: {error}"),
+            ))
+        }
+    };
     let min_host = gpu_helpers::download_native_values_async(provider, &min_handle)
         .await
         .map_err(|e| {
@@ -273,11 +153,29 @@ async fn detect_gpu_requires_complex(
             )
         })?;
     let _ = provider.free(&min_handle);
-    if min_host.data.iter().any(|value| !value.is_finite()) {
-        // NaN or -Inf: force host evaluation to preserve MATLAB semantics.
-        return Ok(true);
+    if min_host.data.iter().any(|value| value.is_nan()) {
+        return Ok(None);
     }
-    Ok(min_host.data.iter().any(|value| value.is_less_than_one()))
+    Ok(Some(
+        min_host.data.iter().any(|value| value.is_less_than_one()),
+    ))
+}
+
+async fn acosh_gather_compute_restore(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+        acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, "GPU input has no owning provider")
+    })?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|error| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, error))?;
+    let output = acosh_tensor_real(tensor)?;
+    if matches!(output, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ACOSH_GPU_REAL_COMPLEX_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    super::inverse_helpers::upload_value_like(provider, output, BUILTIN_NAME, &handle)
 }
 
 fn acosh_real(value: Value) -> BuiltinResult<Value> {
@@ -301,11 +199,11 @@ fn acosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         BUILTIN_NAME,
         |(real, imag)| {
             let result = Complex64::new(real, imag).acosh();
-            (zero_small(result.re), zero_small(result.im))
+            (result.re, result.im)
         },
         |(real, imag)| {
             let result = num_complex::Complex32::new(real, imag).acosh();
-            (zero_small_f32(result.re), zero_small_f32(result.im))
+            (result.re, result.im)
         },
     )?;
     Ok(crate::builtins::common::random_args::complex_tensor_into_value(tensor))
@@ -325,7 +223,7 @@ fn acosh_real_parts(value: f64) -> (f64, f64) {
         return (value.acosh(), 0.0);
     }
     let result = Complex64::new(value, 0.0).acosh();
-    (zero_small(result.re), zero_small(result.im))
+    (result.re, result.im)
 }
 
 fn acosh_real_parts_f32(value: f32) -> (f32, f32) {
@@ -342,12 +240,12 @@ fn acosh_real_parts_f32(value: f32) -> (f32, f32) {
         return (value.acosh(), 0.0);
     }
     let result = num_complex::Complex32::new(value, 0.0).acosh();
-    (zero_small_f32(result.re), zero_small_f32(result.im))
+    (result.re, result.im)
 }
 
 fn acosh_complex_scalar(re: f64, im: f64) -> Value {
     let result = Complex64::new(re, im).acosh();
-    Value::Complex(zero_small(result.re), zero_small(result.im))
+    Value::Complex(result.re, result.im)
 }
 
 fn acosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -362,29 +260,12 @@ fn acosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     acosh_tensor_real(tensor)
 }
 
-fn zero_small(value: f64) -> f64 {
-    if value.abs() < ZERO_EPS {
-        0.0
-    } else {
-        value
-    }
-}
-
-fn zero_small_f32(value: f32) -> f32 {
-    if value.abs() < ZERO_EPS as f32 {
-        0.0
-    } else {
-        value
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex64;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
 
     fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -445,33 +326,6 @@ pub(crate) mod tests {
         assert!(labels.contains(&"Y = acosh(X)"));
     }
 
-    #[test]
-    fn acosh_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn acosh_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_scalar_real() {
@@ -494,6 +348,21 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex scalar, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn acosh_preserves_small_complex_components() {
+        let input = Complex64::new(2.0, 1.0e-15);
+        let expected = input.acosh();
+        let Value::Complex(real, imaginary) =
+            acosh_builtin(Value::Complex(input.re, input.im)).expect("complex acosh")
+        else {
+            panic!("expected complex scalar");
+        };
+        assert_eq!(real, expected.re);
+        assert_eq!(imaginary, expected.im);
+        assert_ne!(imaginary, 0.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

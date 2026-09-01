@@ -13,25 +13,27 @@ use crate::{
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-use super::documentation::SIN_DOCUMENTATION;
+mod documentation;
 
-const SIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+use documentation::TAN_DOCUMENTATION;
+
+const TAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Elementwise sine result.",
+    description: "Elementwise tangent result.",
 }];
-const SIN_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
+const TAN_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "X",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
 };
-const SIN_INPUTS: [BuiltinParamDescriptor; 1] = [SIN_INPUT];
-const SIN_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    SIN_INPUT,
+const TAN_INPUTS: [BuiltinParamDescriptor; 1] = [TAN_INPUT];
+const TAN_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    TAN_INPUT,
     BuiltinParamDescriptor {
         name: "like",
         ty: BuiltinParamType::StringScalar,
@@ -48,112 +50,112 @@ const SIN_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
             "Prototype selecting host or provider residency and real or complex representation.",
     },
 ];
-const SIN_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const TAN_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "Y = sin(X)",
-        inputs: &SIN_INPUTS,
-        outputs: &SIN_OUTPUT,
+        label: "Y = tan(X)",
+        inputs: &TAN_INPUTS,
+        outputs: &TAN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "Y = sin(X, \"like\", P)",
-        inputs: &SIN_LIKE_INPUTS,
-        outputs: &SIN_OUTPUT,
+        label: "Y = tan(X, \"like\", P)",
+        inputs: &TAN_LIKE_INPUTS,
+        outputs: &TAN_OUTPUT,
     },
 ];
 
-pub const SIN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.INVALID_INPUT",
-    identifier: Some("RunMat:sin:InvalidInput"),
+pub const TAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.INVALID_INPUT",
+    identifier: Some("RunMat:tan:InvalidInput"),
     when: "Input cannot be interpreted as supported numeric, logical, character, or complex data.",
-    message: "sin: invalid input",
+    message: "tan: invalid input",
 };
-pub const SIN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.INVALID_OPTION",
-    identifier: Some("RunMat:sin:InvalidOption"),
+pub const TAN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.INVALID_OPTION",
+    identifier: Some("RunMat:tan:InvalidOption"),
     when: "Optional arguments after X are malformed or unsupported.",
-    message: "sin: invalid option",
+    message: "tan: invalid option",
 };
-pub const SIN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.ARG_COUNT",
-    identifier: Some("RunMat:sin:ArgCount"),
+pub const TAN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.ARG_COUNT",
+    identifier: Some("RunMat:tan:ArgCount"),
     when: "Too many input arguments were supplied.",
-    message: "sin: too many input arguments",
+    message: "tan: too many input arguments",
 };
-pub const SIN_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.LIKE_PROTOTYPE",
-    identifier: Some("RunMat:sin:LikePrototype"),
+pub const TAN_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.LIKE_PROTOTYPE",
+    identifier: Some("RunMat:tan:LikePrototype"),
     when: "The \"like\" prototype is unsupported for this output conversion path.",
-    message: "sin: invalid \"like\" prototype",
+    message: "tan: invalid \"like\" prototype",
 };
-pub const SIN_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.GPU_UNAVAILABLE",
-    identifier: Some("RunMat:sin:GpuUnavailable"),
+pub const TAN_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.GPU_UNAVAILABLE",
+    identifier: Some("RunMat:tan:GpuUnavailable"),
     when: "Provider output was requested through \"like\" but no active provider is available.",
-    message: "sin: GPU provider unavailable",
+    message: "tan: GPU provider unavailable",
 };
-pub const SIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.INTERNAL",
-    identifier: Some("RunMat:sin:Internal"),
+pub const TAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.INTERNAL",
+    identifier: Some("RunMat:tan:Internal"),
     when: "Internal tensor conversion, allocation, or provider execution failed.",
-    message: "sin: internal error",
+    message: "tan: internal error",
 };
-const SIN_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    SIN_ERROR_INVALID_INPUT,
-    SIN_ERROR_INVALID_OPTION,
-    SIN_ERROR_ARG_COUNT,
-    SIN_ERROR_LIKE_PROTOTYPE,
-    SIN_ERROR_GPU_UNAVAILABLE,
-    SIN_ERROR_INTERNAL,
+const TAN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    TAN_ERROR_INVALID_INPUT,
+    TAN_ERROR_INVALID_OPTION,
+    TAN_ERROR_ARG_COUNT,
+    TAN_ERROR_LIKE_PROTOTYPE,
+    TAN_ERROR_GPU_UNAVAILABLE,
+    TAN_ERROR_INTERNAL,
 ];
-pub const SIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIN_SIGNATURES,
+pub const TAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TAN_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SIN_ERRORS,
+    errors: &TAN_ERRORS,
 };
 
-pub const SIN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sin-integer-input",
+pub const TAN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tan-integer-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sin with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SinIntegerInputExtension"),
+    description: "tan with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TanIntegerInputExtension"),
 };
-pub const SIN_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sin-logical-input",
+pub const TAN_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tan-logical-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sin with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SinLogicalInputExtension"),
+    description: "tan with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TanLogicalInputExtension"),
 };
-pub const SIN_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sin-character-input",
+pub const TAN_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tan-character-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sin with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SinCharacterInputExtension"),
+    description: "tan with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TanCharacterInputExtension"),
 };
-pub const SIN_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sin-like-output",
+pub const TAN_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tan-like-output",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sin with a like output prototype is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SinLikeOutputExtension"),
+    description: "tan with a like output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TanLikeOutputExtension"),
 };
-pub const SIN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    SIN_INTEGER_INPUT_EXTENSION,
-    SIN_LOGICAL_INPUT_EXTENSION,
-    SIN_CHARACTER_INPUT_EXTENSION,
-    SIN_LIKE_OUTPUT_EXTENSION,
+pub const TAN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    TAN_INTEGER_INPUT_EXTENSION,
+    TAN_LOGICAL_INPUT_EXTENSION,
+    TAN_CHARACTER_INPUT_EXTENSION,
+    TAN_LIKE_OUTPUT_EXTENSION,
 ];
 
-const SIN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+const TAN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "X",
     classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
     notes: "All eight real integer classes are admitted only when every value is exactly representable at the binary64 transcendental boundary.",
 }];
-pub const SIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+pub const TAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sin(integer_X)",
-        inputs: &SIN_INTEGER_INPUT,
+        form: "Y = tan(integer_X)",
+        inputs: &TAN_INTEGER_INPUT,
         computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
         output_class: BuiltinIntegerOutputClassRule::Double,
         overflow: BuiltinIntegerOverflowRule::Error,
@@ -162,17 +164,17 @@ pub const SIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         notes: "RunMat mode validates authoritative integer storage before conversion; provider-resident input may gather and follows the declared output placement policy.",
     }];
 
-const SIN_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const SIN_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
-pub const SIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
-    identity: BuiltinCatalogIdentity { name: "sin" },
+const TAN_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
+const TAN_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+pub const TAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    identity: BuiltinCatalogIdentity { name: "tan" },
     category: "math/trigonometry",
-    documentation: SIN_DOCUMENTATION,
-    descriptor: &SIN_DESCRIPTOR,
+    documentation: TAN_DOCUMENTATION,
+    descriptor: &TAN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Trigonometric(
-            TrigonometricFunction::Sin,
+            TrigonometricFunction::Tan,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
@@ -180,7 +182,7 @@ pub const SIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: &SIN_EFFECTS,
+        effects: &TAN_EFFECTS,
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
@@ -196,9 +198,9 @@ pub const SIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         execution_stack: ExecutionStackRequirement::Any,
         artifact_dependencies: &[],
     },
-    bindings: &SIN_BINDINGS,
-    extensions: &SIN_EXTENSIONS,
-    integer_capabilities: &SIN_INTEGER_CAPABILITIES,
+    bindings: &TAN_BINDINGS,
+    extensions: &TAN_EXTENSIONS,
+    integer_capabilities: &TAN_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };

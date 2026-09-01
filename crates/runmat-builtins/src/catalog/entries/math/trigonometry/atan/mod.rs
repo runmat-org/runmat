@@ -15,7 +15,9 @@ use crate::{
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-use super::documentation::ATAN_DOCUMENTATION;
+mod documentation;
+
+use documentation::ATAN_DOCUMENTATION;
 
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",

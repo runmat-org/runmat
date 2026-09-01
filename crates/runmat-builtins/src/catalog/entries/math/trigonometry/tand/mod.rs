@@ -15,14 +15,16 @@ use crate::{
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-use super::documentation::COSD_DOCUMENTATION;
+mod documentation;
+
+use documentation::TAND_DOCUMENTATION;
 
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Elementwise cosine result for degree-valued input.",
+    description: "Elementwise tangent result for degree-valued input.",
 }];
 const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "X",
@@ -32,84 +34,83 @@ const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
 }];
 const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = cosd(X)",
+    label: "Y = tand(X)",
     inputs: &INPUTS,
     outputs: &OUTPUTS,
 }];
-pub const COSD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COSD.INVALID_INPUT",
-    identifier: Some("RunMat:cosd:InvalidInput"),
+pub const TAND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAND.INVALID_INPUT",
+    identifier: Some("RunMat:tand:InvalidInput"),
     when: "Input is not a supported numeric, logical, or character value.",
-    message: "cosd: invalid input",
+    message: "tand: invalid input",
 };
-pub const COSD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COSD.INTERNAL",
-    identifier: Some("RunMat:cosd:Internal"),
+pub const TAND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAND.INTERNAL",
+    identifier: Some("RunMat:tand:Internal"),
     when: "Internal gather, conversion, allocation, or provider restoration failed.",
-    message: "cosd: internal error",
+    message: "tand: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [COSD_ERROR_INVALID_INPUT, COSD_ERROR_INTERNAL];
-pub const COSD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+const ERRORS: [BuiltinErrorDescriptor; 2] = [TAND_ERROR_INVALID_INPUT, TAND_ERROR_INTERNAL];
+pub const TAND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
 
-pub const COSD_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cosd-integer-input",
+pub const TAND_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tand-integer-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cosd with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosdIntegerInputExtension"),
+    description: "tand with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TandIntegerInputExtension"),
 };
-pub const COSD_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cosd-logical-input",
+pub const TAND_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tand-logical-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cosd with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosdLogicalInputExtension"),
+    description: "tand with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TandLogicalInputExtension"),
 };
-pub const COSD_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cosd-character-input",
+pub const TAND_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "tand-character-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cosd with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosdCharacterInputExtension"),
+    description: "tand with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TandCharacterInputExtension"),
 };
-pub const COSD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    COSD_INTEGER_INPUT_EXTENSION,
-    COSD_LOGICAL_INPUT_EXTENSION,
-    COSD_CHARACTER_INPUT_EXTENSION,
+pub const TAND_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    TAND_INTEGER_INPUT_EXTENSION,
+    TAND_LOGICAL_INPUT_EXTENSION,
+    TAND_CHARACTER_INPUT_EXTENSION,
 ];
 const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "X",
     classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes:
-        "Every value must be exactly representable at the binary64 degree-trigonometric boundary.",
+    notes: "Native integer values are reduced exactly modulo 360 before floating evaluation.",
 }];
-pub const COSD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+pub const TAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = cosd(integer_X)",
+        form: "Y = tand(integer_X)",
         inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
         output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat validates authoritative integer storage before conversion; resident fallback restores the double result to the owner.",
+        notes: "Exact native modular reduction preserves wide int64/uint64 canonical values and poles; resident output returns to its owner.",
     }];
 
 const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
-pub const COSD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
-    identity: BuiltinCatalogIdentity { name: "cosd" },
+pub const TAND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    identity: BuiltinCatalogIdentity { name: "tand" },
     category: "math/trigonometry",
-    documentation: COSD_DOCUMENTATION,
-    descriptor: &COSD_DESCRIPTOR,
+    documentation: TAND_DOCUMENTATION,
+    descriptor: &TAND_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::DegreeTrigonometric(
-            DegreeTrigonometricFunction::Cos,
+            DegreeTrigonometricFunction::Tan,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
@@ -134,8 +135,8 @@ pub const COSD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &BINDINGS,
-    extensions: &COSD_EXTENSIONS,
-    integer_capabilities: &COSD_INTEGER_CAPABILITIES,
+    extensions: &TAND_EXTENSIONS,
+    integer_capabilities: &TAND_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };
