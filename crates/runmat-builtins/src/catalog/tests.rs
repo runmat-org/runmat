@@ -775,6 +775,45 @@ fn codistributor_documentation_is_catalog_owned_and_executable() {
 }
 
 #[test]
+fn distributed_array_documentation_is_catalog_owned_and_executable() {
+    for (name, example_count) in [
+        ("distributed", 2),
+        ("codistributed", 2),
+        ("codistributed.build", 1),
+        ("redistribute", 2),
+        ("getCodistributor", 1),
+        ("globalIndices", 2),
+        ("getLocalPart", 2),
+    ] {
+        let entry = builtin_catalog_entry_by_name(name).expect("distributed array catalog entry");
+        let documentation = &entry.documentation;
+        assert_eq!(
+            documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(documentation.examples.len(), example_count, "{name}");
+        assert_eq!(documentation.faqs.len(), 5, "{name}");
+        assert!(
+            documentation
+                .sections
+                .iter()
+                .any(|section| section.heading == "Execution placement"),
+            "{name}"
+        );
+        assert!(!documentation.evidence.implementation.is_empty(), "{name}");
+        assert!(!documentation.evidence.verification.is_empty(), "{name}");
+        assert!(documentation.examples.iter().all(|example| {
+            !example.id.is_empty()
+                && example.harness == BuiltinExampleHarness::Native
+                && matches!(
+                    example.verification,
+                    BuiltinExampleVerification::Assertions { .. }
+                )
+        }));
+    }
+}
+
+#[test]
 fn gpu_array_inference_preserves_or_converts_typed_facts_before_device_placement() {
     use runmat_types::{
         CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,

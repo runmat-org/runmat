@@ -188,10 +188,11 @@ const PARALLEL_LINK: BuiltinLinkContract = BuiltinLinkContract {
 
 macro_rules! parallel_data_entry {
     ($constant:ident, $name:literal, $rule:expr, $summary:literal, $descriptor:ident) => {
-        pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
-            identity: BuiltinCatalogIdentity { name: $name },
-            category: "parallel",
-            documentation: BuiltinDocumentation {
+        documented_parallel_data_entry!(
+            $constant,
+            $name,
+            $rule,
+            BuiltinDocumentation {
                 summary: $summary,
                 keywords: &["parallel", "distributed", "spmd"],
                 related: &[],
@@ -200,6 +201,17 @@ macro_rules! parallel_data_entry {
                 examples: &[],
                 ..BuiltinDocumentation::EMPTY
             },
+            $descriptor
+        );
+    };
+}
+
+macro_rules! documented_parallel_data_entry {
+    ($constant:ident, $name:literal, $rule:expr, $documentation:expr, $descriptor:ident) => {
+        pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            identity: BuiltinCatalogIdentity { name: $name },
+            category: "parallel",
+            documentation: $documentation,
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
                 maturity: BuiltinContractMaturity::Complete,
