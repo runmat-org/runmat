@@ -183,6 +183,11 @@ pub(super) fn infer_pi_scaled_trigonometric(
         );
     }
 
+    let output_residency = match function {
+        PiScaledTrigonometricFunction::Sin => ResidencyFact::Host,
+        PiScaledTrigonometricFunction::Cos => input.residency.clone(),
+    };
+
     let mut output = input.clone();
     match &mut output.kind {
         ValueKindFact::Numeric(numeric)
@@ -201,16 +206,16 @@ pub(super) fn infer_pi_scaled_trigonometric(
                 numeric.class = NumericClass::Double;
             }
             materialize_output(&mut output);
-            output.residency = ResidencyFact::Host;
+            output.residency = output_residency.clone();
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
             materialize_output(&mut output);
-            output.residency = ResidencyFact::Host;
+            output.residency = output_residency.clone();
         }
         ValueKindFact::Unknown => {
             preserve_shape_on_dynamic_input(&mut output);
-            output.residency = ResidencyFact::Host;
+            output.residency = output_residency;
         }
         _ => {
             diagnostics.push(argument_error(

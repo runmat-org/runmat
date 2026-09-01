@@ -2,15 +2,13 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, COSPI_CHARACTER_INPUT_EXTENSION, COSPI_ERROR_INTERNAL,
+    COSPI_ERROR_INVALID_INPUT, COSPI_INTEGER_INPUT_EXTENSION, COSPI_LOGICAL_INPUT_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{COSPI_DESCRIPTOR, COSPI_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexStorage, ComplexTensor, Tensor, Value};
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -19,36 +17,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::trigonometry::pi_helpers::{cospi_complex, cospi_real};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "cospi";
-pub const COSPI_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cospi-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cospi with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CospiIntegerInputExtension"),
-};
-pub const COSPI_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cospi-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cospi with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CospiLogicalInputExtension"),
-};
-pub const COSPI_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "cospi-character-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "cospi with character input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:CospiCharacterInputExtension"),
-    };
-pub const COSPI_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    COSPI_INTEGER_INPUT_EXTENSION,
-    COSPI_LOGICAL_INPUT_EXTENSION,
-    COSPI_CHARACTER_INPUT_EXTENSION,
-];
-const COSPI_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "All eight real integer classes are evaluated from authoritative storage, so integer parity remains exact even above flintmax." }];
-pub const COSPI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "Y = cospi(integer_X)", inputs: &COSPI_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "RunMat mode computes exact +/-1 directly from integer parity without binary64 conversion; resident integer inputs gather exactly and restore double output to the owner." }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::cospi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -78,61 +49,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Fusion is disabled because lowering to cos(x*pi) would lose cospi's exactness guarantees.",
 };
 
-const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise cos(X*pi) result with exact integer and half-integer handling.",
-}];
-
-const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, array, logical array, complex value, or gpuArray.",
-}];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = cospi(X)",
-    inputs: &INPUTS,
-    outputs: &OUTPUTS,
-}];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COSPI.INVALID_INPUT",
-    identifier: Some("RunMat:cospi:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/logical/complex data.",
-    message: "cospi: invalid input",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COSPI.INTERNAL",
-    identifier: Some("RunMat:cospi:Internal"),
-    when: "Internal gather/conversion/allocation flow failed.",
-    message: "cospi: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_INTERNAL];
-
-pub const COSPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "cospi",
-    category = "math/trigonometry",
-    summary = "Compute cos(X*pi) accurately.",
-    keywords = "cospi,cosine,pi,trigonometry,elementwise,gpu",
-    sink = true,
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::cospi::COSPI_DESCRIPTOR),
-    extensions(COSPI_EXTENSIONS),
-    integer_capabilities(COSPI_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::cospi"
 )]
 async fn cospi_builtin(value: Value) -> BuiltinResult<Value> {
@@ -145,9 +64,21 @@ async fn cospi_builtin(value: Value) -> BuiltinResult<Value> {
             Ok(Value::Complex(out_re, out_im))
         }
         Value::ComplexTensor(tensor) => cospi_complex_tensor(tensor),
-        Value::String(_) | Value::StringArray(_) => Err(cospi_error(&ERROR_INVALID_INPUT)),
+        Value::CharArray(array) => cospi_char_array(array),
+        Value::String(_) | Value::StringArray(_) => Err(cospi_error(&COSPI_ERROR_INVALID_INPUT)),
         other => cospi_real_value(other),
     }
+}
+
+fn cospi_char_array(array: CharArray) -> BuiltinResult<Value> {
+    let data = array
+        .data
+        .into_iter()
+        .map(|value| if u32::from(value) % 2 == 0 { 1.0 } else { -1.0 })
+        .collect();
+    let tensor = Tensor::new(data, array.shape)
+        .map_err(|err| cospi_error_with_detail(&COSPI_ERROR_INTERNAL, err))?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 fn ensure_extensions(value: &Value) -> BuiltinResult<()> {
@@ -174,9 +105,7 @@ fn ensure_extensions(value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 fn is_integer(value: &Value) -> bool {
-    matches!(value, Value::Int(_))
-        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
-        || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
+    crate::builtins::common::validation::value_contains_native_integer_class(value)
 }
 
 async fn cospi_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -206,7 +135,7 @@ fn cospi_real_value(value: Value) -> BuiltinResult<Value> {
         }));
     }
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|err| cospi_error_with_detail(&ERROR_INVALID_INPUT, err))?;
+        .map_err(|err| cospi_error_with_detail(&COSPI_ERROR_INVALID_INPUT, err))?;
     cospi_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -218,9 +147,9 @@ fn cospi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .map(|v| if integer_is_even(v) { 1.0 } else { -1.0 })
             .collect();
         return Tensor::new(data, tensor.shape.clone())
-            .map_err(|err| cospi_error_with_detail(&ERROR_INTERNAL, err));
+            .map_err(|err| cospi_error_with_detail(&COSPI_ERROR_INTERNAL, err));
     }
-    if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+    if tensor.numeric_dtype() == NumericDType::F32 {
         let data = tensor
             .as_f32_slice()
             .expect("single tensor storage")
@@ -228,14 +157,14 @@ fn cospi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .map(|&v| cospi_real(f64::from(v)) as f32)
             .collect();
         return Tensor::from_f32(data, tensor.shape.clone())
-            .map_err(|err| cospi_error_with_detail(&ERROR_INTERNAL, err));
+            .map_err(|err| cospi_error_with_detail(&COSPI_ERROR_INTERNAL, err));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| cospi_real(value))
         .collect();
     Tensor::new(data, tensor.shape.clone())
-        .map_err(|err| cospi_error_with_detail(&ERROR_INTERNAL, err))
+        .map_err(|err| cospi_error_with_detail(&COSPI_ERROR_INTERNAL, err))
 }
 
 fn integer_is_even(value: &runmat_value::IntValue) -> bool {
@@ -273,7 +202,7 @@ fn cospi_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
         ),
         ComplexStorage::Integer(_) => Err("typed complex integer input is unsupported".into()),
     }
-    .map_err(|err| cospi_error_with_detail(&ERROR_INTERNAL, err))?;
+    .map_err(|err| cospi_error_with_detail(&COSPI_ERROR_INTERNAL, err))?;
     Ok(complex_tensor_into_value(converted))
 }
 
@@ -285,17 +214,17 @@ fn upload_gpu_output(
         Value::Num(value) => upload_real_gpu_output(
             provider,
             Tensor::new(vec![value], vec![1, 1])
-                .map_err(|e| cospi_error_with_detail(&ERROR_INTERNAL, e))?,
+                .map_err(|e| cospi_error_with_detail(&COSPI_ERROR_INTERNAL, e))?,
         ),
         Value::Tensor(tensor) => upload_real_gpu_output(provider, tensor),
         Value::Complex(re, im) => upload_complex_gpu_output(
             provider,
             ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cospi_error_with_detail(&ERROR_INTERNAL, e))?,
+                .map_err(|e| cospi_error_with_detail(&COSPI_ERROR_INTERNAL, e))?,
         ),
         Value::ComplexTensor(tensor) => upload_complex_gpu_output(provider, tensor),
         other => Err(cospi_error_with_detail(
-            &ERROR_INTERNAL,
+            &COSPI_ERROR_INTERNAL,
             format!("cannot restore GPU output {other:?}"),
         )),
     }
@@ -306,7 +235,7 @@ fn upload_real_gpu_output(
     tensor: Tensor,
 ) -> BuiltinResult<Value> {
     let handle = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|e| cospi_error_with_detail(&ERROR_INTERNAL, e))?;
+        .map_err(|e| cospi_error_with_detail(&COSPI_ERROR_INTERNAL, e))?;
     Ok(gpu_helpers::resident_gpu_value(handle))
 }
 
@@ -342,8 +271,6 @@ fn cospi_error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::NumericDType;
     use runmat_value::{IntValue, LogicalArray};
 
     use crate::builtins::common::test_support;
@@ -368,32 +295,48 @@ mod tests {
     }
 
     #[test]
-    fn integer_gate_all_classes_exact_wide_parity_and_single_precision() {
+    fn integer_logical_and_character_extensions_are_exact_and_gated() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        assert!(block_on(super::cospi_builtin(Value::Int(IntValue::I8(0)))).is_err());
+        let err = block_on(super::cospi_builtin(Value::Int(IntValue::U64(u64::MAX))))
+            .expect_err("strict mode rejects integer extension");
+        assert_eq!(
+            err.identifier(),
+            COSPI_INTEGER_INPUT_EXTENSION.error_identifier
+        );
         drop(_strict);
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        for value in [
-            IntValue::I8(0),
-            IntValue::I16(0),
-            IntValue::I32(0),
-            IntValue::I64(0),
-            IntValue::U8(0),
-            IntValue::U16(0),
-            IntValue::U32(0),
-            IntValue::U64(0),
+        for (value, expected) in [
+            (IntValue::I8(i8::MIN), 1.0),
+            (IntValue::I16(i16::MIN), 1.0),
+            (IntValue::I32(i32::MIN), 1.0),
+            (IntValue::I64(i64::MIN), 1.0),
+            (IntValue::U8(u8::MAX), -1.0),
+            (IntValue::U16(u16::MAX), -1.0),
+            (IntValue::U32(u32::MAX), -1.0),
+            (IntValue::U64(u64::MAX), -1.0),
         ] {
             assert_eq!(
                 expect_num(block_on(super::cospi_builtin(Value::Int(value))).unwrap()),
-                1.0
+                expected
             );
         }
-        assert_eq!(
-            expect_num(
-                block_on(super::cospi_builtin(Value::Int(IntValue::U64(u64::MAX)))).unwrap()
-            ),
-            -1.0
-        );
+
+        let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
+        let Value::Tensor(out) = call(Value::LogicalArray(logical)).unwrap() else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.materialize_f64(), vec![1.0, -1.0]);
+
+        let Value::Tensor(out) = call(Value::CharArray(CharArray::new_row("AB"))).unwrap() else {
+            panic!("expected character result tensor");
+        };
+        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.materialize_f64(), vec![-1.0, 1.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn real_and_complex_single_preserve_class() {
         let Value::Tensor(real) = block_on(super::cospi_builtin(Value::Tensor(
             Tensor::from_f32(vec![0.0, 0.5], vec![2, 1]).unwrap(),
         )))
@@ -408,23 +351,6 @@ mod tests {
             panic!("expected complex tensor")
         };
         assert_eq!(complex.numeric_dtype(), NumericDType::F32);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    fn type_resolver_preserves_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -446,17 +372,6 @@ mod tests {
         };
         assert_eq!(out.shape, vec![1, 5]);
         assert_eq!(out.materialize_f64(), vec![1.0, 0.0, -1.0, 0.0, 1.0]);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    fn integer_and_logical_inputs_promote() {
-        assert_eq!(expect_num(call(Value::Int(IntValue::I32(2))).unwrap()), 1.0);
-        let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
-        let Value::Tensor(out) = call(Value::LogicalArray(logical)).unwrap() else {
-            panic!("expected tensor");
-        };
-        assert_eq!(out.materialize_f64(), vec![1.0, -1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
