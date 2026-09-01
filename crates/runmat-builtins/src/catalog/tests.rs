@@ -2246,6 +2246,92 @@ fn inverse_hyperbolic_sine_proves_real_outputs_for_real_inputs() {
 }
 
 #[test]
+fn inverse_hyperbolic_tangent_tracks_the_exact_closed_unit_interval() {
+    use runmat_types::{
+        CallRequest, CertaintyFact, DimensionFact, DynamicReason, LiteralContext, LiteralValue,
+        NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount,
+        ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("atanh").expect("atanh catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::InverseHyperbolic(
+            InverseHyperbolicFunction::Tangent
+        ))
+    );
+    assert_eq!(entry.documentation.examples.len(), 6);
+    assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Never);
+
+    let input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let infer_literal = |value| {
+        infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![input.clone()],
+                literals: LiteralContext::new(vec![LiteralValue::Number(value)]),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        )
+    };
+    for value in [-1.0, 0.0, 1.0, f64::NAN] {
+        assert_eq!(
+            infer_literal(value).outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })
+        );
+    }
+    for value in [
+        f64::from_bits(1.0f64.to_bits() + 1),
+        f64::from_bits((-1.0f64).to_bits() + 1),
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
+        assert_eq!(
+            infer_literal(value).outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Complex,
+            })
+        );
+    }
+
+    let mut unknown_real = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(2), DimensionFact::Known(3)],
+        },
+        StorageFact::Dense,
+    );
+    unknown_real.residency = ResidencyFact::Device {
+        provider: Some("atanh-provider".into()),
+    };
+    let dynamic = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![unknown_real.clone()],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(dynamic.outputs[0].shape, unknown_real.shape);
+    assert_eq!(dynamic.outputs[0].residency, unknown_real.residency);
+    assert_eq!(
+        dynamic.outputs[0].certainty,
+        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
+    );
+}
+
+#[test]
 fn inverse_tangent_tracks_real_domain_and_typed_like_placement() {
     use runmat_types::{
         CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
