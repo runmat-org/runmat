@@ -1,6 +1,7 @@
 mod acos;
 mod acosh;
 mod asin;
+mod asinh;
 mod atan;
 mod cos;
 mod cosd;
@@ -14,6 +15,7 @@ mod tand;
 pub use acos::*;
 pub use acosh::*;
 pub use asin::*;
+pub use asinh::*;
 pub use atan::*;
 pub use cos::*;
 pub use cosd::*;
@@ -28,6 +30,7 @@ pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &ACOS_CATALOG_ENTRY,
     &ACOSH_CATALOG_ENTRY,
     &ASIN_CATALOG_ENTRY,
+    &ASINH_CATALOG_ENTRY,
     &ATAN_CATALOG_ENTRY,
     &COS_CATALOG_ENTRY,
     &COSD_CATALOG_ENTRY,

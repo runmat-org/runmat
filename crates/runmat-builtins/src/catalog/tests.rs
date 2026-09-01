@@ -496,6 +496,8 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
 #[test]
 fn catalog_entry_modules_remain_focused() {
     const MAX_LINES: usize = 500;
+    const MAX_LINE_BYTES: usize = 1_000;
+    const MAX_MODULE_BYTES: usize = 24_000;
 
     fn visit(directory: &std::path::Path) {
         for entry in std::fs::read_dir(directory)
@@ -516,6 +518,18 @@ fn catalog_entry_modules_remain_focused() {
             assert!(
                 line_count <= MAX_LINES,
                 "catalog contract module has {line_count} lines; split it by builtin domain before it exceeds {MAX_LINES}: {}",
+                path.display()
+            );
+            assert!(
+                source.len() <= MAX_MODULE_BYTES,
+                "catalog contract module has {} bytes; split it by a meaningful local concern before it exceeds {MAX_MODULE_BYTES}: {}",
+                source.len(),
+                path.display()
+            );
+            let longest_line = source.lines().map(str::len).max().unwrap_or_default();
+            assert!(
+                longest_line <= MAX_LINE_BYTES,
+                "catalog contract module has a {longest_line}-byte line; keep declarations reviewable instead of compressing them to evade the module-size guard: {}",
                 path.display()
             );
         }
@@ -2166,6 +2180,69 @@ fn inverse_hyperbolic_cosine_tracks_exact_domain_shape_and_residency() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-INVERSE-HYPERBOLIC-SPARSE"));
+}
+
+#[test]
+fn inverse_hyperbolic_sine_proves_real_outputs_for_real_inputs() {
+    use runmat_types::{
+        CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("asinh").expect("asinh catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::InverseHyperbolic(
+            InverseHyperbolicFunction::Sine
+        ))
+    );
+    assert_eq!(entry.documentation.examples.len(), 6);
+    assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Candidate);
+
+    for kind in [
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ValueKindFact::Logical,
+        ValueKindFact::Character,
+    ] {
+        let expected_class = if matches!(&kind, ValueKindFact::Numeric(_)) {
+            NumericClass::Single
+        } else {
+            NumericClass::Double
+        };
+        let mut input = ValueFact::proven(
+            kind,
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            StorageFact::Dense,
+        );
+        input.residency = ResidencyFact::Device {
+            provider: Some("asinh-provider".into()),
+        };
+        let inferred = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![input],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        assert!(inferred.diagnostics.is_empty());
+        assert_eq!(
+            inferred.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: expected_class,
+                domain: NumericDomain::Real,
+            })
+        );
+        assert_eq!(
+            inferred.outputs[0].residency,
+            ResidencyFact::Device {
+                provider: Some("asinh-provider".into())
+            }
+        );
+    }
 }
 
 #[test]
