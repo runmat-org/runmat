@@ -1,5 +1,8 @@
 use super::{argument_error, finish_fixed, numeric_kind};
-use crate::{BuiltinCatalogEntry, LogarithmBase, RootKind, TrigonometricFunction};
+use crate::{
+    BuiltinCatalogEntry, LogarithmBase, PiScaledTrigonometricFunction, RootKind,
+    TrigonometricFunction,
+};
 use runmat_types::{
     infer_call, AliasFact, CallContract, CallInference, CallRequest, ContiguityFact, DynamicReason,
     LayoutFact, LiteralValue, MutationFact, NumericClass, NumericDomain, NumericFact,
@@ -129,6 +132,93 @@ pub(super) fn infer_trigonometric(
                 request.arguments.len().saturating_sub(1),
             ));
             output.residency = ResidencyFact::Unknown;
+        }
+    }
+
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+pub(super) fn infer_pi_scaled_trigonometric(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    function: PiScaledTrigonometricFunction,
+) -> CallInference {
+    let name = match function {
+        PiScaledTrigonometricFunction::Sin => "sinpi",
+        PiScaledTrigonometricFunction::Cos => "cospi",
+    };
+    let mut diagnostics = Vec::new();
+    let Some(input) = request.arguments.first() else {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-PI-TRIGONOMETRIC-ARITY",
+            format!("{name} requires exactly one input"),
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+    if request.arguments.len() > 1 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-PI-TRIGONOMETRIC-ARITY",
+            format!("{name} accepts exactly one input"),
+            1,
+        ));
+    }
+
+    if matches!(input.storage, StorageFact::Sparse) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-PI-TRIGONOMETRIC-SPARSE",
+            format!("{name} does not currently accept sparse input"),
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    }
+
+    let mut output = input.clone();
+    match &mut output.kind {
+        ValueKindFact::Numeric(numeric)
+            if numeric.domain == NumericDomain::Complex
+                && !matches!(numeric.class, NumericClass::Double | NumericClass::Single) =>
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-PI-TRIGONOMETRIC-COMPLEX-INTEGER",
+                format!("{name} does not accept complex fixed-width integer input"),
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+        ValueKindFact::Numeric(numeric) => {
+            if !matches!(numeric.class, NumericClass::Double | NumericClass::Single) {
+                numeric.class = NumericClass::Double;
+            }
+            materialize_output(&mut output);
+            output.residency = ResidencyFact::Host;
+        }
+        ValueKindFact::Logical | ValueKindFact::Character => {
+            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
+            materialize_output(&mut output);
+            output.residency = ResidencyFact::Host;
+        }
+        ValueKindFact::Unknown => {
+            preserve_shape_on_dynamic_input(&mut output);
+            output.residency = ResidencyFact::Host;
+        }
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-PI-TRIGONOMETRIC-INPUT",
+                format!("{name} requires numeric, logical, or character input"),
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
         }
     }
 
