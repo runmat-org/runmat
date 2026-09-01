@@ -64,6 +64,7 @@ pub enum MathInferenceRule {
     Trigonometric(TrigonometricFunction),
     PiScaledTrigonometric(PiScaledTrigonometricFunction),
     DegreeTrigonometric(DegreeTrigonometricFunction),
+    InverseTrigonometric(InverseTrigonometricFunction),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -84,6 +85,13 @@ pub enum DegreeTrigonometricFunction {
     Sin,
     Cos,
     Tan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum InverseTrigonometricFunction {
+    Sine,
+    Cosine,
+    Tangent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

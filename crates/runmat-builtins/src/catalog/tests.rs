@@ -1663,7 +1663,6 @@ fn pi_scaled_cosine_owns_exact_typed_resident_contract_and_documentation() {
         entry.placement.residency,
         BuiltinResidencyPolicy::PreserveInputs
     );
-
     let mut input = ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Single,
@@ -1898,6 +1897,113 @@ fn degree_tangent_owns_typed_resident_contract_and_character_extension() {
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Double,
             domain: NumericDomain::Real
+        })
+    );
+}
+
+#[test]
+fn inverse_sine_tracks_value_dependent_domain_and_preserves_residency() {
+    use runmat_types::{
+        CallRequest, CertaintyFact, DimensionFact, DynamicReason, LiteralContext, LiteralValue,
+        NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount,
+        ResidencyFact, ShapeFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("asin").expect("asin catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::InverseTrigonometric(
+            InverseTrigonometricFunction::Sine
+        ))
+    );
+    assert_eq!(
+        entry.documentation.authority,
+        BuiltinDocumentationAuthority::Catalog
+    );
+    assert_eq!(entry.documentation.examples.len(), 6);
+    assert_eq!(
+        entry.placement.residency,
+        BuiltinResidencyPolicy::PreserveInputs
+    );
+    assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Never);
+
+    let input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let infer_literal = |value| {
+        infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![input.clone()],
+                literals: LiteralContext::new(vec![LiteralValue::Number(value)]),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        )
+    };
+    let in_domain = infer_literal(0.5);
+    assert!(in_domain.diagnostics.is_empty());
+    assert_eq!(
+        in_domain.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real
+        })
+    );
+    let promoted = infer_literal(1.2);
+    assert!(promoted.diagnostics.is_empty());
+    assert_eq!(
+        promoted.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex
+        })
+    );
+
+    let mut dynamic_input = input;
+    let matrix_shape = ShapeFact::Shaped {
+        dims: vec![DimensionFact::Known(2), DimensionFact::Known(3)],
+    };
+    dynamic_input.shape = matrix_shape.clone();
+    dynamic_input.residency = ResidencyFact::Device {
+        provider: Some("source-provider".into()),
+    };
+    let dynamic = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![dynamic_input],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(dynamic.diagnostics.is_empty());
+    assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(dynamic.outputs[0].shape, matrix_shape);
+    assert_eq!(
+        dynamic.outputs[0].residency,
+        ResidencyFact::Device {
+            provider: Some("source-provider".into())
+        }
+    );
+    assert_eq!(
+        dynamic.outputs[0].certainty,
+        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
+    );
+
+    let character = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![ValueFact::scalar(ValueKindFact::Character)],
+            literals: LiteralContext::new(vec![LiteralValue::Character("A".into())]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(character.diagnostics.is_empty());
+    assert_eq!(
+        character.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex
         })
     );
 }

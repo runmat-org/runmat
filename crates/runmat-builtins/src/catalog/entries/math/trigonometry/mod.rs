@@ -1,3 +1,4 @@
+mod asin;
 mod cos;
 mod cosd;
 mod cospi;
@@ -8,6 +9,7 @@ mod sinpi;
 mod tan;
 mod tand;
 
+pub use asin::*;
 pub use cos::*;
 pub use cosd::*;
 pub use cospi::*;
@@ -18,6 +20,7 @@ pub use tan::*;
 pub use tand::*;
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
+    &ASIN_CATALOG_ENTRY,
     &COS_CATALOG_ENTRY,
     &COSD_CATALOG_ENTRY,
     &COSPI_CATALOG_ENTRY,
