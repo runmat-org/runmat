@@ -186,6 +186,36 @@ fn numeric_limit_documentation_is_catalog_owned_and_executable() {
 }
 
 #[test]
+fn exponential_documentation_is_catalog_owned_and_executable() {
+    for (name, example_count, faq_count) in [("exp", 6, 6), ("expm1", 5, 7)] {
+        let entry = builtin_catalog_entry_by_name(name).expect("exponential catalog entry");
+        let documentation = &entry.documentation;
+        assert_eq!(
+            documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(documentation.examples.len(), example_count, "{name}");
+        assert_eq!(documentation.faqs.len(), faq_count, "{name}");
+        assert!(
+            documentation
+                .sections
+                .iter()
+                .any(|section| section.heading == "GPU execution"),
+            "{name}"
+        );
+        assert!(!documentation.evidence.implementation.is_empty(), "{name}");
+        assert!(!documentation.evidence.verification.is_empty(), "{name}");
+        assert!(documentation.examples.iter().all(|example| {
+            !example.id.is_empty()
+                && matches!(
+                    example.verification,
+                    BuiltinExampleVerification::Assertions { .. }
+                )
+        }));
+    }
+}
+
+#[test]
 fn migrated_registry_is_valid_and_case_insensitive() {
     let errors = validate_builtin_catalog(builtin_catalog_entries());
     assert!(errors.is_empty(), "catalog errors: {errors:#?}");
@@ -234,7 +264,23 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
                 let defines_family_entries = source
                     .lines()
                     .any(|line| line.starts_with("pub const ") && line.contains("_CATALOG_ENTRY:"));
-                if !defines_family_entries {
+                let composes_local_contracts =
+                    std::fs::read_dir(path.parent().expect("catalog module directory"))
+                        .expect("catalog module directory")
+                        .filter_map(Result::ok)
+                        .map(|entry| entry.path())
+                        .filter(|candidate| candidate != &path)
+                        .filter(|candidate| {
+                            candidate
+                                .extension()
+                                .and_then(|extension| extension.to_str())
+                                == Some("rs")
+                        })
+                        .any(|candidate| {
+                            std::fs::read_to_string(candidate)
+                                .is_ok_and(|child| child.contains("_CATALOG_ENTRY:"))
+                        });
+                if !defines_family_entries && !composes_local_contracts {
                     assert!(
                         !source.lines().any(|line| {
                             line.trim_start().starts_with('&') && line.contains("_CATALOG_ENTRY")
@@ -243,12 +289,29 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
                         path.display()
                     );
                 }
-            } else if source.contains("_CATALOG_ENTRY") {
+            } else if source.contains("_CATALOG_ENTRY") && !source.contains("const ENTRIES") {
+                let family_module_path = path.parent().expect("family directory").join("mod.rs");
+                let family_module =
+                    std::fs::read_to_string(&family_module_path).unwrap_or_else(|error| {
+                        panic!("read {}: {error}", family_module_path.display())
+                    });
                 assert!(
-                    source.contains("const ENTRIES"),
-                    "catalog family must register entries beside their contracts: {}",
-                    path.display()
+                    family_module.contains("const ENTRIES"),
+                    "grouped catalog family must own one local entry slice: {}",
+                    family_module_path.display()
                 );
+                for declaration in source.lines().filter_map(|line| {
+                    line.strip_prefix("pub const ")
+                        .and_then(|rest| rest.split_once("_CATALOG_ENTRY:"))
+                        .map(|(prefix, _)| format!("&{prefix}_CATALOG_ENTRY"))
+                }) {
+                    assert!(
+                        family_module.contains(&declaration),
+                        "{} does not register {declaration} from {}",
+                        family_module_path.display(),
+                        path.display()
+                    );
+                }
             }
         }
     }

@@ -4,7 +4,8 @@ use futures::channel::oneshot;
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, IntegerElementType, NumericElementType, ProviderPrecision,
+    unsupported_provider_operation, GpuTensorHandle, GpuTensorStorage, IntegerElementType,
+    NumericElementType, ProviderPrecision,
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_time::Instant;
@@ -407,17 +408,17 @@ impl WgpuProvider {
     pub(super) fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         let entry = self.get_entry_raw(handle)?;
         if let Some(element_type) = entry.integer_type() {
-            return Err(anyhow!(
+            return Err(unsupported_provider_operation(format!(
                 "native {:?} gpuArray buffers require an integer provider kernel; floating-point dispatch is not permitted",
                 element_type
-            ));
+            )));
         }
         if entry.precision != self.precision {
-            return Err(anyhow!(
+            return Err(unsupported_provider_operation(format!(
                 "native {:?} gpuArray buffer requires a precision-aware provider kernel; {:?} dispatch is not permitted",
                 entry.element_type,
                 self.precision
-            ));
+            )));
         }
         Ok(entry)
     }

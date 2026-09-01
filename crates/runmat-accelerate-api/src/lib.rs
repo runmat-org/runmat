@@ -1534,19 +1534,21 @@ pub type AccelNumericDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostNum
 
 #[derive(Debug)]
 pub struct UnsupportedProviderOperation {
-    detail: &'static str,
+    detail: String,
 }
 
 impl std::fmt::Display for UnsupportedProviderOperation {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.detail)
+        formatter.write_str(&self.detail)
     }
 }
 
 impl std::error::Error for UnsupportedProviderOperation {}
 
-pub fn unsupported_provider_operation(detail: &'static str) -> anyhow::Error {
-    anyhow::Error::new(UnsupportedProviderOperation { detail })
+pub fn unsupported_provider_operation(detail: impl Into<String>) -> anyhow::Error {
+    anyhow::Error::new(UnsupportedProviderOperation {
+        detail: detail.into(),
+    })
 }
 
 pub fn is_unsupported_provider_operation(error: &anyhow::Error) -> bool {
@@ -5471,10 +5473,13 @@ mod tests {
     #[test]
     fn unsupported_provider_operations_have_typed_identity() {
         let unsupported = unsupported_provider_operation("test operation is unavailable");
+        let dynamic = unsupported_provider_operation(format!("unsupported precision {}", 64));
         let ordinary = anyhow::anyhow!("test operation is unavailable");
 
         assert!(is_unsupported_provider_operation(&unsupported));
+        assert!(is_unsupported_provider_operation(&dynamic));
         assert!(!is_unsupported_provider_operation(&ordinary));
         assert_eq!(unsupported.to_string(), "test operation is unavailable");
+        assert_eq!(dynamic.to_string(), "unsupported precision 64");
     }
 }

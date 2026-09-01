@@ -1,18 +1,19 @@
 use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,
     BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
-    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
-    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy,
-    BuiltinInferenceRule, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinLinkContract,
-    BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinPlacementContract, BuiltinPortability, BuiltinPurity,
-    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
-    MathInferenceRule, ALL_INTEGER_CLASSES,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
+    BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
+    BuiltinSignatureDescriptor, MathInferenceRule, ALL_INTEGER_CLASSES,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
+
+use super::documentation::EXPM1_DOCUMENTATION;
 
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -104,15 +105,7 @@ const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const EXPM1_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     identity: BuiltinCatalogIdentity { name: "expm1" },
     category: "math/elementwise",
-    documentation: BuiltinDocumentation {
-        summary: "Compute exp(X)-1 elementwise with near-zero accuracy.",
-        keywords: &["expm1", "exponential", "elementwise", "precision", "gpu"],
-        related: &["exp", "log1p"],
-        introduced: None,
-        status: None,
-        examples: &[],
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: EXPM1_DOCUMENTATION,
     descriptor: &EXPM1_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
@@ -145,5 +138,3 @@ pub const EXPM1_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&EXPM1_CATALOG_ENTRY];

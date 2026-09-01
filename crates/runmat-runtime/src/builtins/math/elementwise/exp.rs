@@ -185,7 +185,7 @@ async fn exp_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 "provider unary_exp returned malformed output",
             ));
         }
-        Err(err) if is_unsupported_provider_hook(&err) => {}
+        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => {}
         Err(err) => {
             return Err(exp_error_with_detail(
                 &EXP_ERROR_INTERNAL,
@@ -537,10 +537,6 @@ fn free_rejected_gpu_output(output: &GpuTensorHandle, input: &GpuTensorHandle) {
     {
         let _ = owner.free(output);
     }
-}
-
-fn is_unsupported_provider_hook(err: &anyhow::Error) -> bool {
-    err.to_string().contains("unary_exp not supported")
 }
 
 fn exp_complex_parts(re: f64, im: f64) -> (f64, f64) {
