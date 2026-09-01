@@ -7,6 +7,7 @@ pub enum BuiltinEvidenceKind {
     IntegrationTest,
     BrowserTest,
     ProviderTest,
+    WgpuTest,
     ConformanceTest,
     Validation,
 }

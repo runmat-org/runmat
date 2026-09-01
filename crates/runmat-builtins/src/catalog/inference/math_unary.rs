@@ -1,5 +1,5 @@
 use super::{argument_error, finish_fixed, numeric_kind};
-use crate::{BuiltinCatalogEntry, LogarithmBase, RootKind};
+use crate::{BuiltinCatalogEntry, LogarithmBase, RootKind, TrigonometricFunction};
 use runmat_types::{
     infer_call, AliasFact, CallContract, CallInference, CallRequest, ContiguityFact, DynamicReason,
     LayoutFact, LiteralValue, MutationFact, NumericClass, NumericDomain, NumericFact,
@@ -8,6 +8,158 @@ use runmat_types::{
 
 pub(super) fn infer_exp(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_exponential(request, entry, ExponentialKind::Exp)
+}
+
+pub(super) fn infer_trigonometric(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    function: TrigonometricFunction,
+) -> CallInference {
+    let name = match function {
+        TrigonometricFunction::Sin => "sin",
+    };
+    let mut diagnostics = Vec::new();
+    let Some(input) = request.arguments.first() else {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-TRIGONOMETRIC-ARITY",
+            format!("{name} requires an input value"),
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+
+    let mut output = input.clone();
+    match &mut output.kind {
+        ValueKindFact::Numeric(numeric)
+            if numeric.domain == NumericDomain::Complex
+                && !matches!(numeric.class, NumericClass::Double | NumericClass::Single) =>
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-TRIGONOMETRIC-COMPLEX-INTEGER",
+                format!("{name} does not accept complex fixed-width integer input"),
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+        ValueKindFact::Numeric(numeric) => {
+            if !matches!(numeric.class, NumericClass::Double | NumericClass::Single) {
+                numeric.class = NumericClass::Double;
+            }
+            if matches!(output.storage, StorageFact::Sparse) {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-TRIGONOMETRIC-SPARSE",
+                    format!("{name} does not currently accept sparse input"),
+                    0,
+                ));
+                output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+            } else {
+                materialize_output(&mut output);
+            }
+        }
+        ValueKindFact::Logical | ValueKindFact::Character => {
+            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
+            materialize_output(&mut output);
+        }
+        ValueKindFact::Symbolic => {}
+        ValueKindFact::Unknown => preserve_shape_on_dynamic_input(&mut output),
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-TRIGONOMETRIC-INPUT",
+                format!("{name} requires numeric, logical, character, or symbolic input"),
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+    }
+
+    match request.arguments.as_slice() {
+        [_] => {
+            if matches!(output.residency, ResidencyFact::Device { .. }) {
+                output.residency = ResidencyFact::Unknown;
+            }
+        }
+        [_, keyword, prototype] => {
+            let keyword_literal =
+                request
+                    .literals
+                    .literal_args
+                    .get(1)
+                    .and_then(|literal| match literal {
+                        LiteralValue::String(value)
+                        | LiteralValue::Character(value)
+                        | LiteralValue::Keyword(value) => Some(value.as_str()),
+                        _ => None,
+                    });
+            match keyword_literal {
+                Some(value) if value.eq_ignore_ascii_case("like") => {
+                    apply_trigonometric_prototype(&mut output, prototype, name, &mut diagnostics);
+                }
+                Some(_) => diagnostics.push(argument_error(
+                    "RM-CATALOG-TRIGONOMETRIC-LIKE",
+                    format!("{name} accepts only the \"like\" option"),
+                    1,
+                )),
+                None if matches!(
+                    keyword.kind,
+                    ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+                ) =>
+                {
+                    output.residency = ResidencyFact::Unknown;
+                }
+                None => diagnostics.push(argument_error(
+                    "RM-CATALOG-TRIGONOMETRIC-LIKE",
+                    format!("{name} requires \"like\" as its second input"),
+                    1,
+                )),
+            }
+        }
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-TRIGONOMETRIC-ARITY",
+                format!(
+                    "{name} accepts one input or an input followed by \"like\" and a prototype"
+                ),
+                request.arguments.len().saturating_sub(1),
+            ));
+            output.residency = ResidencyFact::Unknown;
+        }
+    }
+
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+fn apply_trigonometric_prototype(
+    output: &mut ValueFact,
+    prototype: &ValueFact,
+    name: &str,
+    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+) {
+    match &prototype.kind {
+        ValueKindFact::Numeric(prototype_numeric) => {
+            if let ValueKindFact::Numeric(output_numeric) = &mut output.kind {
+                if prototype_numeric.domain == NumericDomain::Complex {
+                    output_numeric.domain = NumericDomain::Complex;
+                }
+            }
+            output.residency = prototype.residency.clone();
+        }
+        ValueKindFact::Logical | ValueKindFact::Unknown => {
+            output.residency = prototype.residency.clone();
+        }
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-TRIGONOMETRIC-PROTOTYPE",
+                format!("{name} requires a numeric or logical prototype"),
+                2,
+            ));
+            output.residency = ResidencyFact::Unknown;
+        }
+    }
 }
 
 pub(super) fn infer_expm1(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {

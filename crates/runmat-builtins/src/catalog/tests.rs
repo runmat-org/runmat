@@ -1380,6 +1380,170 @@ fn abs_contract_preserves_class_shape_storage_and_residency_but_makes_complex_re
 }
 
 #[test]
+fn sin_catalog_leaf_owns_complete_contract_documentation_and_examples() {
+    let entry = builtin_catalog_entry_by_name("sin").expect("sin catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::Trigonometric(TrigonometricFunction::Sin))
+    );
+    assert_eq!(
+        entry.documentation.authority,
+        BuiltinDocumentationAuthority::Catalog
+    );
+    assert_eq!(entry.documentation.examples.len(), 5);
+    assert_eq!(entry.documentation.faqs.len(), 8);
+    assert!(entry
+        .documentation
+        .examples
+        .iter()
+        .all(|example| !example.id.is_empty() && !example.program.is_empty()));
+    assert_eq!(entry.bindings, REQUIRED_DEFAULT_BINDING.as_slice());
+    assert_eq!(entry.extensions.len(), 4);
+    assert_eq!(entry.integer_capabilities.len(), 1);
+}
+
+#[test]
+fn sin_contract_preserves_floating_class_and_applies_like_representation() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+        OutputSelection, RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact,
+        ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("sin").expect("sin catalog entry");
+    let mut input = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    input.residency = ResidencyFact::Device {
+        provider: Some("source-provider".into()),
+    };
+    let inferred = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![input.clone()],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(inferred.diagnostics.is_empty());
+    assert_eq!(inferred.outputs[0].kind, input.kind);
+    assert_eq!(inferred.outputs[0].shape, input.shape);
+    assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
+    assert_eq!(inferred.outputs[0].residency, ResidencyFact::Unknown);
+
+    let mut prototype = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Complex,
+    }));
+    prototype.residency = ResidencyFact::Device {
+        provider: Some("prototype-provider".into()),
+    };
+    let like = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![
+                input,
+                ValueFact::scalar(ValueKindFact::String),
+                prototype.clone(),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("like".into()),
+                LiteralValue::Unknown,
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(like.diagnostics.is_empty());
+    assert_eq!(
+        like.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        })
+    );
+    assert_eq!(like.outputs[0].residency, prototype.residency);
+}
+
+#[test]
+fn sin_contract_promotes_extensions_and_rejects_unsupported_representations() {
+    use runmat_types::{
+        CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("sin").expect("sin catalog entry");
+    let infer = |input| {
+        infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![input],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        )
+    };
+    let integer = infer(ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt16,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(4), Some(1)]),
+        StorageFact::Dense,
+    ));
+    assert_eq!(
+        integer.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        integer.outputs[0].shape,
+        ShapeFact::from(vec![Some(4), Some(1)])
+    );
+
+    for kind in [ValueKindFact::Logical, ValueKindFact::Character] {
+        let extension = infer(ValueFact::scalar(kind));
+        assert!(extension.diagnostics.is_empty());
+        assert_eq!(
+            extension.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })
+        );
+    }
+
+    let sparse = infer(ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(3), Some(3)]),
+        StorageFact::Sparse,
+    ));
+    assert!(sparse
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-TRIGONOMETRIC-SPARSE"));
+
+    let complex_integer = infer(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Int32,
+        domain: NumericDomain::Complex,
+    })));
+    assert!(complex_integer
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-TRIGONOMETRIC-COMPLEX-INTEGER"));
+}
+
+#[test]
 fn exp_contract_preserves_floating_facts_and_marks_conversion_residency_dynamic() {
     use runmat_types::{
         AliasFact, CallRequest, ContiguityFact, LayoutFact, NumericClass, NumericDomain,

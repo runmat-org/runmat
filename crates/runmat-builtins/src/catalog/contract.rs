@@ -61,6 +61,12 @@ pub enum MathInferenceRule {
     NumericConversionWithLike(runmat_types::NumericClass),
     NumericComponent(NumericComponentRule),
     Signum,
+    Trigonometric(TrigonometricFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum TrigonometricFunction {
+    Sin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
