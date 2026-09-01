@@ -251,6 +251,37 @@ fn logarithm_documentation_is_catalog_owned_and_executable() {
 }
 
 #[test]
+fn complex_component_documentation_is_catalog_owned_and_executable() {
+    for (name, example_count) in [("conj", 6), ("real", 6), ("imag", 5)] {
+        let entry = builtin_catalog_entry_by_name(name).expect("component catalog entry");
+        let documentation = &entry.documentation;
+        assert_eq!(
+            documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(documentation.examples.len(), example_count, "{name}");
+        assert_eq!(documentation.faqs.len(), 7, "{name}");
+        assert!(
+            documentation
+                .sections
+                .iter()
+                .any(|section| section.heading == "GPU execution"),
+            "{name}"
+        );
+        assert!(!documentation.evidence.implementation.is_empty(), "{name}");
+        assert!(!documentation.evidence.verification.is_empty(), "{name}");
+        assert!(documentation
+            .examples
+            .iter()
+            .all(|example| !example.id.is_empty()
+                && matches!(
+                    example.verification,
+                    BuiltinExampleVerification::Assertions { .. }
+                )));
+    }
+}
+
+#[test]
 fn migrated_registry_is_valid_and_case_insensitive() {
     let errors = validate_builtin_catalog(builtin_catalog_entries());
     assert!(errors.is_empty(), "catalog errors: {errors:#?}");
@@ -281,6 +312,10 @@ fn catalog_entries_keep_domain_modules_out_of_the_root() {
 
 #[test]
 fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
+    fn declares_catalog_entry(source: &str) -> bool {
+        source.contains("_CATALOG_ENTRY:") || source.contains("CATALOG_ENTRY: BuiltinCatalogEntry")
+    }
+
     fn visit(directory: &std::path::Path) {
         for entry in std::fs::read_dir(directory)
             .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
@@ -313,7 +348,7 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
                         })
                         .any(|candidate| {
                             std::fs::read_to_string(candidate)
-                                .is_ok_and(|child| child.contains("_CATALOG_ENTRY:"))
+                                .is_ok_and(|child| declares_catalog_entry(&child))
                         });
                 if !defines_family_entries && !composes_local_contracts {
                     assert!(
@@ -343,6 +378,19 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
                     assert!(
                         family_module.contains(&declaration),
                         "{} does not register {declaration} from {}",
+                        family_module_path.display(),
+                        path.display()
+                    );
+                }
+                for alias in source.lines().filter_map(|line| {
+                    line.trim()
+                        .split_once(" as ")
+                        .map(|(_, alias)| alias.trim_end_matches(','))
+                        .filter(|alias| alias.ends_with("_CATALOG_ENTRY"))
+                }) {
+                    assert!(
+                        family_module.contains(&format!("&{alias}")),
+                        "{} does not register aliased entry {alias} from {}",
                         family_module_path.display(),
                         path.display()
                     );

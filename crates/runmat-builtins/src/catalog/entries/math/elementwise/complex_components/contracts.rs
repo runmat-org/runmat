@@ -1,18 +1,19 @@
 use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,
     BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
-    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
-    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy,
-    BuiltinInferenceRule, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinLinkContract,
-    BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinPlacementContract, BuiltinPortability, BuiltinPurity,
-    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
-    MathInferenceRule, NumericComponentRule, ALL_INTEGER_CLASSES,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
+    BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
+    BuiltinSignatureDescriptor, MathInferenceRule, NumericComponentRule, ALL_INTEGER_CLASSES,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
+
+use super::documentation::{CONJ_DOCUMENTATION, IMAG_DOCUMENTATION, REAL_DOCUMENTATION};
 
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
@@ -22,7 +23,7 @@ macro_rules! define_component_projection {
         $name:literal,
         $upper:literal,
         $rule:expr,
-        $summary:literal,
+        $documentation:expr,
         $output_description:literal,
         $integer_notes:literal,
         $capability_notes:literal
@@ -96,15 +97,7 @@ macro_rules! define_component_projection {
             pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
                 identity: BuiltinCatalogIdentity { name: $name },
                 category: "math/elementwise",
-                documentation: BuiltinDocumentation {
-                    summary: $summary,
-                    keywords: &[$name, "complex", "component", "elementwise", "gpu"],
-                    related: &["complex", "conj", "real", "imag", "angle"],
-                    introduced: None,
-                    status: None,
-                    examples: &[],
-                    ..BuiltinDocumentation::EMPTY
-                },
+                documentation: $documentation,
                 descriptor: &DESCRIPTOR,
                 contract: BuiltinContractDeclaration {
                     maturity: BuiltinContractMaturity::Complete,
@@ -148,7 +141,7 @@ define_component_projection!(
     "real",
     "REAL",
     NumericComponentRule::RealPart,
-    "Extract the real component of numeric values.",
+    REAL_DOCUMENTATION,
     "Real component of X.",
     "All eight integer classes retain their class while projecting the real component.",
     "Real integer input is an exact same-class identity. Paired complex-integer input projects its same-class real storage without arithmetic; supported resident forms preserve class, shape, owner, and residency."
@@ -159,7 +152,7 @@ define_component_projection!(
     "imag",
     "IMAG",
     NumericComponentRule::ImaginaryPart,
-    "Extract the imaginary component of numeric values.",
+    IMAG_DOCUMENTATION,
     "Imaginary component of X.",
     "All eight real and componentwise-complex integer classes retain their class.",
     "Real integer input produces exact same-class zeros. Paired complex-integer input projects its exact imaginary storage without arithmetic or overflow; supported resident forms preserve class, shape, owner, and residency."
@@ -260,15 +253,7 @@ mod conj {
     pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         identity: BuiltinCatalogIdentity { name: "conj" },
         category: "math/elementwise",
-        documentation: BuiltinDocumentation {
-            summary: "Compute complex conjugates element-wise.",
-            keywords: &["conj", "complex conjugate", "complex", "elementwise", "gpu"],
-            related: &["complex", "real", "imag", "angle"],
-            introduced: None,
-            status: None,
-            examples: &[],
-            ..BuiltinDocumentation::EMPTY
-        },
+        documentation: CONJ_DOCUMENTATION,
         descriptor: &DESCRIPTOR,
         contract: BuiltinContractDeclaration {
             maturity: BuiltinContractMaturity::Complete,
@@ -321,9 +306,3 @@ pub use real::{
     ERROR_INTERNAL as REAL_ERROR_INTERNAL, ERROR_INVALID_INPUT as REAL_ERROR_INVALID_INPUT,
     INTEGER_CAPABILITIES as REAL_INTEGER_CAPABILITIES,
 };
-
-pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
-    &CONJ_CATALOG_ENTRY,
-    &REAL_CATALOG_ENTRY,
-    &IMAG_CATALOG_ENTRY,
-];
