@@ -1,3 +1,7 @@
+use super::documentation::{
+    CODISTRIBUTOR_1D_DOCUMENTATION, CODISTRIBUTOR_2DBC_DOCUMENTATION, CODISTRIBUTOR_DOCUMENTATION,
+    IS_CODISTRIBUTED_DOCUMENTATION, IS_COMPLETE_DOCUMENTATION,
+};
 use super::*;
 
 const LOCAL_PART_INPUTS: [BuiltinParamDescriptor; 1] = [ANY_REQUIRED];
@@ -120,35 +124,35 @@ codistributor_entry!(
     CODISTRIBUTOR_CATALOG_ENTRY,
     "codistributor",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Codistributor),
-    "Create a one-dimensional or two-dimensional codistributor.",
+    CODISTRIBUTOR_DOCUMENTATION,
     CODISTRIBUTOR_DESCRIPTOR
 );
 codistributor_entry!(
     CODISTRIBUTOR_1D_CATALOG_ENTRY,
     "codistributor1d",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Codistributor1d),
-    "Create a one-dimensional codistributor.",
+    CODISTRIBUTOR_1D_DOCUMENTATION,
     CODISTRIBUTOR_1D_DESCRIPTOR
 );
 codistributor_entry!(
     CODISTRIBUTOR_2DBC_CATALOG_ENTRY,
     "codistributor2dbc",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Codistributor2dbc),
-    "Create a two-dimensional block-cyclic codistributor.",
+    CODISTRIBUTOR_2DBC_DOCUMENTATION,
     CODISTRIBUTOR_2DBC_DESCRIPTOR
 );
 codistributor_entry!(
     IS_COMPLETE_CATALOG_ENTRY,
     "isComplete",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::CodistributorIsComplete),
-    "Return whether a codistributor has a complete global size.",
+    IS_COMPLETE_DOCUMENTATION,
     IS_COMPLETE_DESCRIPTOR
 );
 codistributor_entry!(
     IS_CODISTRIBUTED_CATALOG_ENTRY,
     "iscodistributed",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Iscodistributed),
-    "Return whether a value is a codistributed array.",
+    IS_CODISTRIBUTED_DOCUMENTATION,
     IS_CODISTRIBUTED_DESCRIPTOR,
     DISTRIBUTED_INSPECTION_PLACEMENT
 );
