@@ -15508,16 +15508,17 @@ fn parfeval_without_explicit_pool_and_fetch_next_use_typed_future_state() {
 #[test]
 fn parfeval_on_all_returns_one_aggregate_future() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
     execute_text_request(
         &mut session,
-        "pool = parpool(); future = parfevalOnAll(pool, @(x) x + 2, 1, 5); workerCount = pool.NumWorkers; futureCount = numel(future); answer = fetchOutputs(future);",
+        "pool = parpool(2); future = parfevalOnAll(pool, @(x) x + 2, 1, 5); workerCount = pool.NumWorkers; futureCount = numel(future); answer = fetchOutputs(future); answerCount = numel(answer); answersMatch = all(answer(:) == 7);",
     )
     .expect("execute one invocation per pool worker");
 
     let variables = session.get_variables();
     assert_eq!(
         variables.get("workerCount"),
-        Some(&runmat_value::Value::Num(1.0))
+        Some(&runmat_value::Value::Num(2.0))
     );
     assert_eq!(
         variables.get("futureCount"),
@@ -15529,8 +15530,12 @@ fn parfeval_on_all_returns_one_aggregate_future() {
             if object.class_name == runmat_runtime::parallel::future::FEVAL_ON_ALL_FUTURE_CLASS
     ));
     assert_eq!(
-        variables.get("answer"),
-        Some(&runmat_value::Value::Num(7.0))
+        variables.get("answerCount"),
+        Some(&runmat_value::Value::Num(2.0))
+    );
+    assert_eq!(
+        variables.get("answersMatch"),
+        Some(&runmat_value::Value::Bool(true))
     );
 }
 

@@ -1,3 +1,4 @@
+use super::documentation::{GCP_DOCUMENTATION, PARPOOL_DOCUMENTATION};
 use super::*;
 
 const POOL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -53,8 +54,7 @@ parallel_entry!(
     PARPOOL_CATALOG_ENTRY,
     "parpool",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parpool),
-    "Create or return the execution pool for the current session.",
-    &["parallel", "pool", "workers", "parpool"],
+    PARPOOL_DOCUMENTATION,
     PARPOOL_DESCRIPTOR,
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::MaySuspend,
@@ -65,8 +65,7 @@ parallel_entry!(
     GCP_CATALOG_ENTRY,
     "gcp",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Gcp),
-    "Return the current execution pool.",
-    &["parallel", "pool", "current", "gcp", "nocreate"],
+    GCP_DOCUMENTATION,
     GCP_DESCRIPTOR,
     BuiltinContractMaturity::DynamicByDesign,
     BuiltinAsyncBehavior::MaySuspend,
