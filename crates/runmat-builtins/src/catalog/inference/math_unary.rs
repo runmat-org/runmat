@@ -18,6 +18,7 @@ pub(super) fn infer_trigonometric(
     let name = match function {
         TrigonometricFunction::Sin => "sin",
         TrigonometricFunction::Cos => "cos",
+        TrigonometricFunction::Tan => "tan",
     };
     let mut diagnostics = Vec::new();
     let Some(input) = request.arguments.first() else {

@@ -1,17 +1,16 @@
 //! MATLAB-compatible `tan` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, TAN_CHARACTER_INPUT_EXTENSION, TAN_ERROR_ARG_COUNT,
+    TAN_ERROR_GPU_UNAVAILABLE, TAN_ERROR_INTERNAL, TAN_ERROR_INVALID_INPUT,
+    TAN_ERROR_INVALID_OPTION, TAN_ERROR_LIKE_PROTOTYPE, TAN_INTEGER_INPUT_EXTENSION,
+    TAN_LIKE_OUTPUT_EXTENSION, TAN_LOGICAL_INPUT_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{TAN_DESCRIPTOR, TAN_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
-use runmat_value::{ComplexStorage, NumericDType};
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -21,171 +20,10 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::symbolic::symbolic_function;
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_value::SymbolicFunction;
 
 const BUILTIN_NAME: &str = "tan";
-
-pub const TAN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tan-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tan with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TanIntegerInputExtension"),
-};
-pub const TAN_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tan-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tan with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TanLogicalInputExtension"),
-};
-pub const TAN_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tan-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tan with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TanCharacterInputExtension"),
-};
-pub const TAN_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tan-like-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tan with a like output prototype is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TanLikeOutputExtension"),
-};
-pub const TAN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    TAN_INTEGER_INPUT_EXTENSION,
-    TAN_LOGICAL_INPUT_EXTENSION,
-    TAN_CHARACTER_INPUT_EXTENSION,
-    TAN_LIKE_OUTPUT_EXTENSION,
-];
-const TAN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "All eight real integer classes are admitted only when exactly representable at the binary64 transcendental boundary.",
-}];
-pub const TAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = tan(integer_X)",
-        inputs: &TAN_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat mode checks authoritative integer storage before conversion; host output is double and resident fallback returns through the owning provider.",
-    }];
-
-const TAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise tangent result.",
-}];
-
-const TAN_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, array, char array, complex value, or gpuArray.",
-}];
-
-const TAN_INPUTS_X_LIKE_P: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, array, char array, complex value, or gpuArray.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Output template selector keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "P",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype determining host vs gpuArray output residency.",
-    },
-];
-
-const TAN_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = tan(X)",
-        inputs: &TAN_INPUTS_X,
-        outputs: &TAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = tan(X, \"like\", P)",
-        inputs: &TAN_INPUTS_X_LIKE_P,
-        outputs: &TAN_OUTPUT,
-    },
-];
-
-const TAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TAN.INVALID_INPUT",
-    identifier: Some("RunMat:tan:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/logical/char/complex data.",
-    message: "tan: invalid input",
-};
-
-const TAN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TAN.INVALID_OPTION",
-    identifier: Some("RunMat:tan:InvalidOption"),
-    when: "Optional arguments after X are malformed or unsupported.",
-    message: "tan: invalid option",
-};
-
-const TAN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TAN.ARG_COUNT",
-    identifier: Some("RunMat:tan:ArgCount"),
-    when: "Too many input arguments were supplied.",
-    message: "tan: too many input arguments",
-};
-
-const TAN_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TAN.LIKE_PROTOTYPE",
-    identifier: Some("RunMat:tan:LikePrototype"),
-    when: "The \"like\" prototype is unsupported for this output conversion path.",
-    message: "tan: invalid \"like\" prototype",
-};
-
-const TAN_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TAN.GPU_UNAVAILABLE",
-    identifier: Some("RunMat:tan:GpuUnavailable"),
-    when: "GPU output was requested via \"like\" but no active provider is available.",
-    message: "tan: GPU provider unavailable",
-};
-
-const TAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TAN.INTERNAL",
-    identifier: Some("RunMat:tan:Internal"),
-    when: "Internal tensor conversion/allocation/provider flow failed.",
-    message: "tan: internal error",
-};
-
-const TAN_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    TAN_ERROR_INVALID_INPUT,
-    TAN_ERROR_INVALID_OPTION,
-    TAN_ERROR_ARG_COUNT,
-    TAN_ERROR_LIKE_PROTOTYPE,
-    TAN_ERROR_GPU_UNAVAILABLE,
-    TAN_ERROR_INTERNAL,
-];
-
-pub const TAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TAN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TAN_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::tan")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -243,14 +81,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "tan",
-    category = "math/trigonometry",
-    summary = "Compute element-wise tangent values in radians.",
-    keywords = "tan,tangent,trigonometry,radians,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::tan::TAN_DESCRIPTOR),
-    extensions(TAN_EXTENSIONS),
-    integer_capabilities(TAN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::tan"
 )]
 async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -311,12 +142,42 @@ async fn ensure_tan_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<(
 }
 
 async fn tan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let exact_fallback = runmat_accelerate_api::handle_integer_type(&handle).is_some()
+    let provider = gpu_helpers::exact_provider_for_handle(&handle);
+    let requires_exact_host_path = runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle);
-    if !exact_fallback {
-        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-            if let Ok(out) = provider.unary_tan(&handle).await {
-                return Ok(Value::GpuTensor(out));
+    if !requires_exact_host_path {
+        if let Some(provider) = provider {
+            match provider.unary_tan(&handle).await {
+                Ok(output)
+                    if gpu_helpers::unary_gpu_output_matches(
+                        &output,
+                        &handle,
+                        provider,
+                        gpu_helpers::UnaryGpuOutputContract {
+                            storage: runmat_accelerate_api::handle_storage(&handle),
+                            precision: runmat_accelerate_api::handle_precision(&handle),
+                            integer: None,
+                            logical: false,
+                            alias: gpu_helpers::GpuOutputAliasPolicy::AllowInput,
+                        },
+                    ) =>
+                {
+                    return Ok(gpu_helpers::resident_gpu_value(output));
+                }
+                Ok(output) => {
+                    gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
+                    return Err(tan_error_with_detail(
+                        &TAN_ERROR_INTERNAL,
+                        "provider returned an invalid unary tangent result",
+                    ));
+                }
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) => {
+                    return Err(tan_error_with_detail(
+                        &TAN_ERROR_INTERNAL,
+                        format!("provider unary tangent failed: {error}"),
+                    ));
+                }
             }
         }
     }
@@ -457,9 +318,9 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
                 if runmat_accelerate_api::handle_storage(handle)
                     == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
                 {
-                    convert_to_gpu_complex(value).await
+                    convert_to_gpu_complex(value, handle).await
                 } else {
-                    convert_to_gpu(value)
+                    convert_to_gpu(value, handle).await
                 }
             }
             Value::Tensor(_)
@@ -476,37 +337,45 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
     }
 }
 
-fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+#[async_recursion::async_recursion(?Send)]
+async fn convert_to_gpu(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
         tan_error_with_detail(
             &TAN_ERROR_GPU_UNAVAILABLE,
-            "GPU output requested via 'like' but no acceleration provider is active",
+            "GPU output requested via 'like' but no provider owns the prototype",
         )
     })?;
     match value {
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+                && gpu_helpers::exact_provider_for_handle(&handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
+        {
+            Ok(gpu_helpers::resident_gpu_value(handle))
+        }
+        Value::GpuTensor(handle) => {
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            convert_to_gpu(gathered, prototype).await
+        }
         Value::Tensor(tensor) => {
-            let data = tensor::tensor_values_f64_cow(&tensor);
-            let view = HostTensorView {
-                data: data.as_ref(),
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::resident_gpu_value(handle))
         }
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
                 .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor))
+            convert_to_gpu(Value::Tensor(tensor), prototype).await
         }
-        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
-        Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
+        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64()), prototype).await,
+        Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 }), prototype).await,
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor))
+            convert_to_gpu(Value::Tensor(tensor), prototype).await
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(tan_error_with_detail(
             &TAN_ERROR_LIKE_PROTOTYPE,
@@ -520,65 +389,101 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+async fn convert_to_gpu_complex(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
         tan_error_with_detail(
             &TAN_ERROR_GPU_UNAVAILABLE,
-            "complex GPU output requested via 'like' but no acceleration provider is active",
+            "complex GPU output requested via 'like' but no provider owns the prototype",
         )
     })?;
     match value {
-        Value::GpuTensor(handle) => {
+        Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_storage(&handle)
                 == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                && gpu_helpers::exact_provider_for_handle(&handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
+        {
+            Ok(gpu_helpers::complex_gpu_value(handle))
+        }
+        Value::GpuTensor(handle) => {
+            let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider));
+            if same_owner
+                && runmat_accelerate_api::handle_storage(&handle)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
             {
-                Ok(Value::GpuTensor(handle))
-            } else if let Some(handle_provider) =
-                runmat_accelerate_api::provider_for_handle(&handle)
-            {
-                match handle_provider.complex_from_real(&handle).await {
-                    Ok(out) => Ok(Value::GpuTensor(out)),
-                    Err(_) => {
-                        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-                            .await
-                            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-                        convert_to_gpu_complex(gathered).await
+                match provider.complex_from_real(&handle).await {
+                    Ok(output)
+                        if gpu_helpers::unary_gpu_output_matches(
+                            &output,
+                            &handle,
+                            provider,
+                            gpu_helpers::UnaryGpuOutputContract {
+                                storage:
+                                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                                precision: runmat_accelerate_api::handle_precision(&handle),
+                                integer: None,
+                                logical: false,
+                                alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+                            },
+                        ) =>
+                    {
+                        return Ok(gpu_helpers::complex_gpu_value(output));
+                    }
+                    Ok(output) => {
+                        gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
+                        return Err(tan_error_with_detail(
+                            &TAN_ERROR_INTERNAL,
+                            "provider returned an invalid complex conversion result",
+                        ));
+                    }
+                    Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                    Err(error) => {
+                        return Err(tan_error_with_detail(
+                            &TAN_ERROR_INTERNAL,
+                            format!("provider complex conversion failed: {error}"),
+                        ));
                     }
                 }
-            } else {
-                Err(tan_error_with_detail(
-                    &TAN_ERROR_GPU_UNAVAILABLE,
-                    "complex GPU output requested but the input handle has no provider",
-                ))
             }
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            convert_to_gpu_complex(gathered, prototype).await
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::complex_gpu_value(handle))
         }
         Value::ComplexTensor(tensor) => {
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::complex_gpu_value(handle))
         }
-        Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0)).await,
+        Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0), prototype).await,
         Value::Tensor(tensor) => {
             let values = tensor::tensor_values_f64_cow(&tensor);
             let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
-            let complex = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            convert_to_gpu_complex(Value::ComplexTensor(complex)).await
+            let complex = ComplexTensor::from_f64_values_with_dtype(
+                data,
+                tensor.shape.clone(),
+                complex_floating_output_dtype(tensor.numeric_dtype()),
+            )
+            .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
+            convert_to_gpu_complex(Value::ComplexTensor(complex), prototype).await
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            convert_to_gpu_complex(Value::Tensor(tensor)).await
+            convert_to_gpu_complex(Value::Tensor(tensor), prototype).await
         }
-        Value::Int(i) => convert_to_gpu_complex(Value::Num(i.to_f64())).await,
-        Value::Bool(b) => convert_to_gpu_complex(Value::Num(if b { 1.0 } else { 0.0 })).await,
+        Value::Int(i) => convert_to_gpu_complex(Value::Num(i.to_f64()), prototype).await,
+        Value::Bool(b) => {
+            convert_to_gpu_complex(Value::Num(if b { 1.0 } else { 0.0 }), prototype).await
+        }
         other => Err(tan_error_with_detail(
             &TAN_ERROR_INTERNAL,
             format!("cannot convert value {other:?} to complex GPU output via 'like'"),
@@ -604,8 +509,12 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => {
             let values = tensor::tensor_values_f64_cow(&tensor);
             let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
-            let complex = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
+            let complex = ComplexTensor::from_f64_values_with_dtype(
+                data,
+                tensor.shape.clone(),
+                complex_floating_output_dtype(tensor.numeric_dtype()),
+            )
+            .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(complex))
         }
         Value::GpuTensor(handle) => {
@@ -628,13 +537,20 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+fn complex_floating_output_dtype(dtype: NumericDType) -> NumericDType {
+    if dtype == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CharArray, IntValue, StringArray, Tensor};
 
     fn error_message(err: RuntimeError) -> String {
@@ -650,37 +566,65 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"Y = tan(X)"));
         assert!(labels.contains(&"Y = tan(X, \"like\", P)"));
+        assert_eq!(TAN_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+    }
+
+    #[test]
+    fn tan_integer_gate_all_classes_boundary_and_single_precision() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(super::tan_builtin(Value::Int(IntValue::I8(1)), Vec::new()))
+            .expect_err("strict mode rejects integer extension");
+        assert_eq!(
+            err.identifier(),
+            TAN_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        drop(_strict);
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for value in [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ] {
+            assert!(block_on(super::tan_builtin(Value::Int(value), Vec::new())).is_ok());
+        }
+        assert!(block_on(super::tan_builtin(
+            Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+            Vec::new(),
+        ))
+        .is_err());
+        assert!(block_on(super::tan_builtin(
+            Value::Int(IntValue::U64(1_u64 << 54)),
+            Vec::new(),
+        ))
+        .is_ok());
+
+        let single = Tensor::from_f32(vec![0.0, 1.0], vec![2, 1]).unwrap();
+        let Value::Tensor(single_out) =
+            block_on(super::tan_builtin(Value::Tensor(single), Vec::new())).unwrap()
+        else {
+            panic!("expected single tensor")
+        };
+        assert_eq!(single_out.numeric_dtype(), NumericDType::F32);
+        let complex = ComplexTensor::from_f32(vec![(1.0, 0.5)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(complex_out) = block_on(super::tan_builtin(
+            Value::ComplexTensor(complex),
+            Vec::new(),
+        ))
+        .unwrap() else {
+            panic!("expected single complex tensor")
+        };
+        assert_eq!(complex_out.numeric_dtype(), NumericDType::F32);
     }
 
     fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::tan_builtin(value, rest))
-    }
-
-    #[test]
-    fn tan_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn tan_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

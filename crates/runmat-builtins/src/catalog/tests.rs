@@ -1384,6 +1384,7 @@ fn radian_trigonometric_leaves_own_complete_contracts_documentation_and_examples
     for (name, function, example_count) in [
         ("sin", TrigonometricFunction::Sin, 5),
         ("cos", TrigonometricFunction::Cos, 6),
+        ("tan", TrigonometricFunction::Tan, 8),
     ] {
         let entry = builtin_catalog_entry_by_name(name).expect("trigonometric catalog entry");
         assert_eq!(
