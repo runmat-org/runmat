@@ -47,8 +47,7 @@ macro_rules! parallel_entry {
         $constant:ident,
         $name:literal,
         $rule:expr,
-        $summary:literal,
-        $keywords:expr,
+        $documentation:expr,
         $descriptor:ident,
         $maturity:expr,
         $async_behavior:expr,
@@ -58,15 +57,7 @@ macro_rules! parallel_entry {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
-            documentation: BuiltinDocumentation {
-                summary: $summary,
-                keywords: $keywords,
-                related: &[],
-                introduced: None,
-                status: None,
-                examples: &[],
-                ..BuiltinDocumentation::EMPTY
-            },
+            documentation: $documentation,
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
                 maturity: $maturity,
@@ -286,6 +277,7 @@ mod collectives;
 mod context;
 mod current_execution;
 mod distributed_arrays;
+mod documentation;
 mod futures;
 mod pools;
 

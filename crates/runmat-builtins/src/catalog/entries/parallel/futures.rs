@@ -1,3 +1,7 @@
+use super::documentation::{
+    FETCH_NEXT_DOCUMENTATION, FETCH_OUTPUTS_DOCUMENTATION, PARFEVAL_DOCUMENTATION,
+    PARFEVAL_ON_ALL_DOCUMENTATION,
+};
 use super::*;
 
 const FUTURE_INPUTS: [BuiltinParamDescriptor; 4] = [
@@ -218,8 +222,7 @@ parallel_entry!(
     PARFEVAL_CATALOG_ENTRY,
     "parfeval",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parfeval),
-    "Schedule a function for asynchronous execution on a pool.",
-    &["parallel", "future", "async", "parfeval"],
+    PARFEVAL_DOCUMENTATION,
     PARFEVAL_DESCRIPTOR,
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::MaySuspend,
@@ -230,8 +233,7 @@ parallel_entry!(
     PARFEVAL_ON_ALL_CATALOG_ENTRY,
     "parfevalOnAll",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::ParfevalOnAll),
-    "Schedule a function once on every worker in a pool.",
-    &["parallel", "future", "async", "workers"],
+    PARFEVAL_ON_ALL_DOCUMENTATION,
     PARFEVAL_ON_ALL_DESCRIPTOR,
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::MaySuspend,
@@ -242,8 +244,7 @@ parallel_entry!(
     FETCH_OUTPUTS_CATALOG_ENTRY,
     "fetchOutputs",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::FetchOutputs),
-    "Wait for a future and return its outputs.",
-    &["parallel", "future", "wait", "outputs"],
+    FETCH_OUTPUTS_DOCUMENTATION,
     FETCH_OUTPUTS_DESCRIPTOR,
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::RequiresAsyncRuntime,
@@ -254,8 +255,7 @@ parallel_entry!(
     FETCH_NEXT_CATALOG_ENTRY,
     "fetchNext",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::FetchNext),
-    "Retrieve the next completed unread result from a future array.",
-    &["parallel", "future", "wait", "completion order"],
+    FETCH_NEXT_DOCUMENTATION,
     FETCH_NEXT_DESCRIPTOR,
     BuiltinContractMaturity::Complete,
     BuiltinAsyncBehavior::RequiresAsyncRuntime,
