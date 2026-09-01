@@ -1,6 +1,8 @@
 use crate::*;
 use runmat_types::EffectKind;
 
+use super::documentation::STRUCT_DOCUMENTATION;
+
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
     ty: BuiltinParamType::Any,
@@ -177,15 +179,7 @@ const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const STRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     identity: BuiltinCatalogIdentity { name: "struct" },
     category: "structs/core",
-    documentation: BuiltinDocumentation {
-        summary: "Create scalar structs or struct arrays from field/value inputs.",
-        keywords: &["name-value", "record", "struct", "structure"],
-        related: &[],
-        introduced: None,
-        status: None,
-        examples: &[],
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: STRUCT_DOCUMENTATION,
     descriptor: &STRUCT_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,

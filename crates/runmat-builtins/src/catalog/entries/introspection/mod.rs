@@ -1,3 +1,4 @@
+mod documentation;
 mod function_dispatch;
 
 pub use function_dispatch::*;
