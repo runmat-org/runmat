@@ -1718,6 +1718,72 @@ fn pi_scaled_cosine_owns_exact_typed_resident_contract_and_documentation() {
 }
 
 #[test]
+fn degree_sine_owns_typed_host_contract_and_documentation() {
+    use runmat_types::{
+        CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("sind").expect("sind catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::DegreeTrigonometric(
+            DegreeTrigonometricFunction::Sin,
+        ))
+    );
+    assert_eq!(
+        entry.documentation.authority,
+        BuiltinDocumentationAuthority::Catalog
+    );
+    assert_eq!(entry.documentation.examples.len(), 5);
+    assert_eq!(entry.bindings, REQUIRED_DEFAULT_BINDING.as_slice());
+
+    let mut input = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    input.residency = ResidencyFact::Device {
+        provider: Some("source-provider".into()),
+    };
+    let infer = |input| {
+        infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![input],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        )
+    };
+    let floating = infer(input.clone());
+    assert!(floating.diagnostics.is_empty());
+    assert_eq!(floating.outputs[0].kind, input.kind);
+    assert_eq!(floating.outputs[0].shape, input.shape);
+    assert_eq!(floating.outputs[0].residency, ResidencyFact::Host);
+
+    let integer = infer(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::UInt64,
+        domain: NumericDomain::Real,
+    })));
+    assert_eq!(
+        integer.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real
+        })
+    );
+    let character = infer(ValueFact::scalar(ValueKindFact::Character));
+    assert!(character
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-DEGREE-TRIGONOMETRIC-INPUT"));
+}
+
+#[test]
 fn exp_contract_preserves_floating_facts_and_marks_conversion_residency_dynamic() {
     use runmat_types::{
         AliasFact, CallRequest, ContiguityFact, LayoutFact, NumericClass, NumericDomain,
