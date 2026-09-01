@@ -2012,6 +2012,107 @@ fn inverse_sine_and_cosine_track_value_dependent_domain_and_preserve_residency()
 }
 
 #[test]
+fn inverse_tangent_tracks_real_domain_and_typed_like_placement() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+        OutputSelection, RequestedOutputCount, ResidencyFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("atan").expect("atan catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::InverseTrigonometric(
+            InverseTrigonometricFunction::Tangent
+        ))
+    );
+    assert_eq!(entry.documentation.examples.len(), 6);
+    assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Candidate);
+
+    let mut real_input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    }));
+    real_input.residency = ResidencyFact::Device {
+        provider: Some("input-provider".into()),
+    };
+    let real = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![real_input],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(real.diagnostics.is_empty());
+    assert_eq!(
+        real.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        real.outputs[0].residency,
+        ResidencyFact::Device {
+            provider: Some("input-provider".into())
+        }
+    );
+
+    let mut prototype = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Complex,
+    }));
+    prototype.residency = ResidencyFact::Host;
+    let like = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+                ValueFact::scalar(ValueKindFact::String),
+                prototype,
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Keyword("like".into()),
+                LiteralValue::Unknown,
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(like.diagnostics.is_empty());
+    assert_eq!(
+        like.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        })
+    );
+    assert_eq!(like.outputs[0].residency, ResidencyFact::Host);
+
+    let bad_arity = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+                ValueFact::scalar(ValueKindFact::String),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Keyword("like".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(bad_arity.diagnostics.len(), 1);
+}
+
+#[test]
 fn exp_contract_preserves_floating_facts_and_marks_conversion_residency_dynamic() {
     use runmat_types::{
         AliasFact, CallRequest, ContiguityFact, LayoutFact, NumericClass, NumericDomain,

@@ -124,11 +124,21 @@ pub(super) fn infer_inverse_trigonometric(
             diagnostics,
         );
     };
-    if request.arguments.len() > 1 {
+    let accepts_like = function == InverseTrigonometricFunction::Tangent;
+    let arity_is_valid = if accepts_like {
+        matches!(request.arguments.len(), 1 | 3)
+    } else {
+        request.arguments.len() == 1
+    };
+    if !arity_is_valid {
         diagnostics.push(argument_error(
             "RM-CATALOG-INVERSE-TRIGONOMETRIC-ARITY",
-            format!("{name} accepts exactly one input"),
-            1,
+            if accepts_like {
+                format!("{name} accepts one input or an input followed by \"like\" and a prototype")
+            } else {
+                format!("{name} accepts exactly one input")
+            },
+            request.arguments.len().saturating_sub(1),
         ));
     }
     if matches!(input.storage, StorageFact::Sparse) {
@@ -194,7 +204,9 @@ pub(super) fn infer_inverse_trigonometric(
             materialize_output(&mut output);
         }
         ValueKindFact::Character => {
-            if let Some(domain) = literal_domain {
+            if let Some(domain) = literal_domain.or_else(|| {
+                (function == InverseTrigonometricFunction::Tangent).then_some(NumericDomain::Real)
+            }) {
                 output.kind = numeric_kind(NumericClass::Double, domain);
                 materialize_output(&mut output);
             } else {
@@ -215,7 +227,105 @@ pub(super) fn infer_inverse_trigonometric(
             output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
         }
     }
+    if accepts_like {
+        apply_inverse_trigonometric_like(request, &mut output, name, &mut diagnostics);
+    }
     finish_fixed(entry, request, output, diagnostics)
+}
+
+fn apply_inverse_trigonometric_like(
+    request: &CallRequest,
+    output: &mut ValueFact,
+    name: &str,
+    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+) {
+    let [_, keyword, prototype] = request.arguments.as_slice() else {
+        return;
+    };
+    let keyword_literal = request
+        .literals
+        .literal_args
+        .get(1)
+        .and_then(|literal| match literal {
+            LiteralValue::String(value)
+            | LiteralValue::Character(value)
+            | LiteralValue::Keyword(value) => Some(value.as_str()),
+            _ => None,
+        });
+    match keyword_literal {
+        Some(value) if value.eq_ignore_ascii_case("like") => {}
+        Some(_) => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-INVERSE-TRIGONOMETRIC-LIKE",
+                format!("{name} accepts only the \"like\" option"),
+                1,
+            ));
+            output.residency = ResidencyFact::Unknown;
+            return;
+        }
+        None if matches!(
+            keyword.kind,
+            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+        ) =>
+        {
+            output.residency = ResidencyFact::Unknown;
+            return;
+        }
+        None => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-INVERSE-TRIGONOMETRIC-LIKE",
+                format!("{name} requires \"like\" as its second input"),
+                1,
+            ));
+            output.residency = ResidencyFact::Unknown;
+            return;
+        }
+    }
+
+    let output_is_complex = matches!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Complex,
+            ..
+        })
+    );
+    match &prototype.kind {
+        ValueKindFact::Numeric(prototype_numeric) => {
+            if prototype_numeric.domain == NumericDomain::Complex {
+                if let ValueKindFact::Numeric(output_numeric) = &mut output.kind {
+                    output_numeric.domain = NumericDomain::Complex;
+                }
+            } else if output_is_complex {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-INVERSE-TRIGONOMETRIC-PROTOTYPE",
+                    format!("{name} cannot place a complex result like a real prototype"),
+                    2,
+                ));
+            }
+            output.residency = prototype.residency.clone();
+        }
+        ValueKindFact::Logical => {
+            if output_is_complex {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-INVERSE-TRIGONOMETRIC-PROTOTYPE",
+                    format!("{name} cannot place a complex result like a real prototype"),
+                    2,
+                ));
+            }
+            output.residency = prototype.residency.clone();
+        }
+        ValueKindFact::Unknown => {
+            output.residency = prototype.residency.clone();
+        }
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-INVERSE-TRIGONOMETRIC-PROTOTYPE",
+                format!("{name} requires a numeric or logical prototype"),
+                2,
+            ));
+            output.residency = ResidencyFact::Unknown;
+        }
+    }
 }
 
 fn inverse_trigonometric_literal_domain(
