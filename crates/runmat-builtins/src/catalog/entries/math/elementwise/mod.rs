@@ -3,8 +3,6 @@ mod angle;
 mod complex_components;
 mod exponentials;
 mod floating_conversions;
-mod log1p;
-mod log2;
 mod logarithms;
 mod numeric_conversions;
 mod numeric_limits;
@@ -17,8 +15,6 @@ pub use angle::*;
 pub use complex_components::*;
 pub use exponentials::*;
 pub use floating_conversions::*;
-pub use log1p::*;
-pub use log2::*;
 pub use logarithms::*;
 pub use numeric_conversions::*;
 pub use numeric_limits::*;
@@ -31,8 +27,6 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     complex_components::ENTRIES,
     exponentials::ENTRIES,
     floating_conversions::ENTRIES,
-    log1p::ENTRIES,
-    log2::ENTRIES,
     logarithms::ENTRIES,
     numeric_conversions::ENTRIES,
     numeric_limits::ENTRIES,

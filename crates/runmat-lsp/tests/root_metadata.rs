@@ -10,6 +10,10 @@ fn migrated_signatures_and_documentation_come_from_the_canonical_catalog() {
         ("realsqrt", "x=realsqrt(single(4));", "Y = realsqrt(X)"),
         ("exp", "x=exp(single(1));", "Y = exp(X)"),
         ("expm1", "x=expm1(single(1));", "Y = expm1(X)"),
+        ("log", "x=log(single(1));", "Y = log(X)"),
+        ("log10", "x=log10(single(1));", "Y = log10(X)"),
+        ("log1p", "x=log1p(single(1));", "Y = log1p(X)"),
+        ("log2", "x=log2(single(1));", "Y = log2(X)"),
         ("intmin", "x=intmin(\"int16\");", "value = intmin(typename)"),
         (
             "intmax",
