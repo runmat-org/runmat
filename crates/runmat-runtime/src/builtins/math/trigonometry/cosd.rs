@@ -8,97 +8,21 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, COSD_CHARACTER_INPUT_EXTENSION, COSD_ERROR_INTERNAL,
+    COSD_ERROR_INVALID_INPUT, COSD_INTEGER_INPUT_EXTENSION, COSD_LOGICAL_INPUT_EXTENSION,
 };
-use runmat_macros::runtime_builtin;
 #[cfg(test)]
-use runmat_value::NumericDType;
-use runmat_value::{ComplexStorage, ComplexTensor, Tensor, Value};
+use runmat_builtins::{COSD_DESCRIPTOR, COSD_INTEGER_CAPABILITIES};
+use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::trigonometry::degree_helpers::reduce_degrees;
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "cosd";
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
-pub const COSD_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cosd-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cosd with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosdIntegerInputExtension"),
-};
-pub const COSD_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cosd-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cosd with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosdLogicalInputExtension"),
-};
-pub const COSD_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cosd-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cosd with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosdCharacterInputExtension"),
-};
-pub const COSD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    COSD_INTEGER_INPUT_EXTENSION,
-    COSD_LOGICAL_INPUT_EXTENSION,
-    COSD_CHARACTER_INPUT_EXTENSION,
-];
-const COSD_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "All eight real integer classes require exact binary64 representability before degree reduction." }];
-pub const COSD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "Y = cosd(integer_X)", inputs: &COSD_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "RunMat mode validates native integer storage before the floating degree boundary; the output is double and resident fallback is restored to the owner." }];
-
-const COSD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise cosine result with degree input semantics.",
-}];
-
-const COSD_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, array, logical array, complex value, or gpuArray.",
-}];
-
-const COSD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = cosd(X)",
-    inputs: &COSD_INPUTS,
-    outputs: &COSD_OUTPUT,
-}];
-
-const COSD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COSD.INVALID_INPUT",
-    identifier: Some("RunMat:cosd:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/logical/complex data.",
-    message: "cosd: invalid input",
-};
-
-const COSD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COSD.INTERNAL",
-    identifier: Some("RunMat:cosd:Internal"),
-    when: "Internal gather/conversion/allocation flow failed.",
-    message: "cosd: internal error",
-};
-
-const COSD_ERRORS: [BuiltinErrorDescriptor; 2] = [COSD_ERROR_INVALID_INPUT, COSD_ERROR_INTERNAL];
-
-pub const COSD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COSD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COSD_ERRORS,
-};
-
 fn cosd_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
@@ -157,14 +81,7 @@ fn cosd_complex(re: f64, im: f64) -> (f64, f64) {
 
 #[runtime_builtin(
     name = "cosd",
-    category = "math/trigonometry",
-    summary = "Compute cosine of degree-valued inputs.",
-    keywords = "cosd,cosine,degrees,trigonometry",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::cosd::COSD_DESCRIPTOR),
-    extensions(COSD_EXTENSIONS),
-    integer_capabilities(COSD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::cosd"
 )]
 async fn cosd_builtin(value: Value) -> BuiltinResult<Value> {
@@ -177,9 +94,21 @@ async fn cosd_builtin(value: Value) -> BuiltinResult<Value> {
             Ok(Value::Complex(out_re, out_im))
         }
         Value::ComplexTensor(ct) => cosd_complex_tensor(ct),
+        Value::CharArray(array) => cosd_char_array(array),
         Value::String(_) | Value::StringArray(_) => Err(cosd_error(&COSD_ERROR_INVALID_INPUT)),
         other => cosd_real(other),
     }
+}
+
+fn cosd_char_array(array: CharArray) -> BuiltinResult<Value> {
+    let data = array
+        .data
+        .into_iter()
+        .map(|value| cosd_scalar(f64::from(u32::from(value))))
+        .collect();
+    let tensor = Tensor::new(data, array.shape)
+        .map_err(|error| cosd_error_with_detail(&COSD_ERROR_INTERNAL, error))?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 fn ensure_extensions(value: &Value) -> BuiltinResult<()> {
@@ -206,9 +135,7 @@ fn ensure_extensions(value: &Value) -> BuiltinResult<()> {
     ensure_exact(value)
 }
 fn is_integer(value: &Value) -> bool {
-    matches!(value, Value::Int(_))
-        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
-        || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
+    crate::builtins::common::validation::value_contains_native_integer_class(value)
 }
 fn ensure_exact(value: &Value) -> BuiltinResult<()> {
     let ok = crate::builtins::common::validation::integer_is_exact_f64;
@@ -255,7 +182,7 @@ fn cosd_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn cosd_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+    if tensor.numeric_dtype() == NumericDType::F32 {
         let data = tensor
             .as_f32_slice()
             .expect("single tensor storage")
@@ -344,8 +271,9 @@ fn upload_complex_gpu_output(
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
+
+    use crate::builtins::common::test_support;
 
     fn cosd_builtin(value: Value) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -370,7 +298,12 @@ pub(crate) mod tests {
     #[test]
     fn cosd_integer_gate_boundary_and_single_precision() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        assert!(block_on(super::cosd_builtin(Value::Int(IntValue::I8(0)))).is_err());
+        let err = block_on(super::cosd_builtin(Value::Int(IntValue::I8(0))))
+            .expect_err("strict mode rejects integer extension");
+        assert_eq!(
+            err.identifier(),
+            COSD_INTEGER_INPUT_EXTENSION.error_identifier
+        );
         drop(_strict);
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         for value in [
@@ -404,6 +337,14 @@ pub(crate) mod tests {
             panic!("expected complex tensor")
         };
         assert_eq!(complex.numeric_dtype(), NumericDType::F32);
+
+        let Value::Tensor(chars) =
+            cosd_builtin(Value::CharArray(CharArray::new_row("AZ"))).unwrap()
+        else {
+            panic!("expected character result tensor")
+        };
+        assert_eq!(chars.shape, vec![1, 2]);
+        assert_eq!(chars.materialize_f64()[1], 0.0);
     }
 
     fn expect_num(value: Value) -> f64 {
@@ -411,22 +352,6 @@ pub(crate) mod tests {
             Value::Num(v) => v,
             other => panic!("expected scalar result, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn cosd_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -576,6 +501,26 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn gpu_fallback_restores_output_to_owner() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![0.0, 60.0, 90.0], vec![1, 3]).unwrap();
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &tensor.materialize_f64(),
+                    shape: &tensor.shape,
+                })
+                .expect("upload");
+            let Value::GpuTensor(out_handle) = cosd_builtin(Value::GpuTensor(handle)).unwrap()
+            else {
+                panic!("expected owner-resident tensor")
+            };
+            assert_eq!(out_handle.device_id, provider.device_id());
+            let out = test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
+            assert_eq!(out.materialize_f64(), vec![1.0, 0.5, 0.0]);
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
