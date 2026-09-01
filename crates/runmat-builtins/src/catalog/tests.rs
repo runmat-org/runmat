@@ -1458,6 +1458,111 @@ fn hyperbolic_cosine_owns_a_complete_typed_contract_and_documentation() {
 }
 
 #[test]
+fn hyperbolic_tangent_owns_a_complete_typed_contract_and_documentation() {
+    let entry = builtin_catalog_entry_by_name("tanh").expect("tanh catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::Hyperbolic(HyperbolicFunction::Tangent))
+    );
+    assert_eq!(
+        entry.documentation.authority,
+        BuiltinDocumentationAuthority::Catalog
+    );
+    assert_eq!(entry.documentation.examples.len(), 7);
+    assert_eq!(entry.documentation.faqs.len(), 8);
+    assert_eq!(entry.bindings, REQUIRED_DEFAULT_BINDING.as_slice());
+    assert_eq!(entry.extensions.len(), 3);
+    assert_eq!(entry.integer_capabilities.len(), 1);
+}
+
+#[test]
+fn direct_hyperbolic_contracts_preserve_floating_facts_and_type_conversion_boundaries() {
+    use runmat_types::{
+        CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+
+    for name in ["sinh", "cosh", "tanh"] {
+        let entry = builtin_catalog_entry_by_name(name).expect("hyperbolic catalog entry");
+        let mut complex_single = ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                domain: NumericDomain::Complex,
+            }),
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            StorageFact::Dense,
+        );
+        complex_single.residency = ResidencyFact::Device {
+            provider: Some("source-provider".into()),
+        };
+        let inferred = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![complex_single.clone()],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        assert!(inferred.diagnostics.is_empty());
+        assert_eq!(inferred.outputs[0].kind, complex_single.kind);
+        assert_eq!(inferred.outputs[0].shape, complex_single.shape);
+        assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
+        assert_eq!(inferred.outputs[0].residency, complex_single.residency);
+
+        let integer = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![ValueFact::proven(
+                    ValueKindFact::Numeric(NumericFact {
+                        class: NumericClass::Int64,
+                        domain: NumericDomain::Real,
+                    }),
+                    ShapeFact::from(vec![Some(4), Some(1)]),
+                    StorageFact::Dense,
+                )],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        assert!(integer.diagnostics.is_empty());
+        assert_eq!(
+            integer.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })
+        );
+        assert_eq!(
+            integer.outputs[0].shape,
+            ShapeFact::from(vec![Some(4), Some(1)])
+        );
+
+        let sparse = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![ValueFact::proven(
+                    ValueKindFact::Numeric(NumericFact {
+                        class: NumericClass::Double,
+                        domain: NumericDomain::Real,
+                    }),
+                    ShapeFact::from(vec![Some(4), Some(4)]),
+                    StorageFact::Sparse,
+                )],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        assert_eq!(sparse.diagnostics.len(), 1);
+        assert_eq!(
+            sparse.outputs[0].certainty,
+            runmat_types::CertaintyFact::Dynamic(
+                runmat_types::DynamicReason::UnsupportedRepresentation
+            )
+        );
+    }
+}
+
+#[test]
 fn radian_trigonometric_contracts_preserve_floating_class_and_apply_like_representation() {
     use runmat_types::{
         CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,

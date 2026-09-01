@@ -14,6 +14,7 @@ mod sinh;
 mod sinpi;
 mod tan;
 mod tand;
+mod tanh;
 
 pub use acos::*;
 pub use acosh::*;
@@ -31,6 +32,7 @@ pub use sinh::*;
 pub use sinpi::*;
 pub use tan::*;
 pub use tand::*;
+pub use tanh::*;
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &ACOS_CATALOG_ENTRY,
@@ -49,4 +51,5 @@ pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &SIND_CATALOG_ENTRY,
     &TAN_CATALOG_ENTRY,
     &TAND_CATALOG_ENTRY,
+    &TANH_CATALOG_ENTRY,
 ];
