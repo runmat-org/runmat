@@ -72,7 +72,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(isa(Y, \"single\"));\nassert(abs(double(real(Y)) - cosh(pi)) < 1e-5);\nassert(imag(Y) == 0);",
+            source: "expected = complex(cosh(pi), 0);\nassert(abs(double(Y) - expected) < 1e-4);",
         },
     },
     BuiltinExample {

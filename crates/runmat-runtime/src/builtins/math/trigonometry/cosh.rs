@@ -2,13 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, COSH_CHARACTER_INPUT_EXTENSION, COSH_ERROR_INTERNAL,
+    COSH_ERROR_INVALID_INPUT, COSH_INTEGER_INPUT_EXTENSION, COSH_LOGICAL_INPUT_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{COSH_DESCRIPTOR, COSH_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 #[cfg(test)]
 use runmat_value::NumericDType;
@@ -20,80 +18,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "cosh";
-pub const COSH_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cosh-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cosh with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CoshIntegerInputExtension"),
-};
-pub const COSH_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cosh-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cosh with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CoshLogicalInputExtension"),
-};
-pub const COSH_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cosh-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cosh with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CoshCharacterInputExtension"),
-};
-pub const COSH_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    COSH_INTEGER_INPUT_EXTENSION,
-    COSH_LOGICAL_INPUT_EXTENSION,
-    COSH_CHARACTER_INPUT_EXTENSION,
-];
-const COSH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "All eight real integer classes require exact binary64 representability before hyperbolic evaluation." }];
-pub const COSH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "Y = cosh(integer_X)", inputs: &COSH_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "RunMat mode validates native integer storage before conversion; large finite inputs may naturally overflow to Inf and resident fallback returns through the owner." }];
-
-const COSH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise hyperbolic cosine result.",
-}];
-
-const COSH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, array, char array, complex value, or gpuArray.",
-}];
-
-const COSH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = cosh(X)",
-    inputs: &COSH_INPUTS,
-    outputs: &COSH_OUTPUT,
-}];
-
-const COSH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COSH.INVALID_INPUT",
-    identifier: Some("RunMat:cosh:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/char/complex data.",
-    message: "cosh: invalid input",
-};
-
-const COSH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COSH.INTERNAL",
-    identifier: Some("RunMat:cosh:Internal"),
-    when: "Internal gather/conversion/allocation/provider flow failed.",
-    message: "cosh: internal error",
-};
-
-const COSH_ERRORS: [BuiltinErrorDescriptor; 2] = [COSH_ERROR_INVALID_INPUT, COSH_ERROR_INTERNAL];
-
-pub const COSH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COSH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COSH_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::cosh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -151,18 +78,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "cosh",
-    category = "math/trigonometry",
-    summary = "Compute hyperbolic cosine element-wise.",
-    keywords = "cosh,hyperbolic cosine,trigonometry,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::cosh::COSH_DESCRIPTOR),
-    extensions(COSH_EXTENSIONS),
-    integer_capabilities(COSH_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::cosh"
 )]
 async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
-    ensure_extensions(&value)?;
+    super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
+    super::inverse_helpers::ensure_input_extensions(
+        &value,
+        BUILTIN_NAME,
+        &COSH_INTEGER_INPUT_EXTENSION,
+        &COSH_LOGICAL_INPUT_EXTENSION,
+        &COSH_CHARACTER_INPUT_EXTENSION,
+    )?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &value,
+        &COSH_INTEGER_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "X",
+    )
+    .await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "cosh")?;
     match value {
         Value::GpuTensor(handle) => cosh_gpu(handle).await,
@@ -177,105 +111,46 @@ async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn ensure_extensions(value: &Value) -> BuiltinResult<()> {
-    if is_integer(value) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &COSH_INTEGER_INPUT_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
-        || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_is_logical(h))
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &COSH_LOGICAL_INPUT_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    if matches!(value, Value::CharArray(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &COSH_CHARACTER_INPUT_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    ensure_exact(value)
-}
-fn is_integer(value: &Value) -> bool {
-    matches!(value, Value::Int(_))
-        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
-        || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
-}
-fn ensure_exact(value: &Value) -> BuiltinResult<()> {
-    let ok = crate::builtins::common::validation::integer_is_exact_f64;
-    let valid = match value {
-        Value::Int(v) => ok(v),
-        Value::Tensor(t) => t
-            .integer_storage()
-            .is_none_or(|s| s.exact_values().iter().all(ok)),
-        _ => true,
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err(cosh_error_with_detail(
-            &COSH_ERROR_INVALID_INPUT,
-            "integer input must be exactly representable as double",
-        ))
-    }
-}
-
 async fn cosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider_for_handle(&handle);
     let requires_exact_host_path = runmat_accelerate_api::handle_integer_type(&handle).is_some()
-        || runmat_accelerate_api::handle_is_logical(&handle);
+        || runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_storage(&handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real;
     if !requires_exact_host_path {
         if let Some(provider) = provider {
             match provider.unary_cosh(&handle).await {
-                Ok(out) if native_unary_output_matches(&handle, &out, provider) => {
-                    return Ok(gpu_helpers::resident_gpu_value(out));
+                Ok(output) => {
+                    return super::inverse_helpers::validate_real_unary_provider_output(
+                        provider,
+                        &handle,
+                        output,
+                        BUILTIN_NAME,
+                    )
                 }
-                Ok(out) => free_rejected_native_output(&out, provider),
-                Err(_) => {}
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) => {
+                    return Err(cosh_error_with_detail(
+                        &COSH_ERROR_INTERNAL,
+                        format!("provider unary_cosh failed: {error}"),
+                    ))
+                }
             }
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
-    ensure_exact(&gathered)?;
-    let host = match gathered {
-        Value::Complex(re, im) => Value::Complex(cosh_complex_re(re, im), cosh_complex_im(re, im)),
-        Value::ComplexTensor(tensor) => cosh_complex_tensor(tensor)?,
-        other => cosh_real(other)?,
-    };
-    if let Some(provider) = provider {
-        upload_gpu_output(provider, host)
-    } else {
-        Ok(host)
-    }
-}
-
-fn native_unary_output_matches(
-    input: &GpuTensorHandle,
-    output: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-) -> bool {
-    output.device_id == input.device_id
-        && runmat_accelerate_api::handle_precision(output)
-            == Some(
-                runmat_accelerate_api::handle_precision(input)
-                    .unwrap_or_else(|| provider.precision()),
-            )
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::handle_storage(input)
-        && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_native_output(
-    output: &GpuTensorHandle,
-    invoked_provider: &dyn runmat_accelerate_api::AccelProvider,
-) {
-    let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(invoked_provider);
-    let _ = owner.free(output);
+    super::inverse_helpers::gather_value_compute_restore(
+        handle,
+        BUILTIN_NAME,
+        |value| match value {
+            Value::Complex(re, im) => Ok(Value::Complex(
+                cosh_complex_re(re, im),
+                cosh_complex_im(re, im),
+            )),
+            Value::ComplexTensor(tensor) => cosh_complex_tensor(tensor),
+            other => cosh_real(other),
+        },
+    )
+    .await
 }
 
 fn cosh_real(value: Value) -> BuiltinResult<Value> {
@@ -331,47 +206,6 @@ fn cosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     Ok(Value::ComplexTensor(tensor))
 }
 
-fn upload_gpu_output(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    value: Value,
-) -> BuiltinResult<Value> {
-    match value {
-        Value::Num(value) => upload_real_gpu_output(
-            provider,
-            Tensor::new(vec![value], vec![1, 1])
-                .map_err(|e| cosh_error_with_detail(&COSH_ERROR_INTERNAL, e))?,
-        ),
-        Value::Tensor(tensor) => upload_real_gpu_output(provider, tensor),
-        Value::Complex(re, im) => upload_complex_gpu_output(
-            provider,
-            ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cosh_error_with_detail(&COSH_ERROR_INTERNAL, e))?,
-        ),
-        Value::ComplexTensor(tensor) => upload_complex_gpu_output(provider, tensor),
-        other => Err(cosh_error_with_detail(
-            &COSH_ERROR_INTERNAL,
-            format!("cannot restore GPU output {other:?}"),
-        )),
-    }
-}
-
-fn upload_real_gpu_output(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    tensor: Tensor,
-) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|e| cosh_error_with_detail(&COSH_ERROR_INTERNAL, e))?;
-    Ok(gpu_helpers::resident_gpu_value(handle))
-}
-
-fn upload_complex_gpu_output(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    tensor: ComplexTensor,
-) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-    Ok(gpu_helpers::complex_gpu_value(handle))
-}
-
 fn cosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data
@@ -402,7 +236,6 @@ pub(crate) mod tests {
         AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorOwned,
         HostTensorView, ProviderPrecision,
     };
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray, Tensor};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
@@ -597,30 +430,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cosh_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn cosh_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
+    fn cosh_rejects_excess_outputs() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error =
+            block_on(super::cosh_builtin(Value::Num(0.0))).expect_err("excess outputs must reject");
+        assert_eq!(error.identifier(), Some("RunMat:cosh:TooManyOutputs"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -759,6 +573,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn cosh_complex_gpu_fallback_restores_through_the_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(0.5, 0.25), (1.0, -0.75)], vec![2, 1])
+                .expect("complex tensor");
+            let handle = gpu_helpers::upload_complex_tensor(provider, &input).expect("upload");
+            let resident = cosh_builtin(Value::GpuTensor(handle)).expect("resident cosh");
+            let gathered = block_on(gpu_helpers::gather_value_async(&resident)).expect("gather");
+            let Value::ComplexTensor(output) = gathered else {
+                panic!("expected complex tensor")
+            };
+            for (actual, &(real, imag)) in output
+                .materialize_f64()
+                .iter()
+                .zip(input.materialize_f64().iter())
+            {
+                assert!((actual.0 - cosh_complex_re(real, imag)).abs() < 1e-12);
+                assert!((actual.1 - cosh_complex_im(real, imag)).abs() < 1e-12);
+            }
+        });
+    }
+
+    #[test]
     fn cosh_rejects_and_frees_malformed_native_outputs_before_owner_restoration() {
         let _guard = test_support::accel_test_lock();
         let provider = Box::leak(Box::new(MalformedCoshProvider::new()));
@@ -774,29 +610,15 @@ pub(crate) mod tests {
                     shape: &[2, 1],
                 })
                 .expect("input upload");
-            let Value::GpuTensor(output) = block_on(super::cosh_gpu(input.clone()))
-                .expect("malformed native output must fall back and restore")
-            else {
-                panic!("fallback must restore residency")
-            };
-            assert_eq!(output.device_id, provider.device_id());
-            assert_eq!(
-                runmat_accelerate_api::handle_precision(&output),
-                Some(ProviderPrecision::F64)
-            );
-            assert_eq!(
-                runmat_accelerate_api::handle_storage(&output),
-                GpuTensorStorage::Real
-            );
-            let gathered = block_on(provider.download(&output)).expect("restored output");
-            assert_eq!(gathered.data, vec![1.0, 1.0_f64.cosh()]);
+            let error = block_on(super::cosh_gpu(input.clone()))
+                .expect_err("malformed native output must reject");
+            assert!(error.message().contains("malformed unary output"));
 
             let completed = usize::from(malformed) + 1;
-            assert_eq!(provider.allocations.load(Ordering::Relaxed), completed * 3);
-            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 3 - 2);
+            assert_eq!(provider.allocations.load(Ordering::Relaxed), completed * 2);
+            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 2 - 1);
             provider.free(&input).expect("free input");
-            provider.free(&output).expect("free restored output");
-            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 3);
+            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 2);
         }
         assert_eq!(
             provider.allocations.load(Ordering::Relaxed),

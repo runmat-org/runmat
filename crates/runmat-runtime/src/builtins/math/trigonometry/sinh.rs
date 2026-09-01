@@ -112,10 +112,21 @@ async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
 async fn sinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_storage(&handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
     {
-        return super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
-            sinh_tensor(tensor).map(tensor::tensor_into_value)
-        })
+        return super::inverse_helpers::gather_value_compute_restore(
+            handle,
+            BUILTIN_NAME,
+            |value| match value {
+                Value::Complex(re, im) => Ok(Value::Complex(
+                    sinh_complex_re(re, im),
+                    sinh_complex_im(re, im),
+                )),
+                Value::ComplexTensor(tensor) => sinh_complex_tensor(tensor),
+                other => sinh_real(other),
+            },
+        )
         .await;
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
@@ -137,10 +148,7 @@ async fn sinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
-        sinh_tensor(tensor).map(tensor::tensor_into_value)
-    })
-    .await
+    super::inverse_helpers::gather_value_compute_restore(handle, BUILTIN_NAME, sinh_real).await
 }
 
 fn sinh_real(value: Value) -> BuiltinResult<Value> {
@@ -391,6 +399,28 @@ pub(crate) mod tests {
             let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.sinh()).collect();
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.materialize_f64(), expected);
+        });
+    }
+
+    #[test]
+    fn sinh_complex_gpu_fallback_restores_through_the_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(0.5, 0.25), (1.0, -0.75)], vec![2, 1])
+                .expect("complex tensor");
+            let handle = gpu_helpers::upload_complex_tensor(provider, &input).expect("upload");
+            let resident = sinh_builtin(Value::GpuTensor(handle)).expect("resident sinh");
+            let gathered = block_on(gpu_helpers::gather_value_async(&resident)).expect("gather");
+            let Value::ComplexTensor(output) = gathered else {
+                panic!("expected complex tensor")
+            };
+            for (actual, &(real, imag)) in output
+                .materialize_f64()
+                .iter()
+                .zip(input.materialize_f64().iter())
+            {
+                assert!((actual.0 - sinh_complex_re(real, imag)).abs() < 1e-12);
+                assert!((actual.1 - sinh_complex_im(real, imag)).abs() < 1e-12);
+            }
         });
     }
 

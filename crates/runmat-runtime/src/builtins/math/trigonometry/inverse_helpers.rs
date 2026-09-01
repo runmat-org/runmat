@@ -102,6 +102,24 @@ where
     upload_value_like(provider, output, builtin, &handle)
 }
 
+pub(crate) async fn gather_value_compute_restore<F>(
+    handle: GpuTensorHandle,
+    builtin: &str,
+    compute: F,
+) -> BuiltinResult<Value>
+where
+    F: FnOnce(Value) -> BuiltinResult<Value>,
+{
+    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+        build_runtime_error(format!("{builtin}: GPU input has no owning provider"))
+            .with_builtin(builtin)
+            .build()
+    })?;
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+    let output = compute(gathered)?;
+    upload_value_like(provider, output, builtin, &handle)
+}
+
 pub(crate) fn upload_value_like(
     provider: &dyn AccelProvider,
     value: Value,
