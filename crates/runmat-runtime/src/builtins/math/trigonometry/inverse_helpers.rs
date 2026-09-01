@@ -1,4 +1,4 @@
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::BuiltinExtensionDescriptor;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
@@ -46,6 +46,42 @@ pub(crate) fn reject_excess_outputs(builtin: &str) -> BuiltinResult<()> {
         );
     }
     Ok(())
+}
+
+pub(crate) fn validate_real_unary_provider_output(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    output: GpuTensorHandle,
+    builtin: &str,
+) -> BuiltinResult<Value> {
+    let valid = gpu_helpers::unary_gpu_output_matches(
+        &output,
+        input,
+        provider,
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: GpuTensorStorage::Real,
+            precision: runmat_accelerate_api::handle_precision(input),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        },
+    );
+    if !valid {
+        gpu_helpers::free_rejected_provider_output(&output, &[input], provider);
+        return Err(build_runtime_error(format!(
+            "{builtin}: provider returned malformed unary output"
+        ))
+        .with_builtin(builtin)
+        .with_identifier(format!("RunMat:{builtin}:Internal"))
+        .build());
+    }
+    let mut output = output;
+    runmat_accelerate_api::set_handle_provenance(
+        &mut output,
+        runmat_accelerate_api::handle_provenance(input)
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+    );
+    Ok(gpu_helpers::resident_gpu_value(output))
 }
 
 pub(crate) async fn gather_compute_restore<F>(

@@ -1,7 +1,7 @@
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{
-    BuiltinCatalogEntry, DegreeTrigonometricFunction, LogarithmBase, PiScaledTrigonometricFunction,
-    RootKind, TrigonometricFunction,
+    BuiltinCatalogEntry, DegreeTrigonometricFunction, InverseTrigonometricFunction, LogarithmBase,
+    PiScaledTrigonometricFunction, RootKind, TrigonometricFunction,
 };
 
 pub(super) fn infer_degree_trigonometric(
@@ -98,6 +98,196 @@ pub(super) fn infer_degree_trigonometric(
         }
     }
     finish_fixed(entry, request, output, diagnostics)
+}
+
+pub(super) fn infer_inverse_trigonometric(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    function: InverseTrigonometricFunction,
+) -> CallInference {
+    let name = match function {
+        InverseTrigonometricFunction::Sine => "asin",
+        InverseTrigonometricFunction::Cosine => "acos",
+        InverseTrigonometricFunction::Tangent => "atan",
+    };
+    let mut diagnostics = Vec::new();
+    let Some(input) = request.arguments.first() else {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-INVERSE-TRIGONOMETRIC-ARITY",
+            format!("{name} requires exactly one input"),
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+    if request.arguments.len() > 1 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-INVERSE-TRIGONOMETRIC-ARITY",
+            format!("{name} accepts exactly one input"),
+            1,
+        ));
+    }
+    if matches!(input.storage, StorageFact::Sparse) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-INVERSE-TRIGONOMETRIC-SPARSE",
+            format!("{name} does not currently accept sparse input"),
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    }
+
+    let literal_domain = request
+        .literals
+        .literal_args
+        .first()
+        .and_then(|literal| inverse_trigonometric_literal_domain(literal, function));
+    let mut output = input.clone();
+    match &input.kind {
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Complex,
+        }) if !matches!(class, NumericClass::Double | NumericClass::Single) => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-INVERSE-TRIGONOMETRIC-COMPLEX-INTEGER",
+                format!("{name} does not accept complex fixed-width integer input"),
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Complex,
+        }) => {
+            output.kind = numeric_kind(*class, NumericDomain::Complex);
+            materialize_output(&mut output);
+        }
+        ValueKindFact::Numeric(NumericFact {
+            class,
+            domain: NumericDomain::Real,
+        }) => {
+            let output_class = if matches!(class, NumericClass::Double | NumericClass::Single) {
+                *class
+            } else {
+                NumericClass::Double
+            };
+            if let Some(domain) = literal_domain.or_else(|| {
+                (function == InverseTrigonometricFunction::Tangent).then_some(NumericDomain::Real)
+            }) {
+                output.kind = numeric_kind(output_class, domain);
+                materialize_output(&mut output);
+            } else {
+                preserve_shape_on_dynamic_input(&mut output);
+                output.residency = input.residency.clone();
+            }
+        }
+        ValueKindFact::Logical => {
+            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
+            materialize_output(&mut output);
+        }
+        ValueKindFact::Character => {
+            if let Some(domain) = literal_domain {
+                output.kind = numeric_kind(NumericClass::Double, domain);
+                materialize_output(&mut output);
+            } else {
+                preserve_shape_on_dynamic_input(&mut output);
+                output.residency = input.residency.clone();
+            }
+        }
+        ValueKindFact::Unknown => {
+            preserve_shape_on_dynamic_input(&mut output);
+            output.residency = input.residency.clone();
+        }
+        _ => {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-INVERSE-TRIGONOMETRIC-INPUT",
+                format!("{name} requires numeric, logical, or character input"),
+                0,
+            ));
+            output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+        }
+    }
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+fn inverse_trigonometric_literal_domain(
+    literal: &LiteralValue,
+    function: InverseTrigonometricFunction,
+) -> Option<NumericDomain> {
+    if function == InverseTrigonometricFunction::Tangent {
+        return literal_is_real(literal).then_some(NumericDomain::Real);
+    }
+    match literal {
+        LiteralValue::Number(value) => Some(unit_interval_domain(*value)),
+        LiteralValue::Real { text, .. } | LiteralValue::Integer { text, .. } => {
+            text.parse::<f64>().ok().map(unit_interval_domain)
+        }
+        LiteralValue::Bool(_) => Some(NumericDomain::Real),
+        LiteralValue::Character(value) => Some(if value.chars().all(|ch| u32::from(ch) <= 1) {
+            NumericDomain::Real
+        } else {
+            NumericDomain::Complex
+        }),
+        LiteralValue::Complex { .. } => Some(NumericDomain::Complex),
+        LiteralValue::Vector(values) => combine_inverse_literal_domains(values, function),
+        LiteralValue::Matrix(rows) => {
+            let values = rows.iter().flatten().cloned().collect::<Vec<_>>();
+            combine_inverse_literal_domains(&values, function)
+        }
+        LiteralValue::Empty => Some(NumericDomain::Real),
+        LiteralValue::String(_)
+        | LiteralValue::Keyword(_)
+        | LiteralValue::Symbolic(_)
+        | LiteralValue::Unknown => None,
+    }
+}
+
+fn literal_is_real(literal: &LiteralValue) -> bool {
+    match literal {
+        LiteralValue::Number(_)
+        | LiteralValue::Real { .. }
+        | LiteralValue::Integer { .. }
+        | LiteralValue::Bool(_)
+        | LiteralValue::Character(_)
+        | LiteralValue::Empty => true,
+        LiteralValue::Vector(values) => values.iter().all(literal_is_real),
+        LiteralValue::Matrix(rows) => rows.iter().flatten().all(literal_is_real),
+        LiteralValue::Complex { .. }
+        | LiteralValue::String(_)
+        | LiteralValue::Keyword(_)
+        | LiteralValue::Symbolic(_)
+        | LiteralValue::Unknown => false,
+    }
+}
+
+fn unit_interval_domain(value: f64) -> NumericDomain {
+    if value.is_nan() || (-1.0..=1.0).contains(&value) {
+        NumericDomain::Real
+    } else {
+        NumericDomain::Complex
+    }
+}
+
+fn combine_inverse_literal_domains(
+    values: &[LiteralValue],
+    function: InverseTrigonometricFunction,
+) -> Option<NumericDomain> {
+    let mut domain = NumericDomain::Real;
+    for value in values {
+        let value_domain = inverse_trigonometric_literal_domain(value, function)?;
+        if value_domain == NumericDomain::Complex {
+            domain = NumericDomain::Complex;
+        }
+    }
+    Some(domain)
 }
 use runmat_types::{
     infer_call, AliasFact, CallContract, CallInference, CallRequest, ContiguityFact, DynamicReason,

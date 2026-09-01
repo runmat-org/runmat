@@ -87,6 +87,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::DegreeTrigonometric(function)) => {
             math_unary::infer_degree_trigonometric(request, entry, function)
         }
+        BuiltinInferenceRule::Math(MathInferenceRule::InverseTrigonometric(function)) => {
+            math_unary::infer_inverse_trigonometric(request, entry, function)
+        }
         BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather) => {
             infer_gather(request, entry)
         }
