@@ -67,6 +67,7 @@ pub enum MathInferenceRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TrigonometricFunction {
     Sin,
+    Cos,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

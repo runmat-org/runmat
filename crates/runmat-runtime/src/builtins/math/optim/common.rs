@@ -180,7 +180,7 @@ pub(crate) fn ensure_option_extensions(
 }
 
 fn ensure_exact_binary64_integer(name: &str, value: &Value, role: &str) -> BuiltinResult<()> {
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = crate::builtins::common::validation::integer_is_exact_f64;
     let valid = match value {
         Value::Int(value) => exact(value),
         Value::Tensor(tensor) => tensor
@@ -369,9 +369,7 @@ pub(crate) fn option_f64(
     };
     let parsed = match value {
         Value::Num(n) => *n,
-        Value::Int(i) if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(i) => {
-            i.to_f64()
-        }
+        Value::Int(i) if crate::builtins::common::validation::integer_is_exact_f64(i) => i.to_f64(),
         Value::Int(_) => {
             return Err(optim_error(
                 builtin,

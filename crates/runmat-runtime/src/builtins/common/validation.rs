@@ -1670,8 +1670,31 @@ pub fn value_has_logical_class(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if handle_is_logical(handle))
 }
 
+/// Returns whether a fixed-width integer can cross a binary64 boundary
+/// without changing its value. Exactness depends on significant bits, so an
+/// aligned wide integer can be exact even when its magnitude exceeds
+/// `flintmax`.
+pub fn integer_is_exact_f64(value: &IntValue) -> bool {
+    let magnitude = match value {
+        IntValue::I8(value) => u64::from(value.unsigned_abs()),
+        IntValue::I16(value) => u64::from(value.unsigned_abs()),
+        IntValue::I32(value) => u64::from(value.unsigned_abs()),
+        IntValue::I64(value) => value.unsigned_abs(),
+        IntValue::U8(value) => u64::from(*value),
+        IntValue::U16(value) => u64::from(*value),
+        IntValue::U32(value) => u64::from(*value),
+        IntValue::U64(value) => *value,
+    };
+    if magnitude == 0 {
+        return true;
+    }
+    let significant_bits = u64::BITS - magnitude.leading_zeros();
+    significant_bits <= f64::MANTISSA_DIGITS
+        || magnitude.trailing_zeros() >= significant_bits - f64::MANTISSA_DIGITS
+}
+
 pub fn native_integer_value_is_exact_f64(value: &Value) -> bool {
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = integer_is_exact_f64;
     match value {
         Value::Int(value) => exact(value),
         Value::Tensor(tensor) => tensor
@@ -1747,7 +1770,7 @@ pub async fn native_integer_value_is_exact_f64_async(value: &Value) -> Result<bo
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build());
         }
-        let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+        let exact = integer_is_exact_f64;
         let values_exact = match &gathered.data {
             runmat_accelerate_api::HostIntegerDataOwned::I8(values) => values
                 .iter()
@@ -2617,6 +2640,24 @@ mod tests {
 
     fn sparse(values: Vec<f64>) -> Value {
         Value::SparseTensor(SparseTensor::new(2, 2, vec![0, 1, 1], vec![0], values).unwrap())
+    }
+
+    #[test]
+    fn fixed_width_integer_binary64_exactness_uses_significant_bits() {
+        for value in [
+            IntValue::I8(i8::MIN),
+            IntValue::I16(i16::MIN),
+            IntValue::I32(i32::MIN),
+            IntValue::U8(u8::MAX),
+            IntValue::U16(u16::MAX),
+            IntValue::U32(u32::MAX),
+            IntValue::U64(1_u64 << 54),
+        ] {
+            assert!(integer_is_exact_f64(&value), "{value:?} must be exact");
+        }
+        assert!(!integer_is_exact_f64(&IntValue::U64((1_u64 << 53) + 1)));
+        assert!(!integer_is_exact_f64(&IntValue::I64(-((1_i64 << 53) + 1))));
+        assert!(integer_is_exact_f64(&IntValue::U64(0)));
     }
 
     #[test]

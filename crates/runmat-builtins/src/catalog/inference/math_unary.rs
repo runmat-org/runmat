@@ -17,6 +17,7 @@ pub(super) fn infer_trigonometric(
 ) -> CallInference {
     let name = match function {
         TrigonometricFunction::Sin => "sin",
+        TrigonometricFunction::Cos => "cos",
     };
     let mut diagnostics = Vec::new();
     let Some(input) = request.arguments.first() else {

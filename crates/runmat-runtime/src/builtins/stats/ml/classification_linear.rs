@@ -2108,7 +2108,7 @@ fn ensure_integer_tensor_exact(tensor: &Tensor, name: &str) -> BuiltinResult<()>
 fn ensure_integer_tensor_exact_predict(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
     if let Some(storage) = tensor.integer_storage() {
         for value in storage.exact_values() {
-            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+            if !crate::builtins::common::validation::integer_is_exact_f64(&value) {
                 return Err(predict_invalid(format!(
                     "predict: integer {name} must be exactly representable as double"
                 )));
@@ -2119,7 +2119,7 @@ fn ensure_integer_tensor_exact_predict(tensor: &Tensor, name: &str) -> BuiltinRe
 }
 
 fn ensure_int_exact_f64(value: &IntValue, name: &str) -> BuiltinResult<()> {
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(())
     } else {
         Err(fitclinear_invalid(format!(

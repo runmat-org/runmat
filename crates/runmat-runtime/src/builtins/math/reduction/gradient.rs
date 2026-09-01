@@ -396,7 +396,7 @@ fn value_is_integer_or_logical(value: &Value) -> bool {
 }
 
 fn ensure_exact_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = crate::builtins::common::validation::integer_is_exact_f64;
     let valid = match value {
         Value::Int(value) => exact(value),
         Value::Tensor(tensor) => tensor

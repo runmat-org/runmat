@@ -422,7 +422,7 @@ fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
     let mut struct_value = StructValue::new();
     let seed = snapshot.seed.unwrap_or(DEFAULT_USER_SEED);
     let seed_value =
-        if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&IntValue::U64(seed)) {
+        if crate::builtins::common::validation::integer_is_exact_f64(&IntValue::U64(seed)) {
             Value::Num(seed as f64)
         } else {
             Value::Int(IntValue::U64(seed))

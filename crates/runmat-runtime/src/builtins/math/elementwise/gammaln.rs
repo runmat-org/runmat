@@ -374,7 +374,7 @@ fn gammaln_real(value: Value) -> BuiltinResult<Value> {
 fn gammaln_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     if let Some(storage) = tensor.integer_storage() {
         for integer in storage.exact_values() {
-            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+            if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
                 return Err(error_with_detail(
                     &ERROR_INVALID_INPUT,
                     "integer values must be exactly representable as double",

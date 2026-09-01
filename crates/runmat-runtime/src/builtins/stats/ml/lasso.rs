@@ -617,7 +617,7 @@ fn value_to_real_tensor(label: &str, value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn ensure_exact_integer_value(value: &runmat_value::IntValue, label: &str) -> BuiltinResult<()> {
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(())
     } else {
         Err(invalid_argument(format!(

@@ -571,7 +571,7 @@ fn value_contains_typed_integer(value: &Value) -> bool {
 }
 
 fn ensure_exact_integer_value(value: &Value, role: &str) -> BuiltinResult<()> {
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = crate::builtins::common::validation::integer_is_exact_f64;
     let valid = match value {
         Value::Int(value) => exact(value),
         Value::Tensor(tensor) => tensor
@@ -784,7 +784,7 @@ fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
 }
 
 fn ensure_exact_integer_scalar(value: &IntValue, name: &str) -> BuiltinResult<()> {
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(())
     } else {
         Err(invalid(format!(
@@ -797,7 +797,7 @@ fn ensure_exact_integer_tensor(tensor: &Tensor, name: &str) -> BuiltinResult<()>
     let Some(storage) = tensor.integer_storage() else {
         return Ok(());
     };
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = crate::builtins::common::validation::integer_is_exact_f64;
     if storage.exact_values().iter().all(exact) {
         Ok(())
     } else {

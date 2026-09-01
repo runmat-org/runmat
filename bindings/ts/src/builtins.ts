@@ -38,7 +38,7 @@ export type BuiltinDocSection = {
 export type BuiltinDocEvidence = {
   implementation: Array<{ label: string; target: unknown }>;
   verification: Array<{
-    kind: "UnitTest" | "IntegrationTest" | "BrowserTest" | "ProviderTest" | "ConformanceTest" | "Validation";
+    kind: "UnitTest" | "IntegrationTest" | "BrowserTest" | "ProviderTest" | "WgpuTest" | "ConformanceTest" | "Validation";
     label: string;
     location: string;
   }>;

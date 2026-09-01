@@ -626,7 +626,7 @@ fn ensure_kstest_extensions(x: &Value, rest: &[Value]) -> BuiltinResult<()> {
 fn ensure_exact_kstest_integer_tensor(value: &Tensor, role: &str) -> BuiltinResult<()> {
     if let Some(storage) = value.integer_storage() {
         for integer in storage.exact_values() {
-            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+            if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
                 return Err(kstest_invalid_argument(format!(
                     "kstest: integer {role} values must be exactly representable as double"
                 )));
@@ -1018,7 +1018,7 @@ fn ensure_ttest2_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResu
 fn ensure_exact_ttest2_integer_tensor(tensor: &Tensor, role: &str) -> BuiltinResult<()> {
     if let Some(storage) = tensor.integer_storage() {
         for integer in storage.exact_values() {
-            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+            if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
                 return Err(invalid_argument(format!(
                     "ttest2: integer {role} values must be exactly representable as double"
                 )));
@@ -1031,7 +1031,7 @@ fn ensure_exact_ttest2_integer_tensor(tensor: &Tensor, role: &str) -> BuiltinRes
 fn ensure_exact_ttest2_integer_scalar(value: &Value, role: &str) -> BuiltinResult<()> {
     match value {
         Value::Int(integer) => {
-            if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(integer) {
+            if crate::builtins::common::validation::integer_is_exact_f64(integer) {
                 Ok(())
             } else {
                 Err(invalid_argument(format!(

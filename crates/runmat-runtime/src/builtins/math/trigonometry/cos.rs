@@ -1,14 +1,14 @@
 //! MATLAB-compatible `cos` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, COS_CHARACTER_INPUT_EXTENSION, COS_ERROR_ARG_COUNT,
+    COS_ERROR_GPU_UNAVAILABLE, COS_ERROR_INTERNAL, COS_ERROR_INVALID_INPUT,
+    COS_ERROR_INVALID_OPTION, COS_ERROR_LIKE_PROTOTYPE, COS_INTEGER_INPUT_EXTENSION,
+    COS_LIKE_OUTPUT_EXTENSION, COS_LOGICAL_INPUT_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{COS_DESCRIPTOR, COS_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 #[cfg(test)]
 use runmat_value::NumericDType;
@@ -22,155 +22,10 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::symbolic::symbolic_function;
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_value::SymbolicFunction;
 
 const BUILTIN_NAME: &str = "cos";
-
-pub const COS_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cos-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cos with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosIntegerInputExtension"),
-};
-pub const COS_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cos-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cos with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosLogicalInputExtension"),
-};
-pub const COS_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cos-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cos with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosCharacterInputExtension"),
-};
-pub const COS_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cos-like-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cos with a like output prototype is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosLikeOutputExtension"),
-};
-pub const COS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    COS_INTEGER_INPUT_EXTENSION,
-    COS_LOGICAL_INPUT_EXTENSION,
-    COS_CHARACTER_INPUT_EXTENSION,
-    COS_LIKE_OUTPUT_EXTENSION,
-];
-const COS_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "All eight real integer classes are admitted only when exactly representable at the binary64 transcendental boundary." }];
-pub const COS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "Y = cos(integer_X)", inputs: &COS_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "RunMat mode checks authoritative integer storage before conversion; host output is double and resident fallback returns through the owning provider." }];
-
-const COS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise cosine result.",
-}];
-
-const COS_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, array, char array, complex value, or gpuArray.",
-}];
-
-const COS_INPUTS_X_LIKE_P: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, array, char array, complex value, or gpuArray.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Output template selector keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "P",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype determining host vs gpuArray output residency.",
-    },
-];
-
-const COS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = cos(X)",
-        inputs: &COS_INPUTS_X,
-        outputs: &COS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = cos(X, \"like\", P)",
-        inputs: &COS_INPUTS_X_LIKE_P,
-        outputs: &COS_OUTPUT,
-    },
-];
-
-const COS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.INVALID_INPUT",
-    identifier: Some("RunMat:cos:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/logical/char/complex data.",
-    message: "cos: invalid input",
-};
-
-const COS_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.INVALID_OPTION",
-    identifier: Some("RunMat:cos:InvalidOption"),
-    when: "Optional arguments after X are malformed or unsupported.",
-    message: "cos: invalid option",
-};
-
-const COS_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.ARG_COUNT",
-    identifier: Some("RunMat:cos:ArgCount"),
-    when: "Too many input arguments were supplied.",
-    message: "cos: too many input arguments",
-};
-
-const COS_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.LIKE_PROTOTYPE",
-    identifier: Some("RunMat:cos:LikePrototype"),
-    when: "The \"like\" prototype is unsupported for this output conversion path.",
-    message: "cos: invalid \"like\" prototype",
-};
-
-const COS_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.GPU_UNAVAILABLE",
-    identifier: Some("RunMat:cos:GpuUnavailable"),
-    when: "GPU output was requested via \"like\" but no active provider is available.",
-    message: "cos: GPU provider unavailable",
-};
-
-const COS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.INTERNAL",
-    identifier: Some("RunMat:cos:Internal"),
-    when: "Internal tensor conversion/allocation/provider flow failed.",
-    message: "cos: internal error",
-};
-
-const COS_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    COS_ERROR_INVALID_INPUT,
-    COS_ERROR_INVALID_OPTION,
-    COS_ERROR_ARG_COUNT,
-    COS_ERROR_LIKE_PROTOTYPE,
-    COS_ERROR_GPU_UNAVAILABLE,
-    COS_ERROR_INTERNAL,
-];
-
-pub const COS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COS_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::cos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -228,19 +83,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "cos",
-    category = "math/trigonometry",
-    summary = "Compute cosine element-wise.",
-    keywords = "cos,cosine,trigonometry,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::cos::COS_DESCRIPTOR),
-    extensions(COS_EXTENSIONS),
-    integer_capabilities(COS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::cos"
 )]
 async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
-    ensure_cos_extensions(&value, &rest)?;
+    ensure_cos_extensions(&value, &rest).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "cos")?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Cos) {
         return apply_output_template(symbolic, &template).await;
@@ -261,13 +109,14 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     apply_output_template(base, &template).await
 }
 
-fn ensure_cos_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    if is_real_integer_value(value) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &COS_INTEGER_INPUT_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
+async fn ensure_cos_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        value,
+        &COS_INTEGER_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "X",
+    )
+    .await?;
     if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
     {
@@ -288,72 +137,53 @@ fn ensure_cos_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
             BUILTIN_NAME,
         )?;
     }
-    ensure_integer_exact_f64(value)
-}
-
-fn is_real_integer_value(value: &Value) -> bool {
-    matches!(value, Value::Int(_))
-        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
-        || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
-}
-
-fn ensure_integer_exact_f64(value: &Value) -> BuiltinResult<()> {
-    let exact = integer_is_exact_f64;
-    let ok = match value {
-        Value::Int(v) => exact(v),
-        Value::Tensor(t) => t
-            .integer_storage()
-            .is_none_or(|s| s.exact_values().iter().all(exact)),
-        _ => true,
-    };
-    if ok {
-        Ok(())
-    } else {
-        Err(cos_error_with_detail(
-            &COS_ERROR_INVALID_INPUT,
-            "integer input must be exactly representable as double",
-        ))
-    }
-}
-
-pub(crate) fn integer_is_exact_f64(value: &runmat_value::IntValue) -> bool {
-    let magnitude = match value {
-        runmat_value::IntValue::I8(value) => u64::from(value.unsigned_abs()),
-        runmat_value::IntValue::I16(value) => u64::from(value.unsigned_abs()),
-        runmat_value::IntValue::I32(value) => u64::from(value.unsigned_abs()),
-        runmat_value::IntValue::I64(value) => value.unsigned_abs(),
-        runmat_value::IntValue::U8(value) => u64::from(*value),
-        runmat_value::IntValue::U16(value) => u64::from(*value),
-        runmat_value::IntValue::U32(value) => u64::from(*value),
-        runmat_value::IntValue::U64(value) => *value,
-    };
-    if magnitude == 0 {
-        return true;
-    }
-    let significant_bits = u64::BITS - magnitude.leading_zeros();
-    significant_bits <= f64::MANTISSA_DIGITS
-        || magnitude.trailing_zeros() >= significant_bits - f64::MANTISSA_DIGITS
+    Ok(())
 }
 
 async fn cos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle);
+    let provider = gpu_helpers::exact_provider_for_handle(&handle);
     let requires_exact_host_path = runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle);
     if !requires_exact_host_path {
         if let Some(provider) = provider {
             match provider.unary_cos(&handle).await {
-                Ok(out) if native_unary_output_matches(&handle, &out, provider) => {
-                    return Ok(gpu_helpers::resident_gpu_value(out));
+                Ok(output)
+                    if gpu_helpers::unary_gpu_output_matches(
+                        &output,
+                        &handle,
+                        provider,
+                        gpu_helpers::UnaryGpuOutputContract {
+                            storage: runmat_accelerate_api::handle_storage(&handle),
+                            precision: runmat_accelerate_api::handle_precision(&handle),
+                            integer: None,
+                            logical: false,
+                            alias: gpu_helpers::GpuOutputAliasPolicy::AllowInput,
+                        },
+                    ) =>
+                {
+                    return Ok(gpu_helpers::resident_gpu_value(output));
                 }
-                Ok(out) => free_rejected_native_output(&out, provider),
-                Err(_) => {}
+                Ok(output) => {
+                    gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
+                    return Err(cos_error_with_detail(
+                        &COS_ERROR_INTERNAL,
+                        "provider returned an invalid unary cosine result",
+                    ));
+                }
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) => {
+                    return Err(cos_error_with_detail(
+                        &COS_ERROR_INTERNAL,
+                        format!("provider unary cosine failed: {error}"),
+                    ));
+                }
             }
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+    let source = handle.clone();
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    ensure_integer_exact_f64(&gathered)?;
     let host = match gathered {
         Value::Complex(re, im) => Ok(Value::Complex(
             cos_complex_re(re, im),
@@ -364,36 +194,7 @@ async fn cos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Num(n.cos())),
         other => cos_real(other),
     }?;
-    if let Some(provider) = provider {
-        upload_gpu_output(provider, host)
-    } else {
-        Ok(host)
-    }
-}
-
-fn native_unary_output_matches(
-    input: &GpuTensorHandle,
-    output: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-) -> bool {
-    output.device_id == input.device_id
-        && runmat_accelerate_api::handle_precision(output)
-            == Some(
-                runmat_accelerate_api::handle_precision(input)
-                    .unwrap_or_else(|| provider.precision()),
-            )
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::handle_storage(input)
-        && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_native_output(
-    output: &GpuTensorHandle,
-    invoked_provider: &dyn runmat_accelerate_api::AccelProvider,
-) {
-    let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(invoked_provider);
-    let _ = owner.free(output);
+    gpu_helpers::restore_class_preserving_value(&source, host, BUILTIN_NAME)
 }
 
 fn cos_real(value: Value) -> BuiltinResult<Value> {
@@ -447,47 +248,6 @@ fn cos_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     }
     .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(tensor))
-}
-
-fn upload_gpu_output(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    value: Value,
-) -> BuiltinResult<Value> {
-    match value {
-        Value::Num(value) => {
-            let tensor = Tensor::new(vec![value], vec![1, 1])
-                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-            upload_real_gpu_output(provider, tensor)
-        }
-        Value::Tensor(tensor) => upload_real_gpu_output(provider, tensor),
-        Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-            upload_complex_gpu_output(provider, tensor)
-        }
-        Value::ComplexTensor(tensor) => upload_complex_gpu_output(provider, tensor),
-        other => Err(cos_error_with_detail(
-            &COS_ERROR_INTERNAL,
-            format!("cannot restore GPU output {other:?}"),
-        )),
-    }
-}
-
-fn upload_real_gpu_output(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    tensor: Tensor,
-) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-    Ok(gpu_helpers::resident_gpu_value(handle))
-}
-
-fn upload_complex_gpu_output(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    tensor: ComplexTensor,
-) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-    Ok(gpu_helpers::complex_gpu_value(handle))
 }
 
 fn cos_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -552,19 +312,12 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
         OutputTemplate::Default => Ok(value),
         OutputTemplate::Like(proto) => match proto {
             Value::GpuTensor(handle) => {
-                let provider =
-                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-                        cos_error_with_detail(
-                            &COS_ERROR_GPU_UNAVAILABLE,
-                            "GPU prototype for 'like' has no owning acceleration provider",
-                        )
-                    })?;
                 if runmat_accelerate_api::handle_storage(handle)
                     == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
                 {
-                    convert_to_gpu_complex(value, provider).await
+                    convert_to_gpu_complex(value, handle).await
                 } else {
-                    convert_to_gpu(value, provider).await
+                    convert_to_gpu(value, handle).await
                 }
             }
             Value::Tensor(_)
@@ -582,42 +335,44 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn convert_to_gpu(
-    value: Value,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-) -> BuiltinResult<Value> {
+async fn convert_to_gpu(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
+        cos_error_with_detail(
+            &COS_ERROR_GPU_UNAVAILABLE,
+            "GPU output requested via 'like' but no provider owns the prototype",
+        )
+    })?;
     match value {
-        Value::GpuTensor(handle) if gpu_handle_is_owned_by(&handle, provider) => {
-            Ok(Value::GpuTensor(handle))
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+                && gpu_helpers::exact_provider_for_handle(&handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
+        {
+            Ok(gpu_helpers::resident_gpu_value(handle))
         }
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
                 .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            convert_to_gpu(gathered, provider).await
+            convert_to_gpu(gathered, prototype).await
         }
         Value::Tensor(tensor) => {
-            let data = tensor::tensor_values_f64_cow(&tensor);
-            let view = HostTensorView {
-                data: data.as_ref(),
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::resident_gpu_value(handle))
         }
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
                 .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor), provider).await
+            convert_to_gpu(Value::Tensor(tensor), prototype).await
         }
-        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64()), provider).await,
-        Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 }), provider).await,
+        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64()), prototype).await,
+        Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 }), prototype).await,
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor), provider).await
+            convert_to_gpu(Value::Tensor(tensor), prototype).await
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(cos_error_with_detail(
             &COS_ERROR_LIKE_PROTOTYPE,
@@ -631,77 +386,106 @@ async fn convert_to_gpu(
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn convert_to_gpu_complex(
-    value: Value,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-) -> BuiltinResult<Value> {
+async fn convert_to_gpu_complex(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
+        cos_error_with_detail(
+            &COS_ERROR_GPU_UNAVAILABLE,
+            "complex GPU output requested via 'like' but no provider owns the prototype",
+        )
+    })?;
     match value {
-        Value::GpuTensor(handle) if gpu_handle_is_owned_by(&handle, provider) => {
+        Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_storage(&handle)
                 == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                && gpu_helpers::exact_provider_for_handle(&handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
+        {
+            Ok(gpu_helpers::complex_gpu_value(handle))
+        }
+        Value::GpuTensor(handle) => {
+            let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider));
+            if same_owner
+                && runmat_accelerate_api::handle_storage(&handle)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
             {
-                Ok(Value::GpuTensor(handle))
-            } else {
                 match provider.complex_from_real(&handle).await {
-                    Ok(out) => Ok(Value::GpuTensor(out)),
-                    Err(_) => {
-                        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-                            .await
-                            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-                        convert_to_gpu_complex(gathered, provider).await
+                    Ok(output)
+                        if gpu_helpers::unary_gpu_output_matches(
+                            &output,
+                            &handle,
+                            provider,
+                            gpu_helpers::UnaryGpuOutputContract {
+                                storage:
+                                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                                precision: runmat_accelerate_api::handle_precision(&handle),
+                                integer: None,
+                                logical: false,
+                                alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+                            },
+                        ) =>
+                    {
+                        return Ok(gpu_helpers::complex_gpu_value(output));
+                    }
+                    Ok(output) => {
+                        gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
+                        return Err(cos_error_with_detail(
+                            &COS_ERROR_INTERNAL,
+                            "provider returned an invalid complex conversion result",
+                        ));
+                    }
+                    Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                    Err(error) => {
+                        return Err(cos_error_with_detail(
+                            &COS_ERROR_INTERNAL,
+                            format!("provider complex conversion failed: {error}"),
+                        ));
                     }
                 }
             }
-        }
-        Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
                 .await
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            convert_to_gpu_complex(gathered, provider).await
+            convert_to_gpu_complex(gathered, prototype).await
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::complex_gpu_value(handle))
         }
         Value::ComplexTensor(tensor) => {
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::complex_gpu_value(handle))
         }
-        Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0), provider).await,
+        Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0), prototype).await,
         Value::Tensor(tensor) => {
             let values = tensor::tensor_values_f64_cow(&tensor);
             let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
-            let complex = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-            convert_to_gpu_complex(Value::ComplexTensor(complex), provider).await
+            let complex = ComplexTensor::from_f64_values_with_dtype(
+                data,
+                tensor.shape.clone(),
+                complex_floating_output_dtype(tensor.numeric_dtype()),
+            )
+            .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
+            convert_to_gpu_complex(Value::ComplexTensor(complex), prototype).await
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
-            convert_to_gpu_complex(Value::Tensor(tensor), provider).await
+            convert_to_gpu_complex(Value::Tensor(tensor), prototype).await
         }
-        Value::Int(i) => convert_to_gpu_complex(Value::Num(i.to_f64()), provider).await,
+        Value::Int(i) => convert_to_gpu_complex(Value::Num(i.to_f64()), prototype).await,
         Value::Bool(b) => {
-            convert_to_gpu_complex(Value::Num(if b { 1.0 } else { 0.0 }), provider).await
+            convert_to_gpu_complex(Value::Num(if b { 1.0 } else { 0.0 }), prototype).await
         }
         other => Err(cos_error_with_detail(
             &COS_ERROR_INTERNAL,
             format!("cannot convert value {other:?} to complex GPU output via 'like'"),
         )),
     }
-}
-
-fn gpu_handle_is_owned_by(
-    handle: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-) -> bool {
-    handle.device_id == provider.device_id()
-        && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
 }
 
 async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
@@ -722,8 +506,12 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => {
             let values = tensor::tensor_values_f64_cow(&tensor);
             let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
-            let complex = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
+            let complex = ComplexTensor::from_f64_values_with_dtype(
+                data,
+                tensor.shape.clone(),
+                complex_floating_output_dtype(tensor.numeric_dtype()),
+            )
+            .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(complex))
         }
         Value::GpuTensor(handle) => {
@@ -746,6 +534,14 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+fn complex_floating_output_dtype(dtype: runmat_value::NumericDType) -> runmat_value::NumericDType {
+    if dtype == runmat_value::NumericDType::F32 {
+        runmat_value::NumericDType::F32
+    } else {
+        runmat_value::NumericDType::F64
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -754,7 +550,6 @@ pub(crate) mod tests {
         AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorOwned,
         HostTensorView, ProviderPrecision,
     };
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, StringArray, Tensor};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
@@ -965,33 +760,6 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
-    #[test]
-    fn cos_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn cos_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cos_scalar_zero() {
@@ -1118,7 +886,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cos_rejects_and_frees_malformed_native_outputs_before_owner_restoration() {
+    fn cos_rejects_and_frees_malformed_native_outputs() {
         let _guard = test_support::accel_test_lock();
         let provider = Box::leak(Box::new(MalformedCosProvider::new()));
         unsafe {
@@ -1133,29 +901,14 @@ pub(crate) mod tests {
                     shape: &[2, 1],
                 })
                 .expect("input upload");
-            let Value::GpuTensor(output) = block_on(super::cos_gpu(input.clone()))
-                .expect("malformed native output must fall back and restore")
-            else {
-                panic!("fallback must restore residency")
-            };
-            assert_eq!(output.device_id, provider.device_id());
-            assert_eq!(
-                runmat_accelerate_api::handle_precision(&output),
-                Some(ProviderPrecision::F64)
-            );
-            assert_eq!(
-                runmat_accelerate_api::handle_storage(&output),
-                GpuTensorStorage::Real
-            );
-            let gathered = block_on(provider.download(&output)).expect("restored output");
-            assert_eq!(gathered.data, vec![1.0, 1.0_f64.cos()]);
-
+            let error = block_on(super::cos_gpu(input.clone()))
+                .expect_err("malformed native output must be rejected");
+            assert_eq!(error.identifier(), COS_ERROR_INTERNAL.identifier);
             let completed = usize::from(malformed) + 1;
-            assert_eq!(provider.allocations.load(Ordering::Relaxed), completed * 3);
-            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 3 - 2);
+            assert_eq!(provider.allocations.load(Ordering::Relaxed), completed * 2);
+            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 2 - 1);
             provider.free(&input).expect("free input");
-            provider.free(&output).expect("free restored output");
-            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 3);
+            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 2);
         }
         assert_eq!(
             provider.allocations.load(Ordering::Relaxed),

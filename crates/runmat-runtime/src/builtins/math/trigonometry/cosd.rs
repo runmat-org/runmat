@@ -211,7 +211,7 @@ fn is_integer(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
 }
 fn ensure_exact(value: &Value) -> BuiltinResult<()> {
-    let ok = super::cos::integer_is_exact_f64;
+    let ok = crate::builtins::common::validation::integer_is_exact_f64;
     let valid = match value {
         Value::Int(v) => ok(v),
         Value::Tensor(t) => t

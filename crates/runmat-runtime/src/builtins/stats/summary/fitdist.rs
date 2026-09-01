@@ -1335,7 +1335,7 @@ fn ensure_exact_fitdist_integer_boundary(tensor: &Tensor, role: &str) -> Builtin
         .expect("integer storage checked above")
         .exact_values()
     {
-        if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+        if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
             return Err(invalid(format!(
                 "fitdist: integer {role} values must be exactly representable as double"
             )));
