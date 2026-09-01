@@ -1575,11 +1575,46 @@ async function runHeadlessChrome(options) {
         results = await resultsPromise;
     } finally {
         clearTimeout(timeout);
-        chrome.kill("SIGTERM");
-        server.close();
+        server.closeAllConnections();
+        await Promise.all([
+            terminateChild(chrome, 5000),
+            new Promise((resolveClose, rejectClose) => {
+                server.close((error) => {
+                    if (error) {
+                        rejectClose(error);
+                    } else {
+                        resolveClose();
+                    }
+                });
+            })
+        ]);
     }
 
     return results;
+}
+
+/**
+ * @param {import("child_process").ChildProcess} child
+ * @param {number} graceMs
+ */
+async function terminateChild(child, graceMs) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+        return;
+    }
+
+    const exited = new Promise((resolveExit) => child.once("exit", resolveExit));
+    child.kill("SIGTERM");
+    const forced = await Promise.race([
+        exited.then(() => false),
+        new Promise((resolveTimeout) => {
+            const timer = setTimeout(() => resolveTimeout(true), graceMs);
+            timer.unref();
+        })
+    ]);
+    if (forced && child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await exited;
+    }
 }
 
 /**

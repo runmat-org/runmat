@@ -2,9 +2,9 @@ use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,
     BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
     BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor,
-    BuiltinDistributedPolicy, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinDistributedPolicy, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
@@ -13,6 +13,8 @@ use crate::{
     BuiltinSignatureDescriptor, MathInferenceRule, ALL_INTEGER_CLASSES,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
+
+use super::documentation::LOG2_DOCUMENTATION;
 
 const LOG2_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "X",
@@ -177,23 +179,7 @@ const MAY_THROW: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const LOG2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     identity: BuiltinCatalogIdentity { name: "log2" },
     category: "math/elementwise",
-    documentation: BuiltinDocumentation {
-        summary: "Compute the base-2 logarithm or dissect floating-point values.",
-        keywords: &[
-            "log2",
-            "base 2",
-            "logarithm",
-            "floating-point dissection",
-            "mantissa",
-            "exponent",
-            "gpu",
-        ],
-        related: &["log", "log10", "pow2", "nextpow2"],
-        introduced: None,
-        status: None,
-        examples: &[],
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: LOG2_DOCUMENTATION,
     descriptor: &LOG2_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
@@ -226,5 +212,3 @@ pub const LOG2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&LOG2_CATALOG_ENTRY];

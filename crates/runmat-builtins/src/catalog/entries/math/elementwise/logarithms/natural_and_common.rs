@@ -1,14 +1,16 @@
-use super::support::{unary_numeric_catalog_entry, UnaryNumericCatalogSpec};
+use super::super::support::{unary_numeric_catalog_entry, UnaryNumericCatalogSpec};
 use crate::{
     BuiltinBindingDeclaration, BuiltinCatalogEntry, BuiltinCatalogIdentity,
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinSignatureDescriptor, LogarithmBase, MathInferenceRule, ALL_INTEGER_CLASSES,
 };
+
+use super::documentation::{LOG10_DOCUMENTATION, LOG_DOCUMENTATION};
 
 const LOG_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -106,15 +108,7 @@ const LOG_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BIN
 pub const LOG_CATALOG_ENTRY: BuiltinCatalogEntry =
     unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
         identity: BuiltinCatalogIdentity { name: "log" },
-        documentation: BuiltinDocumentation {
-            summary: "Compute the natural logarithm elementwise.",
-            keywords: &["log", "natural logarithm", "elementwise", "complex", "gpu"],
-            related: &["exp", "log1p", "log2", "log10", "reallog"],
-            introduced: None,
-            status: None,
-            examples: &[],
-            ..BuiltinDocumentation::EMPTY
-        },
+        documentation: LOG_DOCUMENTATION,
         descriptor: &LOG_DESCRIPTOR,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Logarithm(
             LogarithmBase::Natural,
@@ -125,8 +119,6 @@ pub const LOG_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_audit: None,
         fusion: BuiltinFusionPolicy::Never,
     });
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&LOG_CATALOG_ENTRY, &LOG10_CATALOG_ENTRY];
 
 const LOG10_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -221,22 +213,7 @@ const LOG10_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_B
 pub const LOG10_CATALOG_ENTRY: BuiltinCatalogEntry =
     unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
         identity: BuiltinCatalogIdentity { name: "log10" },
-        documentation: BuiltinDocumentation {
-            summary: "Compute the common logarithm elementwise.",
-            keywords: &[
-                "log10",
-                "common logarithm",
-                "base 10",
-                "elementwise",
-                "complex",
-                "gpu",
-            ],
-            related: &["exp", "log", "log1p", "log2", "reallog"],
-            introduced: None,
-            status: None,
-            examples: &[],
-            ..BuiltinDocumentation::EMPTY
-        },
+        documentation: LOG10_DOCUMENTATION,
         descriptor: &LOG10_DESCRIPTOR,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Logarithm(
             LogarithmBase::Common,
