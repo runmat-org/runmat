@@ -61,6 +61,7 @@ pub enum MathInferenceRule {
     NumericConversionWithLike(runmat_types::NumericClass),
     NumericComponent(NumericComponentRule),
     Rounding(RoundingFunction),
+    Round,
     Signum,
     Trigonometric(TrigonometricFunction),
     Hyperbolic(HyperbolicFunction),

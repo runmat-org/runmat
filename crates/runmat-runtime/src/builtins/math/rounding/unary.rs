@@ -39,12 +39,30 @@ pub(super) fn validate_provider_output(
     builtin: &str,
     internal_error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<Value> {
+    validate_provider_output_with_storage(
+        provider,
+        input,
+        output,
+        GpuTensorStorage::Real,
+        builtin,
+        internal_error,
+    )
+}
+
+pub(super) fn validate_provider_output_with_storage(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    output: GpuTensorHandle,
+    storage: GpuTensorStorage,
+    builtin: &str,
+    internal_error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<Value> {
     let valid = gpu_helpers::unary_gpu_output_matches(
         &output,
         input,
         provider,
         gpu_helpers::UnaryGpuOutputContract {
-            storage: GpuTensorStorage::Real,
+            storage,
             precision: runmat_accelerate_api::handle_precision(input),
             integer: None,
             logical: false,

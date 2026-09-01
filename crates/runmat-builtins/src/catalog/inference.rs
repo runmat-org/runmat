@@ -78,6 +78,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::Rounding(function)) => {
             math_unary::infer_rounding(request, entry, function)
         }
+        BuiltinInferenceRule::Math(MathInferenceRule::Round) => {
+            math_unary::infer_round(request, entry)
+        }
         BuiltinInferenceRule::Math(MathInferenceRule::Signum) => {
             math_unary::infer_signum(request, entry)
         }
