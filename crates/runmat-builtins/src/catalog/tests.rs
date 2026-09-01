@@ -312,6 +312,36 @@ fn magnitude_phase_sign_documentation_is_catalog_owned_and_executable() {
 }
 
 #[test]
+fn floating_conversion_documentation_is_catalog_owned_and_executable() {
+    for (name, example_count, faq_count) in [("double", 8, 9), ("single", 6, 10)] {
+        let entry = builtin_catalog_entry_by_name(name).expect("floating conversion entry");
+        let documentation = &entry.documentation;
+        assert_eq!(
+            documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(documentation.examples.len(), example_count, "{name}");
+        assert_eq!(documentation.faqs.len(), faq_count, "{name}");
+        assert!(
+            documentation
+                .sections
+                .iter()
+                .any(|section| section.heading == "GPU execution"),
+            "{name}"
+        );
+        assert!(!documentation.evidence.implementation.is_empty(), "{name}");
+        assert!(!documentation.evidence.verification.is_empty(), "{name}");
+        assert!(documentation.examples.iter().all(|example| {
+            !example.id.is_empty()
+                && matches!(
+                    example.verification,
+                    BuiltinExampleVerification::Assertions { .. }
+                )
+        }));
+    }
+}
+
+#[test]
 fn migrated_registry_is_valid_and_case_insensitive() {
     let errors = validate_builtin_catalog(builtin_catalog_entries());
     assert!(errors.is_empty(), "catalog errors: {errors:#?}");

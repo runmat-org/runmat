@@ -20,6 +20,8 @@ fn migrated_signatures_and_documentation_come_from_the_canonical_catalog() {
         ("abs", "x=abs(single(-1));", "Y = abs(X)"),
         ("angle", "x=angle(single(1));", "theta = angle(X)"),
         ("sign", "x=sign(single(-1));", "Y = sign(X)"),
+        ("double", "x=double(single(1));", "Y = double(X)"),
+        ("single", "x=single(1);", "Y = single(X)"),
         ("intmin", "x=intmin(\"int16\");", "value = intmin(typename)"),
         (
             "intmax",
