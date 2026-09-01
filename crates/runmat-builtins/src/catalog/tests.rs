@@ -1847,6 +1847,62 @@ fn degree_cosine_owns_typed_resident_contract_and_character_extension() {
 }
 
 #[test]
+fn degree_tangent_owns_typed_resident_contract_and_character_extension() {
+    use runmat_types::{
+        CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ResidencyFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("tand").expect("tand catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::DegreeTrigonometric(
+            DegreeTrigonometricFunction::Tan
+        ))
+    );
+    assert_eq!(
+        entry.documentation.authority,
+        BuiltinDocumentationAuthority::Catalog
+    );
+    assert_eq!(entry.documentation.examples.len(), 5);
+    assert_eq!(
+        entry.placement.residency,
+        BuiltinResidencyPolicy::PreserveInputs
+    );
+    let infer = |input| {
+        infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![input],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        )
+    };
+
+    let mut single = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    }));
+    single.residency = ResidencyFact::Device {
+        provider: Some("source-provider".into()),
+    };
+    let floating = infer(single.clone());
+    assert!(floating.diagnostics.is_empty());
+    assert_eq!(floating.outputs[0].kind, single.kind);
+    assert_eq!(floating.outputs[0].residency, single.residency);
+    let character = infer(ValueFact::scalar(ValueKindFact::Character));
+    assert!(character.diagnostics.is_empty());
+    assert_eq!(
+        character.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real
+        })
+    );
+}
+
+#[test]
 fn exp_contract_preserves_floating_facts_and_marks_conversion_residency_dynamic() {
     use runmat_types::{
         AliasFact, CallRequest, ContiguityFact, LayoutFact, NumericClass, NumericDomain,
