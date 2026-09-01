@@ -814,6 +814,56 @@ fn distributed_array_documentation_is_catalog_owned_and_executable() {
 }
 
 #[test]
+fn parallel_collective_documentation_is_catalog_owned_and_executable() {
+    for name in [
+        "labBarrier",
+        "labBroadcast",
+        "labSend",
+        "labReceive",
+        "labProbe",
+        "labSendReceive",
+        "gplus",
+        "gcat",
+        "gop",
+        "spmdBarrier",
+        "spmdBroadcast",
+        "spmdSend",
+        "spmdReceive",
+        "spmdProbe",
+        "spmdSendReceive",
+        "spmdPlus",
+        "spmdCat",
+        "spmdReduce",
+    ] {
+        let entry = builtin_catalog_entry_by_name(name).expect("parallel collective catalog entry");
+        let documentation = &entry.documentation;
+        assert_eq!(
+            documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(documentation.examples.len(), 1, "{name}");
+        assert_eq!(documentation.faqs.len(), 5, "{name}");
+        assert!(
+            documentation
+                .sections
+                .iter()
+                .any(|section| section.heading == "Failures and cancellation"),
+            "{name}"
+        );
+        assert!(!documentation.evidence.implementation.is_empty(), "{name}");
+        assert!(!documentation.evidence.verification.is_empty(), "{name}");
+        assert!(documentation.examples.iter().all(|example| {
+            !example.id.is_empty()
+                && example.harness == BuiltinExampleHarness::Native
+                && matches!(
+                    example.verification,
+                    BuiltinExampleVerification::Assertions { .. }
+                )
+        }));
+    }
+}
+
+#[test]
 fn gpu_array_inference_preserves_or_converts_typed_facts_before_device_placement() {
     use runmat_types::{
         CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,

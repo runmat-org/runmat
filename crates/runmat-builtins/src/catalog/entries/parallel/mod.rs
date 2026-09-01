@@ -1,11 +1,11 @@
 use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinCatalogEntry, BuiltinCatalogIdentity,
     BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
-    BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor,
-    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinLinkContract, BuiltinLinkPolicy,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinPlacementContract, BuiltinPortability, BuiltinPurity, BuiltinReachability,
-    BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor, ParallelInferenceRule,
+    BuiltinContractMaturity, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinFusionPolicy,
+    BuiltinInferenceRule, BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract,
+    BuiltinPortability, BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy,
+    BuiltinSemanticKind, BuiltinSignatureDescriptor, ParallelInferenceRule,
 };
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
@@ -185,26 +185,6 @@ const PARALLEL_LINK: BuiltinLinkContract = BuiltinLinkContract {
     execution_stack: ExecutionStackRequirement::Any,
     artifact_dependencies: &[],
 };
-
-macro_rules! parallel_data_entry {
-    ($constant:ident, $name:literal, $rule:expr, $summary:literal, $descriptor:ident) => {
-        documented_parallel_data_entry!(
-            $constant,
-            $name,
-            $rule,
-            BuiltinDocumentation {
-                summary: $summary,
-                keywords: &["parallel", "distributed", "spmd"],
-                related: &[],
-                introduced: None,
-                status: None,
-                examples: &[],
-                ..BuiltinDocumentation::EMPTY
-            },
-            $descriptor
-        );
-    };
-}
 
 macro_rules! documented_parallel_data_entry {
     ($constant:ident, $name:literal, $rule:expr, $documentation:expr, $descriptor:ident) => {
