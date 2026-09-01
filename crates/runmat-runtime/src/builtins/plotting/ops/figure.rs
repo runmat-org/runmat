@@ -373,7 +373,7 @@ fn is_supported_integer_property_route(property: &str) -> bool {
 }
 
 fn ensure_integer_property_exact_f64(value: &Value, property: &str) -> crate::BuiltinResult<()> {
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = crate::builtins::common::validation::integer_is_exact_f64;
     let valid = match value {
         Value::Int(value) => exact(value),
         Value::Tensor(tensor) => tensor

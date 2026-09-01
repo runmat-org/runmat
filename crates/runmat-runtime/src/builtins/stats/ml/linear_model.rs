@@ -1835,7 +1835,7 @@ fn ensure_exact_fitlm_integer_tensor_boundary(tensor: &Tensor, role: &str) -> Bu
         return Ok(());
     };
     for integer in storage.exact_values() {
-        if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+        if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
             return Err(fitlm_invalid(format!(
                 "fitlm: integer {role} values must be exactly representable as double"
             )));
@@ -1851,7 +1851,7 @@ fn ensure_exact_fitlm_integer_scalar_boundary(
     let Some(integer) = value.into_int_value() else {
         return Ok(());
     };
-    if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+    if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
         return Err(fitlm_invalid(format!(
             "fitlm: integer {role} values must be exactly representable as double"
         )));

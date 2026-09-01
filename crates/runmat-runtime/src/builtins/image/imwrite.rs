@@ -656,7 +656,7 @@ fn numeric_scalar_to_exact_f64(value: NumericScalar, label: &str) -> BuiltinResu
         NumericScalar::I16(value) => f64::from(value),
         NumericScalar::I32(value) => f64::from(value),
         NumericScalar::I64(value)
-            if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(
+            if crate::builtins::common::validation::integer_is_exact_f64(
                 &runmat_value::IntValue::I64(value),
             ) =>
         {
@@ -666,7 +666,7 @@ fn numeric_scalar_to_exact_f64(value: NumericScalar, label: &str) -> BuiltinResu
         NumericScalar::U16(value) => f64::from(value),
         NumericScalar::U32(value) => f64::from(value),
         NumericScalar::U64(value)
-            if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(
+            if crate::builtins::common::validation::integer_is_exact_f64(
                 &runmat_value::IntValue::U64(value),
             ) =>
         {

@@ -162,7 +162,7 @@ async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     return Ok(gpu_helpers::resident_gpu_value(output));
                 }
                 Ok(output) => {
-                    gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
+                    gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
                     return Err(sin_error_with_detail(
                         &SIN_ERROR_INTERNAL,
                         "provider returned an invalid unary sine result",
@@ -433,7 +433,7 @@ async fn convert_to_gpu_complex(value: Value, prototype: &GpuTensorHandle) -> Bu
                         return Ok(gpu_helpers::complex_gpu_value(output));
                     }
                     Ok(output) => {
-                        gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
+                        gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
                         return Err(sin_error_with_detail(
                             &SIN_ERROR_INTERNAL,
                             "provider returned an invalid complex conversion result",

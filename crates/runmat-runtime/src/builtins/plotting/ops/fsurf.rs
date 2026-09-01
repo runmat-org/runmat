@@ -730,7 +730,7 @@ fn numeric_vector(value: &Value) -> BuiltinResult<Vec<f64>> {
 }
 
 fn checked_integer_f64(value: &IntValue, role: &str) -> BuiltinResult<f64> {
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(value.to_f64())
     } else {
         Err(fsurf_invalid(format!(
@@ -943,7 +943,7 @@ fn checked_integer_callback_f64(value: &IntValue) -> BuiltinResult<f64> {
         &INTEGER_CALLBACK_OUTPUT_EXTENSION,
         BUILTIN_NAME,
     )?;
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(value.to_f64())
     } else {
         Err(fsurf_error_with_detail(

@@ -271,7 +271,7 @@ fn integer_storage_type(
 }
 
 pub(crate) fn ensure_integer_exact_f64(value: &Value, builtin: &str) -> BuiltinResult<()> {
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = crate::builtins::common::validation::integer_is_exact_f64;
     let valid = match value {
         Value::Int(value) => exact(value),
         Value::Tensor(tensor) => tensor

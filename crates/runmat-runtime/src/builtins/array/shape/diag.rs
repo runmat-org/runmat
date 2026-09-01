@@ -2108,7 +2108,7 @@ fn ensure_integer_exact_for_complex_float(value: &Value, dtype: NumericDType) ->
 }
 
 fn integer_exact_for_float(value: &runmat_value::IntValue, dtype: NumericDType) -> bool {
-    if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if !crate::builtins::common::validation::integer_is_exact_f64(value) {
         return false;
     }
     if dtype == NumericDType::F64 {

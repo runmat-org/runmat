@@ -369,7 +369,7 @@ fn ensure_exact_integer_tensor(tensor: &Tensor, role: &str) -> BuiltinResult<()>
     if storage
         .exact_values()
         .iter()
-        .any(|integer| !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(integer))
+        .any(|integer| !crate::builtins::common::validation::integer_is_exact_f64(integer))
     {
         return Err(invalid(format!(
             "linkage: integer {role} values must be exactly representable as double"
@@ -388,7 +388,7 @@ async fn ensure_exact_metric_integer_boundaries(values: &[Value]) -> BuiltinResu
             .map_err(|err| invalid(format!("linkage: {err}")))?;
         match gathered {
             Value::Int(integer) => {
-                if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+                if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
                     return Err(invalid(
                         "linkage: integer distance parameter values must be exactly representable as double",
                     ));

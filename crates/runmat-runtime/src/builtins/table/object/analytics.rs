@@ -634,7 +634,7 @@ fn summarize_groups_value(
                 let value = storage
                     .value_at(*row)
                     .ok_or_else(|| invalid_index("groupsummary: integer row out of bounds"))?;
-                if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+                if !crate::builtins::common::validation::integer_is_exact_f64(&value) {
                     return Err(invalid_argument(
                         "groupsummary: integer data must be exactly representable as double for floating summary methods",
                     ));

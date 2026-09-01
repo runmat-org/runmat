@@ -358,7 +358,7 @@ fn ensure_tsne_extensions(x: &Value, rest: &[Value]) -> BuiltinResult<()> {
 
 fn ensure_exact_tsne_integer_value(value: &Value, role: &str) -> BuiltinResult<()> {
     let exact = |integer: &runmat_value::IntValue| {
-        if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(integer) {
+        if crate::builtins::common::validation::integer_is_exact_f64(integer) {
             Ok(())
         } else {
             Err(invalid(format!(

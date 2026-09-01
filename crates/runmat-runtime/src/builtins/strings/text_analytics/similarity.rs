@@ -259,7 +259,7 @@ fn value_is_single(value: &Value) -> bool {
                     == Some(runmat_accelerate_api::ProviderPrecision::F32))
 }
 fn ensure_integer_exact(value: &Value) -> BuiltinResult<()> {
-    let ok = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let ok = crate::builtins::common::validation::integer_is_exact_f64;
     let valid = match value {
         Value::Int(v) => ok(v),
         Value::Tensor(t) => t

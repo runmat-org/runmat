@@ -361,6 +361,27 @@ pub fn free_unprotected_exact_owner(handle: &GpuTensorHandle, protected: &[&GpuT
     }
 }
 
+/// Release an invalid output returned by `invoked_provider` without freeing a
+/// protected input alias. Prefer a registered exact owner when the returned
+/// metadata identifies one; otherwise the provider that created the output is
+/// responsible for releasing it even when the output metadata is malformed.
+pub fn free_rejected_provider_output(
+    handle: &GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
+    invoked_provider: &dyn AccelProvider,
+) {
+    if protected
+        .iter()
+        .any(|protected| same_gpu_handle(handle, protected))
+    {
+        return;
+    }
+    let owner = exact_provider_for_handle(handle).unwrap_or(invoked_provider);
+    if owner.free(handle).is_ok() {
+        runmat_accelerate_api::clear_handle_metadata(handle);
+    }
+}
+
 /// Return whether an optional provider hook reported the API's typed
 /// unsupported-operation result. Other provider failures must remain visible
 /// instead of silently changing the execution path.

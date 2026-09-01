@@ -1226,7 +1226,7 @@ fn numeric_scalar_f64(value: NumericScalar, err: &str) -> BuiltinResult<f64> {
 }
 
 fn exact_integer_f64(value: &IntValue, err: &str) -> BuiltinResult<f64> {
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(value.to_f64())
     } else {
         Err(fspecial_error(format!(

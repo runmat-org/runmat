@@ -357,7 +357,7 @@ fn summarize_integer_table_groups<'a>(
         let value = storage
             .value_at(row)
             .ok_or_else(|| invalid_index("grpstats: integer row out of bounds"))?;
-        if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+        if !crate::builtins::common::validation::integer_is_exact_f64(&value) {
             return Err(invalid_argument(
                 "grpstats: integer table data must be exactly representable as double for floating summary statistics",
             ));
@@ -463,7 +463,7 @@ fn checked_tensor_values_f64(tensor: &Tensor, context: &str) -> BuiltinResult<Ve
             .exact_values()
             .into_iter()
             .map(|value| {
-                if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+                if crate::builtins::common::validation::integer_is_exact_f64(&value) {
                     Ok(value.to_f64())
                 } else {
                     Err(invalid_argument(format!(

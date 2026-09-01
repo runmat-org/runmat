@@ -459,7 +459,7 @@ fn ensure_exact_integer_tensor_boundary(tensor: &Tensor, role: &str) -> Result<(
     if storage
         .exact_values()
         .iter()
-        .all(crate::builtins::math::trigonometry::cos::integer_is_exact_f64)
+        .all(crate::builtins::common::validation::integer_is_exact_f64)
     {
         Ok(())
     } else {
@@ -684,7 +684,7 @@ async fn scalar_parameter(value: &Value, label: &str) -> BuiltinResult<f64> {
             gauspuls_error_with_detail(&GAUSPULS_ERROR_INVALID_PARAMETER, format!("{label}: {err}"))
         })?;
     if let Some(integer) = tensor::scalar_integer_value(&host) {
-        if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+        if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
             return Err(gauspuls_error_with_detail(
                 &GAUSPULS_ERROR_INVALID_PARAMETER,
                 format!("{label}: integer value must be exactly representable as double"),

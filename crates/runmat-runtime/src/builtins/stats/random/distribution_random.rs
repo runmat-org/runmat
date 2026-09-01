@@ -528,7 +528,7 @@ pub mod gamrnd {
         if storage
             .exact_values()
             .iter()
-            .any(|integer| !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(integer))
+            .any(|integer| !crate::builtins::common::validation::integer_is_exact_f64(integer))
         {
             return Err(random_error(
                 "gamrnd",
@@ -1205,9 +1205,10 @@ pub mod wblrnd {
         {
             let tensor = value_to_tensor("wblrnd", value).await?;
             let inexact = tensor.integer_storage().is_some_and(|storage| {
-                storage.exact_values().iter().any(|value| {
-                    !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value)
-                })
+                storage
+                    .exact_values()
+                    .iter()
+                    .any(|value| !crate::builtins::common::validation::integer_is_exact_f64(value))
             });
             if inexact {
                 return Err(random_error(
