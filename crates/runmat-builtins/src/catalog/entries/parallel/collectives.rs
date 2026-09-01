@@ -1,3 +1,11 @@
+use super::documentation::{
+    GCAT_DOCUMENTATION, GOP_DOCUMENTATION, GPLUS_DOCUMENTATION, LAB_BARRIER_DOCUMENTATION,
+    LAB_BROADCAST_DOCUMENTATION, LAB_PROBE_DOCUMENTATION, LAB_RECEIVE_DOCUMENTATION,
+    LAB_SEND_DOCUMENTATION, LAB_SEND_RECEIVE_DOCUMENTATION, SPMD_BARRIER_DOCUMENTATION,
+    SPMD_BROADCAST_DOCUMENTATION, SPMD_CAT_DOCUMENTATION, SPMD_PLUS_DOCUMENTATION,
+    SPMD_PROBE_DOCUMENTATION, SPMD_RECEIVE_DOCUMENTATION, SPMD_REDUCE_DOCUMENTATION,
+    SPMD_SEND_DOCUMENTATION, SPMD_SEND_RECEIVE_DOCUMENTATION,
+};
 use super::*;
 
 const BROADCAST_INPUTS: [BuiltinParamDescriptor; 2] = [LAB_REQUIRED, ANY_OPTIONAL];
@@ -155,130 +163,130 @@ descriptor!(SPMD_REDUCE_DESCRIPTOR, SPMD_REDUCE_SIGNATURES);
 descriptor!(GCAT_DESCRIPTOR, GCAT_SIGNATURES);
 descriptor!(GOP_DESCRIPTOR, GOP_SIGNATURES);
 
-parallel_data_entry!(
+documented_parallel_data_entry!(
     LAB_BARRIER_CATALOG_ENTRY,
     "labBarrier",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Barrier),
-    "Synchronize all labs in the current SPMD region.",
+    LAB_BARRIER_DOCUMENTATION,
     LAB_BARRIER_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     LAB_BROADCAST_CATALOG_ENTRY,
     "labBroadcast",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Broadcast),
-    "Broadcast a value from one lab to every lab.",
+    LAB_BROADCAST_DOCUMENTATION,
     LAB_BROADCAST_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     LAB_SEND_CATALOG_ENTRY,
     "labSend",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Send),
-    "Send a value to another lab.",
+    LAB_SEND_DOCUMENTATION,
     LAB_SEND_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     LAB_RECEIVE_CATALOG_ENTRY,
     "labReceive",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Receive),
-    "Receive a value from another lab.",
+    LAB_RECEIVE_DOCUMENTATION,
     LAB_RECEIVE_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     LAB_PROBE_CATALOG_ENTRY,
     "labProbe",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Probe),
-    "Test whether a matching lab message is available.",
+    LAB_PROBE_DOCUMENTATION,
     LAB_PROBE_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     GPLUS_CATALOG_ENTRY,
     "gplus",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Gplus),
-    "Sum values across labs.",
+    GPLUS_DOCUMENTATION,
     GPLUS_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     GCAT_CATALOG_ENTRY,
     "gcat",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Cat),
-    "Concatenate values across labs in rank order.",
+    GCAT_DOCUMENTATION,
     GCAT_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     GOP_CATALOG_ENTRY,
     "gop",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::FunctionalReduce),
-    "Reduce values across labs with an associative binary function.",
+    GOP_DOCUMENTATION,
     GOP_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     LAB_SEND_RECEIVE_CATALOG_ENTRY,
     "labSendReceive",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::SendReceive),
-    "Send and receive one value as an atomic point-to-point exchange.",
+    LAB_SEND_RECEIVE_DOCUMENTATION,
     LAB_SEND_RECEIVE_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     SPMD_BARRIER_CATALOG_ENTRY,
     "spmdBarrier",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Barrier),
-    "Synchronize all labs in the current SPMD region.",
+    SPMD_BARRIER_DOCUMENTATION,
     SPMD_BARRIER_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     SPMD_BROADCAST_CATALOG_ENTRY,
     "spmdBroadcast",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Broadcast),
-    "Broadcast a value from one lab to every lab.",
+    SPMD_BROADCAST_DOCUMENTATION,
     SPMD_BROADCAST_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     SPMD_SEND_CATALOG_ENTRY,
     "spmdSend",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Send),
-    "Send a value to another lab.",
+    SPMD_SEND_DOCUMENTATION,
     SPMD_SEND_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     SPMD_RECEIVE_CATALOG_ENTRY,
     "spmdReceive",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Receive),
-    "Receive a value and optional sender metadata.",
+    SPMD_RECEIVE_DOCUMENTATION,
     SPMD_RECEIVE_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     SPMD_PROBE_CATALOG_ENTRY,
     "spmdProbe",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Probe),
-    "Test whether a matching lab message is available.",
+    SPMD_PROBE_DOCUMENTATION,
     SPMD_PROBE_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     SPMD_SEND_RECEIVE_CATALOG_ENTRY,
     "spmdSendReceive",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::SendReceive),
-    "Send and receive one value as an atomic point-to-point exchange.",
+    SPMD_SEND_RECEIVE_DOCUMENTATION,
     SPMD_SEND_RECEIVE_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     SPMD_PLUS_CATALOG_ENTRY,
     "spmdPlus",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Gplus),
-    "Sum values across labs.",
+    SPMD_PLUS_DOCUMENTATION,
     SPMD_PLUS_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     SPMD_CAT_CATALOG_ENTRY,
     "spmdCat",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::Cat),
-    "Concatenate values across SPMD workers in rank order.",
+    SPMD_CAT_DOCUMENTATION,
     SPMD_CAT_DESCRIPTOR
 );
-parallel_data_entry!(
+documented_parallel_data_entry!(
     SPMD_REDUCE_CATALOG_ENTRY,
     "spmdReduce",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::FunctionalReduce),
-    "Reduce values across SPMD workers with an associative binary function.",
+    SPMD_REDUCE_DOCUMENTATION,
     SPMD_REDUCE_DESCRIPTOR
 );
 
