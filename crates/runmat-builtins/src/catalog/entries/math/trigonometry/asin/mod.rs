@@ -15,7 +15,9 @@ use crate::{
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-use super::documentation::ASIN_DOCUMENTATION;
+mod documentation;
+
+use documentation::ASIN_DOCUMENTATION;
 
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",

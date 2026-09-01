@@ -13,25 +13,27 @@ use crate::{
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-use super::documentation::COS_DOCUMENTATION;
+mod documentation;
 
-const COS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+use documentation::SIN_DOCUMENTATION;
+
+const SIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Elementwise cosine result.",
+    description: "Elementwise sine result.",
 }];
-const COS_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
+const SIN_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "X",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
 };
-const COS_INPUTS: [BuiltinParamDescriptor; 1] = [COS_INPUT];
-const COS_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    COS_INPUT,
+const SIN_INPUTS: [BuiltinParamDescriptor; 1] = [SIN_INPUT];
+const SIN_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    SIN_INPUT,
     BuiltinParamDescriptor {
         name: "like",
         ty: BuiltinParamType::StringScalar,
@@ -48,112 +50,112 @@ const COS_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
             "Prototype selecting host or provider residency and real or complex representation.",
     },
 ];
-const COS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const SIN_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "Y = cos(X)",
-        inputs: &COS_INPUTS,
-        outputs: &COS_OUTPUT,
+        label: "Y = sin(X)",
+        inputs: &SIN_INPUTS,
+        outputs: &SIN_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "Y = cos(X, \"like\", P)",
-        inputs: &COS_LIKE_INPUTS,
-        outputs: &COS_OUTPUT,
+        label: "Y = sin(X, \"like\", P)",
+        inputs: &SIN_LIKE_INPUTS,
+        outputs: &SIN_OUTPUT,
     },
 ];
 
-pub const COS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.INVALID_INPUT",
-    identifier: Some("RunMat:cos:InvalidInput"),
+pub const SIN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.INVALID_INPUT",
+    identifier: Some("RunMat:sin:InvalidInput"),
     when: "Input cannot be interpreted as supported numeric, logical, character, or complex data.",
-    message: "cos: invalid input",
+    message: "sin: invalid input",
 };
-pub const COS_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.INVALID_OPTION",
-    identifier: Some("RunMat:cos:InvalidOption"),
+pub const SIN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.INVALID_OPTION",
+    identifier: Some("RunMat:sin:InvalidOption"),
     when: "Optional arguments after X are malformed or unsupported.",
-    message: "cos: invalid option",
+    message: "sin: invalid option",
 };
-pub const COS_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.ARG_COUNT",
-    identifier: Some("RunMat:cos:ArgCount"),
+pub const SIN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.ARG_COUNT",
+    identifier: Some("RunMat:sin:ArgCount"),
     when: "Too many input arguments were supplied.",
-    message: "cos: too many input arguments",
+    message: "sin: too many input arguments",
 };
-pub const COS_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.LIKE_PROTOTYPE",
-    identifier: Some("RunMat:cos:LikePrototype"),
+pub const SIN_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.LIKE_PROTOTYPE",
+    identifier: Some("RunMat:sin:LikePrototype"),
     when: "The \"like\" prototype is unsupported for this output conversion path.",
-    message: "cos: invalid \"like\" prototype",
+    message: "sin: invalid \"like\" prototype",
 };
-pub const COS_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.GPU_UNAVAILABLE",
-    identifier: Some("RunMat:cos:GpuUnavailable"),
+pub const SIN_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.GPU_UNAVAILABLE",
+    identifier: Some("RunMat:sin:GpuUnavailable"),
     when: "Provider output was requested through \"like\" but no active provider is available.",
-    message: "cos: GPU provider unavailable",
+    message: "sin: GPU provider unavailable",
 };
-pub const COS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COS.INTERNAL",
-    identifier: Some("RunMat:cos:Internal"),
+pub const SIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.INTERNAL",
+    identifier: Some("RunMat:sin:Internal"),
     when: "Internal tensor conversion, allocation, or provider execution failed.",
-    message: "cos: internal error",
+    message: "sin: internal error",
 };
-const COS_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    COS_ERROR_INVALID_INPUT,
-    COS_ERROR_INVALID_OPTION,
-    COS_ERROR_ARG_COUNT,
-    COS_ERROR_LIKE_PROTOTYPE,
-    COS_ERROR_GPU_UNAVAILABLE,
-    COS_ERROR_INTERNAL,
+const SIN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    SIN_ERROR_INVALID_INPUT,
+    SIN_ERROR_INVALID_OPTION,
+    SIN_ERROR_ARG_COUNT,
+    SIN_ERROR_LIKE_PROTOTYPE,
+    SIN_ERROR_GPU_UNAVAILABLE,
+    SIN_ERROR_INTERNAL,
 ];
-pub const COS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COS_SIGNATURES,
+pub const SIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SIN_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COS_ERRORS,
+    errors: &SIN_ERRORS,
 };
 
-pub const COS_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cos-integer-input",
+pub const SIN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sin-integer-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cos with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosIntegerInputExtension"),
+    description: "sin with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinIntegerInputExtension"),
 };
-pub const COS_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cos-logical-input",
+pub const SIN_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sin-logical-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cos with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosLogicalInputExtension"),
+    description: "sin with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinLogicalInputExtension"),
 };
-pub const COS_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cos-character-input",
+pub const SIN_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sin-character-input",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cos with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosCharacterInputExtension"),
+    description: "sin with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinCharacterInputExtension"),
 };
-pub const COS_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cos-like-output",
+pub const SIN_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sin-like-output",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cos with a like output prototype is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CosLikeOutputExtension"),
+    description: "sin with a like output prototype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SinLikeOutputExtension"),
 };
-pub const COS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    COS_INTEGER_INPUT_EXTENSION,
-    COS_LOGICAL_INPUT_EXTENSION,
-    COS_CHARACTER_INPUT_EXTENSION,
-    COS_LIKE_OUTPUT_EXTENSION,
+pub const SIN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    SIN_INTEGER_INPUT_EXTENSION,
+    SIN_LOGICAL_INPUT_EXTENSION,
+    SIN_CHARACTER_INPUT_EXTENSION,
+    SIN_LIKE_OUTPUT_EXTENSION,
 ];
 
-const COS_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+const SIN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "X",
     classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
     notes: "All eight real integer classes are admitted only when every value is exactly representable at the binary64 transcendental boundary.",
 }];
-pub const COS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+pub const SIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = cos(integer_X)",
-        inputs: &COS_INTEGER_INPUT,
+        form: "Y = sin(integer_X)",
+        inputs: &SIN_INTEGER_INPUT,
         computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
         output_class: BuiltinIntegerOutputClassRule::Double,
         overflow: BuiltinIntegerOverflowRule::Error,
@@ -162,17 +164,17 @@ pub const COS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         notes: "RunMat mode validates authoritative integer storage before conversion; provider-resident input may gather and follows the declared output placement policy.",
     }];
 
-const COS_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const COS_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
-pub const COS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
-    identity: BuiltinCatalogIdentity { name: "cos" },
+const SIN_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
+const SIN_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+pub const SIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    identity: BuiltinCatalogIdentity { name: "sin" },
     category: "math/trigonometry",
-    documentation: COS_DOCUMENTATION,
-    descriptor: &COS_DESCRIPTOR,
+    documentation: SIN_DOCUMENTATION,
+    descriptor: &SIN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Trigonometric(
-            TrigonometricFunction::Cos,
+            TrigonometricFunction::Sin,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
@@ -180,7 +182,7 @@ pub const COS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: &COS_EFFECTS,
+        effects: &SIN_EFFECTS,
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
@@ -196,9 +198,9 @@ pub const COS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         execution_stack: ExecutionStackRequirement::Any,
         artifact_dependencies: &[],
     },
-    bindings: &COS_BINDINGS,
-    extensions: &COS_EXTENSIONS,
-    integer_capabilities: &COS_INTEGER_CAPABILITIES,
+    bindings: &SIN_BINDINGS,
+    extensions: &SIN_EXTENSIONS,
+    integer_capabilities: &SIN_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };

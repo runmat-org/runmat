@@ -432,14 +432,13 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
                         .filter_map(Result::ok)
                         .map(|entry| entry.path())
                         .filter(|candidate| candidate != &path)
-                        .filter(|candidate| {
-                            candidate
-                                .extension()
-                                .and_then(|extension| extension.to_str())
-                                == Some("rs")
-                        })
                         .any(|candidate| {
-                            std::fs::read_to_string(candidate)
+                            let source_path = if candidate.is_dir() {
+                                candidate.join("mod.rs")
+                            } else {
+                                candidate
+                            };
+                            std::fs::read_to_string(source_path)
                                 .is_ok_and(|child| declares_catalog_entry(&child))
                         });
                 if !defines_family_entries && !composes_local_contracts {
@@ -2009,6 +2008,164 @@ fn inverse_sine_and_cosine_track_value_dependent_domain_and_preserve_residency()
             })
         );
     }
+}
+
+#[test]
+fn inverse_hyperbolic_cosine_tracks_exact_domain_shape_and_residency() {
+    use runmat_types::{
+        CallRequest, CertaintyFact, DimensionFact, DynamicReason, LiteralContext, LiteralValue,
+        NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount,
+        ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("acosh").expect("acosh catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::InverseHyperbolic(
+            InverseHyperbolicFunction::Cosine
+        ))
+    );
+    assert_eq!(
+        entry.documentation.authority,
+        BuiltinDocumentationAuthority::Catalog
+    );
+    assert_eq!(entry.documentation.examples.len(), 6);
+    assert_eq!(
+        entry.placement.residency,
+        BuiltinResidencyPolicy::PreserveInputs
+    );
+    assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Never);
+
+    let input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let infer_literal = |literal| {
+        infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![input.clone()],
+                literals: LiteralContext::new(vec![literal]),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        )
+    };
+    for literal in [
+        LiteralValue::Number(1.0),
+        LiteralValue::Number(f64::INFINITY),
+        LiteralValue::Number(f64::NAN),
+    ] {
+        let inferred = infer_literal(literal);
+        assert!(inferred.diagnostics.is_empty());
+        assert_eq!(
+            inferred.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })
+        );
+    }
+    for literal in [
+        LiteralValue::Number(0.5),
+        LiteralValue::Number(f64::NEG_INFINITY),
+    ] {
+        let inferred = infer_literal(literal);
+        assert!(inferred.diagnostics.is_empty());
+        assert_eq!(
+            inferred.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Complex,
+            })
+        );
+    }
+
+    let mut unknown_real = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(2), DimensionFact::Known(3)],
+        },
+        StorageFact::Dense,
+    );
+    unknown_real.residency = ResidencyFact::Device {
+        provider: Some("source-provider".into()),
+    };
+    let dynamic = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![unknown_real.clone()],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(dynamic.diagnostics.is_empty());
+    assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(dynamic.outputs[0].shape, unknown_real.shape);
+    assert_eq!(dynamic.outputs[0].residency, unknown_real.residency);
+    assert_eq!(
+        dynamic.outputs[0].certainty,
+        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
+    );
+
+    let logical = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![ValueFact::scalar(ValueKindFact::Logical)],
+            literals: LiteralContext::new(vec![LiteralValue::Bool(false)]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(
+        logical.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        })
+    );
+
+    let character = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![ValueFact::proven(
+                ValueKindFact::Character,
+                ShapeFact::from(vec![Some(1), Some(2)]),
+                StorageFact::Dense,
+            )],
+            literals: LiteralContext::new(vec![LiteralValue::Character("\0A".into())]),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert_eq!(
+        character.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        })
+    );
+    assert_eq!(
+        character.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), Some(2)])
+    );
+
+    let sparse = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![ValueFact::proven(
+                input.kind,
+                ShapeFact::from(vec![Some(2), Some(2)]),
+                StorageFact::Sparse,
+            )],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(sparse
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INVERSE-HYPERBOLIC-SPARSE"));
 }
 
 #[test]

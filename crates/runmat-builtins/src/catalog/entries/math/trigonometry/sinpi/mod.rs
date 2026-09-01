@@ -14,7 +14,9 @@ use crate::{
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-use super::documentation::SINPI_DOCUMENTATION;
+mod documentation;
+
+use documentation::SINPI_DOCUMENTATION;
 
 const SINPI_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",

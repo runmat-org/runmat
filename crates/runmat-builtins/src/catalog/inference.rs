@@ -90,6 +90,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::InverseTrigonometric(function)) => {
             math_unary::infer_inverse_trigonometric(request, entry, function)
         }
+        BuiltinInferenceRule::Math(MathInferenceRule::InverseHyperbolic(function)) => {
+            math_unary::infer_inverse_hyperbolic(request, entry, function)
+        }
         BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather) => {
             infer_gather(request, entry)
         }

@@ -23,7 +23,7 @@ flowchart TD
   Catalog --> Validation --> Runtime
 ```
 
-Catalog families live in the private `crates/runmat-builtins/src/catalog/entries/<category>` tree. The tree follows the public builtin taxonomy, while the crate root re-exports entry constants so consumers do not depend on its physical layout. Each family owns its local `ENTRIES` slice; domain modules compose families, and the root composes domains. Adding a builtin does not require a second global name list. Substantial prose belongs in a focused `documentation.rs` sibling within the same family directory so neither contract assembly nor documentation becomes a godfile.
+Catalog builtins live in private `crates/runmat-builtins/src/catalog/entries/<domain>/<family>/<builtin>/` packages. The tree follows the public builtin taxonomy, while the crate root re-exports entry constants so consumers do not depend on its physical layout. A builtin package keeps contract assembly in `mod.rs`, substantive prose and executable examples in `documentation.rs`, and identity-specific inference in `inference.rs` only when the logic does not belong in a reusable typed semantic-family module. Split an oversized package by meaningful local concerns such as examples, errors, or capabilities; do not build parallel contract and documentation trees. Each family owns its local `ENTRIES` slice, domain modules compose families, and the root composes domains. Adding a builtin does not require a second global identity list.
 
 Executable implementations live under `crates/runmat-runtime/src/builtins/<category>`. Category modules re-export their children through the existing runtime tree so native and WASM builds link the required bindings.
 

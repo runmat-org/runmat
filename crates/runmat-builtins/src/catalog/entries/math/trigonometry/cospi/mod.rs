@@ -14,7 +14,9 @@ use crate::{
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-use super::documentation::COSPI_DOCUMENTATION;
+mod documentation;
+
+use documentation::COSPI_DOCUMENTATION;
 
 const COSPI_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
