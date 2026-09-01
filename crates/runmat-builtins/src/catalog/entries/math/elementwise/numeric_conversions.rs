@@ -1,8 +1,8 @@
 use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,
     BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
-    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
-    BuiltinErrorDescriptor, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
@@ -13,8 +13,15 @@ use crate::{
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement, NumericClass};
 
+mod documentation;
+
+use documentation::{
+    INT16_DOCUMENTATION, INT32_DOCUMENTATION, INT64_DOCUMENTATION, INT8_DOCUMENTATION,
+    UINT16_DOCUMENTATION, UINT32_DOCUMENTATION, UINT64_DOCUMENTATION, UINT8_DOCUMENTATION,
+};
+
 macro_rules! define_integer_conversion {
-    ($module:ident, $name:literal, $upper:literal, $class:expr, $summary:literal) => {
+    ($module:ident, $name:literal, $upper:literal, $class:expr, $documentation:expr) => {
         mod $module {
             use super::*;
 
@@ -102,18 +109,7 @@ macro_rules! define_integer_conversion {
             pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
                 identity: BuiltinCatalogIdentity { name: $name },
                 category: "math/elementwise",
-                documentation: BuiltinDocumentation {
-                    summary: $summary,
-                    keywords: &[$name, "cast", "integer", "conversion", "gpuArray"],
-                    related: &[
-                        "double", "single", "int8", "int16", "int32", "int64", "uint8",
-                        "uint16", "uint32", "uint64",
-                    ],
-                    introduced: None,
-                    status: None,
-                    examples: &[],
-                ..BuiltinDocumentation::EMPTY
-                },
+                documentation: $documentation,
                 descriptor: &DESCRIPTOR,
                 contract: BuiltinContractDeclaration {
                     maturity: BuiltinContractMaturity::Complete,
@@ -152,61 +148,55 @@ macro_rules! define_integer_conversion {
     };
 }
 
-define_integer_conversion!(
-    int8,
-    "int8",
-    "INT8",
-    NumericClass::Int8,
-    "Convert values to signed 8-bit integer storage."
-);
+define_integer_conversion!(int8, "int8", "INT8", NumericClass::Int8, INT8_DOCUMENTATION);
 define_integer_conversion!(
     int16,
     "int16",
     "INT16",
     NumericClass::Int16,
-    "Convert values to signed 16-bit integer storage."
+    INT16_DOCUMENTATION
 );
 define_integer_conversion!(
     int32,
     "int32",
     "INT32",
     NumericClass::Int32,
-    "Convert values to signed 32-bit integer storage."
+    INT32_DOCUMENTATION
 );
 define_integer_conversion!(
     int64,
     "int64",
     "INT64",
     NumericClass::Int64,
-    "Convert values to signed 64-bit integer storage."
+    INT64_DOCUMENTATION
 );
 define_integer_conversion!(
     uint8,
     "uint8",
     "UINT8",
     NumericClass::UInt8,
-    "Convert values to unsigned 8-bit integer storage."
+    UINT8_DOCUMENTATION
 );
 define_integer_conversion!(
     uint16,
     "uint16",
     "UINT16",
     NumericClass::UInt16,
-    "Convert values to unsigned 16-bit integer storage."
+    UINT16_DOCUMENTATION
 );
 define_integer_conversion!(
     uint32,
     "uint32",
     "UINT32",
     NumericClass::UInt32,
-    "Convert values to unsigned 32-bit integer storage."
+    UINT32_DOCUMENTATION
 );
 define_integer_conversion!(
     uint64,
     "uint64",
     "UINT64",
     NumericClass::UInt64,
-    "Convert values to unsigned 64-bit integer storage."
+    UINT64_DOCUMENTATION
 );
 
 pub use int16::{

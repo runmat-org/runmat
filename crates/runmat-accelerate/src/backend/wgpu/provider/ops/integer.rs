@@ -1379,6 +1379,14 @@ impl WgpuProvider {
             entry.storage == GpuTensorStorage::Real,
             "integer cast: complex gpuArray inputs are not supported by the resident integer cast kernel"
         );
+        if entry.integer_type().is_none()
+            && entry.precision == NumericPrecision::F64
+            && self.precision == NumericPrecision::F32
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "integer cast: the active WebGPU device cannot execute an f64 source kernel",
+            ));
+        }
         let len = entry.len;
         let raw_len = integer_word_count(target_type, len)?;
         let allocated_bytes = (raw_len as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
@@ -1504,7 +1512,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{
         AccelProvider, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
-        HostTensorView, IntegerElementType,
+        HostNumericDataView, HostNumericTensorView, HostTensorView, IntegerElementType,
     };
 
     fn register_wgpu_provider_for_test() -> Option<&'static WgpuProvider> {
@@ -2614,6 +2622,33 @@ mod tests {
                 .data,
             HostIntegerDataOwned::U32(vec![0, 0, 4, 6, 0, u32::MAX])
         );
+    }
+
+    #[test]
+    fn wgpu_integer_cast_reports_native_f64_on_f32_device_as_unsupported() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        if provider.precision() == runmat_accelerate_api::ProviderPrecision::F64 {
+            return;
+        }
+        let values = [-2.5_f64, 3.5];
+        let input = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F64(&values),
+                shape: &[1, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("upload native f64");
+
+        let error = block_on(provider.cast_to_integer(&input, IntegerElementType::I16))
+            .expect_err("f32 WebGPU device must not execute an f64 integer-cast kernel");
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &error
+        ));
+        assert!(error
+            .to_string()
+            .contains("cannot execute an f64 source kernel"));
     }
 
     #[test]
