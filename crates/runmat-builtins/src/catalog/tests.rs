@@ -1664,6 +1664,153 @@ fn unary_rounding_contracts_reject_sparse_and_complex_integer_inputs() {
 }
 
 #[test]
+fn round_owns_complete_multi_form_contract_documentation_and_examples() {
+    let entry = builtin_catalog_entry_by_name("round").expect("round catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::Round)
+    );
+    assert_eq!(
+        entry.documentation.authority,
+        BuiltinDocumentationAuthority::Catalog
+    );
+    assert_eq!(entry.documentation.examples.len(), 8);
+    assert_eq!(entry.documentation.faqs.len(), 9);
+    assert!(entry.documentation.example_exemption.is_none());
+    assert_eq!(entry.bindings, REQUIRED_DEFAULT_BINDING.as_slice());
+    assert_eq!(entry.extensions.len(), 2);
+    assert_eq!(entry.integer_capabilities.len(), 2);
+}
+
+#[test]
+fn round_contract_preserves_typed_data_and_validates_controls() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+        OutputSelection, RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact,
+        ValueKindFact,
+    };
+
+    let entry = builtin_catalog_entry_by_name("round").expect("round catalog entry");
+    let outputs = OutputSelection::new(RequestedOutputCount::One);
+    let mut single = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    single.residency = ResidencyFact::Device {
+        provider: Some("round-provider".into()),
+    };
+    let significant = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![
+                single.clone(),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+                ValueFact::scalar(ValueKindFact::String),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(3.0),
+                LiteralValue::String("significant".into()),
+            ]),
+            outputs: outputs.clone(),
+        },
+    );
+    assert!(significant.diagnostics.is_empty());
+    assert_eq!(significant.outputs[0].kind, single.kind);
+    assert_eq!(significant.outputs[0].shape, single.shape);
+    assert_eq!(significant.outputs[0].residency, single.residency);
+
+    let mut integer = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    );
+    integer.residency = ResidencyFact::Device {
+        provider: Some("round-provider".into()),
+    };
+    let exact = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![integer.clone()],
+            literals: LiteralContext::default(),
+            outputs: outputs.clone(),
+        },
+    );
+    assert!(exact.diagnostics.is_empty());
+    assert_eq!(exact.outputs[0], integer);
+
+    for (arguments, literals) in [
+        (
+            vec![
+                single.clone(),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+            ],
+            vec![LiteralValue::Unknown, LiteralValue::Number(1.5)],
+        ),
+        (
+            vec![
+                single.clone(),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+                ValueFact::scalar(ValueKindFact::String),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(0.0),
+                LiteralValue::String("significant".into()),
+            ],
+        ),
+    ] {
+        let invalid = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments,
+                literals: LiteralContext::new(literals),
+                outputs: outputs.clone(),
+            },
+        );
+        assert_eq!(invalid.diagnostics.len(), 1);
+    }
+
+    let integer_digits = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![
+                integer,
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Int8,
+                    domain: NumericDomain::Real,
+                })),
+            ],
+            literals: LiteralContext::default(),
+            outputs,
+        },
+    );
+    assert_eq!(integer_digits.diagnostics.len(), 1);
+    assert!(matches!(
+        integer_digits.outputs[0].certainty,
+        runmat_types::CertaintyFact::Dynamic(
+            runmat_types::DynamicReason::UnsupportedRepresentation
+        )
+    ));
+}
+
+#[test]
 fn direct_hyperbolic_contracts_preserve_floating_facts_and_type_conversion_boundaries() {
     use runmat_types::{
         CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
