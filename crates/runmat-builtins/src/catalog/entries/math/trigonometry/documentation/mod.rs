@@ -1,3 +1,4 @@
+mod acos;
 mod asin;
 mod cos;
 mod cosd;
@@ -8,6 +9,7 @@ mod sinpi;
 mod tan;
 mod tand;
 
+pub(super) use acos::ACOS_DOCUMENTATION;
 pub(super) use asin::ASIN_DOCUMENTATION;
 pub(super) use cos::COS_DOCUMENTATION;
 pub(super) use cosd::COSD_DOCUMENTATION;
