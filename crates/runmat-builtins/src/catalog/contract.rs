@@ -60,6 +60,7 @@ pub enum MathInferenceRule {
     NumericConversion(runmat_types::NumericClass),
     NumericConversionWithLike(runmat_types::NumericClass),
     NumericComponent(NumericComponentRule),
+    Rounding(RoundingFunction),
     Signum,
     Trigonometric(TrigonometricFunction),
     Hyperbolic(HyperbolicFunction),
@@ -67,6 +68,13 @@ pub enum MathInferenceRule {
     DegreeTrigonometric(DegreeTrigonometricFunction),
     InverseTrigonometric(InverseTrigonometricFunction),
     InverseHyperbolic(InverseHyperbolicFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum RoundingFunction {
+    Ceil,
+    Fix,
+    Floor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -1476,6 +1476,194 @@ fn hyperbolic_tangent_owns_a_complete_typed_contract_and_documentation() {
 }
 
 #[test]
+fn unary_rounding_leaves_own_complete_contracts_documentation_and_examples() {
+    for (name, function, faq_count) in [
+        ("ceil", RoundingFunction::Ceil, 7),
+        ("fix", RoundingFunction::Fix, 5),
+        ("floor", RoundingFunction::Floor, 8),
+    ] {
+        let entry = builtin_catalog_entry_by_name(name).expect("rounding catalog entry");
+        assert_eq!(
+            entry.contract.inference_rule,
+            BuiltinInferenceRule::Math(MathInferenceRule::Rounding(function))
+        );
+        assert_eq!(
+            entry.documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(entry.documentation.examples.len(), 6);
+        assert_eq!(entry.documentation.faqs.len(), faq_count);
+        assert!(entry.documentation.example_exemption.is_none());
+        assert!(entry
+            .documentation
+            .examples
+            .iter()
+            .all(|example| !example.id.is_empty() && !example.program.is_empty()));
+        assert_eq!(entry.bindings, REQUIRED_DEFAULT_BINDING.as_slice());
+        assert!(entry.extensions.is_empty());
+        assert_eq!(entry.integer_capabilities.len(), 1);
+    }
+}
+
+#[test]
+fn unary_rounding_contracts_preserve_typed_facts_and_tabular_identity() {
+    use runmat_types::{
+        CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, ObjectFact,
+        OutputSelection, RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact,
+        ValueKindFact,
+    };
+    use std::collections::BTreeMap;
+
+    for name in ["ceil", "fix", "floor"] {
+        let entry = builtin_catalog_entry_by_name(name).expect("rounding catalog entry");
+        let device = ResidencyFact::Device {
+            provider: Some("rounding-provider".into()),
+        };
+        let mut single = ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                domain: NumericDomain::Complex,
+            }),
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            StorageFact::Dense,
+        );
+        single.residency = device.clone();
+        let inferred = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![single.clone()],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        assert!(inferred.diagnostics.is_empty(), "{name}");
+        assert_eq!(inferred.outputs[0].kind, single.kind, "{name}");
+        assert_eq!(inferred.outputs[0].shape, single.shape, "{name}");
+        assert_eq!(inferred.outputs[0].residency, device, "{name}");
+
+        let mut integer = ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::UInt64,
+                domain: NumericDomain::Real,
+            }),
+            ShapeFact::from(vec![Some(1), Some(4)]),
+            StorageFact::Dense,
+        );
+        integer.residency = device.clone();
+        let exact = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![integer.clone()],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        assert!(exact.diagnostics.is_empty(), "{name}");
+        assert_eq!(exact.outputs[0], integer, "{name}");
+
+        let mut logical = ValueFact::proven(
+            ValueKindFact::Logical,
+            ShapeFact::from(vec![Some(2), Some(2)]),
+            StorageFact::Dense,
+        );
+        logical.residency = device.clone();
+        let promoted = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![logical],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        assert!(promoted.diagnostics.is_empty(), "{name}");
+        assert_eq!(
+            promoted.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+            "{name}"
+        );
+        assert_eq!(promoted.outputs[0].residency, device, "{name}");
+
+        let table = ValueFact::proven(
+            ValueKindFact::Object(ObjectFact {
+                class: None,
+                runtime_class: Some(runmat_types::standard::TABLE.owned()),
+                properties: BTreeMap::from([(
+                    "Variables".into(),
+                    ValueFact::scalar(ValueKindFact::Logical),
+                )]),
+                properties_complete: true,
+                handle_semantics: Some(false),
+            }),
+            ShapeFact::Scalar,
+            StorageFact::Opaque,
+        );
+        let table_output = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![table],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        let ValueKindFact::Object(table_output) = &table_output.outputs[0].kind else {
+            panic!("expected {name} to preserve tabular identity");
+        };
+        assert_eq!(
+            table_output.runtime_class,
+            Some(runmat_types::standard::TABLE.owned()),
+            "{name}"
+        );
+        assert!(table_output.properties.is_empty(), "{name}");
+        assert!(!table_output.properties_complete, "{name}");
+    }
+}
+
+#[test]
+fn unary_rounding_contracts_reject_sparse_and_complex_integer_inputs() {
+    use runmat_types::{
+        CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+
+    for name in ["ceil", "fix", "floor"] {
+        let entry = builtin_catalog_entry_by_name(name).expect("rounding catalog entry");
+        for input in [
+            ValueFact::proven(
+                ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                }),
+                ShapeFact::from(vec![Some(3), Some(3)]),
+                StorageFact::Sparse,
+            ),
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Int32,
+                domain: NumericDomain::Complex,
+            })),
+        ] {
+            let inferred = infer_catalog_call(
+                entry,
+                &CallRequest {
+                    arguments: vec![input],
+                    literals: LiteralContext::default(),
+                    outputs: OutputSelection::new(RequestedOutputCount::One),
+                },
+            );
+            assert_eq!(inferred.diagnostics.len(), 1, "{name}");
+            assert!(matches!(
+                inferred.outputs[0].certainty,
+                runmat_types::CertaintyFact::Dynamic(
+                    runmat_types::DynamicReason::UnsupportedRepresentation
+                )
+            ));
+        }
+    }
+}
+
+#[test]
 fn direct_hyperbolic_contracts_preserve_floating_facts_and_type_conversion_boundaries() {
     use runmat_types::{
         CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
