@@ -41,6 +41,7 @@ pub(super) const DOMAIN_ENTRY_GROUPS: &[&[&[&crate::BuiltinCatalogEntry]]] = &[
     array::ENTRY_GROUPS,
     introspection::ENTRY_GROUPS,
     math::ENTRY_GROUPS,
+    math::ROUNDING_ENTRY_GROUPS,
     math::TRIGONOMETRY_ENTRY_GROUPS,
     parallel::ENTRY_GROUPS,
 ];

@@ -5,6 +5,7 @@ pub(crate) mod fix;
 pub(crate) mod floor;
 pub(crate) mod rem;
 pub(crate) mod round;
+mod unary;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
