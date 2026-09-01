@@ -1,3 +1,6 @@
+use super::documentation::{
+    GET_CURRENT_JOB_DOCUMENTATION, GET_CURRENT_TASK_DOCUMENTATION, GET_CURRENT_WORKER_DOCUMENTATION,
+};
 use super::*;
 
 const CURRENT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -42,19 +45,11 @@ const fn current_descriptor(
     }
 }
 macro_rules! current_execution_entry {
-    ($constant:ident, $name:literal, $rule:expr, $summary:literal, $keywords:expr, $descriptor:ident) => {
+    ($constant:ident, $name:literal, $rule:expr, $documentation:expr, $descriptor:ident) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
-            documentation: BuiltinDocumentation {
-                summary: $summary,
-                keywords: $keywords,
-                related: &[],
-                introduced: None,
-                status: None,
-                examples: &[],
-                ..BuiltinDocumentation::EMPTY
-            },
+            documentation: $documentation,
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
                 // The result depends on the scoped execution identity: it is
@@ -85,24 +80,21 @@ current_execution_entry!(
     GET_CURRENT_TASK_CATALOG_ENTRY,
     "getCurrentTask",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCurrentTask),
-    "Return the task executing the current function.",
-    &["parallel", "current", "task", "worker"],
+    GET_CURRENT_TASK_DOCUMENTATION,
     GET_CURRENT_TASK_DESCRIPTOR
 );
 current_execution_entry!(
     GET_CURRENT_WORKER_CATALOG_ENTRY,
     "getCurrentWorker",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCurrentWorker),
-    "Return the worker executing the current function.",
-    &["parallel", "current", "worker", "pool"],
+    GET_CURRENT_WORKER_DOCUMENTATION,
     GET_CURRENT_WORKER_DESCRIPTOR
 );
 current_execution_entry!(
     GET_CURRENT_JOB_CATALOG_ENTRY,
     "getCurrentJob",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCurrentJob),
-    "Return the job executing the current function.",
-    &["parallel", "current", "job", "worker"],
+    GET_CURRENT_JOB_DOCUMENTATION,
     GET_CURRENT_JOB_DESCRIPTOR
 );
 

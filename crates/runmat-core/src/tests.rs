@@ -14825,6 +14825,33 @@ fn local_multi_rank_spmd_preserves_rank_order_and_collective_results() {
 }
 
 #[test]
+fn spmd_context_names_share_one_rank_and_size_contract() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    execute_text_request(
+        &mut session,
+        "serialIndex = spmdIndex(); serialSize = spmdSize(); pool = parpool(2); spmd; rank = labindex; count = numlabs; end; firstRank = rank{1}; secondRank = rank{2}; firstCount = count{1}; secondCount = count{2};",
+    )
+    .expect("execute compatible SPMD context names");
+
+    let variables = session.get_variables();
+    for (name, expected) in [
+        ("serialIndex", 1.0),
+        ("serialSize", 1.0),
+        ("firstRank", 1.0),
+        ("secondRank", 2.0),
+        ("firstCount", 2.0),
+        ("secondCount", 2.0),
+    ] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Num(expected)),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn local_spmd_reports_a_typed_collective_deadlock_without_a_timeout() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));

@@ -1,13 +1,18 @@
 use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinCatalogEntry, BuiltinCatalogIdentity,
     BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
-    BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation, BuiltinFusionPolicy,
-    BuiltinInferenceRule, BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract,
-    BuiltinPortability, BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy,
-    BuiltinSemanticKind, BuiltinSignatureDescriptor, ParallelInferenceRule,
+    BuiltinContractMaturity, BuiltinDescriptor, BuiltinFusionPolicy, BuiltinInferenceRule,
+    BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
+    BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
+    BuiltinSignatureDescriptor, ParallelInferenceRule,
 };
 use runmat_types::ExecutionStackRequirement;
+
+use super::documentation::{
+    LABINDEX_DOCUMENTATION, NUMLABS_DOCUMENTATION, SPMD_INDEX_DOCUMENTATION,
+    SPMD_SIZE_DOCUMENTATION,
+};
 
 const INDEX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "index",
@@ -60,19 +65,11 @@ const LINK: BuiltinLinkContract = BuiltinLinkContract {
 };
 
 macro_rules! context_entry {
-    ($constant:ident, $name:literal, $rule:expr, $summary:literal, $descriptor:ident) => {
+    ($constant:ident, $name:literal, $rule:expr, $documentation:expr, $descriptor:ident) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
-            documentation: BuiltinDocumentation {
-                summary: $summary,
-                keywords: &["parallel", "spmd", "worker"],
-                related: &["spmdIndex", "spmdSize"],
-                introduced: None,
-                status: None,
-                examples: &[],
-                ..BuiltinDocumentation::EMPTY
-            },
+            documentation: $documentation,
             descriptor: &$descriptor,
             contract: BuiltinContractDeclaration {
                 maturity: BuiltinContractMaturity::Complete,
@@ -101,28 +98,28 @@ context_entry!(
     SPMD_INDEX_CATALOG_ENTRY,
     "spmdIndex",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::SpmdIndex),
-    "Return the index of the current SPMD worker.",
+    SPMD_INDEX_DOCUMENTATION,
     INDEX_DESCRIPTOR
 );
 context_entry!(
     SPMD_SIZE_CATALOG_ENTRY,
     "spmdSize",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::SpmdSize),
-    "Return the number of workers in the current SPMD group.",
+    SPMD_SIZE_DOCUMENTATION,
     SIZE_DESCRIPTOR
 );
 context_entry!(
     LABINDEX_CATALOG_ENTRY,
     "labindex",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::SpmdIndex),
-    "Return the index of the current SPMD worker.",
+    LABINDEX_DOCUMENTATION,
     INDEX_DESCRIPTOR
 );
 context_entry!(
     NUMLABS_CATALOG_ENTRY,
     "numlabs",
     BuiltinInferenceRule::Parallel(ParallelInferenceRule::SpmdSize),
-    "Return the number of workers in the current SPMD group.",
+    NUMLABS_DOCUMENTATION,
     SIZE_DESCRIPTOR
 );
 
