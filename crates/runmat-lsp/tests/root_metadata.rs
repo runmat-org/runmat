@@ -17,6 +17,9 @@ fn migrated_signatures_and_documentation_come_from_the_canonical_catalog() {
         ("conj", "x=conj(single(1));", "Y = conj(X)"),
         ("real", "x=real(single(1));", "Y = real(X)"),
         ("imag", "x=imag(single(1));", "Y = imag(X)"),
+        ("abs", "x=abs(single(-1));", "Y = abs(X)"),
+        ("angle", "x=angle(single(1));", "theta = angle(X)"),
+        ("sign", "x=sign(single(-1));", "Y = sign(X)"),
         ("intmin", "x=intmin(\"int16\");", "value = intmin(typename)"),
         (
             "intmax",

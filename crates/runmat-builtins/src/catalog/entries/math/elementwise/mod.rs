@@ -1,35 +1,29 @@
-mod absolute_value;
-mod angle;
 mod complex_components;
 mod exponentials;
 mod floating_conversions;
 mod logarithms;
+mod magnitude_phase_sign;
 mod numeric_conversions;
 mod numeric_limits;
 mod roots;
-mod sign;
 mod support;
 
-pub use absolute_value::*;
-pub use angle::*;
 pub use complex_components::*;
 pub use exponentials::*;
 pub use floating_conversions::*;
 pub use logarithms::*;
+pub use magnitude_phase_sign::*;
 pub use numeric_conversions::*;
 pub use numeric_limits::*;
 pub use roots::*;
-pub use sign::*;
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
-    absolute_value::ENTRIES,
-    angle::ENTRIES,
     complex_components::ENTRIES,
     exponentials::ENTRIES,
     floating_conversions::ENTRIES,
     logarithms::ENTRIES,
+    magnitude_phase_sign::ENTRIES,
     numeric_conversions::ENTRIES,
     numeric_limits::ENTRIES,
     roots::ENTRIES,
-    sign::ENTRIES,
 ];
