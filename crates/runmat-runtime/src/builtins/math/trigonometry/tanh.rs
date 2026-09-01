@@ -1,13 +1,11 @@
 //! MATLAB-compatible `tanh` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::TANH_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, TANH_CHARACTER_INPUT_EXTENSION, TANH_ERROR_INTERNAL,
+    TANH_ERROR_INVALID_INPUT, TANH_INTEGER_INPUT_EXTENSION, TANH_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
@@ -18,98 +16,10 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tanh";
-
-pub const TANH_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tanh-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tanh with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TanhIntegerInputExtension"),
-};
-pub const TANH_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tanh-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tanh with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TanhLogicalInputExtension"),
-};
-pub const TANH_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tanh-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tanh with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TanhCharacterInputExtension"),
-};
-pub const TANH_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    TANH_INTEGER_INPUT_EXTENSION,
-    TANH_LOGICAL_INPUT_EXTENSION,
-    TANH_CHARACTER_INPUT_EXTENSION,
-];
-const TANH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "All eight real integer classes require exact binary64 representability before hyperbolic evaluation.",
-}];
-pub const TANH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = tanh(integer_X)",
-        inputs: &TANH_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat mode validates native integer storage before conversion; resident fallback returns through the owner and finite integer inputs naturally approach unit magnitude.",
-    }];
-
-const TANH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise hyperbolic tangent result.",
-}];
-
-const TANH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, array, char array, complex value, or gpuArray.",
-}];
-
-const TANH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = tanh(X)",
-    inputs: &TANH_INPUTS,
-    outputs: &TANH_OUTPUT,
-}];
-
-const TANH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TANH.INVALID_INPUT",
-    identifier: Some("RunMat:tanh:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/char/complex data.",
-    message: "tanh: invalid input",
-};
-
-const TANH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TANH.INTERNAL",
-    identifier: Some("RunMat:tanh:Internal"),
-    when: "Internal gather/conversion/allocation/provider flow failed.",
-    message: "tanh: internal error",
-};
-
-const TANH_ERRORS: [BuiltinErrorDescriptor; 2] = [TANH_ERROR_INVALID_INPUT, TANH_ERROR_INTERNAL];
-
-pub const TANH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TANH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TANH_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::tanh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -168,18 +78,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "tanh",
-    category = "math/trigonometry",
-    summary = "Compute element-wise hyperbolic tangent values.",
-    keywords = "tanh,hyperbolic tangent,trigonometry,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::tanh::TANH_DESCRIPTOR),
-    extensions(TANH_EXTENSIONS),
-    integer_capabilities(TANH_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::tanh"
 )]
 async fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
-    ensure_tanh_extensions(&value).await?;
+    super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
+    super::inverse_helpers::ensure_input_extensions(
+        &value,
+        BUILTIN_NAME,
+        &TANH_INTEGER_INPUT_EXTENSION,
+        &TANH_LOGICAL_INPUT_EXTENSION,
+        &TANH_CHARACTER_INPUT_EXTENSION,
+    )?;
+    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+        &value,
+        &TANH_INTEGER_INPUT_EXTENSION,
+        BUILTIN_NAME,
+        "X",
+    )
+    .await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "tanh")?;
     match value {
         Value::GpuTensor(handle) => tanh_gpu(handle).await,
@@ -194,59 +111,45 @@ async fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-async fn ensure_tanh_extensions(value: &Value) -> BuiltinResult<()> {
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        value,
-        &TANH_INTEGER_INPUT_EXTENSION,
-        BUILTIN_NAME,
-        "X",
-    )
-    .await?;
-    if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
-        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &TANH_LOGICAL_INPUT_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    if matches!(value, Value::CharArray(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &TANH_CHARACTER_INPUT_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    Ok(())
-}
-
 async fn tanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let exact_fallback = runmat_accelerate_api::handle_integer_type(&handle).is_some()
-        || runmat_accelerate_api::handle_is_logical(&handle);
+        || runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_storage(&handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real;
     if !exact_fallback {
-        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-            if let Ok(out) = provider.unary_tanh(&handle).await {
-                return Ok(Value::GpuTensor(out));
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+            match provider.unary_tanh(&handle).await {
+                Ok(output) => {
+                    return super::inverse_helpers::validate_real_unary_provider_output(
+                        provider,
+                        &handle,
+                        output,
+                        BUILTIN_NAME,
+                    )
+                }
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) => {
+                    return Err(tanh_error_with_detail(
+                        &TANH_ERROR_INTERNAL,
+                        format!("provider unary_tanh failed: {error}"),
+                    ))
+                }
             }
         }
     }
-    let source = handle.clone();
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    let host = match gathered {
-        Value::Complex(re, im) => {
-            let (out_re, out_im) = tanh_complex_parts(re, im);
-            Ok(Value::Complex(out_re, out_im))
-        }
-        Value::ComplexTensor(tensor) => tanh_complex_tensor(tensor),
-        Value::Tensor(tensor) => tanh_tensor(tensor).map(tensor::tensor_into_value),
-        Value::Num(value) => Ok(Value::Num(value.tanh())),
-        other => Err(tanh_error_with_detail(
-            &TANH_ERROR_INVALID_INPUT,
-            format!("unsupported gathered gpuArray value {other:?}"),
-        )),
-    }?;
-    gpu_helpers::restore_class_preserving_value(&source, host, BUILTIN_NAME)
+    super::inverse_helpers::gather_value_compute_restore(
+        handle,
+        BUILTIN_NAME,
+        |value| match value {
+            Value::Complex(re, im) => {
+                let (out_re, out_im) = tanh_complex_parts(re, im);
+                Ok(Value::Complex(out_re, out_im))
+            }
+            Value::ComplexTensor(tensor) => tanh_complex_tensor(tensor),
+            other => tanh_real(other),
+        },
+    )
+    .await
 }
 
 fn tanh_real(value: Value) -> BuiltinResult<Value> {
@@ -280,10 +183,7 @@ fn tanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
-                .map(|(re, im)| {
-                    let (out_re, out_im) = tanh_complex_parts(f64::from(re), f64::from(im));
-                    (out_re as f32, out_im as f32)
-                })
+                .map(|(re, im)| tanh_complex_parts_f32(re, im))
                 .collect(),
             shape,
         ),
@@ -312,15 +212,20 @@ fn tanh_char_array(ca: CharArray) -> BuiltinResult<Value> {
 }
 
 fn tanh_complex_parts(re: f64, im: f64) -> (f64, f64) {
-    // Use tanh(z) = sinh(z) / cosh(z) with explicit real/imag components.
-    let sinh_re = re.sinh() * im.cos();
-    let sinh_im = re.cosh() * im.sin();
-    let cosh_re = re.cosh() * im.cos();
-    let cosh_im = re.sinh() * im.sin();
-    let denom = cosh_re * cosh_re + cosh_im * cosh_im;
-    // Division by zero yields the expected IEEE infinities/NaNs, matching MATLAB's behaviour at poles.
-    let real = (sinh_re * cosh_re + sinh_im * cosh_im) / denom;
-    let imag = (sinh_im * cosh_re - sinh_re * cosh_im) / denom;
+    let scale = (-2.0 * re.abs()).exp();
+    let cos_im = im.cos();
+    let denominator = (1.0 - scale).powi(2) + 4.0 * scale * cos_im.powi(2);
+    let real = (-(-4.0 * re.abs()).exp_m1() / denominator).copysign(re);
+    let imag = 4.0 * scale * im.sin() * cos_im / denominator;
+    (real, imag)
+}
+
+fn tanh_complex_parts_f32(re: f32, im: f32) -> (f32, f32) {
+    let scale = (-2.0 * re.abs()).exp();
+    let cos_im = im.cos();
+    let denominator = (1.0 - scale).powi(2) + 4.0 * scale * cos_im.powi(2);
+    let real = (-(-4.0 * re.abs()).exp_m1() / denominator).copysign(re);
+    let imag = 4.0 * scale * im.sin() * cos_im / denominator;
     (real, imag)
 }
 
@@ -330,8 +235,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex64;
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::{CharArray, Tensor};
+    use runmat_value::{CharArray, IntValue, Tensor};
 
     fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::tanh_builtin(value))
@@ -348,30 +252,26 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn tanh_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
+    fn tanh_extensions_integer_boundary_and_output_arity_are_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = block_on(super::tanh_builtin(Value::Int(IntValue::I8(1))))
+            .expect_err("integer extension must be gated");
         assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
+            integer.identifier(),
+            TANH_INTEGER_INPUT_EXTENSION.error_identifier
         );
-    }
+        drop(_strict);
 
-    #[test]
-    fn tanh_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        assert!(block_on(super::tanh_builtin(Value::Int(IntValue::U64(
+            (1_u64 << 53) + 1
+        ))))
+        .is_err());
+        assert!(block_on(super::tanh_builtin(Value::Int(IntValue::U64(1_u64 << 54)))).is_ok());
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let arity =
+            block_on(super::tanh_builtin(Value::Num(0.0))).expect_err("excess outputs must reject");
+        assert_eq!(arity.identifier(), Some("RunMat:tanh:TooManyOutputs"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -381,6 +281,54 @@ pub(crate) mod tests {
         match result {
             Value::Num(v) => assert!((v - 1.0_f64.tanh()).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tanh_preserves_native_single_real_and_complex_storage() {
+        let real = Tensor::from_f32(vec![0.5, 2.0], vec![2, 1]).unwrap();
+        let Value::Tensor(real_output) = tanh_builtin(Value::Tensor(real)).expect("single tanh")
+        else {
+            panic!("expected single tensor")
+        };
+        assert_eq!(real_output.numeric_dtype(), NumericDType::F32);
+        let complex = ComplexTensor::from_f32(vec![(0.5, 0.25), (2.0, -1.0)], vec![2, 1]).unwrap();
+        let Value::ComplexTensor(complex_output) =
+            tanh_builtin(Value::ComplexTensor(complex)).expect("complex-single tanh")
+        else {
+            panic!("expected complex-single tensor")
+        };
+        assert_eq!(complex_output.numeric_dtype(), NumericDType::F32);
+        for (actual, &(real, imag)) in complex_output
+            .materialize_f64()
+            .iter()
+            .zip([(0.5, 0.25), (2.0, -1.0)].iter())
+        {
+            let expected = Complex64::new(real, imag).tanh();
+            assert!((actual.0 - expected.re).abs() < 1e-6);
+            assert!((actual.1 - expected.im).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn tanh_all_integer_scalar_classes_cross_the_double_boundary_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for value in [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ] {
+            let Value::Num(result) =
+                block_on(super::tanh_builtin(Value::Int(value))).expect("integer tanh")
+            else {
+                panic!("expected real double scalar")
+            };
+            assert_eq!(result, 1.0f64.tanh());
         }
     }
 
@@ -441,6 +389,31 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn tanh_scaled_complex_formula_matches_reference_away_from_poles() {
+        for real in [-5.0, -1.0, -0.125, 0.0, 0.125, 1.0, 5.0] {
+            for imag in [-2.0, -0.5, 0.0, 0.5, 2.0] {
+                let (actual_real, actual_imag) = tanh_complex_parts(real, imag);
+                let expected = Complex64::new(real, imag).tanh();
+                assert!((actual_real - expected.re).abs() < 1e-12);
+                assert!((actual_imag - expected.im).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn tanh_complex_large_real_part_reaches_its_finite_limit_without_overflow() {
+        for (real, expected) in [(1_000.0, 1.0), (-1_000.0, -1.0)] {
+            let Value::Complex(output_real, output_imag) =
+                tanh_builtin(Value::Complex(real, 0.25)).expect("large complex tanh")
+            else {
+                panic!("expected complex scalar")
+            };
+            assert_eq!(output_real, expected);
+            assert_eq!(output_imag, 0.0);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tanh_char_array_roundtrip() {
@@ -486,6 +459,29 @@ pub(crate) mod tests {
                 .zip(tensor.materialize_f64().iter())
             {
                 assert!((*value - expect.tanh()).abs() < 1e-12);
+            }
+        });
+    }
+
+    #[test]
+    fn tanh_complex_gpu_fallback_restores_through_the_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(0.5, 0.25), (1.0, -0.75)], vec![2, 1])
+                .expect("complex tensor");
+            let handle = gpu_helpers::upload_complex_tensor(provider, &input).expect("upload");
+            let resident = tanh_builtin(Value::GpuTensor(handle)).expect("resident tanh");
+            let gathered = block_on(gpu_helpers::gather_value_async(&resident)).expect("gather");
+            let Value::ComplexTensor(output) = gathered else {
+                panic!("expected complex tensor")
+            };
+            for (actual, &(real, imag)) in output
+                .materialize_f64()
+                .iter()
+                .zip(input.materialize_f64().iter())
+            {
+                let expected = Complex64::new(real, imag).tanh();
+                assert!((actual.0 - expected.re).abs() < 1e-12);
+                assert!((actual.1 - expected.im).abs() < 1e-12);
             }
         });
     }
