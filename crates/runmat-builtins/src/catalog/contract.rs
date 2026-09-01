@@ -62,6 +62,7 @@ pub enum MathInferenceRule {
     NumericComponent(NumericComponentRule),
     Signum,
     Trigonometric(TrigonometricFunction),
+    Hyperbolic(HyperbolicFunction),
     PiScaledTrigonometric(PiScaledTrigonometricFunction),
     DegreeTrigonometric(DegreeTrigonometricFunction),
     InverseTrigonometric(InverseTrigonometricFunction),
@@ -73,6 +74,13 @@ pub enum TrigonometricFunction {
     Sin,
     Cos,
     Tan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum HyperbolicFunction {
+    Sine,
+    Cosine,
+    Tangent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

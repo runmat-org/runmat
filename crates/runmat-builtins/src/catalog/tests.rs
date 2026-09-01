@@ -1422,6 +1422,24 @@ fn radian_trigonometric_leaves_own_complete_contracts_documentation_and_examples
 }
 
 #[test]
+fn hyperbolic_sine_owns_a_complete_typed_contract_and_documentation() {
+    let entry = builtin_catalog_entry_by_name("sinh").expect("sinh catalog entry");
+    assert_eq!(
+        entry.contract.inference_rule,
+        BuiltinInferenceRule::Math(MathInferenceRule::Hyperbolic(HyperbolicFunction::Sine))
+    );
+    assert_eq!(
+        entry.documentation.authority,
+        BuiltinDocumentationAuthority::Catalog
+    );
+    assert_eq!(entry.documentation.examples.len(), 6);
+    assert_eq!(entry.documentation.faqs.len(), 9);
+    assert_eq!(entry.bindings, REQUIRED_DEFAULT_BINDING.as_slice());
+    assert_eq!(entry.extensions.len(), 3);
+    assert_eq!(entry.integer_capabilities.len(), 1);
+}
+
+#[test]
 fn radian_trigonometric_contracts_preserve_floating_class_and_apply_like_representation() {
     use runmat_types::{
         CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,

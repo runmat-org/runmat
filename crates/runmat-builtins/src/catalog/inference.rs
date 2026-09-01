@@ -81,6 +81,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::Trigonometric(function)) => {
             math_unary::infer_trigonometric(request, entry, function)
         }
+        BuiltinInferenceRule::Math(MathInferenceRule::Hyperbolic(function)) => {
+            math_unary::infer_hyperbolic(request, entry, function)
+        }
         BuiltinInferenceRule::Math(MathInferenceRule::PiScaledTrigonometric(function)) => {
             math_unary::infer_pi_scaled_trigonometric(request, entry, function)
         }
