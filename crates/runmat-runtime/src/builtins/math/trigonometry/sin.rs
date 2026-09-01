@@ -1,16 +1,16 @@
 //! MATLAB-compatible `sin` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::SIN_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SIN_CHARACTER_INPUT_EXTENSION, SIN_ERROR_ARG_COUNT,
+    SIN_ERROR_GPU_UNAVAILABLE, SIN_ERROR_INTERNAL, SIN_ERROR_INVALID_INPUT,
+    SIN_ERROR_INVALID_OPTION, SIN_ERROR_LIKE_PROTOTYPE, SIN_INTEGER_INPUT_EXTENSION,
+    SIN_LIKE_OUTPUT_EXTENSION, SIN_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -20,7 +20,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::symbolic::symbolic_function;
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_value::SymbolicFunction;
 
@@ -42,167 +41,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 const BUILTIN_NAME: &str = "sin";
-
-pub const SIN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sin-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sin with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SinIntegerInputExtension"),
-};
-pub const SIN_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sin-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sin with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SinLogicalInputExtension"),
-};
-pub const SIN_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sin-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sin with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SinCharacterInputExtension"),
-};
-pub const SIN_LIKE_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sin-like-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sin with a like output prototype is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SinLikeOutputExtension"),
-};
-pub const SIN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    SIN_INTEGER_INPUT_EXTENSION,
-    SIN_LOGICAL_INPUT_EXTENSION,
-    SIN_CHARACTER_INPUT_EXTENSION,
-    SIN_LIKE_OUTPUT_EXTENSION,
-];
-const SIN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight real integer classes are admitted only when exactly representable at the binary64 transcendental boundary.",
-    }];
-pub const SIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sin(integer_X)",
-        inputs: &SIN_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat mode validates authoritative integer storage before conversion; automatic residency may gather and explicit output residency follows the existing provider policy.",
-    }];
-
-const SIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise sine result.",
-}];
-
-const SIN_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, array, char array, complex value, or gpuArray.",
-}];
-
-const SIN_INPUTS_X_LIKE_P: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, array, char array, complex value, or gpuArray.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Output template selector keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "P",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype determining host vs gpuArray output residency.",
-    },
-];
-
-const SIN_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = sin(X)",
-        inputs: &SIN_INPUTS_X,
-        outputs: &SIN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = sin(X, \"like\", P)",
-        inputs: &SIN_INPUTS_X_LIKE_P,
-        outputs: &SIN_OUTPUT,
-    },
-];
-
-const SIN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.INVALID_INPUT",
-    identifier: Some("RunMat:sin:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/logical/char/complex data.",
-    message: "sin: invalid input",
-};
-
-const SIN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.INVALID_OPTION",
-    identifier: Some("RunMat:sin:InvalidOption"),
-    when: "Optional arguments after X are malformed or unsupported.",
-    message: "sin: invalid option",
-};
-
-const SIN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.ARG_COUNT",
-    identifier: Some("RunMat:sin:ArgCount"),
-    when: "Too many input arguments were supplied.",
-    message: "sin: too many input arguments",
-};
-
-const SIN_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.LIKE_PROTOTYPE",
-    identifier: Some("RunMat:sin:LikePrototype"),
-    when: "The \"like\" prototype is unsupported for this output conversion path.",
-    message: "sin: invalid \"like\" prototype",
-};
-
-const SIN_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.GPU_UNAVAILABLE",
-    identifier: Some("RunMat:sin:GpuUnavailable"),
-    when: "GPU output was requested via \"like\" but no active provider is available.",
-    message: "sin: GPU provider unavailable",
-};
-
-const SIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIN.INTERNAL",
-    identifier: Some("RunMat:sin:Internal"),
-    when: "Internal tensor conversion/allocation/provider flow failed.",
-    message: "sin: internal error",
-};
-
-const SIN_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    SIN_ERROR_INVALID_INPUT,
-    SIN_ERROR_INVALID_OPTION,
-    SIN_ERROR_ARG_COUNT,
-    SIN_ERROR_LIKE_PROTOTYPE,
-    SIN_ERROR_GPU_UNAVAILABLE,
-    SIN_ERROR_INTERNAL,
-];
-
-pub const SIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SIN_ERRORS,
-};
 
 fn sin_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
@@ -243,14 +81,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "sin",
-    category = "math/trigonometry",
-    summary = "Compute element-wise sine values in radians.",
-    keywords = "sin,sine,trigonometry,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::sin::SIN_DESCRIPTOR),
-    extensions(SIN_EXTENSIONS),
-    integer_capabilities(SIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::sin"
 )]
 async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -308,15 +139,50 @@ async fn ensure_sin_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<(
 }
 
 async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_sin(&handle).await {
-            return Ok(gpu_helpers::resident_gpu_value(out));
+    let provider = gpu_helpers::exact_provider_for_handle(&handle);
+    let requires_host_path = runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle);
+    if !requires_host_path {
+        if let Some(provider) = provider {
+            match provider.unary_sin(&handle).await {
+                Ok(output)
+                    if gpu_helpers::unary_gpu_output_matches(
+                        &output,
+                        &handle,
+                        provider,
+                        gpu_helpers::UnaryGpuOutputContract {
+                            storage: runmat_accelerate_api::handle_storage(&handle),
+                            precision: runmat_accelerate_api::handle_precision(&handle),
+                            integer: None,
+                            logical: false,
+                            alias: gpu_helpers::GpuOutputAliasPolicy::AllowInput,
+                        },
+                    ) =>
+                {
+                    return Ok(gpu_helpers::resident_gpu_value(output));
+                }
+                Ok(output) => {
+                    gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
+                    return Err(sin_error_with_detail(
+                        &SIN_ERROR_INTERNAL,
+                        "provider returned an invalid unary sine result",
+                    ));
+                }
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) => {
+                    return Err(sin_error_with_detail(
+                        &SIN_ERROR_INTERNAL,
+                        format!("provider unary sine failed: {error}"),
+                    ));
+                }
+            }
         }
     }
+    let source = handle.clone();
     let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    match gathered {
+    let host = match gathered {
         Value::Complex(re, im) => Ok(Value::Complex(
             sin_complex_re(re, im),
             sin_complex_im(re, im),
@@ -328,7 +194,8 @@ async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             &SIN_ERROR_INVALID_INPUT,
             format!("unsupported gathered gpuArray value {other:?}"),
         )),
-    }
+    }?;
+    gpu_helpers::restore_class_preserving_value(&source, host, BUILTIN_NAME)
 }
 
 fn sin_real(value: Value) -> BuiltinResult<Value> {
@@ -338,6 +205,16 @@ fn sin_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sin_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+        let data = tensor
+            .as_f32_slice()
+            .expect("single tensor storage")
+            .iter()
+            .map(|&value| value.sin())
+            .collect();
+        return Tensor::from_f32(data, tensor.shape.clone())
+            .map_err(|error| sin_error_with_detail(&SIN_ERROR_INTERNAL, error));
+    }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&v| v.sin())
@@ -347,13 +224,34 @@ fn sin_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn sin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mapped = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| (sin_complex_re(re, im), sin_complex_im(re, im)))
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
+    let shape = ct.shape.clone();
+    let tensor = match ct.into_complex_storage() {
+        ComplexStorage::F32(values) => ComplexTensor::from_f32(
+            values
+                .into_iter()
+                .map(|element| {
+                    let (re, im) = element.into();
+                    (
+                        sin_complex_re(f64::from(re), f64::from(im)) as f32,
+                        sin_complex_im(f64::from(re), f64::from(im)) as f32,
+                    )
+                })
+                .collect(),
+            shape,
+        ),
+        ComplexStorage::F64(values) => ComplexTensor::new(
+            values
+                .into_iter()
+                .map(|element| {
+                    let (re, im) = element.into();
+                    (sin_complex_re(re, im), sin_complex_im(re, im))
+                })
+                .collect(),
+            shape,
+        ),
+        ComplexStorage::Integer(_) => Err("typed complex integer input is unsupported".into()),
+    }
+    .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -422,9 +320,9 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
                 if runmat_accelerate_api::handle_storage(handle)
                     == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
                 {
-                    convert_to_gpu_complex(value).await
+                    convert_to_gpu_complex(value, handle).await
                 } else {
-                    convert_to_gpu(value)
+                    convert_to_gpu(value, handle).await
                 }
             }
             Value::Tensor(_)
@@ -441,37 +339,45 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
     }
 }
 
-fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+#[async_recursion::async_recursion(?Send)]
+async fn convert_to_gpu(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
         sin_error_with_detail(
             &SIN_ERROR_GPU_UNAVAILABLE,
-            "GPU output requested via 'like' but no acceleration provider is active",
+            "GPU output requested via 'like' but no provider owns the prototype",
         )
     })?;
     match value {
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+                && gpu_helpers::exact_provider_for_handle(&handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
+        {
+            Ok(gpu_helpers::resident_gpu_value(handle))
+        }
+        Value::GpuTensor(handle) => {
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            convert_to_gpu(gathered, prototype).await
+        }
         Value::Tensor(tensor) => {
-            let data = tensor::tensor_values_f64_cow(&tensor);
-            let view = HostTensorView {
-                data: data.as_ref(),
-                shape: &tensor.shape,
-            };
-            let handle = provider
-                .upload(&view)
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::resident_gpu_value(handle))
         }
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor))
+            convert_to_gpu(Value::Tensor(tensor), prototype).await
         }
-        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
-        Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
+        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64()), prototype).await,
+        Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 }), prototype).await,
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor))
+            convert_to_gpu(Value::Tensor(tensor), prototype).await
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(sin_error_with_detail(
             &SIN_ERROR_LIKE_PROTOTYPE,
@@ -485,65 +391,101 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn convert_to_gpu_complex(value: Value) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+async fn convert_to_gpu_complex(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
         sin_error_with_detail(
             &SIN_ERROR_GPU_UNAVAILABLE,
-            "complex GPU output requested via 'like' but no acceleration provider is active",
+            "complex GPU output requested via 'like' but no provider owns the prototype",
         )
     })?;
     match value {
-        Value::GpuTensor(handle) => {
+        Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_storage(&handle)
                 == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                && gpu_helpers::exact_provider_for_handle(&handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
+        {
+            Ok(gpu_helpers::complex_gpu_value(handle))
+        }
+        Value::GpuTensor(handle) => {
+            let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider));
+            if same_owner
+                && runmat_accelerate_api::handle_storage(&handle)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
             {
-                Ok(Value::GpuTensor(handle))
-            } else if let Some(handle_provider) =
-                runmat_accelerate_api::provider_for_handle(&handle)
-            {
-                match handle_provider.complex_from_real(&handle).await {
-                    Ok(out) => Ok(Value::GpuTensor(out)),
-                    Err(_) => {
-                        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-                            .await
-                            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-                        convert_to_gpu_complex(gathered).await
+                match provider.complex_from_real(&handle).await {
+                    Ok(output)
+                        if gpu_helpers::unary_gpu_output_matches(
+                            &output,
+                            &handle,
+                            provider,
+                            gpu_helpers::UnaryGpuOutputContract {
+                                storage:
+                                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                                precision: runmat_accelerate_api::handle_precision(&handle),
+                                integer: None,
+                                logical: false,
+                                alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+                            },
+                        ) =>
+                    {
+                        return Ok(gpu_helpers::complex_gpu_value(output));
+                    }
+                    Ok(output) => {
+                        gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
+                        return Err(sin_error_with_detail(
+                            &SIN_ERROR_INTERNAL,
+                            "provider returned an invalid complex conversion result",
+                        ));
+                    }
+                    Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                    Err(error) => {
+                        return Err(sin_error_with_detail(
+                            &SIN_ERROR_INTERNAL,
+                            format!("provider complex conversion failed: {error}"),
+                        ));
                     }
                 }
-            } else {
-                Err(sin_error_with_detail(
-                    &SIN_ERROR_GPU_UNAVAILABLE,
-                    "complex GPU output requested but the input handle has no provider",
-                ))
             }
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+            convert_to_gpu_complex(gathered, prototype).await
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::complex_gpu_value(handle))
         }
         Value::ComplexTensor(tensor) => {
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::complex_gpu_value(handle))
         }
-        Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0)).await,
+        Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0), prototype).await,
         Value::Tensor(tensor) => {
             let values = tensor::tensor_values_f64_cow(&tensor);
             let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
-            let complex = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            convert_to_gpu_complex(Value::ComplexTensor(complex)).await
+            let complex = ComplexTensor::from_f64_values_with_dtype(
+                data,
+                tensor.shape.clone(),
+                complex_floating_output_dtype(tensor.numeric_dtype()),
+            )
+            .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
+            convert_to_gpu_complex(Value::ComplexTensor(complex), prototype).await
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            convert_to_gpu_complex(Value::Tensor(tensor)).await
+            convert_to_gpu_complex(Value::Tensor(tensor), prototype).await
         }
-        Value::Int(i) => convert_to_gpu_complex(Value::Num(i.to_f64())).await,
-        Value::Bool(b) => convert_to_gpu_complex(Value::Num(if b { 1.0 } else { 0.0 })).await,
+        Value::Int(i) => convert_to_gpu_complex(Value::Num(i.to_f64()), prototype).await,
+        Value::Bool(b) => {
+            convert_to_gpu_complex(Value::Num(if b { 1.0 } else { 0.0 }), prototype).await
+        }
         other => Err(sin_error_with_detail(
             &SIN_ERROR_INTERNAL,
             format!("cannot convert value {other:?} to complex GPU output via 'like'"),
@@ -569,8 +511,12 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => {
             let values = tensor::tensor_values_f64_cow(&tensor);
             let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
-            let complex = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
+            let complex = ComplexTensor::from_f64_values_with_dtype(
+                data,
+                tensor.shape.clone(),
+                complex_floating_output_dtype(tensor.numeric_dtype()),
+            )
+            .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(complex))
         }
         Value::GpuTensor(handle) => {
@@ -593,12 +539,19 @@ async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+fn complex_floating_output_dtype(dtype: runmat_value::NumericDType) -> runmat_value::NumericDType {
+    if dtype == runmat_value::NumericDType::F32 {
+        runmat_value::NumericDType::F32
+    } else {
+        runmat_value::NumericDType::F64
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, Tensor};
 
     use crate::builtins::common::{gpu_helpers, test_support};
@@ -616,33 +569,6 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"Y = sin(X)"));
         assert!(labels.contains(&"Y = sin(X, \"like\", P)"));
-    }
-
-    #[test]
-    fn sin_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn sin_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -669,6 +595,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sin_preserves_single_tensor_storage() {
+        let tensor = Tensor::from_f32(vec![0.0, std::f32::consts::FRAC_PI_2], vec![2, 1])
+            .expect("single tensor");
+        let result = block_on(sin_builtin(Value::Tensor(tensor), Vec::new())).expect("sin");
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor result, got {result:?}");
+        };
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.as_f32_slice(), Some([0.0, 1.0].as_slice()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -740,6 +680,24 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn sin_preserves_single_complex_tensor_storage() {
+        let input = ComplexTensor::from_f32(vec![(0.5, 0.75), (2.0, -0.25)], vec![1, 2])
+            .expect("single complex tensor");
+        let result =
+            block_on(sin_builtin(Value::ComplexTensor(input.clone()), Vec::new())).expect("sin");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected complex tensor result, got {result:?}");
+        };
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(output.shape, vec![1, 2]);
+        for (actual, input) in output.materialize_f64().iter().zip(input.materialize_f64()) {
+            assert!((actual.0 - sin_complex_re(input.0, input.1)).abs() < 1e-6);
+            assert!((actual.1 - sin_complex_im(input.0, input.1)).abs() < 1e-6);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn sin_char_array_roundtrip() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
@@ -804,6 +762,27 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn sin_like_complex_prototype_preserves_single_computation_class() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let input = Tensor::from_f32(vec![0.0, std::f32::consts::FRAC_PI_2], vec![1, 2])
+            .expect("single tensor");
+        let result = block_on(sin_builtin(
+            Value::Tensor(input),
+            vec![Value::from("like"), Value::Complex(0.0, 1.0)],
+        ))
+        .expect("sin");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected complex tensor result, got {result:?}");
+        };
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(output.shape, vec![1, 2]);
+        let values = output.as_f32_slice().expect("single complex storage");
+        assert_eq!(<(f32, f32)>::from(values[0]), (0.0, 0.0));
+        assert_eq!(<(f32, f32)>::from(values[1]), (1.0, 0.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn sin_like_gpu_prototype() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
@@ -828,6 +807,36 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn sin_like_single_gpu_prototype_preserves_single_storage() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::from_f32(vec![0.0, std::f32::consts::FRAC_PI_2], vec![1, 2])
+                .expect("single input");
+            let prototype = Tensor::from_f32(vec![0.0], vec![1, 1]).expect("single prototype");
+            let prototype = gpu_helpers::upload_tensor(provider, &prototype).expect("upload");
+            let result = block_on(sin_builtin(
+                Value::Tensor(input),
+                vec![Value::from("like"), Value::GpuTensor(prototype)],
+            ))
+            .expect("sin");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected provider-resident result, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&output),
+                Some(runmat_accelerate_api::ProviderPrecision::F32)
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output)))
+                .expect("gather");
+            let Value::Tensor(output) = gathered else {
+                panic!("expected gathered tensor, got {gathered:?}");
+            };
+            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+            assert_eq!(output.as_f32_slice(), Some([0.0, 1.0].as_slice()));
         });
     }
 
@@ -1015,25 +1024,24 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn sin_wgpu_matches_cpu_elementwise() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
+        let provider = runmat_accelerate_api::provider().expect("WGPU provider");
         let t = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
         let cpu = sin_real(Value::Tensor(t.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &t.materialize_f64(),
             shape: &t.shape,
         };
-        let h = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let h = provider.upload(&view).unwrap();
         let gpu = block_on(sin_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
@@ -1042,6 +1050,36 @@ pub(crate) mod tests {
                 }
             }
             _ => panic!("unexpected shapes"),
+        }
+
+        let single = Tensor::from_f32(
+            vec![0.0, std::f32::consts::FRAC_PI_2, std::f32::consts::PI],
+            vec![3, 1],
+        )
+        .expect("single input");
+        let prototype = Tensor::from_f32(vec![0.0], vec![1, 1]).expect("single prototype");
+        let prototype = gpu_helpers::upload_tensor(provider, &prototype).expect("upload prototype");
+        let result = block_on(sin_builtin(
+            Value::Tensor(single),
+            vec![Value::from("like"), Value::GpuTensor(prototype)],
+        ))
+        .expect("single WGPU sin");
+        let Value::GpuTensor(result) = result else {
+            panic!("expected resident single result, got {result:?}");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&result),
+            Some(runmat_accelerate_api::ProviderPrecision::F32)
+        );
+        let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result)))
+            .expect("gather single result");
+        let Value::Tensor(gathered) = gathered else {
+            panic!("expected gathered single tensor, got {gathered:?}");
+        };
+        assert_eq!(gathered.numeric_dtype(), runmat_value::NumericDType::F32);
+        let values = gathered.as_f32_slice().expect("single storage");
+        for (actual, expected) in values.iter().zip([0.0_f32, 1.0, 0.0]) {
+            assert!((actual - expected).abs() < 1e-5);
         }
     }
 }

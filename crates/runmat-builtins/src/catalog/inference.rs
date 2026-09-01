@@ -78,6 +78,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::Signum) => {
             math_unary::infer_signum(request, entry)
         }
+        BuiltinInferenceRule::Math(MathInferenceRule::Trigonometric(function)) => {
+            math_unary::infer_trigonometric(request, entry, function)
+        }
         BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather) => {
             infer_gather(request, entry)
         }
