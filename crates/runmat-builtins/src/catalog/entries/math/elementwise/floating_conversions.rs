@@ -1,18 +1,21 @@
 use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,
     BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
-    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
-    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy,
-    BuiltinInferenceRule, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinLinkContract,
-    BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinPlacementContract, BuiltinPortability, BuiltinPurity,
-    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
-    MathInferenceRule, ALL_INTEGER_CLASSES,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
+    BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
+    BuiltinSignatureDescriptor, MathInferenceRule, ALL_INTEGER_CLASSES,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement, NumericClass};
+
+mod documentation;
+
+use documentation::{DOUBLE_DOCUMENTATION, SINGLE_DOCUMENTATION};
 
 macro_rules! define_floating_conversion {
     (
@@ -20,7 +23,7 @@ macro_rules! define_floating_conversion {
         $name:literal,
         $upper:literal,
         $class:expr,
-        $summary:literal,
+        $documentation:expr,
         $output_description:literal,
         $gpu_storage_description:literal,
         $extension_id:literal,
@@ -163,18 +166,7 @@ macro_rules! define_floating_conversion {
             pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
                 identity: BuiltinCatalogIdentity { name: $name },
                 category: "math/elementwise",
-                documentation: BuiltinDocumentation {
-                    summary: $summary,
-                    keywords: &[$name, "cast", "conversion", "gpuArray", "like"],
-                    related: &[
-                        "double", "single", "int8", "int16", "int32", "int64", "uint8", "uint16",
-                        "uint32", "uint64",
-                    ],
-                    introduced: None,
-                    status: None,
-                    examples: &[],
-                    ..BuiltinDocumentation::EMPTY
-                },
+                documentation: $documentation,
                 descriptor: &DESCRIPTOR,
                 contract: BuiltinContractDeclaration {
                     maturity: BuiltinContractMaturity::Complete,
@@ -218,7 +210,7 @@ define_floating_conversion!(
     "double",
     "DOUBLE",
     NumericClass::Double,
-    "Convert values to double-precision storage.",
+    DOUBLE_DOCUMENTATION,
     "Double-precision output value.",
     "binary64 storage",
     "double-like-prototype",
@@ -235,7 +227,7 @@ define_floating_conversion!(
     "single",
     "SINGLE",
     NumericClass::Single,
-    "Convert values to single-precision storage.",
+    SINGLE_DOCUMENTATION,
     "Single-precision output value.",
     "binary32 storage",
     "single-like-output",
