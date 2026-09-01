@@ -6,6 +6,7 @@ mod atan;
 mod atanh;
 mod cos;
 mod cosd;
+mod cosh;
 mod cospi;
 mod sin;
 mod sind;
@@ -22,6 +23,7 @@ pub use atan::*;
 pub use atanh::*;
 pub use cos::*;
 pub use cosd::*;
+pub use cosh::*;
 pub use cospi::*;
 pub use sin::*;
 pub use sind::*;
@@ -38,6 +40,7 @@ pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &ATAN_CATALOG_ENTRY,
     &ATANH_CATALOG_ENTRY,
     &COS_CATALOG_ENTRY,
+    &COSH_CATALOG_ENTRY,
     &COSD_CATALOG_ENTRY,
     &COSPI_CATALOG_ENTRY,
     &SIN_CATALOG_ENTRY,

@@ -90,7 +90,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         verification: BuiltinExampleVerification::Assertions {
-            source: "expected = [0 + 1.570796326794897i 4.867473388256738];\nassert(isequal(size(Y), [1 2]));\nassert(max(abs(Y - expected)) < 1e-12);",
+            source: "expected = [0 + 1.570796326794897i 4.867475273605342];\nassert(isequal(size(Y), [1 2]));\nassert(max(abs(Y - expected)) < 1e-12);",
         },
     },
 ];
