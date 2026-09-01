@@ -1,3 +1,4 @@
+mod documentation;
 mod gpu_array;
 mod transfer;
 

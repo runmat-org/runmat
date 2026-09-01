@@ -2,8 +2,8 @@ use crate::{
     AccelerationInferenceRule, BuiltinAcceleratorPolicy, BuiltinAsyncBehavior,
     BuiltinBindingDeclaration, BuiltinCatalogEntry, BuiltinCatalogIdentity, BuiltinCompatibility,
     BuiltinCompletionPolicy, BuiltinContractDeclaration, BuiltinContractMaturity,
-    BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
+    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
@@ -13,6 +13,8 @@ use crate::{
     BuiltinSignatureDescriptor, ALL_INTEGER_CLASSES,
 };
 use runmat_types::{CapabilityRequirement, EffectKind};
+
+use super::documentation::GPUARRAY_DOCUMENTATION;
 
 pub const GPUARRAY_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "gpuarray-size-arguments",
@@ -327,15 +329,7 @@ const CAPABILITIES: [CapabilityRequirement; 1] = [CapabilityRequirement::Acceler
 pub const GPUARRAY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     identity: BuiltinCatalogIdentity { name: "gpuArray" },
     category: "acceleration/gpu",
-    documentation: BuiltinDocumentation {
-        summary: "Move data to the GPU as gpuArray values.",
-        keywords: &["gpuArray", "gpu", "accelerate", "upload", "dtype", "like"],
-        related: &["gather"],
-        introduced: None,
-        status: None,
-        examples: &[],
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: GPUARRAY_DOCUMENTATION,
     descriptor: &GPUARRAY_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,

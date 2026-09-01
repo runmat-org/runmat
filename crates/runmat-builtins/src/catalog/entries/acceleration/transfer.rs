@@ -2,8 +2,8 @@ use crate::{
     AccelerationInferenceRule, BuiltinAcceleratorPolicy, BuiltinAsyncBehavior,
     BuiltinBindingDeclaration, BuiltinCatalogEntry, BuiltinCatalogIdentity, BuiltinCompatibility,
     BuiltinCompletionPolicy, BuiltinContractDeclaration, BuiltinContractMaturity,
-    BuiltinDescriptor, BuiltinDocumentation, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
+    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
@@ -13,6 +13,8 @@ use crate::{
     BuiltinSignatureDescriptor, ALL_INTEGER_CLASSES,
 };
 use runmat_types::EffectKind;
+
+use super::documentation::GATHER_DOCUMENTATION;
 
 pub const GATHER_CONTAINER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "gather-recursive-container",
@@ -128,15 +130,7 @@ const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const GATHER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     identity: BuiltinCatalogIdentity { name: "gather" },
     category: "acceleration/gpu",
-    documentation: BuiltinDocumentation {
-        summary: "Gather gpuArray data back to host memory.",
-        keywords: &["accelerate", "download", "gather", "gpuArray"],
-        related: &[],
-        introduced: None,
-        status: None,
-        examples: &[],
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: GATHER_DOCUMENTATION,
     descriptor: &GATHER_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
