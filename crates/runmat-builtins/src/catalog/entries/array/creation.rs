@@ -1,18 +1,19 @@
 use crate::{
     ArrayInferenceRule, BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration,
     BuiltinCatalogEntry, BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
-    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinDocumentation,
-    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy,
-    BuiltinInferenceRule, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinLinkContract,
-    BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinPlacementContract, BuiltinPortability, BuiltinPurity,
-    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, BuiltinSignatureDescriptor,
-    ALL_INTEGER_CLASSES,
+    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
+    BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
+    BuiltinSignatureDescriptor, ALL_INTEGER_CLASSES,
 };
 use runmat_types::EffectKind;
+
+use super::documentation::{FULL_DOCUMENTATION, ZEROS_DOCUMENTATION};
 
 pub const FULL_INTEGER_SPARSE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "full-integer-sparse",
@@ -192,15 +193,7 @@ const FULL_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     identity: BuiltinCatalogIdentity { name: "full" },
     category: "array/creation",
-    documentation: BuiltinDocumentation {
-        summary: "Convert sparse matrix storage to full storage.",
-        keywords: &["dense", "full", "matrix", "sparse", "storage"],
-        related: &[],
-        introduced: None,
-        status: None,
-        examples: &[],
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: FULL_DOCUMENTATION,
     descriptor: &FULL_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
@@ -389,15 +382,7 @@ const ZEROS_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const ZEROS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     identity: BuiltinCatalogIdentity { name: "zeros" },
     category: "array/creation",
-    documentation: BuiltinDocumentation {
-        summary: "Create arrays filled with zero values.",
-        keywords: &["array", "gpu", "like", "logical", "zeros"],
-        related: &[],
-        introduced: None,
-        status: None,
-        examples: &[],
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: ZEROS_DOCUMENTATION,
     descriptor: &ZEROS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,

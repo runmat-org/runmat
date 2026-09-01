@@ -601,6 +601,36 @@ fn acceleration_documentation_is_catalog_owned_and_executable() {
 }
 
 #[test]
+fn array_creation_documentation_is_catalog_owned_and_executable() {
+    for (name, example_count, faq_count) in [("full", 5, 6), ("zeros", 8, 10)] {
+        let entry = builtin_catalog_entry_by_name(name).expect("array creation catalog entry");
+        let documentation = &entry.documentation;
+        assert_eq!(
+            documentation.authority,
+            BuiltinDocumentationAuthority::Catalog
+        );
+        assert_eq!(documentation.examples.len(), example_count, "{name}");
+        assert_eq!(documentation.faqs.len(), faq_count, "{name}");
+        assert!(
+            documentation
+                .sections
+                .iter()
+                .any(|section| section.heading == "GPU execution"),
+            "{name}"
+        );
+        assert!(!documentation.evidence.implementation.is_empty(), "{name}");
+        assert!(!documentation.evidence.verification.is_empty(), "{name}");
+        assert!(documentation.examples.iter().all(|example| {
+            !example.id.is_empty()
+                && matches!(
+                    example.verification,
+                    BuiltinExampleVerification::Assertions { .. }
+                )
+        }));
+    }
+}
+
+#[test]
 fn gpu_array_inference_preserves_or_converts_typed_facts_before_device_placement() {
     use runmat_types::{
         CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
