@@ -1,3 +1,4 @@
+mod documentation;
 mod structure;
 
 pub use structure::*;
