@@ -6,6 +6,7 @@ mod sin;
 mod sind;
 mod sinpi;
 mod tan;
+mod tand;
 
 pub use cos::*;
 pub use cosd::*;
@@ -14,6 +15,7 @@ pub use sin::*;
 pub use sind::*;
 pub use sinpi::*;
 pub use tan::*;
+pub use tand::*;
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &COS_CATALOG_ENTRY,
@@ -23,4 +25,5 @@ pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &SINPI_CATALOG_ENTRY,
     &SIND_CATALOG_ENTRY,
     &TAN_CATALOG_ENTRY,
+    &TAND_CATALOG_ENTRY,
 ];
