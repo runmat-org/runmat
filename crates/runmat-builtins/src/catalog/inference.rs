@@ -12,6 +12,7 @@ use runmat_types::{
 };
 use std::collections::BTreeMap;
 
+mod math_binary;
 mod math_unary;
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
@@ -80,6 +81,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         }
         BuiltinInferenceRule::Math(MathInferenceRule::Round) => {
             math_unary::infer_round(request, entry)
+        }
+        BuiltinInferenceRule::Math(MathInferenceRule::Remainder(function)) => {
+            math_binary::infer_remainder(request, entry, function)
         }
         BuiltinInferenceRule::Math(MathInferenceRule::Signum) => {
             math_unary::infer_signum(request, entry)

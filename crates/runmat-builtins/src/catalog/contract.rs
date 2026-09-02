@@ -61,6 +61,7 @@ pub enum MathInferenceRule {
     NumericConversionWithLike(runmat_types::NumericClass),
     NumericComponent(NumericComponentRule),
     Rounding(RoundingFunction),
+    Remainder(RemainderFunction),
     Round,
     Signum,
     Trigonometric(TrigonometricFunction),
@@ -76,6 +77,12 @@ pub enum RoundingFunction {
     Ceil,
     Fix,
     Floor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum RemainderFunction {
+    Modulus,
+    Remainder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
