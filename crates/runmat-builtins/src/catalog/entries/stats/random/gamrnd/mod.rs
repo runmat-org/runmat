@@ -10,7 +10,7 @@ use crate::{
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
     BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, StatsInferenceRule, ALL_INTEGER_CLASSES,
+    BuiltinSignatureDescriptor, StatsInferenceRule, StatsRandomInferenceRule, ALL_INTEGER_CLASSES,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
@@ -200,7 +200,9 @@ pub const GAMRND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &GAMRND_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Stats(StatsInferenceRule::GammaRandom),
+        inference_rule: BuiltinInferenceRule::Stats(StatsInferenceRule::Random(
+            StatsRandomInferenceRule::Gamma,
+        )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Impure,

@@ -2,6 +2,7 @@ use super::{
     AccelerationInferenceRule, AggregateInferenceRule, ArrayInferenceRule, BuiltinCatalogEntry,
     BuiltinContractMaturity, BuiltinInferenceRule, IntrospectionInferenceRule, MathInferenceRule,
     NumericComponentRule, NumericLimitRule, ParallelInferenceRule, StatsInferenceRule,
+    StatsRandomInferenceRule,
 };
 use runmat_types::{
     codistributor_fact, infer_call, infer_numeric_conversion, AliasFact, CallContract,
@@ -120,9 +121,10 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::InverseHyperbolic(function)) => {
             math_unary::infer_inverse_hyperbolic(request, entry, function)
         }
-        BuiltinInferenceRule::Stats(StatsInferenceRule::GammaRandom) => {
-            stats_random::infer_gamrnd(request, entry)
-        }
+        BuiltinInferenceRule::Stats(StatsInferenceRule::Random(function)) => match function {
+            StatsRandomInferenceRule::Binomial => stats_random::infer_binornd(request, entry),
+            StatsRandomInferenceRule::Gamma => stats_random::infer_gamrnd(request, entry),
+        },
         BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather) => {
             infer_gather(request, entry)
         }

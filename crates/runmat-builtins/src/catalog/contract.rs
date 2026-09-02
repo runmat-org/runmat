@@ -49,7 +49,13 @@ pub enum IntrospectionInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum StatsInferenceRule {
-    GammaRandom,
+    Random(StatsRandomInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum StatsRandomInferenceRule {
+    Binomial,
+    Gamma,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
