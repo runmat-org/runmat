@@ -192,6 +192,27 @@ for (const { path: sourcePath, text } of rustSources("crates/runmat-builtins/src
   }
 }
 
+const logicalReductionBoundaries = new Map([
+  ["crates/runmat-runtime/src/builtins/math/reduction/logical/mod.rs", 128],
+  ["crates/runmat-runtime/src/builtins/math/reduction/logical/arguments.rs", 192],
+  ["crates/runmat-runtime/src/builtins/math/reduction/logical/shape.rs", 128],
+  ["crates/runmat-runtime/src/builtins/math/reduction/logical/host.rs", 400],
+  ["crates/runmat-runtime/src/builtins/math/reduction/logical/gpu.rs", 256],
+  ["crates/runmat-runtime/src/builtins/math/reduction/all.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/reduction/any.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/reduction/all/tests.rs", 600],
+  ["crates/runmat-runtime/src/builtins/math/reduction/any/tests.rs", 600],
+]);
+for (const [sourcePath, ceiling] of logicalReductionBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its logical-reduction domain boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+
 const legacyCatalogTestsPath = "crates/runmat-builtins/src/catalog/tests.rs";
 const legacyCatalogTestLines = read(legacyCatalogTestsPath).split("\n").length;
 if (legacyCatalogTestLines > 4561) {
