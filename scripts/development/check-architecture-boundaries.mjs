@@ -154,5 +154,17 @@ if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/definition
   fail("the obsolete parallel catalog definitions tree must not return");
 }
 
+const inferenceRootPath = "crates/runmat-builtins/src/catalog/inference.rs";
+const inferenceRootLines = read(inferenceRootPath).split("\n").length;
+if (inferenceRootLines > 256) {
+  fail(`${inferenceRootPath} must remain a domain router and shared boundary (found ${inferenceRootLines} lines; maximum 256)`);
+}
+for (const { path: sourcePath, text } of rustSources("crates/runmat-builtins/src/catalog/inference")) {
+  const lines = text.split("\n").length;
+  if (lines > 768) {
+    fail(`${sourcePath} exceeds the bounded inference-family size (found ${lines} lines; maximum 768)`);
+  }
+}
+
 if (failed) process.exit(1);
 console.log("crate architecture boundaries are valid");
