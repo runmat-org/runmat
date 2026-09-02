@@ -20,9 +20,22 @@ pub enum BuiltinInferenceRule {
     Aggregate(AggregateInferenceRule),
     Array(ArrayInferenceRule),
     Introspection(IntrospectionInferenceRule),
+    Logical(LogicalInferenceRule),
     Math(MathInferenceRule),
     Parallel(ParallelInferenceRule),
     Stats(StatsInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LogicalInferenceRule {
+    NumericClassification(NumericClassificationPredicate),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum NumericClassificationPredicate {
+    Finite,
+    Infinite,
+    Nan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

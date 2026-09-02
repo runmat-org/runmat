@@ -25,6 +25,7 @@ mod acceleration;
 mod aggregate;
 mod array;
 mod introspection;
+mod logical;
 mod math;
 mod parallel;
 mod stats;
@@ -33,6 +34,7 @@ pub use acceleration::*;
 pub use aggregate::*;
 pub use array::*;
 pub use introspection::*;
+pub use logical::*;
 pub use math::*;
 pub use parallel::*;
 pub use stats::*;
@@ -42,6 +44,7 @@ pub(super) const DOMAIN_ENTRY_GROUPS: &[&[&[&crate::BuiltinCatalogEntry]]] = &[
     aggregate::ENTRY_GROUPS,
     array::ENTRY_GROUPS,
     introspection::ENTRY_GROUPS,
+    logical::ENTRY_GROUPS,
     math::ENTRY_GROUPS,
     math::ROUNDING_ENTRY_GROUPS,
     math::TRIGONOMETRY_ENTRY_GROUPS,
