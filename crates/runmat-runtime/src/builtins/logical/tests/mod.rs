@@ -1,6 +1,7 @@
 //! Logical test predicates (`isnan`, `isfinite`, `isinf`, etc.).
 
 pub mod allfinite;
+mod classification;
 pub mod isfinite;
 pub mod isgpuarray;
 pub mod isinf;

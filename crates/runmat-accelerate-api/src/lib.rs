@@ -2515,15 +2515,19 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("logical_isreal not supported by provider"))
     }
     fn logical_isfinite(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "logical_isfinite not supported by provider"
+        Err(unsupported_provider_operation(
+            "logical_isfinite not supported by provider",
         ))
     }
     fn logical_isnan(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("logical_isnan not supported by provider"))
+        Err(unsupported_provider_operation(
+            "logical_isnan not supported by provider",
+        ))
     }
     fn logical_isinf(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("logical_isinf not supported by provider"))
+        Err(unsupported_provider_operation(
+            "logical_isinf not supported by provider",
+        ))
     }
     fn elem_atan2<'a>(
         &'a self,

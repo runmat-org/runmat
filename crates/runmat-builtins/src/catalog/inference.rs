@@ -1,8 +1,8 @@
 use super::{
     AccelerationInferenceRule, AggregateInferenceRule, ArrayInferenceRule, BuiltinCatalogEntry,
-    BuiltinContractMaturity, BuiltinInferenceRule, IntrospectionInferenceRule, MathInferenceRule,
-    NumericComponentRule, NumericLimitRule, ParallelInferenceRule, StatsInferenceRule,
-    StatsRandomInferenceRule,
+    BuiltinContractMaturity, BuiltinInferenceRule, IntrospectionInferenceRule,
+    LogicalInferenceRule, MathInferenceRule, NumericComponentRule, NumericLimitRule,
+    ParallelInferenceRule, StatsInferenceRule, StatsRandomInferenceRule,
 };
 use runmat_types::{
     codistributor_fact, infer_call, infer_numeric_conversion, AliasFact, CallContract,
@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 mod math_binary;
 mod math_special;
 mod math_unary;
+mod numeric_classification;
 mod stats_random;
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
@@ -137,6 +138,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         }
         BuiltinInferenceRule::Introspection(IntrospectionInferenceRule::Feval) => {
             infer_feval(request, entry)
+        }
+        BuiltinInferenceRule::Logical(LogicalInferenceRule::NumericClassification(predicate)) => {
+            numeric_classification::infer(request, entry, predicate)
         }
         BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parpool) => {
             infer_parallel_pool(request, entry, false)
