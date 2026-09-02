@@ -1,3 +1,4 @@
+mod allfinite;
 mod isfinite;
 mod isgpuarray;
 mod isinf;
@@ -8,6 +9,7 @@ mod isreal;
 mod issparse;
 mod support;
 
+pub use allfinite::*;
 pub use isfinite::*;
 pub use isgpuarray::*;
 pub use isinf::*;
@@ -18,6 +20,7 @@ pub use isreal::*;
 pub use issparse::*;
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
+    allfinite::ENTRIES,
     isfinite::ENTRIES,
     isgpuarray::ENTRIES,
     isinf::ENTRIES,

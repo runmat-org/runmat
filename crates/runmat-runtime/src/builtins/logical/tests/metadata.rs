@@ -41,39 +41,9 @@ impl MetadataBoundary {
         if self.predicate == MetadataPredicate::GpuArray {
             return Ok(runmat_accelerate_api::handle_is_explicit(handle));
         }
-        if gpu_helpers::exact_provider_for_handle(handle).is_none() {
-            return Err(self.internal("no acceleration provider owns the input handle"));
-        }
+        validate_resident_numeric_metadata(handle).map_err(|detail| self.internal(detail))?;
         let storage = runmat_accelerate_api::handle_storage(handle);
-        let integer = runmat_accelerate_api::handle_integer_type(handle);
         let logical = runmat_accelerate_api::handle_is_logical(handle);
-        let precision = runmat_accelerate_api::handle_precision(handle);
-        let coherent = if logical {
-            integer.is_none()
-                && precision.is_some()
-                && storage == GpuTensorStorage::Real
-                && gpu_helpers::gpu_class_metadata_matches(handle, precision, None, true)
-        } else if let Some(integer) = integer {
-            precision.is_none()
-                && matches!(
-                    storage,
-                    GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
-                )
-                && gpu_helpers::gpu_class_metadata_matches(handle, None, Some(integer), false)
-        } else {
-            precision.is_some()
-                && matches!(
-                    storage,
-                    GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
-                )
-                && gpu_helpers::gpu_class_metadata_matches(handle, precision, None, false)
-        };
-        if !coherent {
-            return Err(self.internal(format!(
-                "resident class metadata contradicts physical storage (storage={storage:?}, integer={integer:?}, logical={logical}, precision={precision:?}, class={:?})",
-                runmat_accelerate_api::handle_class_identity(handle)
-            )));
-        }
         Ok(match self.predicate {
             MetadataPredicate::GpuArray => unreachable!("handled before metadata validation"),
             MetadataPredicate::Logical => logical,
@@ -160,6 +130,43 @@ impl MetadataBoundary {
         }
         builder.build()
     }
+}
+
+pub(super) fn validate_resident_numeric_metadata(handle: &GpuTensorHandle) -> Result<(), String> {
+    if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+        return Err("no acceleration provider owns the input handle".into());
+    }
+    let storage = runmat_accelerate_api::handle_storage(handle);
+    let integer = runmat_accelerate_api::handle_integer_type(handle);
+    let logical = runmat_accelerate_api::handle_is_logical(handle);
+    let precision = runmat_accelerate_api::handle_precision(handle);
+    let coherent = if logical {
+        integer.is_none()
+            && precision.is_some()
+            && storage == GpuTensorStorage::Real
+            && gpu_helpers::gpu_class_metadata_matches(handle, precision, None, true)
+    } else if let Some(integer) = integer {
+        precision.is_none()
+            && matches!(
+                storage,
+                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
+            )
+            && gpu_helpers::gpu_class_metadata_matches(handle, None, Some(integer), false)
+    } else {
+        precision.is_some()
+            && matches!(
+                storage,
+                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
+            )
+            && gpu_helpers::gpu_class_metadata_matches(handle, precision, None, false)
+    };
+    if coherent {
+        return Ok(());
+    }
+    Err(format!(
+        "resident class metadata contradicts physical storage (storage={storage:?}, integer={integer:?}, logical={logical}, precision={precision:?}, class={:?})",
+        runmat_accelerate_api::handle_class_identity(handle)
+    ))
 }
 
 fn fact_is_logical(value: &ValueFact) -> bool {

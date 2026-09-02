@@ -30,6 +30,7 @@ pub enum BuiltinInferenceRule {
 pub enum LogicalInferenceRule {
     MetadataPredicate(MetadataPredicate),
     NumericClassification(NumericClassificationPredicate),
+    ScalarReduction(ScalarLogicalReduction),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -46,6 +47,11 @@ pub enum NumericClassificationPredicate {
     Finite,
     Infinite,
     Nan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ScalarLogicalReduction {
+    AllFinite,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
