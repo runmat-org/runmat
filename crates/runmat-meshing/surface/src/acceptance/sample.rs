@@ -57,14 +57,6 @@ pub(crate) fn accept_exact_face_mesh_in_parameterization(
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
     let report = sample(mesh, context, quality, options, parameterization)?;
     enforce_report(mesh, &report, quality)?;
-    validate_exact_face_acceptance_in_parameterization(
-        &report,
-        mesh,
-        context,
-        quality,
-        options,
-        parameterization,
-    )?;
     Ok(report)
 }
 

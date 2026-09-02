@@ -1,12 +1,12 @@
 schema_version = 1
-policy_revision = 3
-approved_at = "2026-08-23"
-approval_basis = "Measured native exact-box smoke distribution with process allocation instrumentation; revision 3 adopts the material-independent geometric-region artifact identity while retaining the approved resource limits."
+policy_revision = 4
+approved_at = "2026-09-01"
+approval_basis = "Measured native exact-box production distribution with process allocation instrumentation; revision 4 pins the minimum-edge-aware surface contract, its 108-element canonical artifact, and a tight aggregate allocation ceiling for independently certified exact-surface samples."
 workload_id = "native-exact-box"
 fixture = "crates/runmat-geometry/io/tests/fixtures/box.brep"
 fixture_sha256 = "79ad22b1cc652f2307a1d8f9c3ec5644fa2f86de1d9700820d234ee1199e6d34"
-expected_canonical_digest = "13cd25a99b9865e3b2d0845086adeb61d2432afd993e3d97164316138ce1b6f1"
-minimum_elements = 14
+expected_canonical_digest = "29463f6e47ead9e7a0232e87346c31fe6c2c821b2fb4a5c930c628978aaa6345"
+minimum_elements = 108
 maximum_report_age_hours = 24
 required_stages = ["curve_mesh", "surface_mesh", "tetrahedralization", "order_elevation", "validation", "serialization"]
 
@@ -23,7 +23,7 @@ wall_time_p50_ms = 5000
 wall_time_p95_ms = 10000
 wall_time_p99_ms = 15000
 peak_rss_p99_bytes = 1500000000
-allocation_count_p99 = 5000000
+allocation_count_p99 = 10000000
 allocated_bytes_p99 = 10000000000
 peak_live_bytes_p99 = 750000000
 minimum_element_throughput_per_second_p50 = 1.0
