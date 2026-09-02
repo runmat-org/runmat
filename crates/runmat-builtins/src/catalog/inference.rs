@@ -13,6 +13,7 @@ use runmat_types::{
 use std::collections::BTreeMap;
 
 mod math_binary;
+mod math_special;
 mod math_unary;
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
@@ -50,6 +51,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         }
         BuiltinInferenceRule::Math(MathInferenceRule::Hypot) => {
             math_binary::infer_hypot(request, entry)
+        }
+        BuiltinInferenceRule::Math(MathInferenceRule::Gamma) => {
+            math_special::infer_gamma(request, entry)
         }
         BuiltinInferenceRule::Math(MathInferenceRule::PhaseAngle) => {
             math_unary::infer_phase_angle(request, entry)

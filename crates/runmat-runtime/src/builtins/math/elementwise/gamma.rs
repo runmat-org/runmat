@@ -3,12 +3,8 @@
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
+    BuiltinErrorDescriptor, GAMMA_ERROR_INTERNAL, GAMMA_ERROR_INVALID_ARGUMENT,
+    GAMMA_ERROR_INVALID_INPUT, GAMMA_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericStorage, Tensor, Value};
@@ -17,8 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const PI: f64 = std::f64::consts::PI;
@@ -66,95 +61,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner currently falls back to host evaluation; providers may supply specialised kernels.",
 };
 
-const GAMMA_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Gamma-function result.",
-}];
-
-const GAMMA_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Real single or double input.",
-}];
-
-const GAMMA_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = gamma(X)",
-    inputs: &GAMMA_INPUTS,
-    outputs: &GAMMA_OUTPUT,
-}];
-
-const GAMMA_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer input is rejected before host evaluation or provider dispatch; the documented numeric surface accepts only real single and double data.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = gamma(X) with typed-integer X",
-        inputs: &GAMMA_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "All eight typed-integer classes are unsupported in both compatibility modes and are rejected before provider access; real single and double inputs retain their documented host and GPU behavior.",
-    }];
-
-const GAMMA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GAMMA.INVALID_ARGUMENT",
-    identifier: Some("RunMat:gamma:InvalidArgument"),
-    when: "The invocation has more than one input.",
-    message: "gamma: invalid argument",
-};
-
-const GAMMA_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GAMMA.INVALID_INPUT",
-    identifier: Some("RunMat:gamma:InvalidInput"),
-    when: "Input is not real single or double numeric data.",
-    message: "gamma: invalid input",
-};
-
-const GAMMA_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GAMMA.INTERNAL",
-    identifier: Some("RunMat:gamma:Internal"),
-    when: "Internal gather, provider, or tensor construction failed.",
-    message: "gamma: internal error",
-};
-
-const GAMMA_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    GAMMA_ERROR_INVALID_ARGUMENT,
-    GAMMA_ERROR_INVALID_INPUT,
-    GAMMA_ERROR_INTERNAL,
-];
-
-pub const GAMMA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GAMMA_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GAMMA_ERRORS,
-};
-
 #[runtime_builtin(
     name = "gamma",
-    category = "math/elementwise",
-    summary = "Compute gamma function values element-wise.",
-    keywords = "gamma,factorial,special,gpu",
-    accel = "unary",
-    type_resolver(gamma_type),
-    descriptor(crate::builtins::math::elementwise::gamma::GAMMA_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::elementwise::gamma::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::gamma"
 )]
 async fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    reject_excess_outputs()?;
     if !rest.is_empty() {
         return Err(gamma_error_with_detail(
             &GAMMA_ERROR_INVALID_ARGUMENT,
@@ -172,11 +85,14 @@ async fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn gamma_type(args: &[Type], context: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::Int | Type::Bool | Type::Logical { .. }) => Type::Unknown,
-        _ => numeric_unary_type(args, context),
+fn reject_excess_outputs() -> BuiltinResult<()> {
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        return Err(gamma_error_with_detail(
+            &GAMMA_ERROR_TOO_MANY_OUTPUTS,
+            "only one output is defined",
+        ));
     }
+    Ok(())
 }
 
 async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -189,65 +105,51 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             "expected real single or double gpuArray input",
         ));
     }
-    let provider = runmat_accelerate_api::provider_for_handle(&handle);
-    if let Some(provider) = provider {
-        if let Ok(out) = provider.unary_gamma(&handle).await {
-            if gamma_native_output_matches(&handle, &out, provider) {
-                return Ok(gpu_helpers::resident_gpu_value(out));
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        gamma_error_with_detail(&GAMMA_ERROR_INTERNAL, "GPU input has no owning provider")
+    })?;
+    match provider.unary_gamma(&handle).await {
+        Ok(output) => {
+            if !gpu_helpers::unary_gpu_output_matches(
+                &output,
+                &handle,
+                provider,
+                gpu_helpers::UnaryGpuOutputContract {
+                    storage: GpuTensorStorage::Real,
+                    precision: runmat_accelerate_api::handle_precision(&handle),
+                    integer: None,
+                    logical: false,
+                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+                },
+            ) {
+                gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
+                return Err(gamma_terminal_error(
+                    &GAMMA_ERROR_INTERNAL,
+                    "provider unary_gamma returned malformed output",
+                ));
             }
-            free_rejected_gamma_output(&out, &handle, provider);
+            let mut output = output;
+            runmat_accelerate_api::set_handle_provenance(
+                &mut output,
+                runmat_accelerate_api::handle_provenance(&handle)
+                    .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+            );
+            return Ok(gpu_helpers::resident_gpu_value(output));
+        }
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+        Err(error) => {
+            return Err(gamma_terminal_error(&GAMMA_ERROR_INTERNAL, error));
         }
     }
-    let gathered = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
     let output = gamma_tensor(gathered)?;
-    if let Some(provider) = provider {
-        let dtype = output.numeric_dtype();
-        let mut handle = gpu_helpers::upload_tensor(provider, &output)
-            .map_err(|detail| gamma_error_with_detail(&GAMMA_ERROR_INTERNAL, detail))?;
-        if dtype == runmat_value::NumericDType::F32 {
-            handle.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::F32);
-        }
-        Ok(gpu_helpers::resident_gpu_value(handle))
-    } else {
-        Ok(tensor::tensor_into_value(output))
-    }
-}
-
-fn gamma_native_output_matches(
-    input: &GpuTensorHandle,
-    output: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-) -> bool {
-    output.shape == input.shape
-        && output.device_id == input.device_id
-        && !gpu_handles_alias(output, input)
-        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-        && runmat_accelerate_api::handle_precision(output)
-            == Some(
-                runmat_accelerate_api::handle_precision(input)
-                    .unwrap_or_else(|| provider.precision()),
-            )
-        && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
-}
-
-fn free_rejected_gamma_output(
-    output: &GpuTensorHandle,
-    input: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-) {
-    if !gpu_handles_alias(output, input) {
-        let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(provider);
-        let _ = owner.free(output);
-    }
+    crate::builtins::math::trigonometry::inverse_helpers::upload_value_like_protected(
+        provider,
+        tensor::tensor_into_value(output),
+        BUILTIN_NAME,
+        &handle,
+        std::slice::from_ref(&handle),
+    )
 }
 
 fn gamma_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
@@ -370,11 +272,26 @@ fn gamma_error_with_detail(
     builder.build()
 }
 
+fn gamma_terminal_error(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail))
+        .with_builtin(BUILTIN_NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
@@ -392,31 +309,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn descriptor_exposes_only_matlab_form() {
-        let labels: Vec<_> = GAMMA_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|signature| signature.label)
-            .collect();
-        assert_eq!(labels, vec!["Y = gamma(X)"]);
-    }
-
-    #[test]
-    fn type_resolver_preserves_tensor_shape_and_rejects_known_integer() {
-        let context = ResolveContext::new(Vec::new());
-        assert_eq!(
-            gamma_type(
-                &[Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                }],
-                &context,
-            ),
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-        assert_eq!(gamma_type(&[Type::Int], &context), Type::Unknown);
-        assert_eq!(gamma_type(&[Type::Bool], &context), Type::Unknown);
+    fn rejects_excess_outputs() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error = call(Value::Num(0.5), Vec::new()).expect_err("second output must reject");
+        assert_eq!(error.identifier(), GAMMA_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 
     #[test]
@@ -591,5 +487,38 @@ pub(crate) mod tests {
             let error = call(Value::GpuTensor(handle), Vec::new()).unwrap_err();
             assert_eq!(error.identifier(), GAMMA_ERROR_INVALID_INPUT.identifier);
         });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn wgpu_gamma_matches_host_for_real_inputs() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let input = Tensor::new(vec![0.25, 0.5, 1.0, 1.5], vec![2, 2]).unwrap();
+        let expected = gamma_tensor(input.clone()).expect("host gamma");
+        let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload gamma input");
+
+        let output = call(Value::GpuTensor(handle), Vec::new()).expect("wgpu gamma");
+        let actual = test_support::gather(output).expect("gather wgpu gamma");
+
+        assert_eq!(actual.shape, expected.shape);
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
+            runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,
+        };
+        for (actual, expected) in actual
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
+            assert!(
+                (actual - expected).abs() <= tolerance,
+                "expected {expected}, got {actual} (tol {tolerance})"
+            );
+        }
     }
 }

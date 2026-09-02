@@ -4319,7 +4319,7 @@ mod tests {
                 "Y = factorial(X, \"like\", prototype)",
             ),
             ("gamma(5);", "Y = gamma(X)"),
-            ("hypot(3, 4);", "R = hypot(X, Y)"),
+            ("hypot(3, 4);", "C = hypot(A, B)"),
             ("nextpow2(9);", "p = nextpow2(X)"),
             ("pow2(3);", "Y = pow2(X)"),
             ("pow2(1.5, 2);", "Y = pow2(F, E)"),
