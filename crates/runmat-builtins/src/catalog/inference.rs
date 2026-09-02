@@ -6,6 +6,7 @@ mod aggregate_semantics;
 mod array;
 mod distributed_semantics;
 mod introspection_semantics;
+mod logical;
 mod math_binary;
 mod math_components;
 mod math_degree_trigonometric;
@@ -79,7 +80,7 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Introspection(rule) => {
             routing::introspection::infer(rule, request, entry)
         }
-        BuiltinInferenceRule::Logical(rule) => routing::logical::infer(rule, request, entry),
+        BuiltinInferenceRule::Logical(rule) => logical::infer(rule, request, entry),
         BuiltinInferenceRule::Parallel(rule) => routing::parallel::infer(rule, request, entry),
     }
 }

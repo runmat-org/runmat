@@ -1,20 +1,23 @@
+mod relational;
+
 use crate::{BuiltinCatalogEntry, LogicalInferenceRule};
 use runmat_types::{CallInference, CallRequest};
 
-pub(in crate::catalog::inference) fn infer(
+pub(super) fn infer(
     rule: LogicalInferenceRule,
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
         LogicalInferenceRule::NumericClassification(predicate) => {
-            super::super::numeric_classification::infer(request, entry, predicate)
+            super::numeric_classification::infer(request, entry, predicate)
         }
         LogicalInferenceRule::MetadataPredicate(predicate) => {
-            super::super::metadata_predicate::infer(request, entry, predicate)
+            super::metadata_predicate::infer(request, entry, predicate)
         }
+        LogicalInferenceRule::Relational(operator) => relational::infer(request, entry, operator),
         LogicalInferenceRule::ScalarReduction(reduction) => {
-            super::super::scalar_logical_reduction::infer(request, entry, reduction)
+            super::scalar_logical_reduction::infer(request, entry, reduction)
         }
     }
 }

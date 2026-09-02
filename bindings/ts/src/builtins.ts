@@ -3,7 +3,7 @@ export type BuiltinDocExample = {
   description?: string;
   label?: string;
   input?: string;
-  output?: string;
+  output?: string | null;
   compatibility?: "RunMat" | "Matlab" | "Strict";
   harness?:
     | "Portable"

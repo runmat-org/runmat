@@ -213,6 +213,51 @@ for (const [sourcePath, ceiling] of logicalReductionBoundaries) {
   }
 }
 
+const relationalComparisonBoundaries = new Map([
+  ["crates/runmat-builtins/src/catalog/inference/logical/mod.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/logical/relational.rs", 160],
+  ["crates/runmat-builtins/src/catalog/entries/logical/relational/mod.rs", 64],
+  ["crates/runmat-builtins/src/catalog/entries/logical/relational/support.rs", 192],
+  ["crates/runmat-builtins/src/catalog/entries/logical/relational/ordering_documentation.rs", 160],
+  ["crates/runmat-runtime/src/builtins/logical/rel/comparison/mod.rs", 224],
+  ["crates/runmat-runtime/src/builtins/logical/rel/comparison/errors.rs", 80],
+  ["crates/runmat-runtime/src/builtins/logical/rel/comparison/identity.rs", 80],
+  ["crates/runmat-runtime/src/builtins/logical/rel/comparison/operands.rs", 256],
+  ["crates/runmat-runtime/src/builtins/logical/rel/integer_comparison/mod.rs", 480],
+  ["crates/runmat-runtime/src/builtins/logical/rel/integer_comparison/exact.rs", 768],
+  ["crates/runmat-runtime/src/builtins/logical/rel/integer_comparison/gpu.rs", 320],
+]);
+for (const [sourcePath, ceiling] of relationalComparisonBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its relational-comparison domain boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+for (const identity of ["eq", "ne", "lt", "le", "gt", "ge"]) {
+  const modulePath = `crates/runmat-runtime/src/builtins/logical/rel/${identity}/mod.rs`;
+  const moduleLines = read(modulePath).split("\n").length;
+  if (moduleLines > 128) {
+    fail(`${modulePath} must remain a thin registration and specification leaf (found ${moduleLines} lines; maximum 128)`);
+  }
+  const testsPath = `crates/runmat-runtime/src/builtins/logical/rel/${identity}/tests.rs`;
+  const testLines = read(testsPath).split("\n").length;
+  if (testLines > 600) {
+    fail(`${testsPath} exceeds its identity-owned test boundary (found ${testLines} lines; maximum 600)`);
+  }
+}
+const relationalRuntimeSources = [
+  ...rustSources("crates/runmat-runtime/src/builtins/logical/rel/comparison"),
+  ...rustSources("crates/runmat-runtime/src/builtins/logical/rel/integer_comparison"),
+];
+for (const { path: sourcePath, text } of relationalRuntimeSources) {
+  if (/match\s+[^\n{]*\.name\s*\(\s*\)|\.name\s*\(\s*\)\s*(?:==|!=)/.test(text)) {
+    fail(`${sourcePath} selects relational semantics from a builtin name; dispatch through RelationalOperator`);
+  }
+}
+
 const legacyCatalogTestsPath = "crates/runmat-builtins/src/catalog/tests.rs";
 const legacyCatalogTestLines = read(legacyCatalogTestsPath).split("\n").length;
 if (legacyCatalogTestLines > 4561) {
