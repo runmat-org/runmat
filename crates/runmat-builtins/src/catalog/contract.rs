@@ -138,6 +138,7 @@ pub enum MathInferenceRule {
     Log1p,
     Log2,
     Logarithm(LogarithmBase),
+    LogicalReduction(LogicalReductionKind),
     Root(RootKind),
     NumericLimit(NumericLimitRule),
     NumericConversion(runmat_types::NumericClass),
@@ -153,6 +154,12 @@ pub enum MathInferenceRule {
     DegreeTrigonometric(DegreeTrigonometricFunction),
     InverseTrigonometric(InverseTrigonometricFunction),
     InverseHyperbolic(InverseHyperbolicFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LogicalReductionKind {
+    All,
+    Any,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

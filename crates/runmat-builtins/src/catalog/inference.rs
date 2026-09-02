@@ -14,6 +14,7 @@ mod math_fact_transforms;
 mod math_hyperbolic;
 mod math_inverse;
 mod math_logarithms;
+mod math_reduction;
 mod math_roots;
 mod math_rounding;
 mod math_special;

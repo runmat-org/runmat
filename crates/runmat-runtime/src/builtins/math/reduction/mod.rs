@@ -14,6 +14,7 @@ pub(crate) mod floating_cumulative_extrema;
 pub(crate) mod gradient;
 pub(crate) mod integer_native;
 pub(crate) mod integration_common;
+mod logical;
 pub(crate) mod max;
 pub(crate) mod mean;
 pub(crate) mod median;
