@@ -13,6 +13,12 @@ import {
 } from "fs";
 import { dirname, extname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import {
+    mergeLaneResults,
+    usesBrowserLane,
+    usesNativeLane
+} from "./builtin-example-verifier/lanes.mjs";
+import { runNativeCases } from "./builtin-example-verifier/native.mjs";
 
 /**
  * @typedef {import("../metadata/BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
@@ -61,14 +67,7 @@ const documents = readBuiltinDocuments();
 
 if (process.argv.includes("--check-inventory")) {
     printInventory(documents);
-    process.exit(0);
-}
-
-if (!existsSync(wasmModule) || !existsSync(wasmBinary)) {
-    console.error("Missing wasm artifacts. Build bindings/ts dist before running this script.");
-    console.error(`Expected: ${wasmModule}`);
-    console.error(`Expected: ${wasmBinary}`);
-    process.exit(1);
+    process.exit(process.exitCode ?? 0);
 }
 
 const cases = collectCases(documents);
@@ -78,20 +77,28 @@ if (cases.length === 0) {
 }
 
 const timeoutMs = resolveTimeoutMs();
+const nativeTimeoutMs = resolveNativeTimeoutMs(timeoutMs);
 const concurrency = resolveConcurrency();
-const overallTimeoutMs = resolveOverallTimeoutMs(timeoutMs, concurrency, cases.length);
+const browserCases = cases.filter((testCase) => usesBrowserLane(testCase.harness));
+const nativeCases = cases.filter((testCase) => usesNativeLane(testCase.harness));
+const unsupportedCases = cases.filter((testCase) => !usesBrowserLane(testCase.harness) && !usesNativeLane(testCase.harness));
+if (browserCases.length > 0 && (!existsSync(wasmModule) || !existsSync(wasmBinary))) {
+    console.error("Missing wasm artifacts required by the selected browser examples. Build bindings/ts dist before running this script.");
+    console.error(`Expected: ${wasmModule}`);
+    console.error(`Expected: ${wasmBinary}`);
+    process.exit(1);
+}
+const overallTimeoutMs = resolveOverallTimeoutMs(timeoutMs, concurrency, browserCases.length);
 const logIntervalMs = resolveLogIntervalMs();
 const reportMode = resolveReportMode();
 const runnerHtml = createRunnerHtml(timeoutMs, concurrency, logIntervalMs);
-const casesJson = JSON.stringify(cases);
+const casesJson = JSON.stringify(browserCases);
 
-const results = await runHeadlessChrome({
-    repoRoot,
-    chromeWrapper,
-    runnerHtml,
-    casesJson,
-    overallTimeoutMs
-});
+const browserResults = browserCases.length > 0
+    ? await runHeadlessChrome({ repoRoot, chromeWrapper, runnerHtml, casesJson, overallTimeoutMs })
+    : [];
+const nativeResults = nativeCases.length > 0 ? runNativeCases(repoRoot, nativeCases, nativeTimeoutMs) : [];
+const results = mergeLaneResults(cases, browserResults, nativeResults, unsupportedCases);
 
 const resultsById = new Map(results.map((result) => [result.id, result]));
 
@@ -183,6 +190,7 @@ function readBuiltinDocuments() {
 function printInventory(documents) {
     const authorities = new Map();
     const harnesses = new Map();
+    const unsupported = [];
     let examples = 0;
     for (const document of documents) {
         const authority = typeof document.authority === "string" ? document.authority : "unknown";
@@ -191,6 +199,9 @@ function printInventory(documents) {
             examples += 1;
             const harness = typeof example.harness === "string" ? example.harness : "LegacyBrowser";
             harnesses.set(harness, (harnesses.get(harness) ?? 0) + 1);
+            if (authority === "catalog" && !usesBrowserLane(harness) && !usesNativeLane(harness)) {
+                unsupported.push(`${document.key ?? document.title}:${example.id ?? "unknown"}:${harness}`);
+            }
         }
     }
     const render = (values) => [...values.entries()]
@@ -200,6 +211,10 @@ function printInventory(documents) {
     console.log(`Builtin documentation inventory: documents=${documents.length}, examples=${examples}`);
     console.log(`Authorities: ${render(authorities)}`);
     console.log(`Harnesses: ${render(harnesses)}`);
+    if (unsupported.length > 0) {
+        console.error(`Catalog examples without an executable adapter: ${unsupported.join(", ")}`);
+        process.exitCode = 1;
+    }
 }
 
 /**
@@ -1014,6 +1029,18 @@ function resolveTimeoutMs() {
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed <= 0) {
         return 15000;
+    }
+    return Math.floor(parsed);
+}
+
+function resolveNativeTimeoutMs(browserTimeoutMs) {
+    const raw = process.env.RUNMAT_EXAMPLE_NATIVE_TIMEOUT_MS;
+    if (!raw) {
+        return Math.max(60000, browserTimeoutMs);
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return Math.max(60000, browserTimeoutMs);
     }
     return Math.floor(parsed);
 }

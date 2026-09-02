@@ -93,7 +93,20 @@ node scripts/runtime/verify-builtin-examples.mjs
 
 The runner consumes the deterministic catalog documentation export, applies declared harnesses and resource ceilings, and writes machine-readable and human-readable reports. Filters are useful for local iteration, but cohort and final closure use the complete affected inventory.
 
+`Portable` runs the same catalog-authored program and assertions through both a native RunMat binary and the browser/WASM runtime. `Native`, `NativeFilesystem`, and `NativeForeignRuntime` use isolated native workspaces; `Browser`, `BrowserGraphics`, and `Wgpu` use the browser adapter. Legacy sidecar examples remain browser-only during migration. Inventory validation fails when a canonical catalog example selects a harness without an executable adapter. Set `RUNMAT_EXAMPLE_NATIVE_BINARY` to reuse an already built binary; otherwise the runner builds the current checkout once. Per-lane timeout environment variables and identity filters support focused iteration without weakening the complete closure run.
+
 During the C00–C07 catalog migration, an unmigrated identity may still use its existing `docs/builtins/reference/*.json` sidecar. The transitional exporter makes that ownership explicit and rejects an identity that claims canonical catalog documentation while retaining a sidecar. Delete the sidecar in the same change that imports and improves its content. The sidecar path and migration mode disappear after the final identity moves.
+
+Audit each cutover against its pre-slice Git baseline after deleting the old editable files:
+
+```bash
+node scripts/development/audit-builtin-documentation-cutover.mjs NAME \
+  --baseline HEAD \
+  --reviewed description,behaviors,examples,faqs,links,source \
+  --output /tmp/NAME-documentation-cutover.json
+```
+
+The audit verifies direct fields, complete typed examples, catalog authority, sidecar removal, and the destination for every populated legacy field. Fields whose meaning cannot be compared mechanically must be named with `--reviewed` only after their source and catalog values have been read. Use `--new` when the public identity had no sidecar or runtime shadow; this is an explicit assertion, and the command rejects it when the baseline contains an old source. The report is temporary migration evidence, not another builtin-definition file. Record its result and any justified corrections in the progress ledger rather than committing the report.
 
 ## Runtime Semantics
 
