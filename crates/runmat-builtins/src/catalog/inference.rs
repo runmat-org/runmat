@@ -1,7 +1,7 @@
 use super::{
     AccelerationInferenceRule, AggregateInferenceRule, ArrayInferenceRule, BuiltinCatalogEntry,
     BuiltinContractMaturity, BuiltinInferenceRule, IntrospectionInferenceRule, MathInferenceRule,
-    NumericComponentRule, NumericLimitRule, ParallelInferenceRule,
+    NumericComponentRule, NumericLimitRule, ParallelInferenceRule, StatsInferenceRule,
 };
 use runmat_types::{
     codistributor_fact, infer_call, infer_numeric_conversion, AliasFact, CallContract,
@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 mod math_binary;
 mod math_special;
 mod math_unary;
+mod stats_random;
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
     let distributed = request.arguments.iter().find_map(|argument| {
@@ -118,6 +119,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         }
         BuiltinInferenceRule::Math(MathInferenceRule::InverseHyperbolic(function)) => {
             math_unary::infer_inverse_hyperbolic(request, entry, function)
+        }
+        BuiltinInferenceRule::Stats(StatsInferenceRule::GammaRandom) => {
+            stats_random::infer_gamrnd(request, entry)
         }
         BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather) => {
             infer_gather(request, entry)
@@ -1216,6 +1220,23 @@ fn literal_text(literal: &LiteralValue) -> Option<String> {
 
 fn numeric_kind(class: NumericClass, domain: NumericDomain) -> ValueKindFact {
     ValueKindFact::Numeric(NumericFact { class, domain })
+}
+
+fn preserved_binary_residency(left: &ResidencyFact, right: &ResidencyFact) -> ResidencyFact {
+    match (left, right) {
+        (ResidencyFact::Host, ResidencyFact::Host) => ResidencyFact::Host,
+        (
+            ResidencyFact::Device {
+                provider: left_owner,
+            },
+            ResidencyFact::Device {
+                provider: right_owner,
+            },
+        ) if left_owner == right_owner => left.clone(),
+        (ResidencyFact::Device { .. }, ResidencyFact::Host) => left.clone(),
+        (ResidencyFact::Host, ResidencyFact::Device { .. }) => right.clone(),
+        _ => ResidencyFact::Unknown,
+    }
 }
 
 fn default_double_scalar() -> ValueFact {

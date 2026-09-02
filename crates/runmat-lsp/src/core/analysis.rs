@@ -1674,6 +1674,7 @@ mod tests {
                 "normrnd(0, 1, 3, 4);",
                 "r = normrnd(mu, sigma, sz1, sz2, ...)",
             ),
+            ("gamrnd(2, 3, 3, 4);", "r = gamrnd(a, b, sz1, sz2, ...)"),
             ("unifrnd(0, 1, [3 4]);", "r = unifrnd(a, b, sz)"),
             ("rng();", "s = rng()"),
         ];
