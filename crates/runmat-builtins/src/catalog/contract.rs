@@ -28,7 +28,17 @@ pub enum BuiltinInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum LogicalInferenceRule {
+    MetadataPredicate(MetadataPredicate),
     NumericClassification(NumericClassificationPredicate),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MetadataPredicate {
+    GpuArray,
+    Logical,
+    Numeric,
+    Real,
+    Sparse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -728,6 +728,30 @@ pub fn builtin_name_is_known(name: &str) -> bool {
     builtin_catalog_entry_by_name(name).is_some() || builtin_function_by_name(name).is_some()
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BuiltinIntegerMetadata {
+    pub capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
+    pub audit: Option<&'static BuiltinIntegerAuditDescriptor>,
+}
+
+/// Returns the canonical integer contract for a builtin during catalog migration.
+///
+/// Catalog-owned identities take precedence. Runtime registration remains the
+/// bounded fallback for identities whose atomic catalog cutover has not occurred.
+pub fn builtin_integer_metadata_by_name(name: &str) -> Option<BuiltinIntegerMetadata> {
+    builtin_catalog_entry_by_name(name)
+        .map(|entry| BuiltinIntegerMetadata {
+            capabilities: entry.integer_capabilities,
+            audit: entry.integer_audit,
+        })
+        .or_else(|| {
+            builtin_function_by_name(name).map(|function| BuiltinIntegerMetadata {
+                capabilities: function.integer_capabilities,
+                audit: function.integer_audit,
+            })
+        })
+}
+
 /// Returns the physical-stack contract for a builtin call.
 ///
 /// Canonical catalog declarations take precedence. Runtime registration remains
