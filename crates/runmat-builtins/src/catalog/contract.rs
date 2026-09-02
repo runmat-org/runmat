@@ -51,6 +51,7 @@ pub enum MathInferenceRule {
     Abs,
     Atan2,
     Hypot,
+    Gamma,
     PhaseAngle,
     Exp,
     Expm1,

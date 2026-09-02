@@ -6596,7 +6596,11 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow::anyhow!("unary_gamma not supported by provider")) })
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "unary_gamma not supported by provider",
+            ))
+        })
     }
     fn unary_gammaln<'a>(
         &'a self,
@@ -9340,7 +9344,9 @@ impl AccelProvider for InProcessProvider {
         _direction: ProviderScanDirection,
         _nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
-        Err(anyhow!("cumsum_scan not supported by provider"))
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "cumsum_scan not supported by provider",
+        ))
     }
 
     fn integer_cumsum_scan(
@@ -9410,7 +9416,9 @@ impl AccelProvider for InProcessProvider {
         _direction: ProviderScanDirection,
         _nan_mode: ProviderNanMode,
     ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
-        Err(anyhow!("cummin_scan not supported by provider"))
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "cummin_scan not supported by provider",
+        ))
     }
 
     fn integer_cummin_scan(
