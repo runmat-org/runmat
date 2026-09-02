@@ -26,12 +26,37 @@ pub(crate) enum SymbolicBinaryOp {
     Eq,
 }
 
-pub(crate) fn symbolic_named_binary(lhs: &Value, rhs: &Value, name: &str) -> Option<Value> {
-    let (lhs, rhs) = symbolic_binary_operands(lhs, rhs)?;
-    Some(symbolic_expr_to_value(SymbolicExpr::function_call(
-        name,
-        vec![lhs, rhs],
-    )))
+pub(crate) fn symbolic_named_binary_broadcast(
+    lhs: &Value,
+    rhs: &Value,
+    name: &str,
+) -> Result<Option<Value>, String> {
+    if !contains_symbolic_value(lhs) && !contains_symbolic_value(rhs) {
+        return Ok(None);
+    }
+    let Some(lhs) = SymbolicOperand::from_value(lhs) else {
+        return Ok(None);
+    };
+    let Some(rhs) = SymbolicOperand::from_value(rhs) else {
+        return Ok(None);
+    };
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())?;
+    let mut data = Vec::with_capacity(plan.len());
+    for (_, lhs_index, rhs_index) in plan.iter() {
+        data.push(SymbolicExpr::function_call(
+            name,
+            vec![
+                lhs.expr_at(lhs_index).clone(),
+                rhs.expr_at(rhs_index).clone(),
+            ],
+        ));
+    }
+    if data.len() == 1 && is_scalar_shape(plan.output_shape()) {
+        return Ok(Some(Value::Symbolic(data.remove(0))));
+    }
+    SymbolicArray::new(data, plan.output_shape().to_vec())
+        .map(Value::SymbolicArray)
+        .map(Some)
 }
 
 pub(crate) fn symbolic_binary(lhs: &Value, rhs: &Value, op: SymbolicBinaryOp) -> Option<Value> {
