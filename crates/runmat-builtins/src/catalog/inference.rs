@@ -18,6 +18,7 @@ mod math_special;
 mod math_unary;
 mod metadata_predicate;
 mod numeric_classification;
+mod scalar_logical_reduction;
 mod stats_random;
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
@@ -145,6 +146,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         }
         BuiltinInferenceRule::Logical(LogicalInferenceRule::MetadataPredicate(predicate)) => {
             metadata_predicate::infer(request, entry, predicate)
+        }
+        BuiltinInferenceRule::Logical(LogicalInferenceRule::ScalarReduction(reduction)) => {
+            scalar_logical_reduction::infer(request, entry, reduction)
         }
         BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parpool) => {
             infer_parallel_pool(request, entry, false)

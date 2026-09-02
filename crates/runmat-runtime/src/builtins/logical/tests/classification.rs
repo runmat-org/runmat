@@ -120,19 +120,8 @@ impl ClassificationBoundary {
         output: &GpuTensorHandle,
         provider: &dyn AccelProvider,
     ) -> bool {
-        output.shape == input.shape
-            && output.device_id == provider.device_id()
-            && gpu_helpers::exact_provider_for_handle(output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider))
-            && !gpu_helpers::same_gpu_handle(input, output)
-            && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
-            && runmat_accelerate_api::handle_integer_type(output).is_none()
-            && runmat_accelerate_api::handle_precision(output) == Some(provider.precision())
-            && runmat_accelerate_api::handle_class_identity(output).is_none_or(|class| {
-                class.is(runmat_types::standard::LOGICAL)
-                    || class.is(runmat_types::standard::SINGLE)
-                    || class.is(runmat_types::standard::DOUBLE)
-            })
+        !gpu_helpers::same_gpu_handle(input, output)
+            && valid_provider_truth_handle(output, provider, &input.shape)
     }
 
     fn resident_integer_mask(&self, handle: &GpuTensorHandle) -> BuiltinResult<Value> {
@@ -276,6 +265,23 @@ impl ClassificationBoundary {
         }
         builder.build()
     }
+}
+
+pub(super) fn valid_provider_truth_handle(
+    output: &GpuTensorHandle,
+    provider: &dyn AccelProvider,
+    expected_shape: &[usize],
+) -> bool {
+    let precision = runmat_accelerate_api::handle_precision(output);
+    let logical = runmat_accelerate_api::handle_is_logical(output);
+    output.shape == expected_shape
+        && output.device_id == provider.device_id()
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && precision.is_some()
+        && gpu_helpers::gpu_class_metadata_matches(output, precision, None, logical)
 }
 
 #[cfg(test)]
