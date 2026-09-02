@@ -56,6 +56,7 @@ pub enum StatsInferenceRule {
 pub enum StatsRandomInferenceRule {
     Binomial,
     Gamma,
+    Weibull,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
