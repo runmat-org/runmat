@@ -2,6 +2,8 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{BuiltinCatalogEntry, BuiltinErrorDescriptor, ShapePredicate};
 use runmat_value::Value;
 
+use super::dimension_metadata::{effective_rank, visible_dimensions};
+
 pub(super) struct ShapePredicateBoundary {
     entry: &'static BuiltinCatalogEntry,
     internal: &'static BuiltinErrorDescriptor,
@@ -31,19 +33,9 @@ impl ShapePredicateBoundary {
     }
 
     async fn dimensions(&self, value: &Value) -> BuiltinResult<Vec<u64>> {
-        let dimensions = match value {
-            Value::Distributed(handle) => {
-                handle.validate().map_err(|error| self.internal(error))?;
-                normalize_dimensions(&handle.global_shape)
-            }
-            other => {
-                let dimensions = crate::builtins::common::shape::value_dimensions(other)
-                    .await
-                    .map_err(|error| self.internal(error.message()))?;
-                dimensions.into_iter().map(|value| value as u64).collect()
-            }
-        };
-        Ok(dimensions)
+        visible_dimensions(value)
+            .await
+            .map_err(|error| self.internal(error))
     }
 
     fn classify(&self, dimensions: &[u64]) -> bool {
@@ -83,21 +75,6 @@ impl ShapePredicateBoundary {
         }
         builder.build()
     }
-}
-
-fn normalize_dimensions(dimensions: &[u64]) -> Vec<u64> {
-    match dimensions {
-        [] | [1] | [1, 1] => vec![1, 1],
-        [dimension] => vec![1, *dimension],
-        _ => dimensions.to_vec(),
-    }
-}
-
-fn effective_rank(dimensions: &[u64]) -> usize {
-    dimensions
-        .iter()
-        .rposition(|dimension| *dimension != 1)
-        .map_or(2, |index| (index + 1).max(2))
 }
 
 macro_rules! define_shape_predicate_runtime {
@@ -218,19 +195,6 @@ mod tests {
             Value::Bool(value) => value,
             other => panic!("expected logical scalar, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn normalizes_scalar_and_vector_shapes() {
-        assert_eq!(normalize_dimensions(&[]), vec![1, 1]);
-        assert_eq!(normalize_dimensions(&[1]), vec![1, 1]);
-        assert_eq!(normalize_dimensions(&[3]), vec![1, 3]);
-    }
-
-    #[test]
-    fn effective_rank_ignores_only_trailing_singletons() {
-        assert_eq!(effective_rank(&[2, 3, 1, 1]), 2);
-        assert_eq!(effective_rank(&[1, 1, 3, 1]), 3);
     }
 
     #[test]

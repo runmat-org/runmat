@@ -103,3 +103,85 @@ macro_rules! define_shape_predicate_entry {
 }
 
 pub(super) use define_shape_predicate_entry;
+
+macro_rules! define_shape_scalar_query_entry {
+    (
+        entry: $entry:ident,
+        descriptor: $descriptor:ident,
+        name: $name:literal,
+        query: $query:expr,
+        documentation: $documentation:expr,
+        errors: $errors:expr,
+        integer_capabilities: $integer_capabilities:expr,
+        output_description: $output_description:literal
+    ) => {
+        const OUTPUTS: [crate::BuiltinParamDescriptor; 1] = [crate::BuiltinParamDescriptor {
+            name: "n",
+            ty: crate::BuiltinParamType::NumericScalar,
+            arity: crate::BuiltinParamArity::Required,
+            default: None,
+            description: $output_description,
+        }];
+        const INPUTS: [crate::BuiltinParamDescriptor; 1] = [crate::BuiltinParamDescriptor {
+            name: "A",
+            ty: crate::BuiltinParamType::Any,
+            arity: crate::BuiltinParamArity::Required,
+            default: None,
+            description: "Value whose MATLAB-visible dimensions are inspected.",
+        }];
+        const SIGNATURES: [crate::BuiltinSignatureDescriptor; 1] =
+            [crate::BuiltinSignatureDescriptor {
+                label: concat!("n = ", $name, "(A)"),
+                inputs: &INPUTS,
+                outputs: &OUTPUTS,
+            }];
+        pub const $descriptor: crate::BuiltinDescriptor = crate::BuiltinDescriptor {
+            signatures: &SIGNATURES,
+            output_mode: crate::BuiltinOutputMode::Fixed,
+            completion_policy: crate::BuiltinCompletionPolicy::Public,
+            errors: $errors,
+        };
+        const BINDINGS: [crate::BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
+        const EFFECTS: [runmat_types::EffectKind; 1] = [runmat_types::EffectKind::MayThrow];
+        pub const $entry: crate::BuiltinCatalogEntry = crate::BuiltinCatalogEntry {
+            identity: crate::BuiltinCatalogIdentity { name: $name },
+            category: "array/introspection",
+            documentation: $documentation,
+            descriptor: &$descriptor,
+            contract: crate::BuiltinContractDeclaration {
+                maturity: crate::BuiltinContractMaturity::Complete,
+                inference_rule: crate::BuiltinInferenceRule::Array(
+                    crate::ArrayInferenceRule::ShapeScalarQuery($query),
+                ),
+                compatibility: crate::BuiltinCompatibility::Matlab,
+                async_behavior: crate::BuiltinAsyncBehavior::NeverSuspends,
+                purity: crate::BuiltinPurity::Pure,
+                semantic_kind: crate::BuiltinSemanticKind::General,
+                workspace_effect: None,
+                environment_effect: None,
+                effects: &EFFECTS,
+                capabilities: &[],
+            },
+            placement: crate::BuiltinPlacementContract {
+                portability: crate::BuiltinPortability::NativeAndWasm,
+                accelerator: crate::BuiltinAcceleratorPolicy::Optional,
+                residency: crate::BuiltinResidencyPolicy::Host,
+                fusion: crate::BuiltinFusionPolicy::Boundary,
+                distributed: crate::BuiltinDistributedPolicy::InspectHandles,
+            },
+            link: crate::BuiltinLinkContract {
+                reachability: crate::BuiltinReachability::Always,
+                policy: crate::BuiltinLinkPolicy::PortableRuntime,
+                execution_stack: runmat_types::ExecutionStackRequirement::Any,
+                artifact_dependencies: &[],
+            },
+            bindings: &BINDINGS,
+            extensions: &[],
+            integer_capabilities: $integer_capabilities,
+            integer_audit: None,
+            suppress_auto_output: false,
+        };
+    };
+}
+
+pub(super) use define_shape_scalar_query_entry;

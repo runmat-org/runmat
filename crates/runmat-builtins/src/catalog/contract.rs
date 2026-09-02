@@ -69,6 +69,7 @@ pub enum AggregateInferenceRule {
 pub enum ArrayInferenceRule {
     Full,
     ShapePredicate(ShapePredicate),
+    ShapeScalarQuery(ShapeScalarQuery),
     Zeros,
 }
 
@@ -80,6 +81,12 @@ pub enum ShapePredicate {
     Matrix,
     Row,
     Column,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ShapeScalarQuery {
+    Length,
+    Rank,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
