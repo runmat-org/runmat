@@ -1,9 +1,8 @@
 //! MATLAB-compatible `size` execution binding.
 
-use super::shape_query::{
-    exact_double, parse_dimension_arguments, row_vector, DimensionSelectorError,
-    EmptySelectorPolicy, StructuralOutputError, VisibleDimensions,
-};
+use super::dimension_metadata::VisibleDimensions;
+use super::shape_query::{parse_dimension_arguments, DimensionSelectorError, EmptySelectorPolicy};
+use super::structural_output::{exact_double, row_vector, StructuralOutputError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,

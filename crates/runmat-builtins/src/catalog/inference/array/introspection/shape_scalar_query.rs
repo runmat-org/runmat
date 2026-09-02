@@ -52,6 +52,8 @@ mod tests {
         for (entry, query) in [
             (&crate::LENGTH_CATALOG_ENTRY, ShapeScalarQuery::Length),
             (&crate::NDIMS_CATALOG_ENTRY, ShapeScalarQuery::Rank),
+            (&crate::HEIGHT_CATALOG_ENTRY, ShapeScalarQuery::Height),
+            (&crate::WIDTH_CATALOG_ENTRY, ShapeScalarQuery::Width),
         ] {
             let result = super::infer(&request, entry, query);
             assert!(result.diagnostics.is_empty());

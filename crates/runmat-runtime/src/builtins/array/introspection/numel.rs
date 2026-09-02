@@ -1,9 +1,8 @@
 //! `numel` execution binding and compatibility-gated selector extension.
 
-use super::shape_query::{
-    exact_double, parse_dimension_arguments, DimensionSelectorError, EmptySelectorPolicy,
-    VisibleDimensions,
-};
+use super::dimension_metadata::VisibleDimensions;
+use super::shape_query::{parse_dimension_arguments, DimensionSelectorError, EmptySelectorPolicy};
+use super::structural_output::exact_double;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,

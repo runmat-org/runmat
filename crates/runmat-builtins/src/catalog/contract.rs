@@ -104,6 +104,8 @@ pub enum ShapePredicate {
 pub enum ShapeScalarQuery {
     Length,
     Rank,
+    Height,
+    Width,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

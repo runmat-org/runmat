@@ -1,12 +1,12 @@
 use runmat_value::{Tensor, Value};
 
 #[derive(Debug)]
-pub(in crate::builtins::array::introspection) enum StructuralOutputError {
+pub(super) enum StructuralOutputError {
     NotExactlyRepresentable(u64),
     Tensor(String),
 }
 
-pub(in crate::builtins::array::introspection) fn exact_double(value: u64) -> Option<f64> {
+pub(super) fn exact_double(value: u64) -> Option<f64> {
     if value != 0 {
         let significant_bits = u64::BITS - value.leading_zeros();
         let discarded_bits = significant_bits.saturating_sub(f64::MANTISSA_DIGITS);
@@ -17,9 +17,7 @@ pub(in crate::builtins::array::introspection) fn exact_double(value: u64) -> Opt
     Some(value as f64)
 }
 
-pub(in crate::builtins::array::introspection) fn row_vector(
-    values: &[u64],
-) -> Result<Value, StructuralOutputError> {
+pub(super) fn row_vector(values: &[u64]) -> Result<Value, StructuralOutputError> {
     let data = values
         .iter()
         .copied()
