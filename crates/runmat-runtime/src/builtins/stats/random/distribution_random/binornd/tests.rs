@@ -1,8 +1,9 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::ProviderPrecision;
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_value::{IntegerStorage, NumericDType, Tensor, Value};
 
 use super::*;
+use crate::builtins::common::gpu_helpers;
 
 fn reset() -> impl Drop {
     let guard = random::test_guard();

@@ -1253,7 +1253,7 @@ function buildReportHtml(allRows, reportRows, reportMode) {
             `${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`
         );
         const input = escapeHtml(row.testCase.input ?? "");
-        const expected = escapeHtml(row.testCase.hasExpectedOutput ? row.normalizedExpected : "(execution-only: no expected output)");
+        const expected = escapeHtml(row.testCase.hasExpectedOutput ? row.testCase.expectedOutput : "(execution-only: no expected output)");
         const actual = escapeHtml(row.normalizedWasm);
         const imageCell = row.testCase.isPlotExample
             ? row.imageRelPath
@@ -1388,7 +1388,7 @@ function buildReportMarkdown(allRows, reportRows, reportMode) {
         const sourceInfo = `${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`;
         // Escape pipe characters in markdown cells and use <br> for newlines in table cells
         const input = (row.testCase.input ?? "").replace(/\|/g, "\\|").replace(/\n/g, "<br>");
-        const expectedRaw = row.testCase.hasExpectedOutput ? row.normalizedExpected : "(execution-only: no expected output)";
+        const expectedRaw = row.testCase.hasExpectedOutput ? row.testCase.expectedOutput : "(execution-only: no expected output)";
         const expected = expectedRaw.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
         const actual = row.normalizedWasm.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
         const imageCell = row.testCase.isPlotExample

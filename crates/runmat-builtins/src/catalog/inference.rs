@@ -124,6 +124,7 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Stats(StatsInferenceRule::Random(function)) => match function {
             StatsRandomInferenceRule::Binomial => stats_random::infer_binornd(request, entry),
             StatsRandomInferenceRule::Gamma => stats_random::infer_gamrnd(request, entry),
+            StatsRandomInferenceRule::Weibull => stats_random::infer_wblrnd(request, entry),
         },
         BuiltinInferenceRule::Acceleration(AccelerationInferenceRule::Gather) => {
             infer_gather(request, entry)

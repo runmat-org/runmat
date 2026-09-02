@@ -68,7 +68,7 @@ fn random_parameters_use_scalar_expansion_not_implicit_expansion() {
     let column = ShapeFact::Shaped {
         dims: vec![DimensionFact::Known(3), DimensionFact::Known(1)],
     };
-    for name in ["gamrnd", "binornd"] {
+    for name in ["gamrnd", "binornd", "wblrnd"] {
         let entry = builtin_catalog_entry_by_name(name).expect("catalog entry");
         let inferred = infer_catalog_call(
             entry,
@@ -137,7 +137,7 @@ fn binomial_random_validates_literals_and_explicit_parameter_shape() {
 
 #[test]
 fn unknown_parameter_class_does_not_invent_double() {
-    for name in ["gamrnd", "binornd"] {
+    for name in ["gamrnd", "binornd", "wblrnd"] {
         let entry = builtin_catalog_entry_by_name(name).expect("catalog entry");
         let inferred = infer_catalog_call(
             entry,
@@ -151,4 +151,45 @@ fn unknown_parameter_class_does_not_invent_double() {
         );
         assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Unknown));
     }
+}
+
+#[test]
+fn weibull_random_validates_parameter_domains_and_logical_size_extension() {
+    let entry = builtin_catalog_entry_by_name("wblrnd").expect("wblrnd catalog entry");
+    let inferred = infer_catalog_call(
+        entry,
+        &request(
+            vec![
+                numeric(NumericClass::Double, ShapeFact::Scalar),
+                numeric(NumericClass::Single, ShapeFact::Scalar),
+                ValueFact::scalar(ValueKindFact::Logical),
+            ],
+            vec![
+                LiteralValue::Number(0.0),
+                LiteralValue::Number(-1.0),
+                LiteralValue::Bool(true),
+            ],
+        ),
+    );
+    assert!(matches!(
+        inferred.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real
+        })
+    ));
+    assert_eq!(
+        inferred.outputs[0].shape.known_dims(),
+        Some(vec![Some(1), Some(1)])
+    );
+    for code in ["RM-CATALOG-WBLRND-SCALE", "RM-CATALOG-WBLRND-SHAPE"] {
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == code));
+    }
+    assert!(!inferred
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-RANDOM-SIZE"));
 }

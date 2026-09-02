@@ -12,6 +12,12 @@ enum ParameterPolicy {
     NumericOrLogical,
 }
 
+#[derive(Clone, Copy)]
+enum SizePolicy {
+    Numeric,
+    NumericOrLogical,
+}
+
 pub(in crate::catalog::inference) fn infer_gamrnd(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
@@ -22,6 +28,7 @@ pub(in crate::catalog::inference) fn infer_gamrnd(
         "gamrnd",
         "shape and scale",
         ParameterPolicy::Numeric,
+        SizePolicy::Numeric,
         validate_gamma_literals,
     )
 }
@@ -36,7 +43,23 @@ pub(in crate::catalog::inference) fn infer_binornd(
         "binornd",
         "trial-count and probability",
         ParameterPolicy::NumericOrLogical,
+        SizePolicy::Numeric,
         validate_binomial_literals,
+    )
+}
+
+pub(in crate::catalog::inference) fn infer_wblrnd(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
+    infer_two_parameter_random(
+        request,
+        entry,
+        "wblrnd",
+        "scale and shape",
+        ParameterPolicy::NumericOrLogical,
+        SizePolicy::NumericOrLogical,
+        validate_weibull_literals,
     )
 }
 
@@ -46,6 +69,7 @@ fn infer_two_parameter_random(
     name: &'static str,
     parameter_names: &'static str,
     parameter_policy: ParameterPolicy,
+    size_policy: SizePolicy,
     validate_literals: fn(&CallRequest, &mut Vec<InferenceDiagnostic>),
 ) -> CallInference {
     let mut diagnostics = Vec::new();
@@ -64,7 +88,7 @@ fn infer_two_parameter_random(
     }
 
     validate_parameter_facts(request, name, parameter_policy, &mut diagnostics);
-    validate_size_facts(request, name, &mut diagnostics);
+    validate_size_facts(request, name, size_policy, &mut diagnostics);
     validate_literals(request, &mut diagnostics);
 
     let parameters = &request.arguments[..2];
@@ -148,15 +172,16 @@ fn validate_parameter_facts(
 fn validate_size_facts(
     request: &CallRequest,
     name: &str,
+    policy: SizePolicy,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) {
     for (index, argument) in request.arguments.iter().enumerate().skip(2) {
-        if matches!(argument.storage, StorageFact::Sparse)
-            || !matches!(
-                argument.kind,
-                ValueKindFact::Numeric(_) | ValueKindFact::Unknown
-            )
-        {
+        let kind_supported = matches!(
+            argument.kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Unknown
+        ) || matches!(policy, SizePolicy::NumericOrLogical)
+            && matches!(argument.kind, ValueKindFact::Logical);
+        if matches!(argument.storage, StorageFact::Sparse) || !kind_supported {
             diagnostics.push(argument_error(
                 "RM-CATALOG-RANDOM-SIZE",
                 format!("{name} size controls must be dense real numeric values"),
@@ -229,6 +254,8 @@ fn explicit_size_shape(request: &CallRequest) -> ShapeFact {
     if request.arguments.len() == 3 {
         if let Some(vector) = request.literals.numeric_vector_at(2) {
             dimensions = vector;
+        } else if let Some(LiteralValue::Bool(value)) = request.literals.literal_args.get(2) {
+            dimensions = vec![Some(usize::from(*value)); 2];
         } else if dimensions.first().is_some_and(Option::is_some) {
             dimensions.push(dimensions[0]);
         } else {
@@ -275,6 +302,23 @@ fn validate_binomial_literals(request: &CallRequest, diagnostics: &mut Vec<Infer
         diagnostics,
         "RM-CATALOG-BINORND-PROBABILITY",
         |value| (0.0..=1.0).contains(&value),
+    );
+}
+
+fn validate_weibull_literals(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnostic>) {
+    validate_numeric_literal(
+        request,
+        0,
+        diagnostics,
+        "RM-CATALOG-WBLRND-SCALE",
+        |value| value > 0.0,
+    );
+    validate_numeric_literal(
+        request,
+        1,
+        diagnostics,
+        "RM-CATALOG-WBLRND-SHAPE",
+        |value| value > 0.0,
     );
 }
 
