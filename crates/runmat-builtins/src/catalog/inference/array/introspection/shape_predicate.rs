@@ -6,5 +6,9 @@ pub(super) fn infer(
     entry: &BuiltinCatalogEntry,
     _predicate: ShapePredicate,
 ) -> CallInference {
-    super::unary_logical_scalar::infer(request, entry, "RM-CATALOG-SHAPE-PREDICATE-ARITY")
+    super::super::super::unary_logical_scalar::infer(
+        request,
+        entry,
+        "RM-CATALOG-SHAPE-PREDICATE-ARITY",
+    )
 }

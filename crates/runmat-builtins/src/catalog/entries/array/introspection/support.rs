@@ -69,7 +69,9 @@ macro_rules! define_shape_predicate_entry {
             contract: crate::BuiltinContractDeclaration {
                 maturity: crate::BuiltinContractMaturity::Complete,
                 inference_rule: crate::BuiltinInferenceRule::Array(
-                    crate::ArrayInferenceRule::ShapePredicate($predicate),
+                    crate::ArrayInferenceRule::Introspection(
+                        crate::ArrayIntrospectionInferenceRule::ShapePredicate($predicate),
+                    ),
                 ),
                 compatibility: crate::BuiltinCompatibility::Matlab,
                 async_behavior: crate::BuiltinAsyncBehavior::NeverSuspends,
@@ -151,7 +153,9 @@ macro_rules! define_shape_scalar_query_entry {
             contract: crate::BuiltinContractDeclaration {
                 maturity: crate::BuiltinContractMaturity::Complete,
                 inference_rule: crate::BuiltinInferenceRule::Array(
-                    crate::ArrayInferenceRule::ShapeScalarQuery($query),
+                    crate::ArrayInferenceRule::Introspection(
+                        crate::ArrayIntrospectionInferenceRule::ShapeScalarQuery($query),
+                    ),
                 ),
                 compatibility: crate::BuiltinCompatibility::Matlab,
                 async_behavior: crate::BuiltinAsyncBehavior::NeverSuspends,
