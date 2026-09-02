@@ -347,6 +347,40 @@ pub fn unary_gpu_output_matches(
         )
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryGpuOutputContract {
+    pub shape: Vec<usize>,
+    pub storage: GpuTensorStorage,
+    pub precision: Option<ProviderPrecision>,
+    pub integer: Option<IntegerElementType>,
+    pub logical: bool,
+    pub alias: GpuOutputAliasPolicy,
+}
+
+pub fn binary_gpu_output_matches(
+    output: &GpuTensorHandle,
+    left: &GpuTensorHandle,
+    right: &GpuTensorHandle,
+    provider: &'static dyn AccelProvider,
+    contract: &BinaryGpuOutputContract,
+) -> bool {
+    output.shape == contract.shape
+        && output.device_id == provider.device_id()
+        && (matches!(contract.alias, GpuOutputAliasPolicy::AllowInput)
+            || (!same_gpu_handle(output, left) && !same_gpu_handle(output, right)))
+        && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(output) == contract.storage
+        && runmat_accelerate_api::handle_precision(output) == contract.precision
+        && runmat_accelerate_api::handle_integer_type(output) == contract.integer
+        && runmat_accelerate_api::handle_is_logical(output) == contract.logical
+        && gpu_class_metadata_matches(
+            output,
+            contract.precision,
+            contract.integer,
+            contract.logical,
+        )
+}
+
 pub fn free_unprotected_exact_owner(handle: &GpuTensorHandle, protected: &[&GpuTensorHandle]) {
     if protected
         .iter()

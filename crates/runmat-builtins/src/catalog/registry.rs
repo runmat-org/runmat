@@ -1,9 +1,9 @@
 use super::{entries::DOMAIN_ENTRY_GROUPS, BuiltinCatalogEntry};
 use std::sync::LazyLock;
 
-/// Canonical entries composed from domain-owned definition groups.
+/// Canonical entries composed from domain-owned entry groups.
 ///
-/// Each contract family registers its entries beside their definitions. The
+/// Each contract family registers its entries beside their typed contracts. The
 /// root registry composes domain groups only, so adding a builtin never
 /// requires editing a second, repository-wide list.
 static CATALOG_ENTRIES: LazyLock<Vec<&'static BuiltinCatalogEntry>> = LazyLock::new(|| {
