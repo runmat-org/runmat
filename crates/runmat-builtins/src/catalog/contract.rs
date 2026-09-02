@@ -68,7 +68,18 @@ pub enum AggregateInferenceRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ArrayInferenceRule {
     Full,
+    ShapePredicate(ShapePredicate),
     Zeros,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ShapePredicate {
+    Empty,
+    Scalar,
+    Vector,
+    Matrix,
+    Row,
+    Column,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

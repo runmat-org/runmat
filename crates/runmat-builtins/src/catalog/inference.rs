@@ -19,7 +19,9 @@ mod math_unary;
 mod metadata_predicate;
 mod numeric_classification;
 mod scalar_logical_reduction;
+mod shape_predicate;
 mod stats_random;
+mod unary_logical_scalar;
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
     let distributed = request.arguments.iter().find_map(|argument| {
@@ -49,6 +51,9 @@ pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) ->
 fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
     match entry.contract.inference_rule {
         BuiltinInferenceRule::Array(ArrayInferenceRule::Full) => infer_full(request, entry),
+        BuiltinInferenceRule::Array(ArrayInferenceRule::ShapePredicate(predicate)) => {
+            shape_predicate::infer(request, entry, predicate)
+        }
         BuiltinInferenceRule::Array(ArrayInferenceRule::Zeros) => infer_zeros(request, entry),
         BuiltinInferenceRule::Math(MathInferenceRule::Abs) => infer_abs(request, entry),
         BuiltinInferenceRule::Math(MathInferenceRule::Atan2) => {
