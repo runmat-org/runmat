@@ -22,6 +22,7 @@ pub enum BuiltinInferenceRule {
     Introspection(IntrospectionInferenceRule),
     Math(MathInferenceRule),
     Parallel(ParallelInferenceRule),
+    Stats(StatsInferenceRule),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -44,6 +45,11 @@ pub enum ArrayInferenceRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum IntrospectionInferenceRule {
     Feval,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum StatsInferenceRule {
+    GammaRandom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

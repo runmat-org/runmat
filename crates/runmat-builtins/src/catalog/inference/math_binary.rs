@@ -1,4 +1,4 @@
-use super::{argument_error, finish_fixed, numeric_kind};
+use super::{argument_error, finish_fixed, numeric_kind, preserved_binary_residency};
 use crate::{BuiltinCatalogEntry, RemainderFunction};
 use runmat_types::{
     broadcast_shape, standard, AliasFact, CallInference, CallRequest, ContiguityFact,
@@ -462,23 +462,6 @@ fn numeric_input(kind: &ValueKindFact) -> Option<NumericFact> {
             domain: NumericDomain::Real,
         }),
         _ => None,
-    }
-}
-
-fn preserved_binary_residency(left: &ResidencyFact, right: &ResidencyFact) -> ResidencyFact {
-    match (left, right) {
-        (ResidencyFact::Host, ResidencyFact::Host) => ResidencyFact::Host,
-        (
-            ResidencyFact::Device {
-                provider: left_owner,
-            },
-            ResidencyFact::Device {
-                provider: right_owner,
-            },
-        ) if left_owner == right_owner => left.clone(),
-        (ResidencyFact::Device { .. }, ResidencyFact::Host) => left.clone(),
-        (ResidencyFact::Host, ResidencyFact::Device { .. }) => right.clone(),
-        _ => ResidencyFact::Unknown,
     }
 }
 
