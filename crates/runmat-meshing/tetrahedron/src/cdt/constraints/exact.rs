@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_geometry_core::{ExactBRepTopology, PersistentEntityId, TopologicalOrientation};
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 use runmat_meshing_curve::shared_curve_vertex_node_id;
-use runmat_meshing_surface::{ExactSurfaceMesh, EXACT_SURFACE_MESH_SCHEMA_VERSION};
+use runmat_meshing_surface::{
+    ExactFaceMeshTriangle, ExactSurfaceMesh, EXACT_SURFACE_MESH_SCHEMA_VERSION,
+};
 
 use super::{
     checkpoint, error, resource, sorted_segment, validate_delaunay_constraints, validate_options,
@@ -60,6 +62,7 @@ pub fn build_delaunay_constraints(
             "exact solid surface facet inventory is empty or exceeds its hard limit",
         ));
     }
+    validate_oriented_region_boundaries(&solid_triangles, &face_sides)?;
     let referenced_nodes = solid_triangles
         .iter()
         .flat_map(|triangle| triangle.node_ids)
@@ -147,6 +150,57 @@ pub fn build_delaunay_constraints(
     };
     validate_delaunay_constraints(&constraints, options, cancellation)?;
     Ok(constraints)
+}
+
+fn validate_oriented_region_boundaries(
+    triangles: &[&ExactFaceMeshTriangle],
+    face_sides: &BTreeMap<
+        PersistentEntityId,
+        (DelaunayConstraintFacetSide, DelaunayConstraintFacetSide),
+    >,
+) -> Result<(), DelaunayConstraintError> {
+    let mut uses = BTreeMap::<
+        (PersistentEntityId, [StableDigest; 2]),
+        Vec<(bool, StableDigest, PersistentEntityId)>,
+    >::new();
+    for triangle in triangles {
+        let (positive, negative) = face_sides.get(&triangle.source_face_id).ok_or_else(|| {
+            invalid_boundary("solid surface triangle has no authoritative side classification")
+        })?;
+        for (region, reverse) in [positive, negative]
+            .into_iter()
+            .filter_map(|side| match side {
+                DelaunayConstraintFacetSide::Region(region) => Some((region, side == positive)),
+                DelaunayConstraintFacetSide::Exterior | DelaunayConstraintFacetSide::Void => None,
+            })
+        {
+            let mut oriented = triangle.node_ids;
+            if reverse {
+                oriented.swap(1, 2);
+            }
+            for directed in [
+                [oriented[0], oriented[1]],
+                [oriented[1], oriented[2]],
+                [oriented[2], oriented[0]],
+            ] {
+                let mut edge = directed;
+                edge.sort_unstable();
+                uses.entry((region.clone(), edge)).or_default().push((
+                    directed == edge,
+                    triangle.triangle_id,
+                    triangle.source_face_id.clone(),
+                ));
+            }
+        }
+    }
+    for ((region, edge), edge_uses) in uses {
+        if edge_uses.len() != 2 || edge_uses[0].0 == edge_uses[1].0 {
+            return Err(invalid_boundary(format!(
+                "solid region boundary is not a closed consistently oriented two-manifold at region {region:?}, edge {edge:?}, uses {edge_uses:?}",
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_surface(

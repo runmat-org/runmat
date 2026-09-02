@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use runmat_geometry_core::{
     ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl, GeometryTransform,
-    PersistentEntityId, SurfaceEvaluatorId,
+    ParameterRange, PersistentEntityId, SurfaceEvaluatorId,
 };
 use runmat_meshing_core::{MetricContributionScope, MetricFieldRequest};
 use runmat_meshing_size::{
@@ -22,11 +23,26 @@ pub struct ResolvedFaceMetricField {
     by_face: BTreeMap<PersistentEntityId, FaceMetricRecord>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 struct FaceMetricRecord {
     surface_evaluator_id: SurfaceEvaluatorId,
     world_transform: GeometryTransform,
     resolved: ResolvedMetricEvaluation,
+    evaluator_parameter_domain: OnceLock<EvaluatorParameterDomain>,
+}
+
+impl PartialEq for FaceMetricRecord {
+    fn eq(&self, other: &Self) -> bool {
+        self.surface_evaluator_id == other.surface_evaluator_id
+            && self.world_transform == other.world_transform
+            && self.resolved == other.resolved
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct EvaluatorParameterDomain {
+    bounds: [ParameterRange; 2],
+    periodicity: [Option<f64>; 2],
 }
 
 impl ResolvedFaceMetricField {
@@ -94,6 +110,7 @@ impl ResolvedFaceMetricField {
                     resolved: resolved_by_face
                         .remove(&face.id)
                         .expect("resolved every exact face"),
+                    evaluator_parameter_domain: OnceLock::new(),
                 },
             );
         }
@@ -148,7 +165,7 @@ impl ResolvedFaceMetricField {
         let sample = parameterized_sample(
             parameterization,
             evaluator,
-            &record.surface_evaluator_id,
+            record,
             source_face_id,
             uv,
             control,
@@ -216,15 +233,16 @@ struct ParameterizedSample {
 fn parameterized_sample(
     parameterization: &ExactFaceChartParameterization,
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
-    evaluator_id: &SurfaceEvaluatorId,
+    record: &FaceMetricRecord,
     source_face_id: &PersistentEntityId,
     coordinates: [f64; 2],
     control: &dyn GeometryEvaluationControl,
 ) -> Result<ParameterizedSample, ExactFaceMetricError> {
+    let evaluator_id = &record.surface_evaluator_id;
     match parameterization {
         ExactFaceChartParameterization::EvaluatorParameters => {
             let evaluator_uv =
-                evaluator_parameters(evaluator, evaluator_id, source_face_id, coordinates)?;
+                cached_evaluator_parameters(evaluator, record, source_face_id, coordinates)?;
             let derivatives = evaluator
                 .derivatives(evaluator_id, evaluator_uv, control)
                 .map_err(|error| geometry_error(source_face_id, error))?;
@@ -234,53 +252,98 @@ fn parameterized_sample(
                 derivatives: [derivatives.du_m, derivatives.dv_m],
             })
         }
-        ExactFaceChartParameterization::ClosestPointProjection {
-            differential_step_m,
-            projection_tolerance_m,
+        ExactFaceChartParameterization::AffineEvaluatorParameters {
+            evaluator_units_per_chart_unit,
             ..
         } => {
-            let project = |coordinates| {
-                let query = parameterization
-                    .chart_plane_point(coordinates)
-                    .ok_or_else(|| {
-                        invalid_evaluation(source_face_id, "projected chart has no plane point")
-                    })?;
-                evaluator
-                    .closest_point(evaluator_id, query, *projection_tolerance_m, control)
-                    .map_err(|error| geometry_error(source_face_id, error))
-            };
-            let center = project(coordinates)?;
-            let samples = [0, 1]
-                .map(|axis| {
-                    let mut before = coordinates;
-                    let mut after = coordinates;
-                    before[axis] -= differential_step_m;
-                    after[axis] += differential_step_m;
-                    let before = project(before)?;
-                    let after = project(after)?;
-                    Ok(std::array::from_fn(|component| {
-                        (after.point_m[component] - before.point_m[component])
-                            / (2.0 * differential_step_m)
-                    }))
+            let raw_uv = parameterization
+                .evaluator_parameters(coordinates)
+                .map_err(|reason| invalid_evaluation(source_face_id, reason))?;
+            let evaluator_uv =
+                cached_evaluator_parameters(evaluator, record, source_face_id, raw_uv)?;
+            let derivatives = evaluator
+                .derivatives(evaluator_id, evaluator_uv, control)
+                .map_err(|error| geometry_error(source_face_id, error))?;
+            Ok(ParameterizedSample {
+                evaluator_uv,
+                point_m: derivatives.point_m,
+                derivatives: [
+                    derivatives
+                        .du_m
+                        .map(|value| value * evaluator_units_per_chart_unit[0]),
+                    derivatives
+                        .dv_m
+                        .map(|value| value * evaluator_units_per_chart_unit[1]),
+                ],
+            })
+        }
+        ExactFaceChartParameterization::PolarEvaluatorParameters {
+            angular_axis,
+            radial_axis,
+            radial_direction,
+            differential_step,
+            ..
+        } => {
+            let evaluator_uv = parameterization
+                .evaluator_parameters(coordinates)
+                .map_err(|reason| invalid_evaluation(source_face_id, reason))?;
+            let center = evaluator
+                .derivatives(evaluator_id, evaluator_uv, control)
+                .map_err(|error| geometry_error(source_face_id, error))?;
+            let radius_squared = coordinates[0] * coordinates[0] + coordinates[1] * coordinates[1];
+            let derivatives = if radius_squared == 0.0 {
+                [0, 1]
+                    .map(|axis| {
+                        let mut sample_coordinates = [0.0; 2];
+                        sample_coordinates[axis] = *differential_step;
+                        let sample_uv =
+                            parameterization
+                                .evaluator_parameters(sample_coordinates)
+                                .map_err(|reason| invalid_evaluation(source_face_id, reason))?;
+                        let sample = evaluator
+                            .point(evaluator_id, sample_uv, control)
+                            .map_err(|error| geometry_error(source_face_id, error))?;
+                        Ok(std::array::from_fn(|component| {
+                            (sample[component] - center.point_m[component]) / differential_step
+                        }))
+                    })
+                    .into_iter()
+                    .collect::<Result<Vec<[f64; 3]>, ExactFaceMetricError>>()?
+                    .try_into()
+                    .expect("two polar chart derivative samples")
+            } else {
+                let radius = radius_squared.sqrt();
+                let mut jacobian = [[0.0; 2]; 2];
+                jacobian[*angular_axis as usize] = [
+                    -coordinates[1] / radius_squared,
+                    coordinates[0] / radius_squared,
+                ];
+                jacobian[*radial_axis as usize] = [
+                    radial_direction * coordinates[0] / radius,
+                    radial_direction * coordinates[1] / radius,
+                ];
+                [0, 1].map(|chart_axis| {
+                    std::array::from_fn(|component| {
+                        center.du_m[component] * jacobian[0][chart_axis]
+                            + center.dv_m[component] * jacobian[1][chart_axis]
+                    })
                 })
-                .into_iter()
-                .collect::<Result<Vec<[f64; 3]>, ExactFaceMetricError>>()?;
-            if center
-                .uv
+            };
+            if evaluator_uv
                 .iter()
                 .chain(&center.point_m)
-                .chain(samples.iter().flatten())
+                .chain(derivatives.iter().flatten())
                 .any(|value| !value.is_finite())
             {
                 return Err(invalid_evaluation(
                     source_face_id,
-                    "projected chart evaluation is not finite",
+                    "polar chart evaluation is not finite",
                 ));
             }
             Ok(ParameterizedSample {
-                evaluator_uv: center.uv,
+                evaluator_uv,
                 point_m: center.point_m,
-                derivatives: [samples[0], samples[1]],
+                derivatives,
             })
         }
     }
@@ -289,38 +352,86 @@ fn parameterized_sample(
 /// Maps chart-local periodic images into the evaluator's admitted parameter
 /// bounds without changing the authoritative chart coordinates retained in
 /// metric evidence.
+fn cached_evaluator_parameters(
+    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    record: &FaceMetricRecord,
+    source_face_id: &PersistentEntityId,
+    uv: [f64; 2],
+) -> Result<[f64; 2], ExactFaceMetricError> {
+    if record.evaluator_parameter_domain.get().is_none() {
+        let domain = EvaluatorParameterDomain {
+            bounds: evaluator
+                .parameter_bounds(&record.surface_evaluator_id)
+                .map_err(|error| geometry_error(source_face_id, error))?,
+            periodicity: evaluator
+                .periodicity(&record.surface_evaluator_id)
+                .map_err(|error| geometry_error(source_face_id, error))?,
+        };
+        let _ = record.evaluator_parameter_domain.set(domain);
+    }
+    let domain = record
+        .evaluator_parameter_domain
+        .get()
+        .expect("surface parameter domain initialized");
+    map_evaluator_parameters(domain, source_face_id, uv)
+}
+
 pub(super) fn evaluator_parameters(
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
     evaluator_id: &SurfaceEvaluatorId,
     source_face_id: &PersistentEntityId,
     uv: [f64; 2],
 ) -> Result<[f64; 2], ExactFaceMetricError> {
-    let bounds = evaluator
-        .parameter_bounds(evaluator_id)
-        .map_err(|error| geometry_error(source_face_id, error))?;
-    let periodicity = evaluator
-        .periodicity(evaluator_id)
-        .map_err(|error| geometry_error(source_face_id, error))?;
+    let domain = EvaluatorParameterDomain {
+        bounds: evaluator
+            .parameter_bounds(evaluator_id)
+            .map_err(|error| geometry_error(source_face_id, error))?,
+        periodicity: evaluator
+            .periodicity(evaluator_id)
+            .map_err(|error| geometry_error(source_face_id, error))?,
+    };
+    map_evaluator_parameters(&domain, source_face_id, uv)
+}
+
+fn map_evaluator_parameters(
+    domain: &EvaluatorParameterDomain,
+    source_face_id: &PersistentEntityId,
+    uv: [f64; 2],
+) -> Result<[f64; 2], ExactFaceMetricError> {
     let mut result = uv;
-    for axis in 0..2 {
-        let bound = bounds[axis];
+    for (axis, value) in result.iter_mut().enumerate() {
+        let bound = &domain.bounds[axis];
         if !bound.start.is_finite() || !bound.end.is_finite() || bound.start >= bound.end {
             return Err(invalid_evaluation(
                 source_face_id,
                 "surface evaluator returned invalid parameter bounds",
             ));
         }
-        let Some(period) = periodicity[axis] else {
+        let Some(period) = domain.periodicity[axis] else {
             continue;
         };
-        if !period.is_finite() || period <= 0.0 || period > bound.end - bound.start {
+        if !period.is_finite() || period <= 0.0 {
             return Err(invalid_evaluation(
                 source_face_id,
                 "surface evaluator returned periodicity inconsistent with its bounds",
             ));
         }
-        if result[axis] < bound.start || result[axis] > bound.end {
-            result[axis] = bound.start + (result[axis] - bound.start).rem_euclid(period);
+        if *value < bound.start || *value > bound.end {
+            *value = bound.start + (*value - bound.start).rem_euclid(period);
+            let tolerance = f64::EPSILON.sqrt()
+                * bound
+                    .start
+                    .abs()
+                    .max(bound.end.abs())
+                    .max(value.abs())
+                    .max(1.0);
+            if *value > bound.end + tolerance {
+                return Err(invalid_evaluation(
+                    source_face_id,
+                    "periodic chart coordinate has no equivalent inside the trimmed face bounds",
+                ));
+            }
+            *value = value.min(bound.end);
         }
     }
     Ok(result)

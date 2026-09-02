@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{
     solver_boundary_edge_identity, solver_boundary_face_identity, solver_volume_element_identity,
     validate_finite, validate_token, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
-    MeshingContractError, MeshingRequest, PersistentEntityId, PersistentEntityKind,
-    SolverMeshArtifact, SolverMeshTopology, StableDigest, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
+    MeshingCancellationSignal, MeshingContractError, MeshingRequest, NeverCancelled,
+    PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, SolverMeshTopology, StableDigest,
+    SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
 const MAX_ENTITY_PROVENANCE: usize = 32;
@@ -15,6 +16,13 @@ impl SolverMeshArtifact {
     }
 
     pub(super) fn validate_payload(&self) -> Result<(), MeshingContractError> {
+        self.validate_payload_with_cancellation(&NeverCancelled)
+    }
+
+    pub(super) fn validate_payload_with_cancellation(
+        &self,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<(), MeshingContractError> {
         if self.schema_version != SOLVER_MESH_ARTIFACT_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
                 "analysis mesh artifact schema version",
@@ -25,12 +33,16 @@ impl SolverMeshArtifact {
             .validate_nonzero("artifact.root_stage_manifest_digest")?;
         self.geometry.validate()?;
         self.resolved_request.validate()?;
-        self.topology.validate(&self.resolved_request)
+        self.topology.validate(&self.resolved_request, cancellation)
     }
 }
 
 impl SolverMeshTopology {
-    pub(super) fn validate(&self, request: &MeshingRequest) -> Result<(), MeshingContractError> {
+    pub(super) fn validate(
+        &self,
+        request: &MeshingRequest,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<(), MeshingContractError> {
         require_nonempty("mesh nodes", &self.nodes)?;
         require_nonempty("volume elements", &self.volume_elements)?;
         if self.nodes.len() as u64 > request.resources.maximum_nodes
@@ -43,6 +55,7 @@ impl SolverMeshTopology {
         }
 
         let node_ids = ordered_ids("mesh nodes", self.nodes.iter().map(|node| node.node_id))?;
+        validation_checkpoint(cancellation)?;
         let element_ids = ordered_ids(
             "volume elements",
             self.volume_elements
@@ -57,6 +70,7 @@ impl SolverMeshTopology {
             "boundary edges",
             self.boundary_edges.iter().map(|edge| edge.edge_id),
         )?;
+        validation_checkpoint(cancellation)?;
         let node_identities = self
             .nodes
             .iter()
@@ -68,6 +82,7 @@ impl SolverMeshTopology {
         )?;
 
         for node in &self.nodes {
+            validation_checkpoint(cancellation)?;
             for coordinate in node.coordinates_m {
                 validate_finite("mesh node coordinate", coordinate)?;
             }
@@ -76,6 +91,7 @@ impl SolverMeshTopology {
         }
         let mut element_identities = BTreeSet::new();
         for element in &self.volume_elements {
+            validation_checkpoint(cancellation)?;
             if element.order != request.element_order
                 || element.node_ids.len()
                     != match element.order {
@@ -102,11 +118,22 @@ impl SolverMeshTopology {
             validate_region_id(&element.region_id)?;
             validate_provenance("volume element", &element.provenance)?;
         }
-        self.validate_boundaries(&node_ids, &node_identities, &element_ids, &face_ids)?;
-        super::artifact_order::validate_order_topology(self, request, &node_ids)?;
-        super::artifact_classification::validate_classification(self, &element_ids, &face_ids)?;
-        self.validate_neighbors(&element_ids)?;
-        self.validate_field_topologies(&node_ids, &element_ids, &face_ids, &edge_ids)
+        self.validate_boundaries(
+            &node_ids,
+            &node_identities,
+            &element_ids,
+            &face_ids,
+            cancellation,
+        )?;
+        super::artifact_order::validate_order_topology(self, request, &node_ids, cancellation)?;
+        super::artifact_classification::validate_classification(
+            self,
+            &element_ids,
+            &face_ids,
+            cancellation,
+        )?;
+        self.validate_neighbors(&element_ids, cancellation)?;
+        self.validate_field_topologies(&node_ids, &element_ids, &face_ids, &edge_ids, cancellation)
     }
 
     fn validate_boundaries(
@@ -115,6 +142,7 @@ impl SolverMeshTopology {
         node_identities: &BTreeMap<u64, StableDigest>,
         element_ids: &BTreeSet<u64>,
         face_ids: &BTreeSet<u64>,
+        cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<(), MeshingContractError> {
         let element_nodes = self
             .volume_elements
@@ -133,6 +161,7 @@ impl SolverMeshTopology {
             .collect::<BTreeMap<_, _>>();
         let mut face_identities = BTreeSet::new();
         for face in &self.boundary_faces {
+            validation_checkpoint(cancellation)?;
             if face.node_ids.len() != face.order.node_count()
                 || face.node_ids.iter().collect::<BTreeSet<_>>().len() != face.node_ids.len()
                 || !all_references_exist(&face.node_ids, node_ids)
@@ -174,6 +203,7 @@ impl SolverMeshTopology {
         }
         let mut edge_identities = BTreeSet::new();
         for edge in &self.boundary_edges {
+            validation_checkpoint(cancellation)?;
             if edge.node_ids.len() != edge.order.node_count()
                 || edge.node_ids[0] >= edge.node_ids[1]
                 || edge.node_ids.iter().collect::<BTreeSet<_>>().len() != edge.node_ids.len()
@@ -207,7 +237,11 @@ impl SolverMeshTopology {
         Ok(())
     }
 
-    fn validate_neighbors(&self, element_ids: &BTreeSet<u64>) -> Result<(), MeshingContractError> {
+    fn validate_neighbors(
+        &self,
+        element_ids: &BTreeSet<u64>,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<(), MeshingContractError> {
         if self.volume_elements.len().checked_mul(4) != Some(self.neighbors.len()) {
             return Err(MeshingContractError::invalid(
                 "mesh neighbors",
@@ -215,7 +249,9 @@ impl SolverMeshTopology {
             ));
         }
         let mut previous = None;
+        let mut directed_adjacencies = BTreeSet::new();
         for neighbor in &self.neighbors {
+            validation_checkpoint(cancellation)?;
             let key = (neighbor.element_id, neighbor.local_face_index);
             if neighbor.local_face_index >= 4
                 || !element_ids.contains(&neighbor.element_id)
@@ -229,18 +265,14 @@ impl SolverMeshTopology {
                     "entries or references are not canonical and valid",
                 ));
             }
+            if let Some(adjacent_element_id) = neighbor.adjacent_element_id {
+                directed_adjacencies.insert((neighbor.element_id, adjacent_element_id));
+            }
             previous = Some(key);
         }
-        for neighbor in self
-            .neighbors
-            .iter()
-            .filter(|neighbor| neighbor.adjacent_element_id.is_some())
-        {
-            let adjacent = neighbor.adjacent_element_id.expect("filtered Some");
-            if !self.neighbors.iter().any(|candidate| {
-                candidate.element_id == adjacent
-                    && candidate.adjacent_element_id == Some(neighbor.element_id)
-            }) {
+        for &(element_id, adjacent_element_id) in &directed_adjacencies {
+            validation_checkpoint(cancellation)?;
+            if !directed_adjacencies.contains(&(adjacent_element_id, element_id)) {
                 return Err(MeshingContractError::invalid(
                     "mesh neighbors",
                     "interior adjacency must be reciprocal",
@@ -256,6 +288,7 @@ impl SolverMeshTopology {
         element_ids: &BTreeSet<u64>,
         face_ids: &BTreeSet<u64>,
         edge_ids: &BTreeSet<u64>,
+        cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<(), MeshingContractError> {
         let expected = BTreeMap::from([
             (FieldTopologyLocation::Node, node_ids),
@@ -271,6 +304,7 @@ impl SolverMeshTopology {
         }
         let mut locations = BTreeSet::new();
         for topology in &self.field_topologies {
+            validation_checkpoint(cancellation)?;
             validate_token("field topology id", &topology.topology_id, 256)?;
             if !locations.insert(topology.location)
                 || &topology
@@ -314,8 +348,29 @@ pub fn validate_solver_mesh_topology(
     topology: &SolverMeshTopology,
     request: &MeshingRequest,
 ) -> Result<(), MeshingContractError> {
+    validate_solver_mesh_topology_with_cancellation(topology, request, &NeverCancelled)
+}
+
+/// Independently admits a solver topology while honoring an execution-owned cancellation signal.
+pub fn validate_solver_mesh_topology_with_cancellation(
+    topology: &SolverMeshTopology,
+    request: &MeshingRequest,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), MeshingContractError> {
     request.validate()?;
-    topology.validate(request)
+    topology.validate(request, cancellation)
+}
+
+pub(super) fn validation_checkpoint(
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), MeshingContractError> {
+    if cancellation.is_cancelled() {
+        return Err(MeshingContractError::invalid(
+            "solver mesh validation",
+            "validation was cancelled",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_region_id(id: &PersistentEntityId) -> Result<(), MeshingContractError> {

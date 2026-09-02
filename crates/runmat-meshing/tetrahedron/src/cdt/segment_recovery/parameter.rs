@@ -64,18 +64,12 @@ impl DyadicNode {
         parameter: f64,
         context: SegmentContext,
     ) -> Result<Self, DelaunaySegmentRecoveryError> {
-        let minimum_exponent = self.exponent.max(right.exponent).saturating_add(24).min(60);
-        for exponent in minimum_exponent..=60 {
-            let denominator = 1_u64 << exponent;
-            let numerator = (parameter * denominator as f64).round() as u64;
+        if let Some(mut result) = Self::from_f64_parameter(parameter) {
+            let exponent = result.exponent.max(self.exponent).max(right.exponent);
+            let numerator = result.numerator << (exponent - result.exponent);
             let left = self.numerator << (exponent - self.exponent);
             let right = right.numerator << (exponent - right.exponent);
             if numerator > left && numerator < right {
-                let mut result = Self {
-                    identity: StableDigest::ZERO,
-                    numerator,
-                    exponent,
-                };
                 while result.exponent > 0 && result.numerator.is_multiple_of(2) {
                     result.numerator /= 2;
                     result.exponent -= 1;
@@ -84,6 +78,40 @@ impl DyadicNode {
             }
         }
         self.midpoint(right, context)
+    }
+
+    fn from_f64_parameter(parameter: f64) -> Option<Self> {
+        if !parameter.is_finite() || !(0.0..=1.0).contains(&parameter) {
+            return None;
+        }
+        if parameter == 0.0 {
+            return Some(Self {
+                identity: StableDigest::ZERO,
+                numerator: 0,
+                exponent: 0,
+            });
+        }
+        let bits = parameter.to_bits();
+        let encoded_exponent = ((bits >> 52) & 0x7ff) as i32;
+        if encoded_exponent == 0 {
+            return None;
+        }
+        let significand = (bits & ((1_u64 << 52) - 1)) | (1_u64 << 52);
+        let binary_power = encoded_exponent - 1023 - 52;
+        let (numerator, exponent) = if binary_power >= 0 {
+            (significand.checked_shl(binary_power as u32)?, 0)
+        } else {
+            let exponent = u8::try_from(-binary_power).ok()?;
+            if exponent >= 63 {
+                return None;
+            }
+            (significand, exponent)
+        };
+        Some(Self {
+            identity: StableDigest::ZERO,
+            numerator,
+            exponent,
+        })
     }
 
     pub(super) fn with_identity(mut self, identity: StableDigest) -> Self {

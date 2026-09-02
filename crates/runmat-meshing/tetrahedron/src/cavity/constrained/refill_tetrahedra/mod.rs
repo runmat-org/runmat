@@ -65,12 +65,13 @@ pub(super) fn raw_refill_tetrahedron(
 
 pub(super) fn raw_refill_tetrahedron_with_rejection_reason(
     mut node_ids: [u32; 4],
-    points: [Point3; 4],
+    mut points: [Point3; 4],
     options: ConstrainedCavityRefillOptions,
 ) -> Result<ConstrainedCavityRefillTetrahedron, &'static str> {
     let mut signed_volume_m3 = tetrahedron_signed_volume(points);
     if signed_volume_m3 < 0.0 {
         node_ids.swap(1, 2);
+        points.swap(1, 2);
         signed_volume_m3 = -signed_volume_m3;
     }
     let volume_m3 = signed_volume_m3.abs();
@@ -183,5 +184,36 @@ pub(super) fn refill_validation_reason(error: &ConstrainedCavityValidationError)
         | ConstrainedCavityValidationError::DuplicateBoundaryFace { .. }
         | ConstrainedCavityValidationError::NonManifoldBoundaryEdge { .. }
         | ConstrainedCavityValidationError::ProtectedNodeOutsideBoundary { .. } => "invalid_cavity",
+    }
+}
+
+#[cfg(test)]
+mod orientation_tests {
+    use super::*;
+
+    #[test]
+    fn raw_refill_preserves_node_coordinate_pairing_when_orienting_a_tetrahedron() {
+        let options = ConstrainedCavityRefillOptions {
+            min_scaled_jacobian: 0.0,
+            ..ConstrainedCavityRefillOptions::default()
+        };
+        let node_ids = [10, 20, 30, 40];
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let forward =
+            raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options).unwrap();
+        let reverse = raw_refill_tetrahedron_with_rejection_reason(
+            [node_ids[0], node_ids[2], node_ids[1], node_ids[3]],
+            [points[0], points[2], points[1], points[3]],
+            options,
+        )
+        .unwrap();
+
+        assert_eq!(forward, reverse);
+        assert!(forward.exact_scaled_jacobian >= 0.0);
     }
 }

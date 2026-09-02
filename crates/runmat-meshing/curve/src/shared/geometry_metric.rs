@@ -13,7 +13,7 @@ use super::{SharedCurveError, SharedCurveErrorKind};
 
 mod proximity;
 
-use proximity::{derive_proximity_contributions, ordered_pair, EdgeWitness};
+use proximity::{derive_proximity_contributions, ordered_pair, ContactProximityPairs, EdgeWitness};
 
 const CURVATURE_SAMPLES_PER_EDGE: u32 = 9;
 
@@ -189,18 +189,7 @@ pub fn derive_curve_geometry_metric(
             })?,
         });
     }
-    let contact_face_pairs = topology
-        .contacts
-        .iter()
-        .flat_map(|contact| {
-            contact.side_a_face_ids.iter().flat_map(move |left| {
-                contact
-                    .side_b_face_ids
-                    .iter()
-                    .map(move |right| ordered_pair(left.clone(), right.clone()))
-            })
-        })
-        .collect::<BTreeSet<_>>();
+    let contact_pairs = contact_proximity_pairs(topology);
     let search_radius_m = request
         .global_metric
         .conservative_minimum_length_m()
@@ -210,7 +199,7 @@ pub fn derive_curve_geometry_metric(
         * 2.0;
     contributions.extend(derive_proximity_contributions(
         edge_witnesses,
-        &contact_face_pairs,
+        &contact_pairs,
         search_radius_m,
         control,
     )?);
@@ -219,6 +208,46 @@ pub fn derive_curve_geometry_metric(
         .map_err(|error| {
             SharedCurveError::invalid_request("curve geometry metric", error.to_string())
         })
+}
+
+fn contact_proximity_pairs(topology: &ExactBRepTopology) -> ContactProximityPairs {
+    let vertices_by_face = topology
+        .faces
+        .iter()
+        .map(|face| {
+            let vertices = topology
+                .coedges
+                .iter()
+                .filter(|coedge| coedge.face_id == face.id)
+                .filter_map(|coedge| topology.edges.iter().find(|edge| edge.id == coedge.edge_id))
+                .flat_map(|edge| {
+                    edge.start_vertex_id
+                        .iter()
+                        .chain(&edge.end_vertex_id)
+                        .cloned()
+                })
+                .collect::<BTreeSet<_>>();
+            (face.id.clone(), vertices)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut pairs = ContactProximityPairs::default();
+    for contact in &topology.contacts {
+        for left in &contact.side_a_face_ids {
+            for right in &contact.side_b_face_ids {
+                pairs
+                    .faces
+                    .insert(ordered_pair(left.clone(), right.clone()));
+                let left_vertices = &vertices_by_face[left];
+                let right_vertices = &vertices_by_face[right];
+                pairs.vertices.extend(left_vertices.iter().flat_map(|left| {
+                    right_vertices
+                        .iter()
+                        .map(move |right| ordered_pair(left.clone(), right.clone()))
+                }));
+            }
+        }
+    }
+    pairs
 }
 
 fn sample_incident_faces(

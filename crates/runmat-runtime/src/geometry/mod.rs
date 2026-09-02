@@ -282,6 +282,10 @@ impl Default for GeometryPreviewSceneOptions {
 const CAD_DEFAULT_FACE_COLOR: glam::Vec4 = glam::Vec4::new(0.66, 0.72, 0.80, 1.0);
 #[cfg(feature = "plot-core")]
 const CAD_FEATURE_EDGE_COLOR: glam::Vec4 = glam::Vec4::new(0.08, 0.10, 0.13, 1.0);
+#[cfg(feature = "plot-core")]
+const CAD_XRAY_FEATURE_EDGE_COLOR: glam::Vec4 = glam::Vec4::new(0.62, 0.78, 0.96, 1.0);
+#[cfg(feature = "plot-core")]
+const CAD_XRAY_FACE_ALPHA: f32 = 0.16;
 
 pub trait GeometryViewCaptureAdapter {
     fn adapter_name(&self) -> &'static str;
@@ -366,14 +370,24 @@ pub fn geometry_load_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<GeometryAsset>, OperationErrorEnvelope> {
     let import_context = current_geometry_import_context();
-    let imported = import_geometry_with_context(path, bytes, options, &import_context)
+    let mut imported = import_geometry_with_context(path, bytes, options, &import_context)
         .map_err(|error| map_geometry_load_error(path, error, &context))?;
+    imported.asset.source.sha256 = sha256_hex(bytes);
     Ok(OperationEnvelope::new(
         GEOMETRY_LOAD_OPERATION,
         GEOMETRY_LOAD_OP_VERSION,
         &context,
         imported.asset,
     ))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest as _, Sha256};
+
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub fn geometry_load(path: &str, bytes: &[u8]) -> BuiltinResult<GeometryAsset> {
@@ -989,7 +1003,11 @@ pub fn geometry_preview_scene(
         } else {
             preview_mesh_color(mesh_index)
         };
-        let alpha = if options.xray { 0.34 } else { base_color.w };
+        let alpha = if options.xray {
+            CAD_XRAY_FACE_ALPHA
+        } else {
+            base_color.w
+        };
         let mut material = runmat_plot::cad_default_material();
         material.albedo = glam::Vec4::new(base_color.x, base_color.y, base_color.z, alpha);
         if options.xray {
@@ -1298,16 +1316,24 @@ pub fn geometry_preview_figure(
                 surface_mesh.vertices.len(),
             );
             mesh.set_face_color(CAD_DEFAULT_FACE_COLOR);
-            mesh.set_edge_color(CAD_FEATURE_EDGE_COLOR);
-            mesh.set_face_alpha(if options.xray { 0.34 } else { 1.0 });
-            mesh.set_edge_alpha(if options.xray { 0.9 } else { 0.72 });
+            mesh.set_edge_color(if options.xray {
+                CAD_XRAY_FEATURE_EDGE_COLOR
+            } else {
+                CAD_FEATURE_EDGE_COLOR
+            });
+            mesh.set_face_alpha(if options.xray {
+                CAD_XRAY_FACE_ALPHA
+            } else {
+                1.0
+            });
+            mesh.set_edge_alpha(if options.xray { 1.0 } else { 0.72 });
             if let Some(colors) = presentation.vertex_colors {
                 mesh.set_vertex_colors(Some(colors))?;
             }
             if let Some(groups) = presentation.feature_edge_groups {
                 mesh.set_feature_edge_groups(Some(groups))?;
                 mesh.set_edge_mode(runmat_plot::plots::MeshEdgeMode::Feature);
-                mesh.set_edge_width(0.85);
+                mesh.set_edge_width(if options.xray { 1.05 } else { 0.85 });
             } else if surface_mesh.triangles.len() > options.edge_overlay_triangle_limit {
                 mesh.set_edge_mode(runmat_plot::plots::MeshEdgeMode::None);
                 mesh.set_edge_width(0.0);

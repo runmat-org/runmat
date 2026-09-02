@@ -7,6 +7,19 @@ mod value;
 
 use serde::{de::DeserializeOwned, Serialize};
 
+pub trait CanonicalCodecControl: Send + Sync {
+    fn is_cancelled(&self) -> bool;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct NeverCancelled;
+
+impl CanonicalCodecControl for NeverCancelled {
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanonicalLimits {
     pub maximum_encoded_bytes: usize,
@@ -60,9 +73,21 @@ pub fn encode_contract<T: Serialize>(
     contract: &T,
     limits: CanonicalLimits,
 ) -> Result<Vec<u8>, CanonicalCodecError> {
+    encode_contract_with_control(prefix, domain, contract, limits, &NeverCancelled)
+}
+
+pub fn encode_contract_with_control<T: Serialize>(
+    prefix: &[u8],
+    domain: &str,
+    contract: &T,
+    limits: CanonicalLimits,
+    control: &dyn CanonicalCodecControl,
+) -> Result<Vec<u8>, CanonicalCodecError> {
     validate_envelope(prefix, domain)?;
+    checkpoint(control)?;
     let value =
         serde_json::to_value(contract).map_err(|error| invalid("canonical encoding", error))?;
+    checkpoint(control)?;
     let mut encoded = Vec::with_capacity(1024);
     encoded.extend_from_slice(prefix);
     let mut encoder = minicbor::Encoder::new(&mut encoded);
@@ -70,7 +95,7 @@ pub fn encode_contract<T: Serialize>(
         .array(2)
         .and_then(|encoder| encoder.str(domain))
         .map_err(encoding_error)?;
-    value::encode_value(&mut encoder, &value)?;
+    value::encode_value(&mut encoder, &value, control)?;
     if encoded.len() > limits.maximum_encoded_bytes {
         return Err(invalid(
             "canonical encoding",
@@ -86,7 +111,18 @@ pub fn decode_contract<T: DeserializeOwned>(
     bytes: &[u8],
     limits: CanonicalLimits,
 ) -> Result<T, CanonicalCodecError> {
+    decode_contract_with_control(prefix, domain, bytes, limits, &NeverCancelled)
+}
+
+pub fn decode_contract_with_control<T: DeserializeOwned>(
+    prefix: &[u8],
+    domain: &str,
+    bytes: &[u8],
+    limits: CanonicalLimits,
+    control: &dyn CanonicalCodecControl,
+) -> Result<T, CanonicalCodecError> {
     validate_envelope(prefix, domain)?;
+    checkpoint(control)?;
     if bytes.len() > limits.maximum_encoded_bytes {
         return Err(invalid(
             "canonical decoding",
@@ -105,18 +141,22 @@ pub fn decode_contract<T: DeserializeOwned>(
             format!("expected {domain}, received {actual_domain}"),
         ));
     }
-    let value = value::decode_value(&mut decoder, limits, 0)?;
+    let value = value::decode_value(&mut decoder, limits, 0, control)?;
     if decoder.position() != payload.len() {
         return Err(invalid("canonical decoding", "trailing data is forbidden"));
     }
-    let canonical = encode_value_envelope(prefix, domain, &value)?;
+    let canonical = encode_value_envelope(prefix, domain, &value, control)?;
     if canonical.as_slice() != bytes {
         return Err(invalid(
             "canonical decoding",
             "input is not in canonical form",
         ));
     }
-    serde_json::from_value(value).map_err(|error| invalid("canonical decoding", error))
+    checkpoint(control)?;
+    let decoded =
+        serde_json::from_value(value).map_err(|error| invalid("canonical decoding", error))?;
+    checkpoint(control)?;
+    Ok(decoded)
 }
 
 /// Exposed for hostile-codec conformance tests that must deliberately construct noncanonical
@@ -126,13 +166,14 @@ pub fn encode_json_value(
     encoder: &mut minicbor::Encoder<&mut Vec<u8>>,
     value: &serde_json::Value,
 ) -> Result<(), CanonicalCodecError> {
-    value::encode_value(encoder, value)
+    value::encode_value(encoder, value, &NeverCancelled)
 }
 
 fn encode_value_envelope(
     prefix: &[u8],
     domain: &str,
     value: &serde_json::Value,
+    control: &dyn CanonicalCodecControl,
 ) -> Result<Vec<u8>, CanonicalCodecError> {
     let mut encoded = prefix.to_vec();
     let mut encoder = minicbor::Encoder::new(&mut encoded);
@@ -140,8 +181,18 @@ fn encode_value_envelope(
         .array(2)
         .and_then(|encoder| encoder.str(domain))
         .map_err(encoding_error)?;
-    value::encode_value(&mut encoder, value)?;
+    value::encode_value(&mut encoder, value, control)?;
     Ok(encoded)
+}
+
+pub(crate) fn checkpoint(control: &dyn CanonicalCodecControl) -> Result<(), CanonicalCodecError> {
+    if control.is_cancelled() {
+        return Err(CanonicalCodecError::invalid(
+            "canonical codec",
+            "operation was cancelled",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_envelope(prefix: &[u8], domain: &str) -> Result<(), CanonicalCodecError> {
@@ -223,6 +274,31 @@ mod tests {
         assert_eq!(
             encode_contract(PREFIX, DOMAIN, &decoded, LIMITS).unwrap(),
             bytes
+        );
+    }
+
+    #[test]
+    fn controlled_codec_observes_cancellation() {
+        struct Cancelled;
+
+        impl CanonicalCodecControl for Cancelled {
+            fn is_cancelled(&self) -> bool {
+                true
+            }
+        }
+
+        assert_eq!(
+            encode_contract_with_control(PREFIX, DOMAIN, &fixture(), LIMITS, &Cancelled)
+                .unwrap_err()
+                .field,
+            "canonical codec"
+        );
+        let bytes = encode_contract(PREFIX, DOMAIN, &fixture(), LIMITS).unwrap();
+        assert_eq!(
+            decode_contract_with_control::<Fixture>(PREFIX, DOMAIN, &bytes, LIMITS, &Cancelled,)
+                .unwrap_err()
+                .field,
+            "canonical codec"
         );
     }
 

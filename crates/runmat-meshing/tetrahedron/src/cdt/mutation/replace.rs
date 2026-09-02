@@ -4,6 +4,9 @@ use runmat_geometry_core::PersistentEntityId;
 
 use super::storage::{error, MutableTetrahedron, TopologyMutation, TopologyMutationError};
 
+type ExternalBoundary = BTreeMap<[u32; 3], Option<(u32, usize)>>;
+type ReplacementNeighbors = (Vec<[Option<u32>; 4]>, Vec<(u32, usize, u32)>);
+
 struct ReplacementPlan {
     removed: BTreeSet<u32>,
     created: Vec<u32>,
@@ -134,7 +137,7 @@ impl TopologyMutation {
     fn external_boundary(
         &self,
         removed: &BTreeSet<u32>,
-    ) -> Result<BTreeMap<[u32; 3], Option<(u32, usize)>>, TopologyMutationError> {
+    ) -> Result<ExternalBoundary, TopologyMutationError> {
         let mut boundary = BTreeMap::new();
         for tetrahedron_index in removed {
             let tetrahedron = self
@@ -204,8 +207,8 @@ impl TopologyMutation {
 fn replacement_neighbors(
     tetrahedra: &[([u32; 4], Option<PersistentEntityId>)],
     assigned: &[u32],
-    external: &BTreeMap<[u32; 3], Option<(u32, usize)>>,
-) -> Result<(Vec<[Option<u32>; 4]>, Vec<(u32, usize, u32)>), TopologyMutationError> {
+    external: &ExternalBoundary,
+) -> Result<ReplacementNeighbors, TopologyMutationError> {
     let mut uses = BTreeMap::<[u32; 3], Vec<(usize, usize)>>::new();
     for (created, (vertices, _)) in tetrahedra.iter().enumerate() {
         for opposite in 0..4 {

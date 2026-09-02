@@ -31,20 +31,24 @@ impl MeshingStageKernel for SolverValidationKernel {
             .control
             .checkpoint(MeshingStageCheckpoint::default())?;
         let projection = decode_projection(projection_publication, invocation.host)?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
         let validation = SolverMeshValidation::from_validated_projection(&projection)
             .map_err(|error| terminal_failure(MeshingStageKind::Validation, &error.to_string()))?;
-        validation
-            .validate_against(&projection)
-            .map_err(|error| terminal_failure(MeshingStageKind::Validation, &error.to_string()))?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
         let encoded = validation
             .canonical_encode()
+            .map_err(|error| terminal_failure(MeshingStageKind::Validation, &error.to_string()))?;
+        let invariant_summary_digest = validation
+            .canonical_digest()
             .map_err(|error| terminal_failure(MeshingStageKind::Validation, &error.to_string()))?;
         let checkpoint = topology_checkpoint(&projection, encoded.len() as u64)?;
         invocation.control.checkpoint(checkpoint.clone())?;
         Ok(ValidatedMeshingStageOutput {
-            invariant_summary_digest: validation.canonical_digest().map_err(|error| {
-                terminal_failure(MeshingStageKind::Validation, &error.to_string())
-            })?,
+            invariant_summary_digest,
             streams: vec![MeshingChunkStream {
                 media_type: MeshingChunkMediaType::ValidationEvidence,
                 schema_version: SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
@@ -69,10 +73,19 @@ impl MeshingStageKernel for SolverSerializationKernel {
             .control
             .checkpoint(MeshingStageCheckpoint::default())?;
         let projection = decode_projection(projection_publication, invocation.host)?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
         let validation = decode_validation(validation_publication)?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
         validation.validate_against(&projection).map_err(|error| {
             terminal_failure(MeshingStageKind::Serialization, &error.to_string())
         })?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
         let projection_digest =
             StableDigest::from_bytes(*projection_publication.stage_objects().root.digest.bytes());
         if validation_publication
@@ -91,9 +104,15 @@ impl MeshingStageKernel for SolverSerializationKernel {
             .map_err(|error| {
                 terminal_failure(MeshingStageKind::Serialization, &error.to_string())
             })?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
         artifact.validate().map_err(|error| {
             terminal_failure(MeshingStageKind::Serialization, &error.to_string())
         })?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
         let encoded = artifact.canonical_encode().map_err(|error| {
             terminal_failure(MeshingStageKind::Serialization, &error.to_string())
         })?;
@@ -124,11 +143,33 @@ impl MeshingStageKernel for SolverPublicationKernel {
         invocation
             .control
             .checkpoint(MeshingStageCheckpoint::default())?;
-        let artifact = decode_artifact(serialization)?;
+        let artifact_control = invocation.control.geometry_evaluation_control();
+        let artifact_bytes = serialized_artifact_bytes(serialization, &artifact_control)?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
         let evidence = &evidence_input.evidence_objects().evidence;
+        let artifact_byte_count = u64::try_from(artifact_bytes.len()).map_err(|_| {
+            terminal_failure(
+                MeshingStageKind::Publication,
+                "serialized artifact byte inventory overflowed",
+            )
+        })?;
+        let artifact_digest = serialization
+            .stage_objects()
+            .result_identity
+            .invariant_summary_digest;
         evidence
-            .validate(&artifact)
+            .validate_publication_closure(
+                &invocation.host.stage_identity.geometry,
+                &invocation.host.resolved_request,
+                artifact_digest,
+                artifact_byte_count,
+            )
             .map_err(|error| terminal_failure(MeshingStageKind::Publication, &error.to_string()))?;
+        invocation
+            .control
+            .checkpoint(MeshingStageCheckpoint::default())?;
         let serialization_digest =
             StableDigest::from_bytes(*serialization.stage_objects().root.digest.bytes());
         if evidence
@@ -139,11 +180,11 @@ impl MeshingStageKernel for SolverPublicationKernel {
         {
             return Err(invalid_inputs(MeshingStageKind::Publication));
         }
-        let artifact_bytes = artifact
-            .canonical_encode()
-            .map_err(|error| terminal_failure(MeshingStageKind::Publication, &error.to_string()))?;
         let evidence_bytes = evidence
             .canonical_encode()
+            .map_err(|error| terminal_failure(MeshingStageKind::Publication, &error.to_string()))?;
+        let invariant_summary_digest = evidence
+            .canonical_digest()
             .map_err(|error| terminal_failure(MeshingStageKind::Publication, &error.to_string()))?;
         let encoded_length = u64::try_from(artifact_bytes.len())
             .ok()
@@ -158,16 +199,17 @@ impl MeshingStageKernel for SolverPublicationKernel {
                     "terminal publication byte inventory overflowed",
                 )
             })?;
-        let checkpoint = artifact_checkpoint_for_stage(
-            &artifact,
+        let checkpoint = artifact_inventory_checkpoint(
+            evidence.resources.generated_nodes,
+            evidence.resources.generated_elements,
+            evidence_entity_count(evidence, "solver_boundary_faces")?,
+            evidence_entity_count(evidence, "solver_boundary_edges")?,
             encoded_length,
             MeshingStageKind::Publication,
         )?;
         invocation.control.checkpoint(checkpoint.clone())?;
         Ok(ValidatedMeshingStageOutput {
-            invariant_summary_digest: evidence.canonical_digest().map_err(|error| {
-                terminal_failure(MeshingStageKind::Publication, &error.to_string())
-            })?,
+            invariant_summary_digest,
             streams: vec![
                 MeshingChunkStream {
                     media_type: MeshingChunkMediaType::SolverMeshArtifact,
@@ -273,6 +315,7 @@ fn decode_projection(
         MeshingChunkMediaType::SolverMeshProjection,
         SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
         host.workload.stage,
+        None,
     )?;
     let projection = SolverMeshProjection::canonical_decode(&bytes)
         .map_err(|error| terminal_failure(host.workload.stage, &error.to_string()))?;
@@ -293,23 +336,24 @@ fn decode_validation(
         MeshingChunkMediaType::ValidationEvidence,
         SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
         MeshingStageKind::Serialization,
+        None,
     )?;
     SolverMeshValidation::canonical_decode(&bytes)
         .map_err(|error| terminal_failure(MeshingStageKind::Serialization, &error.to_string()))
 }
 
-fn decode_artifact(
+fn serialized_artifact_bytes(
     publication: &PreparedMeshingResultPublication,
-) -> Result<SolverMeshArtifact, Box<MeshingFailure>> {
-    let bytes = one_record(
+    cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
+) -> Result<Vec<u8>, Box<MeshingFailure>> {
+    one_record(
         publication,
         MeshingStageKind::Serialization,
         MeshingChunkMediaType::SolverMeshArtifact,
         SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
         MeshingStageKind::Publication,
-    )?;
-    SolverMeshArtifact::canonical_decode(&bytes)
-        .map_err(|error| terminal_failure(MeshingStageKind::Publication, &error.to_string()))
+        Some(cancellation),
+    )
 }
 
 fn one_record(
@@ -318,6 +362,7 @@ fn one_record(
     media_type: MeshingChunkMediaType,
     schema_version: u16,
     consumer_stage: MeshingStageKind,
+    cancellation: Option<&dyn runmat_meshing_core::MeshingCancellationSignal>,
 ) -> Result<Vec<u8>, Box<MeshingFailure>> {
     let stage = publication.stage_objects();
     if stage.result_identity.stage != producer_stage
@@ -325,9 +370,11 @@ fn one_record(
     {
         return Err(invalid_inputs(consumer_stage));
     }
-    let streams = stage
-        .decoded_streams()
-        .map_err(|error| terminal_failure(consumer_stage, &error.to_string()))?;
+    let streams = match cancellation {
+        Some(cancellation) => stage.decoded_streams_with_cancellation(cancellation),
+        None => stage.decoded_streams(),
+    }
+    .map_err(|error| terminal_failure(consumer_stage, &error.to_string()))?;
     let [stream] = streams.as_slice() else {
         return Err(invalid_inputs(consumer_stage));
     };
@@ -337,7 +384,17 @@ fn one_record(
     let [record] = stream.records.as_slice() else {
         return Err(invalid_inputs(consumer_stage));
     };
-    Ok(record.clone())
+    let mut bytes = Vec::with_capacity(record.len());
+    for block in record.chunks(1024 * 1024) {
+        if cancellation.is_some_and(|cancellation| cancellation.is_cancelled()) {
+            return Err(terminal_failure(
+                consumer_stage,
+                "logical record transfer was cancelled",
+            ));
+        }
+        bytes.extend_from_slice(block);
+    }
+    Ok(bytes)
 }
 
 fn topology_checkpoint(
@@ -374,6 +431,41 @@ fn artifact_checkpoint_for_stage(
         encoded_length,
         stage,
     )
+}
+
+fn artifact_inventory_checkpoint(
+    node_count: u64,
+    element_count: u64,
+    face_count: u64,
+    edge_count: u64,
+    encoded_length: u64,
+    stage: MeshingStageKind,
+) -> Result<MeshingStageCheckpoint, Box<MeshingFailure>> {
+    checkpoint(
+        node_count,
+        element_count,
+        face_count,
+        edge_count,
+        encoded_length,
+        stage,
+    )
+}
+
+fn evidence_entity_count(
+    evidence: &runmat_meshing_core::MeshingEvidence,
+    name: &str,
+) -> Result<u64, Box<MeshingFailure>> {
+    evidence
+        .stages
+        .last()
+        .and_then(|stage| stage.entity_counts.get(name))
+        .copied()
+        .ok_or_else(|| {
+            terminal_failure(
+                MeshingStageKind::Publication,
+                "serialization evidence is missing its solver entity inventory",
+            )
+        })
 }
 
 fn checkpoint(

@@ -1,7 +1,9 @@
 use super::*;
 use crate::contracts::canonical::{
-    CanonicalMeshingContract, MeshingManifestDisposition, MeshingStageKind, MeshingStageResultKind,
+    CanonicalMeshingContract, MeshingCancellationSignal, MeshingManifestDisposition,
+    MeshingStageKind, MeshingStageResultKind,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn digest(byte: u8) -> StableDigest {
     StableDigest::from_bytes([byte; 32])
@@ -116,7 +118,7 @@ fn closure_rejects_corruption_truncation_and_reordering() {
 }
 
 #[test]
-fn chunk_builder_enforces_stream_and_hard_byte_bounds() {
+fn chunk_builder_fragments_oversized_records_and_enforces_hard_total_bounds() {
     let mut unordered = streams();
     unordered.swap(0, 1);
     assert_eq!(
@@ -131,11 +133,23 @@ fn chunk_builder_enforces_stream_and_hard_byte_bounds() {
         schema_version: 2,
         records: vec![vec![1; 500]],
     }];
+    let fragmented = build_chunked_stage_payload(&oversized_record, policy(512, 2)).unwrap();
+    assert!(fragmented.chunks.len() > 1);
+    assert_eq!(fragmented.logical_entity_count, 1);
+    assert_eq!(fragmented.chunks[0].descriptor.logical_entity_count, 0);
+    let (identity, manifest) = build_closed_stage_manifest(
+        MeshingStageKind::Serialization,
+        MeshingStageResultKind::WholeStage,
+        digest(4),
+        digest(5),
+        Vec::new(),
+        MeshingManifestDisposition::ValidatedDependency,
+        &fragmented,
+    )
+    .unwrap();
     assert_eq!(
-        build_chunked_stage_payload(&oversized_record, policy(512, 2))
-            .unwrap_err()
-            .field,
-        "meshing chunk record"
+        decode_stage_manifest_streams(&manifest, &identity, &fragmented.chunks).unwrap(),
+        oversized_record
     );
 
     let mut total_limited = policy(512, 2);
@@ -181,5 +195,49 @@ fn manifest_rejects_duplicate_or_discontinuous_chunk_descriptors() {
     assert_eq!(
         manifest.validate().unwrap_err().field,
         "meshing stage manifest chunks"
+    );
+}
+
+#[test]
+fn stream_reconstruction_observes_cancellation_during_chunk_processing() {
+    struct CancelAfter {
+        remaining: AtomicUsize,
+    }
+
+    impl MeshingCancellationSignal for CancelAfter {
+        fn is_cancelled(&self) -> bool {
+            self.remaining
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_err()
+        }
+    }
+
+    let payload = build_chunked_stage_payload(&streams(), policy(512, 2)).unwrap();
+    let (identity, manifest) = build_closed_stage_manifest(
+        MeshingStageKind::Serialization,
+        MeshingStageResultKind::WholeStage,
+        digest(1),
+        digest(2),
+        Vec::new(),
+        MeshingManifestDisposition::ValidatedDependency,
+        &payload,
+    )
+    .unwrap();
+    let cancellation = CancelAfter {
+        remaining: AtomicUsize::new(6),
+    };
+
+    assert_eq!(
+        decode_stage_manifest_streams_with_cancellation(
+            &manifest,
+            &identity,
+            &payload.chunks,
+            &cancellation,
+        )
+        .unwrap_err()
+        .field,
+        "meshing chunk processing"
     );
 }

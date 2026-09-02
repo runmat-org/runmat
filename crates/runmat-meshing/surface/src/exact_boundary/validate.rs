@@ -68,7 +68,7 @@ pub fn validate_exact_surface_boundary(
             validate_loop(loop_boundary, &wires, &coedges, &curves)?;
             segment_count = segment_count.saturating_add(loop_boundary.segments.len());
         }
-        validate_face_segment_intersections(actual)?;
+        validate_face_segment_intersections(actual, [face.periodic_u, face.periodic_v])?;
     }
     if segment_count > MAX_BOUNDARY_SEGMENTS {
         return Err(ExactSurfaceBoundaryError::new(

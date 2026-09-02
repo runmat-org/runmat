@@ -343,8 +343,18 @@ jobs:
             --test meshing_process_conformance \
             2>&1 | tee "${EVIDENCE_DIR}/execution-conformance.log"
 
-      - name: Build the production native meshing verifier
-        run: cargo build --release -p runmat --example meshing-verification --no-default-features --features occt-native
+      - name: Build the production native meshing verifiers
+        run: cargo build --release -p runmat --example meshing-verification --example meshing-corpus --no-default-features --features occt-native
+
+      - name: Gate the complete governed meshing corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          state_dir="${RUNNER_TEMP}/runmat-meshing-release-corpus-${GITHUB_RUN_ID}"
+          RUNMAT_EXECUTION_STATE_DIR="${state_dir}" \
+            "${CARGO_TARGET_DIR}/release/examples/meshing-corpus" \
+            --tier complete \
+            --report "${EVIDENCE_DIR}/integration-corpus-linux-x86_64.json"
 
       - name: Gate stable meshing performance and resources
         shell: bash

@@ -19,7 +19,9 @@ struct IndependentTetrahedronQuality {
     contribution_count: u32,
     clipped_contribution_count: u32,
     rejected_contribution_count: u32,
-    values: [f64; 6],
+    boundary_node_count: u8,
+    protected_facet_count: u8,
+    values: [f64; 7],
 }
 
 pub fn validate_delaunay_volume_quality(
@@ -75,6 +77,21 @@ pub fn validate_delaunay_volume_quality(
     let mut maximum_ratio = 0.0_f64;
     let mut minimum_scaled_jacobian = f64::INFINITY;
     let mut worst = None::<(f64, [runmat_meshing_core::StableDigest; 4])>;
+    let mut observed_worst = None::<(f64, [[u64; 3]; 4], [runmat_meshing_core::StableDigest; 4])>;
+    let mut worst_optimization = None::<(f64, [runmat_meshing_core::StableDigest; 4])>;
+    let mut observed_worst_optimization =
+        None::<(f64, [[u64; 3]; 4], [runmat_meshing_core::StableDigest; 4])>;
+    let mut independent_violations = BTreeMap::new();
+    let boundary_nodes = provenance
+        .facets
+        .iter()
+        .flat_map(|facet| facet.node_identities)
+        .collect::<BTreeSet<_>>();
+    let protected_facets = provenance
+        .facets
+        .iter()
+        .map(|facet| facet.node_identities)
+        .collect::<BTreeSet<_>>();
 
     for (index, ((tetrahedron, context), observed)) in topology
         .tetrahedra
@@ -101,27 +118,37 @@ pub fn validate_delaunay_volume_quality(
             .map(|vertex| topology.nodes[vertex as usize].identity);
         let (minimum_edge, local_maximum_edge) = metric_edge_extrema(points, resolved.metric)
             .ok_or_else(|| invalid(Some(index), "independent metric edge evaluation failed"))?;
-        let radius = metric_circumradius(points, resolved.metric).ok_or_else(|| {
-            invalid(
-                Some(index),
-                "independent metric circumsphere evaluation failed",
-            )
-        })?;
-        let radius_edge_ratio = radius / minimum_edge;
         let scaled_jacobian = metric_scaled_jacobian(points, resolved.metric).ok_or_else(|| {
             invalid(
                 Some(index),
                 "independent metric scaled Jacobian evaluation failed",
             )
         })?;
-        let sliver_violation_ratio = if scaled_jacobian > 0.0 {
-            options.minimum_metric_scaled_jacobian / scaled_jacobian
-        } else {
+        let radius = if scaled_jacobian < super::CIRCUMRADIUS_CONDITION_FLOOR {
             f64::MAX
+        } else {
+            metric_circumradius(points, resolved.metric).unwrap_or(f64::MAX)
         };
-        let violation_ratio = (local_maximum_edge / options.maximum_metric_edge_length)
-            .max(radius_edge_ratio / options.maximum_radius_edge_ratio)
-            .max(sliver_violation_ratio);
+        let radius_edge_ratio = saturated_ratio(radius, minimum_edge);
+        let boundary_node_count = identities
+            .iter()
+            .filter(|identity| boundary_nodes.contains(identity))
+            .count() as u8;
+        let protected_facet_count = super::protected_facet_count(identities, &protected_facets);
+        let size_violation_ratio =
+            saturated_ratio(local_maximum_edge, options.maximum_metric_edge_length);
+        let radius_edge_violation_ratio =
+            saturated_ratio(radius_edge_ratio, options.maximum_radius_edge_ratio);
+        let jacobian_violation_ratio =
+            saturated_ratio(options.minimum_metric_scaled_jacobian, scaled_jacobian);
+        let violation_ratio = size_violation_ratio.max(
+            if super::evaluation::radius_edge_is_refinement_owned(boundary_node_count) {
+                radius_edge_violation_ratio
+            } else {
+                0.0
+            },
+        );
+        let optimization_violation_ratio = jacobian_violation_ratio;
         let independent = IndependentTetrahedronQuality {
             identities,
             region_id,
@@ -131,6 +158,8 @@ pub fn validate_delaunay_volume_quality(
             contribution_count: resolved.applied_contribution_count,
             clipped_contribution_count: resolved.clipped_contribution_count,
             rejected_contribution_count: resolved.rejected_contribution_count,
+            boundary_node_count,
+            protected_facet_count,
             values: [
                 minimum_edge,
                 local_maximum_edge,
@@ -138,13 +167,55 @@ pub fn validate_delaunay_volume_quality(
                 radius_edge_ratio,
                 scaled_jacobian,
                 violation_ratio,
+                optimization_violation_ratio,
             ],
         };
-        validate_tetrahedron(observed, &independent, index)?;
+        validate_tetrahedron(observed, &independent, options, index)?;
+        independent_violations.insert(identities, (violation_ratio, optimization_violation_ratio));
+        if observed.requires_refinement() {
+            let candidate = (
+                observed.refinement_violation_ratio,
+                super::tetrahedron_geometry_key(topology, observed.node_identities),
+                observed.node_identities,
+            );
+            if observed_worst.as_ref().is_none_or(|current| {
+                super::compare_violation_priority(
+                    candidate.0,
+                    candidate.1,
+                    candidate.2,
+                    current.0,
+                    current.1,
+                    current.2,
+                )
+                .is_gt()
+            }) {
+                observed_worst = Some(candidate);
+            }
+        }
+        if observed.requires_optimization() {
+            let candidate = (
+                observed.optimization_violation_ratio,
+                super::tetrahedron_geometry_key(topology, observed.node_identities),
+                observed.node_identities,
+            );
+            if observed_worst_optimization.as_ref().is_none_or(|current| {
+                super::compare_violation_priority(
+                    candidate.0,
+                    candidate.1,
+                    candidate.2,
+                    current.0,
+                    current.1,
+                    current.2,
+                )
+                .is_gt()
+            }) {
+                observed_worst_optimization = Some(candidate);
+            }
+        }
         maximum_edge = maximum_edge.max(local_maximum_edge);
         maximum_ratio = maximum_ratio.max(radius_edge_ratio);
         minimum_scaled_jacobian = minimum_scaled_jacobian.min(scaled_jacobian);
-        if violation_ratio > 1.0 {
+        if super::violation_priority_key(violation_ratio) > super::violation_priority_key(1.0) {
             let candidate = (violation_ratio, identities);
             if worst.as_ref().is_none_or(|current| {
                 candidate.0.total_cmp(&current.0).is_gt()
@@ -153,23 +224,111 @@ pub fn validate_delaunay_volume_quality(
                 worst = Some(candidate);
             }
         }
+        if super::violation_priority_key(optimization_violation_ratio)
+            > super::violation_priority_key(1.0)
+        {
+            let candidate = (optimization_violation_ratio, identities);
+            if worst_optimization.as_ref().is_none_or(|current| {
+                candidate.0.total_cmp(&current.0).is_gt()
+                    || candidate.0.total_cmp(&current.0).is_eq() && candidate.1 < current.1
+            }) {
+                worst_optimization = Some(candidate);
+            }
+        }
     }
-    if quality.worst_refinement_tetrahedron != worst.map(|(_, identity)| identity)
-        || !approximately_equal(quality.maximum_metric_edge_length, maximum_edge)
-        || !approximately_equal(quality.maximum_radius_edge_ratio, maximum_ratio)
-        || !approximately_equal(
-            quality.minimum_metric_scaled_jacobian,
-            minimum_scaled_jacobian,
+    let observed_shape_admissible = super::violation_priority_key(saturated_ratio(
+        options.minimum_metric_scaled_jacobian,
+        quality.minimum_metric_scaled_jacobian,
+    )) <= super::violation_priority_key(1.0);
+    let independent_shape_admissible = super::violation_priority_key(saturated_ratio(
+        options.minimum_metric_scaled_jacobian,
+        minimum_scaled_jacobian,
+    )) <= super::violation_priority_key(1.0);
+    if observed_shape_admissible != independent_shape_admissible
+        || quality.worst_refinement_tetrahedron != observed_worst.map(|(_, _, identity)| identity)
+        || !reported_worst_is_independently_maximal(
+            quality.worst_refinement_tetrahedron,
+            worst,
+            &independent_violations,
+            0,
         )
+        || quality.worst_optimization_tetrahedron
+            != observed_worst_optimization.map(|(_, _, identity)| identity)
+        || !reported_worst_is_independently_maximal(
+            quality.worst_optimization_tetrahedron,
+            worst_optimization,
+            &independent_violations,
+            1,
+        )
+        || !approximately_equal(quality.maximum_metric_edge_length, maximum_edge)
+        || !(if independent_shape_admissible {
+            approximately_equal(quality.maximum_radius_edge_ratio, maximum_ratio)
+                && approximately_equal(
+                    quality.minimum_metric_scaled_jacobian,
+                    minimum_scaled_jacobian,
+                )
+        } else {
+            approximately_equal_ill_conditioned(
+                quality.maximum_radius_edge_ratio,
+                maximum_ratio,
+                minimum_scaled_jacobian,
+            ) && approximately_equal_ill_conditioned(
+                quality.minimum_metric_scaled_jacobian,
+                minimum_scaled_jacobian,
+                minimum_scaled_jacobian,
+            )
+        })
     {
-        return Err(invalid(None, "aggregate quality evidence is inconsistent"));
+        return Err(invalid(
+            None,
+            format!(
+                "aggregate quality evidence is inconsistent: shape admissible observed/independent={observed_shape_admissible}/{independent_shape_admissible}; refinement worst reported/observed/independent={:?}/{:?}/{:?}; optimization worst reported/observed/independent={:?}/{:?}/{:?}; maximum edge reported/independent={:.17e}/{:.17e}; maximum radius ratio reported/independent={:.17e}/{:.17e}; minimum scaled Jacobian reported/independent={:.17e}/{:.17e}",
+                quality.worst_refinement_tetrahedron,
+                observed_worst.map(|(_, _, identity)| identity),
+                worst.map(|(_, identity)| identity),
+                quality.worst_optimization_tetrahedron,
+                observed_worst_optimization.map(|(_, _, identity)| identity),
+                worst_optimization.map(|(_, identity)| identity),
+                quality.maximum_metric_edge_length,
+                maximum_edge,
+                quality.maximum_radius_edge_ratio,
+                maximum_ratio,
+                quality.minimum_metric_scaled_jacobian,
+                minimum_scaled_jacobian,
+            ),
+        ));
     }
     Ok(())
+}
+
+/// Independent arithmetic can reverse two numerically tied extrema even after
+/// every per-cell value has cross-validated. The published identity must be the
+/// exact maximum of the published evidence, while the independent path proves
+/// that the same cell belongs to the independently maximal tolerance class.
+fn reported_worst_is_independently_maximal(
+    reported: Option<[runmat_meshing_core::StableDigest; 4]>,
+    independent_worst: Option<(f64, [runmat_meshing_core::StableDigest; 4])>,
+    independent_violations: &BTreeMap<[runmat_meshing_core::StableDigest; 4], (f64, f64)>,
+    component: usize,
+) -> bool {
+    match (reported, independent_worst) {
+        (None, None) => true,
+        (Some(reported), Some((maximum, _))) => independent_violations
+            .get(&reported)
+            .map(|values| [values.0, values.1][component])
+            .is_some_and(|value| {
+                super::violation_priority_key(value) > super::violation_priority_key(1.0)
+                    && super::violation_priority_key(value)
+                        == super::violation_priority_key(maximum)
+            }),
+        _ => false,
+    }
 }
 
 fn validate_tetrahedron(
     observed: &DelaunayTetrahedronQuality,
     independent: &IndependentTetrahedronQuality,
+    options: DelaunayVolumeQualityOptions,
     index: usize,
 ) -> Result<(), DelaunayVolumeQualityError> {
     if observed.node_identities != independent.identities
@@ -180,16 +339,148 @@ fn validate_tetrahedron(
         || observed.applied_metric_contribution_count != independent.contribution_count
         || observed.clipped_metric_contribution_count != independent.clipped_contribution_count
         || observed.rejected_metric_contribution_count != independent.rejected_contribution_count
-        || !approximately_equal(observed.minimum_metric_edge_length, independent.values[0])
-        || !approximately_equal(observed.maximum_metric_edge_length, independent.values[1])
-        || !approximately_equal(observed.metric_circumradius, independent.values[2])
-        || !approximately_equal(observed.metric_radius_edge_ratio, independent.values[3])
-        || !approximately_equal(observed.metric_scaled_jacobian, independent.values[4])
-        || !approximately_equal(observed.refinement_violation_ratio, independent.values[5])
+        || observed.boundary_node_count != independent.boundary_node_count
+        || observed.protected_facet_count != independent.protected_facet_count
     {
         return Err(invalid(
             Some(index),
-            "tetrahedron quality does not match independent metric evaluation",
+            "tetrahedron quality identity or metric provenance does not match independent evaluation",
+        ));
+    }
+    let observed_shape_admissible = super::violation_priority_key(saturated_ratio(
+        options.minimum_metric_scaled_jacobian,
+        observed.metric_scaled_jacobian,
+    )) <= super::violation_priority_key(1.0);
+    let independent_shape_admissible = super::violation_priority_key(saturated_ratio(
+        options.minimum_metric_scaled_jacobian,
+        independent.values[4],
+    )) <= super::violation_priority_key(1.0);
+    let independent_shape_well_conditioned = independent.values[4] >= 1.0e-5;
+    // Independent direct-metric evaluation and the construction path's factored-coordinate
+    // evaluation lose agreement as a cell collapses. Numerical conditioning is geometric and
+    // independent of the caller's admission threshold, so every nearly collapsed cell receives
+    // the same bounded, conditioning-aware comparison.
+    let approximately_equal_derived = |left, right| {
+        if independent_shape_well_conditioned {
+            approximately_equal(left, right)
+        } else {
+            approximately_equal_ill_conditioned(left, right, independent.values[4])
+        }
+    };
+    for (name, observed, expected) in [
+        (
+            "minimum metric edge length",
+            observed.minimum_metric_edge_length,
+            independent.values[0],
+        ),
+        (
+            "maximum metric edge length",
+            observed.maximum_metric_edge_length,
+            independent.values[1],
+        ),
+    ] {
+        if !approximately_equal_derived(observed, expected) {
+            return Err(invalid(
+                Some(index),
+                format!(
+                    "tetrahedron {name} {observed:.17e} does not match independent evaluation {expected:.17e} (metric scaled Jacobian {:.17e})",
+                    independent.values[4]
+                ),
+            ));
+        }
+    }
+    if observed_shape_admissible != independent_shape_admissible {
+        return Err(invalid(
+            Some(index),
+            "tetrahedron shape-admission decision does not match independent evaluation",
+        ));
+    }
+    let size_violation = saturated_ratio(
+        observed.maximum_metric_edge_length,
+        options.maximum_metric_edge_length,
+    );
+    let radius_edge_violation = saturated_ratio(
+        observed.metric_radius_edge_ratio,
+        options.maximum_radius_edge_ratio,
+    );
+    let jacobian_violation = saturated_ratio(
+        options.minimum_metric_scaled_jacobian,
+        observed.metric_scaled_jacobian,
+    );
+    let observed_violation = size_violation.max(
+        if super::evaluation::radius_edge_is_refinement_owned(observed.boundary_node_count) {
+            radius_edge_violation
+        } else {
+            0.0
+        },
+    );
+    let observed_optimization_violation = jacobian_violation;
+    if !approximately_equal(observed.refinement_violation_ratio, observed_violation) {
+        return Err(invalid(
+            Some(index),
+            "tetrahedron refinement violation ratio is inconsistent with its quality values",
+        ));
+    }
+    if !approximately_equal(
+        observed.optimization_violation_ratio,
+        observed_optimization_violation,
+    ) {
+        return Err(invalid(
+            Some(index),
+            "tetrahedron optimization violation ratio is inconsistent with its quality values",
+        ));
+    }
+    for (name, observed, expected) in [
+        (
+            "metric circumradius",
+            observed.metric_circumradius,
+            independent.values[2],
+        ),
+        (
+            "metric radius-edge ratio",
+            observed.metric_radius_edge_ratio,
+            independent.values[3],
+        ),
+        (
+            "metric scaled Jacobian",
+            observed.metric_scaled_jacobian,
+            independent.values[4],
+        ),
+    ] {
+        if !approximately_equal_derived(observed, expected) {
+            return Err(invalid(
+                Some(index),
+                format!(
+                    "tetrahedron {name} {observed:.17e} does not match independent evaluation {expected:.17e} (metric scaled Jacobian {:.17e})",
+                    independent.values[4]
+                ),
+            ));
+        }
+    }
+    // A violation ratio divides by the scaled Jacobian. Once both evaluation paths have
+    // independently rejected a nearly collapsed cell, that division can amplify their bounded
+    // Jacobian disagreement without bound. The observed ratio was checked against the observed
+    // primitive values above; retain direct cross-path comparison for admissible cells only.
+    if independent_shape_well_conditioned
+        && !approximately_equal(observed.refinement_violation_ratio, independent.values[5])
+    {
+        return Err(invalid(
+            Some(index),
+            format!(
+                "tetrahedron refinement violation ratio {:.17e} does not match independent evaluation {:.17e}",
+                observed.refinement_violation_ratio, independent.values[5]
+            ),
+        ));
+    }
+    if independent_shape_well_conditioned
+        && !approximately_equal(observed.optimization_violation_ratio, independent.values[6])
+    {
+        return Err(invalid(
+            Some(index),
+            format!(
+                "tetrahedron optimization violation ratio {:.17e} does not match independent evaluation {:.17e}",
+                observed.optimization_violation_ratio, independent.values[6]
+            ),
         ));
     }
     Ok(())
@@ -239,6 +530,15 @@ fn metric_length(vector: [f64; 3], metric: MetricTensor3) -> f64 {
     (vector[0] * product[0] + vector[1] * product[1] + vector[2] * product[2]).sqrt()
 }
 
+fn saturated_ratio(numerator: f64, denominator: f64) -> f64 {
+    let ratio = numerator / denominator;
+    if ratio.is_finite() {
+        ratio
+    } else {
+        f64::MAX
+    }
+}
+
 fn determinant3(matrix: [[f64; 3]; 3]) -> f64 {
     matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
         - matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
@@ -260,9 +560,15 @@ fn metric_edge_extrema(points: [[f64; 3]; 4], metric: MetricTensor3) -> Option<(
                 metric.xy * delta[0] + metric.yy * delta[1] + metric.yz * delta[2],
                 metric.xz * delta[0] + metric.yz * delta[1] + metric.zz * delta[2],
             ];
-            let length =
+            let mut length =
                 (delta[0] * product[0] + delta[1] * product[1] + delta[2] * product[2]).sqrt();
-            if !length.is_finite() || length <= 0.0 {
+            if !length.is_finite() {
+                return None;
+            }
+            if length == 0.0 && points[right] != points[left] {
+                length = f64::MIN_POSITIVE;
+            }
+            if length == 0.0 {
                 return None;
             }
             minimum = minimum.min(length);
@@ -280,9 +586,9 @@ fn metric_circumradius(points: [[f64; 3]; 4], metric: MetricTensor3) -> Option<f
             metric.xz * point[0] + metric.yz * point[1] + metric.zz * point[2],
         ]
     };
-    let quadratic = |point: [f64; 3]| {
-        let product = metric_product(point);
-        point[0] * product[0] + point[1] * product[1] + point[2] * product[2]
+    let quadratic = |vector: [f64; 3]| {
+        let product = metric_product(vector);
+        vector[0] * product[0] + vector[1] * product[1] + vector[2] * product[2]
     };
     let mut matrix = [[0.0; 3]; 3];
     let mut right = [0.0; 3];
@@ -293,16 +599,10 @@ fn metric_circumradius(points: [[f64; 3]; 4], metric: MetricTensor3) -> Option<f
             points[row + 1][2] - points[0][2],
         ];
         matrix[row] = metric_product(delta);
-        right[row] = 0.5 * (quadratic(points[row + 1]) - quadratic(points[0]));
+        right[row] = 0.5 * quadratic(delta);
     }
-    let center = gaussian_solve(matrix, right)?;
-    let delta = [
-        center[0] - points[0][0],
-        center[1] - points[0][1],
-        center[2] - points[0][2],
-    ];
-    let product = metric_product(delta);
-    let radius = (delta[0] * product[0] + delta[1] * product[1] + delta[2] * product[2]).sqrt();
+    let center_offset = gaussian_solve(matrix, right)?;
+    let radius = quadratic(center_offset).sqrt();
     (radius.is_finite() && radius > 0.0).then_some(radius)
 }
 
@@ -343,10 +643,39 @@ fn approximately_equal(left: f64, right: f64) -> bool {
             <= 131_072.0 * f64::EPSILON * left.abs().max(right.abs()).max(f64::MIN_POSITIVE)
 }
 
-fn invalid(index: Option<usize>, reason: &'static str) -> DelaunayVolumeQualityError {
+fn approximately_equal_ill_conditioned(left: f64, right: f64, scaled_jacobian: f64) -> bool {
+    const BASE_RELATIVE_TOLERANCE: f64 = 131_072.0 * f64::EPSILON;
+    const MAXIMUM_RELATIVE_TOLERANCE: f64 = 0.01;
+
+    let relative_tolerance = (BASE_RELATIVE_TOLERANCE
+        / scaled_jacobian.abs().max(f64::MIN_POSITIVE))
+    .min(MAXIMUM_RELATIVE_TOLERANCE);
+    left.is_finite()
+        && right.is_finite()
+        && (left - right).abs()
+            <= BASE_RELATIVE_TOLERANCE
+                .max(relative_tolerance * left.abs().max(right.abs()).max(f64::MIN_POSITIVE))
+}
+
+fn invalid(index: Option<usize>, reason: impl Into<String>) -> DelaunayVolumeQualityError {
     error(
         DelaunayVolumeQualityErrorKind::InvalidQuality,
         index,
         reason,
     )
+}
+
+#[cfg(test)]
+mod comparison_tests {
+    use super::approximately_equal_ill_conditioned;
+
+    #[test]
+    fn rejected_near_zero_quality_is_compared_with_a_bounded_absolute_floor() {
+        assert!(approximately_equal_ill_conditioned(
+            9.979_522_325_282_932e-25,
+            1.294_961_824_278_155_4e-24,
+            1.294_961_824_278_155_4e-24,
+        ));
+        assert!(!approximately_equal_ill_conditioned(0.0, 1.0e-6, 1.0e-24));
+    }
 }

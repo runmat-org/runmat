@@ -15,9 +15,15 @@ pub(super) struct EdgeWitness {
     pub points_m: Vec<[f64; 3]>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct ContactProximityPairs {
+    pub faces: BTreeSet<(PersistentEntityId, PersistentEntityId)>,
+    pub vertices: BTreeSet<(PersistentEntityId, PersistentEntityId)>,
+}
+
 pub(super) fn derive_proximity_contributions(
     mut witnesses: Vec<EdgeWitness>,
-    contact_face_pairs: &BTreeSet<(PersistentEntityId, PersistentEntityId)>,
+    contact_pairs: &ContactProximityPairs,
     search_radius_m: f64,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<Vec<MetricContribution>, SharedCurveError> {
@@ -64,12 +70,11 @@ pub(super) fn derive_proximity_contributions(
             {
                 continue;
             }
-            let source =
-                if face_sets_are_contact(&left.face_ids, &right.face_ids, contact_face_pairs) {
-                    MetricSourceKind::Contact
-                } else {
-                    MetricSourceKind::Proximity
-                };
+            let source = if witnesses_are_contact(left, right, contact_pairs) {
+                MetricSourceKind::Contact
+            } else {
+                MetricSourceKind::Proximity
+            };
             let mut minimum = f64::INFINITY;
             for left_point in &left.points_m {
                 for right_point in &right.points_m {
@@ -145,15 +150,28 @@ fn bounds_distance(left: ([f64; 3], [f64; 3]), right: ([f64; 3], [f64; 3])) -> f
         .sqrt()
 }
 
-fn face_sets_are_contact(
+fn witnesses_are_contact(
+    left: &EdgeWitness,
+    right: &EdgeWitness,
+    contact_pairs: &ContactProximityPairs,
+) -> bool {
+    sets_have_pair(&left.face_ids, &right.face_ids, &contact_pairs.faces)
+        || sets_have_pair(
+            &left.endpoint_ids,
+            &right.endpoint_ids,
+            &contact_pairs.vertices,
+        )
+}
+
+fn sets_have_pair(
     left: &BTreeSet<PersistentEntityId>,
     right: &BTreeSet<PersistentEntityId>,
-    contact_pairs: &BTreeSet<(PersistentEntityId, PersistentEntityId)>,
+    pairs: &BTreeSet<(PersistentEntityId, PersistentEntityId)>,
 ) -> bool {
     left.iter().any(|left| {
         right
             .iter()
-            .any(|right| contact_pairs.contains(&ordered_pair(left.clone(), right.clone())))
+            .any(|right| pairs.contains(&ordered_pair(left.clone(), right.clone())))
     })
 }
 
@@ -197,8 +215,13 @@ mod tests {
     fn sweep_emits_canonical_nearby_constraints_and_skips_far_edges() {
         let mut witnesses = vec![witness(3, 5.0), witness(1, 0.0), witness(2, 0.2)];
         witnesses[0].points_m.push([6.0, 0.0, 0.0]);
-        let contributions =
-            derive_proximity_contributions(witnesses, &BTreeSet::new(), 1.0, &Control).unwrap();
+        let contributions = derive_proximity_contributions(
+            witnesses,
+            &ContactProximityPairs::default(),
+            1.0,
+            &Control,
+        )
+        .unwrap();
         assert_eq!(contributions.len(), 2);
         assert!(contributions
             .iter()
@@ -210,7 +233,7 @@ mod tests {
     fn sweep_preserves_typed_search_budget_failure() {
         let error = derive_proximity_contributions(
             vec![witness(1, 0.0), witness(2, 0.2)],
-            &BTreeSet::new(),
+            &ContactProximityPairs::default(),
             1.0,
             &ExhaustedControl,
         )
@@ -234,7 +257,10 @@ mod tests {
 
         let contributions = derive_proximity_contributions(
             vec![left, right],
-            &BTreeSet::from([ordered_pair(left_face, right_face)]),
+            &ContactProximityPairs {
+                faces: BTreeSet::from([ordered_pair(left_face, right_face)]),
+                vertices: BTreeSet::new(),
+            },
             1.0,
             &Control,
         )
@@ -244,6 +270,29 @@ mod tests {
         assert!(contributions
             .iter()
             .all(|contribution| contribution.source == MetricSourceKind::Contact));
+    }
+
+    #[test]
+    fn authored_contact_boundary_vertices_allow_edges_that_only_meet_at_a_corner() {
+        let mut left = witness(1, 0.0);
+        let mut right = witness(2, 0.0);
+        let left_vertex = left.endpoint_ids.iter().next().unwrap().clone();
+        let right_vertex = right.endpoint_ids.iter().next().unwrap().clone();
+        left.face_ids.insert(id(PersistentEntityKind::Face, 21));
+        right.face_ids.insert(id(PersistentEntityKind::Face, 22));
+
+        let contributions = derive_proximity_contributions(
+            vec![left, right],
+            &ContactProximityPairs {
+                faces: BTreeSet::new(),
+                vertices: BTreeSet::from([ordered_pair(left_vertex, right_vertex)]),
+            },
+            1.0,
+            &Control,
+        )
+        .unwrap();
+
+        assert!(contributions.is_empty());
     }
 
     fn witness(seed: u8, x: f64) -> EdgeWitness {

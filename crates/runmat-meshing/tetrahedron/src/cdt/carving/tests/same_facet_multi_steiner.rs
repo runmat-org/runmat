@@ -8,7 +8,7 @@ use crate::cdt::{
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
 
 #[test]
-fn same_facet_multi_insertion_reaches_validated_carved_volume() {
+fn same_facet_atomic_refill_reaches_validated_carved_volume() {
     let seed_constraints = crate::cdt::test_fixtures::same_facet_multi_steiner_constraints();
     let initial = build_delaunay_volume_point_set(
         seed_constraints.volume_nodes(),
@@ -32,16 +32,7 @@ fn same_facet_multi_insertion_reaches_validated_carved_volume() {
         &NeverCancelled,
     )
     .unwrap();
-    let target_index = constraints
-        .facets
-        .iter()
-        .position(|facet| facet.facet_id == StableDigest::from_bytes([90; 32]))
-        .unwrap() as u32;
-    assert_eq!(facets.steiner_insertions.len(), 2);
-    assert!(facets
-        .steiner_insertions
-        .iter()
-        .all(|insertion| insertion.constraint_index == target_index));
+    assert!(facets.steiner_insertions.is_empty());
     validate_delaunay_facet_recovery(
         &facets,
         &constraints,

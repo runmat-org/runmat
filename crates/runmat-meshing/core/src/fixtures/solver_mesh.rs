@@ -1,14 +1,17 @@
 use crate::{
     solver_boundary_edge_identity, solver_boundary_face_identity, solver_midside_node_identity,
     solver_volume_element_identity, sort_solver_node_exact_parameters, AlgorithmVersionSet,
-    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, CancellationPolicy,
-    CurveQualityTargets, ElementOrder, FieldTopologyLocation, FieldTopologyMap,
-    GeometryRevisionRef, GeometryTolerancePolicy, MeshNeighbor, MeshRegion, MeshingQualityTargets,
-    MeshingRequest, MeshingResourceBudget, MetricCombinationRule, MetricFieldRequest,
-    MetricTensor3, PersistentEntityId, PersistentEntityKind, SolverBoundaryEdge,
-    SolverBoundaryFace, SolverMeshArtifact, SolverMeshNode, SolverMeshTopology,
-    SolverNodeExactParameter, SolverVolumeElement, StableDigest, SurfaceQualityTargets,
-    VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
+    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, CacheAdmissionDecision,
+    CancellationPolicy, CanonicalMeshingContract, CurveQualityTargets, ElementOrder,
+    FieldTopologyLocation, FieldTopologyMap, GeometryRevisionRef, GeometryTolerancePolicy,
+    InvariantEvidence, MeshNeighbor, MeshRegion, MeshingEvidence, MeshingPartitionDescriptor,
+    MeshingPartitionKind, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingResourceUsage, MeshingStageEvidence, MeshingStageKind, MetricCombinationRule,
+    MetricFieldRequest, MetricTensor3, PersistentEntityId, PersistentEntityKind,
+    PlatformBuildIdentity, SolverBoundaryEdge, SolverBoundaryFace, SolverMeshArtifact,
+    SolverMeshNode, SolverMeshTopology, SolverNodeExactParameter, SolverVolumeElement,
+    StableDigest, SurfaceQualityTargets, VolumeQualityTargets, MESHING_EVIDENCE_SCHEMA_VERSION,
+    MESHING_REQUEST_SCHEMA_VERSION, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
 pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtifact {
@@ -177,6 +180,79 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
     artifact
 }
 
+/// Builds valid canonical evidence bound to a solver-mesh fixture.
+pub fn canonical_tetrahedron_meshing_evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
+    let stage = MeshingStageEvidence {
+        stage: MeshingStageKind::Serialization,
+        partition: MeshingPartitionDescriptor {
+            kind: MeshingPartitionKind::WholeStage,
+            partition_index: 0,
+            partition_count: 1,
+            entity_range: None,
+        },
+        stage_result_digest: digest(41),
+        entity_counts: std::collections::BTreeMap::from([(
+            "serialized_elements".to_string(),
+            artifact.topology.volume_elements.len() as u64,
+        )]),
+        invariants: vec![InvariantEvidence {
+            invariant_id: "canonical_artifact_valid".to_string(),
+            passed: true,
+            measured: None,
+            required: None,
+            unit: None,
+        }],
+        achieved_error_distributions: std::collections::BTreeMap::new(),
+        completed_work: 1,
+        estimated_work: 1,
+        peak_memory_bytes: 1_024,
+        peak_scratch_bytes: 256,
+        search_work: 1,
+        maximum_recursion_depth: 1,
+        iterations: 1,
+        elapsed_time_ms: 1,
+        cancellation_checkpoints: 1,
+    };
+    let evidence = MeshingEvidence {
+        schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
+        geometry: artifact.geometry.clone(),
+        resolved_request_digest: artifact
+            .resolved_request
+            .canonical_digest()
+            .expect("fixture request must encode canonically"),
+        artifact_digest: artifact.canonical_digest,
+        algorithms: artifact.resolved_request.algorithms.clone(),
+        deterministic_seed: artifact.resolved_request.deterministic_seed,
+        platform: PlatformBuildIdentity {
+            capability_cohort: "fixture-native-exact-cad".to_string(),
+            target_triple: "fixture-target".to_string(),
+            build_digest: digest(42),
+            exact_kernel_abi: Some("fixture-kernel".to_string()),
+        },
+        stages: vec![stage],
+        sizing: Vec::new(),
+        resources: MeshingResourceUsage {
+            generated_nodes: artifact.topology.nodes.len() as u64,
+            generated_elements: artifact.topology.volume_elements.len() as u64,
+            peak_memory_bytes: 1_024,
+            peak_scratch_bytes: 256,
+            wall_time_ms: 1,
+            artifact_bytes: artifact
+                .canonical_encode()
+                .expect("fixture artifact must encode canonically")
+                .len() as u64,
+            search_work: 1,
+            maximum_recursion_depth: 1,
+            iterations: 1,
+        },
+        cache_admission: CacheAdmissionDecision::Admitted,
+    };
+    evidence
+        .validate(artifact)
+        .expect("fixture evidence must validate against its artifact");
+    evidence
+}
+
 fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
@@ -212,6 +288,7 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,

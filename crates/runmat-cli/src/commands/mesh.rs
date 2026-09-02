@@ -1,24 +1,18 @@
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
-use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_runner_native::{
-    mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingResult, NativeExecutionConfig,
-    NativeMeshingExecutionPolicy,
+    mesh_source_with_native_execution, native_meshing_execution_provider,
+    NativeMeshingPartitionPolicy, NativeMeshingSourceRequest,
 };
 use runmat_geometry_core::UnitSystem;
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_meshing_core::{
-    resolve_meshing_request, CacheAdmissionDecision, CanonicalMeshingContract, ElementOrder,
-    MeshingEvidence, MeshingRequestSettings, PlatformBuildIdentity, SolverMeshArtifact,
-    StableDigest,
+    CanonicalMeshingContract, ElementOrder, MeshingEvidence, MeshingRequestSettings,
+    SolverMeshArtifact,
 };
-use runmat_meshing_execution::{ExactMeshingDagRunResult, MeshingRunEvidenceContext};
-use runmat_runtime::analysis::{
-    AnalysisMeshingOutput, AnalysisMeshingProvider, AnalysisMeshingRequest,
-};
+use runmat_meshing_execution::ExactMeshingDagRunResult;
+use runmat_runtime::meshing::MeshingExecutionProvider;
 
 use crate::cli::{MeshElementOrderArg, MeshSourceUnitsArg};
 use crate::presentation;
@@ -35,12 +29,6 @@ pub struct MeshCommand {
     pub deterministic_seed: u64,
     pub force: bool,
     pub json: bool,
-}
-
-struct NativeMeshRequest {
-    source: PathBuf,
-    source_units: UnitSystem,
-    settings: MeshingRequestSettings,
 }
 
 pub fn execute(command: MeshCommand) -> Result<()> {
@@ -65,101 +53,43 @@ pub fn execute(command: MeshCommand) -> Result<()> {
         ..MeshingRequestSettings::default()
     };
     settings.resources.maximum_elements = command.maximum_elements;
-    let generated = generate_native_mesh(NativeMeshRequest {
+    let generated = mesh_source_with_native_execution(NativeMeshingSourceRequest {
         source: command.source.clone(),
-        source_units: match command.source_units {
-            MeshSourceUnitsArg::Meter => UnitSystem::Meter,
-            MeshSourceUnitsArg::Millimeter => UnitSystem::Millimeter,
-            MeshSourceUnitsArg::Inch => UnitSystem::Inch,
+        import_options: ExactCadImportOptions {
+            source_units: match command.source_units {
+                MeshSourceUnitsArg::Meter => UnitSystem::Meter,
+                MeshSourceUnitsArg::Millimeter => UnitSystem::Millimeter,
+                MeshSourceUnitsArg::Inch => UnitSystem::Inch,
+            },
+            ..ExactCadImportOptions::default()
         },
+        contact_definitions: Vec::new(),
+        expected_source_sha256: None,
         settings,
-    })?;
+        partition_policy: NativeMeshingPartitionPolicy::default(),
+    })
+    .map_err(anyhow::Error::new)?;
     let result = &generated.dag_result;
 
-    write_atomic(
+    let artifact_bytes = result
+        .artifact
+        .canonical_encode()
+        .context("failed to encode solver mesh")?;
+    let evidence_bytes = result
+        .evidence
+        .canonical_encode()
+        .context("failed to encode meshing evidence")?;
+    runmat_runtime::meshing::write_canonical_artifact_pair(
         &output,
-        &result
-            .artifact
-            .canonical_encode()
-            .context("failed to encode solver mesh")?,
-        command.force,
-    )?;
-    write_atomic(
+        &artifact_bytes,
         &evidence,
-        &result
-            .evidence
-            .canonical_encode()
-            .context("failed to encode meshing evidence")?,
+        &evidence_bytes,
         command.force,
-    )?;
+    )
+    .map_err(anyhow::Error::msg)?;
     verify_persisted_outputs(&output, &evidence, &result.artifact, &result.evidence)?;
 
     print_result(&command, &output, &evidence, result)
-}
-
-fn generate_native_mesh(request: NativeMeshRequest) -> Result<NativeExactMeshingResult> {
-    let source_bytes = runmat_filesystem::read(&request.source)
-        .with_context(|| format!("failed to read {}", request.source.display()))?;
-    let import_options = ExactCadImportOptions {
-        source_units: request.source_units,
-        ..ExactCadImportOptions::default()
-    };
-    let tolerance = runmat_geometry_core::GeometryTolerancePolicy {
-        source_tolerance_m: 0.0,
-        absolute_floor_m: import_options.analysis.absolute_tolerance_floor_m,
-        model_relative_term: import_options.analysis.model_relative_tolerance,
-        requested_deviation_m: import_options.analysis.requested_deviation_m,
-        maximum_healing_displacement_m: import_options.analysis.maximum_healing_displacement_m,
-    };
-    let canonical_request = resolve_meshing_request(tolerance, request.settings)
-        .context("invalid canonical meshing request")?;
-    let request_bytes = canonical_request
-        .canonical_encode()
-        .context("failed to encode canonical meshing request")?;
-    let cohort = format!("native-{}-{}", std::env::consts::ARCH, std::env::consts::OS);
-    let build_digest = StableDigest::from_bytes(
-        *Digest::sha256(format!("runmat-meshing-build:{}", env!("CARGO_PKG_VERSION")).as_bytes())
-            .bytes(),
-    );
-    let program_revision = ProgramRevision::new(
-        Digest::sha256(&request_bytes),
-        Digest::sha256(&source_bytes),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(env!("CARGO_PKG_VERSION").as_bytes()),
-            Digest::sha256(b"runmat-meshing-catalog/v1"),
-            "matlab",
-        )?,
-    )?;
-    let source_name = request.source.to_string_lossy().into_owned();
-    mesh_exact_geometry(
-        NativeExecutionConfig::for_current_executable()
-            .context("failed to locate the RunMat meshing worker executable")?,
-        NativeExactMeshingJob {
-            source_name: &source_name,
-            source_bytes: &source_bytes,
-            import_options,
-            request: canonical_request,
-            program_revision,
-            capability_cohort: Some(cohort.clone()),
-            preferred_edges_per_partition: 8,
-            preferred_faces_per_partition: 8,
-            inventory_limits: ObjectInventoryLimits::default(),
-            evidence: MeshingRunEvidenceContext {
-                platform: PlatformBuildIdentity {
-                    capability_cohort: cohort,
-                    target_triple: format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS),
-                    build_digest,
-                    exact_kernel_abi: None,
-                },
-                sizing: Vec::new(),
-                cache_admission: CacheAdmissionDecision::Admitted,
-            },
-            execution: NativeMeshingExecutionPolicy::default(),
-        },
-    )
-    .context("exact meshing failed")
 }
 
 fn print_result(
@@ -206,24 +136,8 @@ fn print_result(
     Ok(())
 }
 
-pub(crate) fn analysis_meshing_provider() -> AnalysisMeshingProvider {
-    std::sync::Arc::new(|request: &AnalysisMeshingRequest| {
-        generate_native_mesh(NativeMeshRequest {
-            source: request.source_path.clone(),
-            source_units: request.source_units,
-            settings: request.settings.clone(),
-        })
-        .map(|result| AnalysisMeshingOutput {
-            artifact: result.dag_result.artifact,
-            evidence: result.dag_result.evidence,
-            boundary_region_ids: result
-                .source_face_ids
-                .into_iter()
-                .map(|(index, id)| (format!("face_{:06}", index + 1), id))
-                .collect(),
-        })
-        .map_err(|error| error.to_string())
-    })
+pub(crate) fn meshing_execution_provider() -> MeshingExecutionProvider {
+    native_meshing_execution_provider()
 }
 
 fn validate_output_paths(output: &Path, evidence: &Path, force: bool) -> Result<()> {
@@ -274,36 +188,6 @@ fn verify_persisted_outputs(
     Ok(())
 }
 
-fn write_atomic(path: &Path, bytes: &[u8], force: bool) -> Result<()> {
-    let parent = path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    std::fs::create_dir_all(parent)
-        .with_context(|| format!("failed to create {}", parent.display()))?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temporary output in {}", parent.display()))?;
-    temporary.write_all(bytes)?;
-    temporary.as_file().sync_all()?;
-    if force {
-        temporary
-            .persist(path)
-            .map_err(|error| error.error)
-            .with_context(|| format!("failed to publish {}", path.display()))?;
-    } else {
-        temporary
-            .persist_noclobber(path)
-            .map_err(|error| error.error)
-            .with_context(|| {
-                format!(
-                    "failed to publish {}; use --force to replace an existing file",
-                    path.display()
-                )
-            })?;
-    }
-    Ok(())
-}
-
 fn hex_digest(bytes: &[u8; 32]) -> String {
     use std::fmt::Write as _;
 
@@ -316,7 +200,7 @@ fn hex_digest(bytes: &[u8; 32]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_output_paths, write_atomic};
+    use super::validate_output_paths;
 
     #[test]
     fn output_paths_must_be_distinct_and_do_not_clobber_by_default() {
@@ -325,18 +209,49 @@ mod tests {
         let evidence = directory.path().join("evidence.cbor");
         assert!(validate_output_paths(&output, &output, false).is_err());
 
-        write_atomic(&output, b"first", false).unwrap();
+        runmat_runtime::meshing::write_canonical_artifact_pair(
+            &output,
+            b"first mesh",
+            &evidence,
+            b"first evidence",
+            false,
+        )
+        .unwrap();
         assert!(validate_output_paths(&output, &evidence, false).is_err());
-        assert!(write_atomic(&output, b"second", false).is_err());
-        assert_eq!(std::fs::read(&output).unwrap(), b"first");
+        assert!(runmat_runtime::meshing::write_canonical_artifact_pair(
+            &output,
+            b"second mesh",
+            &evidence,
+            b"second evidence",
+            false,
+        )
+        .is_err());
+        assert_eq!(std::fs::read(&output).unwrap(), b"first mesh");
+        assert_eq!(std::fs::read(&evidence).unwrap(), b"first evidence");
     }
 
     #[test]
     fn force_replaces_an_existing_output_atomically() {
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("mesh.cbor");
-        write_atomic(&output, b"first", false).unwrap();
-        write_atomic(&output, b"second", true).unwrap();
-        assert_eq!(std::fs::read(&output).unwrap(), b"second");
+        let evidence = directory.path().join("evidence.cbor");
+        runmat_runtime::meshing::write_canonical_artifact_pair(
+            &output,
+            b"first mesh",
+            &evidence,
+            b"first evidence",
+            false,
+        )
+        .unwrap();
+        runmat_runtime::meshing::write_canonical_artifact_pair(
+            &output,
+            b"second mesh",
+            &evidence,
+            b"second evidence",
+            true,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), b"second mesh");
+        assert_eq!(std::fs::read(&evidence).unwrap(), b"second evidence");
     }
 }

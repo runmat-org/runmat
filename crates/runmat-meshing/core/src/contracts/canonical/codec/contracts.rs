@@ -2,13 +2,13 @@ use sha2::{Digest as _, Sha256};
 
 use super::{encode_contract, CanonicalMeshingContract, MeshingCanonicalLimits};
 use crate::contracts::canonical::{
-    AlgorithmVersionSet, GeometryTolerancePolicy, MeshingContractError, MeshingEvidence,
-    MeshingFailure, MeshingJoinIdentity, MeshingPartitionDescriptor, MeshingPartitionIdentity,
-    MeshingProgress, MeshingRequest, MeshingStageEvidence, MeshingStageIdentity,
-    MeshingStageManifest, MeshingStageResultIdentity, MeshingValidationIdentity,
-    MeshingWorkloadRequest, MeshingWorkloadResult, MetricFieldRequest, SolverMeshAdaptationLineage,
-    SolverMeshArtifact, SolverMeshProjection, SolverMeshTransferMap, SolverMeshValidation,
-    StableDigest,
+    AlgorithmVersionSet, GeometryRevisionRef, GeometryTolerancePolicy, MeshingCancellationSignal,
+    MeshingContractError, MeshingEvidence, MeshingFailure, MeshingJoinIdentity,
+    MeshingPartitionDescriptor, MeshingPartitionIdentity, MeshingProgress, MeshingRequest,
+    MeshingStageEvidence, MeshingStageIdentity, MeshingStageManifest, MeshingStageResultIdentity,
+    MeshingValidationIdentity, MeshingWorkloadRequest, MeshingWorkloadResult, MetricFieldRequest,
+    SolverMeshAdaptationLineage, SolverMeshArtifact, SolverMeshProjection, SolverMeshTopology,
+    SolverMeshTransferMap, SolverMeshValidation, StableDigest,
 };
 
 macro_rules! canonical_contract {
@@ -181,6 +181,34 @@ impl CanonicalMeshingContract for SolverMeshArtifact {
 }
 
 impl SolverMeshArtifact {
+    /// Decodes and independently validates a solver artifact under an execution-owned
+    /// cancellation signal. This retains the canonical byte and sealed-identity checks while
+    /// allowing large topology validation to satisfy the execution cadence contract.
+    pub fn canonical_decode_with_cancellation(
+        bytes: &[u8],
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<Self, MeshingContractError> {
+        let artifact: Self = super::decode_contract_with_cancellation(
+            Self::DOMAIN,
+            bytes,
+            Self::LIMITS,
+            cancellation,
+        )?;
+        artifact.validate_payload_with_cancellation(cancellation)?;
+        artifact
+            .canonical_digest
+            .validate_nonzero("artifact.canonical_digest")?;
+        if artifact.canonical_digest
+            != artifact_identity_digest_with_cancellation(&artifact, cancellation)?
+        {
+            return Err(MeshingContractError::invalid(
+                "artifact.canonical_digest",
+                "does not match the canonical artifact payload",
+            ));
+        }
+        Ok(artifact)
+    }
+
     pub fn seal_canonical_digest(&mut self) -> Result<StableDigest, MeshingContractError> {
         self.validate_payload()?;
         let digest = artifact_identity_digest(self)?;
@@ -189,19 +217,53 @@ impl SolverMeshArtifact {
     }
 }
 
+fn artifact_identity_digest_with_cancellation(
+    artifact: &SolverMeshArtifact,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<StableDigest, MeshingContractError> {
+    let projection = SolverMeshArtifactIdentity::from(artifact);
+    let encoded = super::encode_contract_with_cancellation(
+        <SolverMeshArtifact as CanonicalMeshingContract>::DOMAIN,
+        &projection,
+        <SolverMeshArtifact as CanonicalMeshingContract>::LIMITS,
+        cancellation,
+    )?;
+    Ok(StableDigest::from_bytes(Sha256::digest(encoded).into()))
+}
+
 fn artifact_identity_digest(
     artifact: &SolverMeshArtifact,
 ) -> Result<StableDigest, MeshingContractError> {
-    let mut projection = artifact.clone();
-    projection.canonical_digest = StableDigest::ZERO;
-    // The validation manifest authenticates one physical stage/chunk layout. It remains in the
-    // artifact for closure loading, but legal partition and chunk layouts must converge on the
-    // same logical solver-mesh identity.
-    projection.root_stage_manifest_digest = StableDigest::ZERO;
+    let projection = SolverMeshArtifactIdentity::from(artifact);
     let encoded = encode_contract(
         <SolverMeshArtifact as CanonicalMeshingContract>::DOMAIN,
         &projection,
         <SolverMeshArtifact as CanonicalMeshingContract>::LIMITS,
     )?;
     Ok(StableDigest::from_bytes(Sha256::digest(encoded).into()))
+}
+
+/// Borrowed identity projection: the validation manifest authenticates one physical stage/chunk
+/// layout, while legal layouts must converge on the same logical solver-mesh identity.
+#[derive(serde::Serialize)]
+struct SolverMeshArtifactIdentity<'a> {
+    schema_version: u16,
+    canonical_digest: StableDigest,
+    root_stage_manifest_digest: StableDigest,
+    geometry: &'a GeometryRevisionRef,
+    resolved_request: &'a MeshingRequest,
+    topology: &'a SolverMeshTopology,
+}
+
+impl<'a> From<&'a SolverMeshArtifact> for SolverMeshArtifactIdentity<'a> {
+    fn from(artifact: &'a SolverMeshArtifact) -> Self {
+        Self {
+            schema_version: artifact.schema_version,
+            canonical_digest: StableDigest::ZERO,
+            root_stage_manifest_digest: StableDigest::ZERO,
+            geometry: &artifact.geometry,
+            resolved_request: &artifact.resolved_request,
+            topology: &artifact.topology,
+        }
+    }
 }

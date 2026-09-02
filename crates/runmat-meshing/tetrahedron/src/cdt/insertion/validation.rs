@@ -1,7 +1,4 @@
-use runmat_meshing_core::{
-    quality::predicate::{insphere3d, PredicateSign},
-    MeshingCancellationSignal,
-};
+use runmat_meshing_core::{quality::predicate::PredicateSign, MeshingCancellationSignal};
 
 use super::{
     cavity::stable_face, error, predicate_error, topology_error,
@@ -10,6 +7,7 @@ use super::{
     DelaunayVolumeTopology, InsertionWork,
 };
 use crate::cdt::topology::build_delaunay_volume_topology_with_regions;
+use crate::cdt::topology::insphere_materialized_volume_nodes as insphere_volume_nodes;
 use crate::reconnect::two_to_three_geometry_is_admissible;
 
 pub fn validate_delaunay_volume_topology(
@@ -17,7 +15,7 @@ pub fn validate_delaunay_volume_topology(
     options: DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayInsertionError> {
-    validate_topology(topology, &[], false, options, cancellation)
+    validate_topology(topology, &[], false, true, options, cancellation)
 }
 
 pub(in crate::cdt) fn validate_constrained_delaunay_volume_topology(
@@ -26,13 +24,41 @@ pub(in crate::cdt) fn validate_constrained_delaunay_volume_topology(
     options: DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayInsertionError> {
-    validate_topology(topology, protected_faces, true, options, cancellation)
+    validate_topology(topology, protected_faces, true, true, options, cancellation)
+}
+
+/// Validates canonical positive, manifold volume topology and every protected
+/// boundary/interface face without requiring the optimized interior to remain
+/// Delaunay. Quality reconnection intentionally leaves the Delaunay family.
+pub(in crate::cdt) fn validate_conforming_volume_topology(
+    topology: &DelaunayVolumeTopology,
+    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), DelaunayInsertionError> {
+    validate_topology(
+        topology,
+        protected_faces,
+        true,
+        false,
+        options,
+        cancellation,
+    )
+}
+
+pub(in crate::cdt) fn validate_locally_delaunay_volume_topology(
+    topology: &DelaunayVolumeTopology,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), DelaunayInsertionError> {
+    validate_topology(topology, &[], true, true, options, cancellation)
 }
 
 fn validate_topology(
     topology: &DelaunayVolumeTopology,
     protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
     protect_region_boundaries: bool,
+    enforce_delaunay: bool,
     options: DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayInsertionError> {
@@ -86,6 +112,10 @@ fn validate_topology(
         .copied()
         .collect::<std::collections::BTreeSet<_>>();
 
+    if enforce_delaunay && protected_faces.is_empty() && !protect_region_boundaries {
+        validate_global_empty_spheres(topology, &mut work)?;
+    }
+
     for (tetrahedron_index, tetrahedron) in topology.tetrahedra.iter().enumerate() {
         for (opposite, neighbor_index) in tetrahedron.neighbors.iter().enumerate() {
             let Some(neighbor_index) = *neighbor_index else {
@@ -133,23 +163,26 @@ fn validate_topology(
                         "neighbors do not have distinct opposite vertices",
                     )
                 })?;
-            if in_circumsphere_exact(
-                topology,
-                tetrahedron.vertex_indices,
-                topology.nodes[opposite as usize],
-                &mut work,
-            )? && two_to_three_topology_is_admissible(
-                topology,
-                tetrahedron_index,
-                neighbor_index as usize,
-                local_opposite,
-                opposite,
-            ) && two_to_three_geometry_is_admissible(
-                tetrahedron.vertex_indices,
-                neighbor.vertex_indices,
-                |node| topology.nodes[node as usize].coordinates_m,
-            )
-            .map_err(predicate_error)?
+            if enforce_delaunay
+                && in_circumsphere_exact(
+                    topology,
+                    tetrahedron.vertex_indices,
+                    topology.nodes[opposite as usize],
+                    &mut work,
+                )?
+                && two_to_three_topology_is_admissible(
+                    topology,
+                    tetrahedron_index as u32,
+                    neighbor_index,
+                    local_opposite,
+                    opposite,
+                )
+                && two_to_three_geometry_is_admissible(
+                    tetrahedron.vertex_indices,
+                    neighbor.vertex_indices,
+                    |node| topology.nodes[node as usize].predicate_point(),
+                )
+                .map_err(predicate_error)?
             {
                 let mut face_indices = [0_u32; 3];
                 let mut cursor = 0;
@@ -167,6 +200,31 @@ fn validate_topology(
                          {face_indices:?} strictly inside its circumsphere; tetrahedra are {:?} \
                          and {:?}",
                         tetrahedron.vertex_indices, neighbor.vertex_indices
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_global_empty_spheres(
+    topology: &DelaunayVolumeTopology,
+    work: &mut InsertionWork<'_>,
+) -> Result<(), DelaunayInsertionError> {
+    for (tetrahedron_index, tetrahedron) in topology.tetrahedra.iter().enumerate() {
+        for (node_index, node) in topology.nodes.iter().copied().enumerate() {
+            work.checkpoint()?;
+            if tetrahedron.vertex_indices.contains(&(node_index as u32)) {
+                continue;
+            }
+            if in_circumsphere_exact(topology, tetrahedron.vertex_indices, node, work)? {
+                return Err(error(
+                    DelaunayInsertionErrorKind::InvalidTopology,
+                    format!(
+                        "node {node_index} is strictly inside the circumsphere of tetrahedron \
+                         {tetrahedron_index} {:?}",
+                        tetrahedron.vertex_indices,
                     ),
                 ));
             }
@@ -208,14 +266,8 @@ fn in_circumsphere_exact(
     work: &mut InsertionWork<'_>,
 ) -> Result<bool, DelaunayInsertionError> {
     work.predicate()?;
-    let points = vertices.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
-    insphere3d([
-        points[0],
-        points[1],
-        points[2],
-        points[3],
-        node.coordinates_m,
-    ])
-    .map(|sign| sign == PredicateSign::Positive)
-    .map_err(predicate_error)
+    let points = vertices.map(|vertex| topology.nodes[vertex as usize]);
+    insphere_volume_nodes([points[0], points[1], points[2], points[3], node])
+        .map(|sign| sign == PredicateSign::Positive)
+        .map_err(predicate_error)
 }

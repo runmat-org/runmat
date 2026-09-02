@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_revision": 3,
+  "corpus_revision": 4,
   "fixture_root": "crates/runmat-geometry/io/tests/fixtures",
   "entries": [
     {
@@ -206,6 +206,90 @@
       "features": ["industrial-model", "independent-exporter", "solid", "mass-properties"],
       "expected": { "outcome": "success", "topology": "1 body, 1 solid, 1 shell, 6 faces, 12 edges, 8 vertices", "mass_properties": "volume=0.0110760072 m^3; area=2.2695054688 m^2; centroid=(0,0,-0.005) m", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
       "test": { "source": "crates/runmat-geometry/io/tests/external_cad_corpus.rs", "name": "public_industrial_step_imports_exact_topology_and_mass_properties" }
+    },
+    {
+      "id": "analytic-cylinder",
+      "path": "meshing_cylinder.brep",
+      "sha256": "42101f4964e0250383d8d3e78f31a607e4ccb1e45d6ba37db213cef2676dcbf7",
+      "tier": "small",
+      "format": "brep",
+      "supported_input": true,
+      "provenance": { "origin": "repository-generated analytic conformance fixture", "exporter": "Open CASCADE BREP", "exporter_version": "repository OCCT build", "license": "RunMat repository license" },
+      "features": ["analytic-primitives", "periodic-surfaces", "seam-cases", "solid"],
+      "expected": { "outcome": "success", "topology": "one closed cylinder with one periodic lateral face", "mass_properties": "volume=2*pi m^3", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "verification/meshing/integration.json", "name": "analytic-cylinder" }
+    },
+    {
+      "id": "analytic-cone",
+      "path": "meshing_cone.brep",
+      "sha256": "7eeb50bf11bc3d0faf3d45006acb0c303bdd6c1f6e0bd4ef584ff0ee9b2ba7ae",
+      "tier": "medium",
+      "format": "brep",
+      "supported_input": true,
+      "provenance": { "origin": "repository-generated analytic conformance fixture", "exporter": "Open CASCADE BREP", "exporter_version": "repository OCCT build", "license": "RunMat repository license" },
+      "features": ["analytic-primitives", "periodic-surfaces", "seam-cases", "solid"],
+      "expected": { "outcome": "success", "topology": "one closed truncated cone with one periodic lateral face", "mass_properties": "exact conical frustum properties", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "verification/meshing/integration.json", "name": "analytic-cone" }
+    },
+    {
+      "id": "analytic-sphere",
+      "path": "meshing_sphere.brep",
+      "sha256": "deac336709cbbf92d998e581b5132e3ef53b6e605dfeb614c77aec1c85c15200",
+      "tier": "medium",
+      "format": "brep",
+      "supported_input": true,
+      "provenance": { "origin": "repository-generated analytic conformance fixture", "exporter": "Open CASCADE BREP", "exporter_version": "repository OCCT build", "license": "RunMat repository license" },
+      "features": ["analytic-primitives", "periodic-surfaces", "seam-and-pole-cases", "solid"],
+      "expected": { "outcome": "success", "topology": "one exact spherical solid assembled from eight bounded pole-safe faces", "mass_properties": "volume=4*pi/3 m^3", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "verification/meshing/integration.json", "name": "analytic-sphere" }
+    },
+    {
+      "id": "analytic-torus",
+      "path": "meshing_torus.brep",
+      "sha256": "13a9c9d408296e5087a190da0f1183654dbd2acf0441463015a6f74f5d670bf1",
+      "tier": "medium",
+      "format": "brep",
+      "supported_input": true,
+      "provenance": { "origin": "repository-generated analytic conformance fixture", "exporter": "Open CASCADE BREP", "exporter_version": "repository OCCT build", "license": "RunMat repository license" },
+      "features": ["analytic-primitives", "doubly-periodic-surfaces", "seam-cases", "solid"],
+      "expected": { "outcome": "success", "topology": "one exact toroidal solid assembled from sixteen bounded faces", "mass_properties": "volume=pi^2 m^3", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "verification/meshing/integration.json", "name": "analytic-torus" }
+    },
+    {
+      "id": "cylinder-millimeter-units",
+      "path": "meshing_cylinder_mm.brep",
+      "sha256": "4c4db7eb18b5e036052feac3a8af4ce522b306f56741c0682da456a8090fdbe4",
+      "tier": "medium",
+      "format": "brep",
+      "supported_input": true,
+      "provenance": { "origin": "repository-generated unit metamorphic fixture", "exporter": "Open CASCADE BREP", "exporter_version": "repository OCCT build", "license": "RunMat repository license" },
+      "features": ["unit-scaling", "periodic-surfaces", "solid"],
+      "expected": { "outcome": "success", "topology": "physical twin of analytic-cylinder authored in millimeters", "mass_properties": "volume=2*pi m^3 after unit conversion", "regions": 1, "mesh_error_bounds": "same resolved physical request as analytic-cylinder" },
+      "test": { "source": "verification/meshing/integration.json", "name": "cylinder-source-unit-invariance" }
+    },
+    {
+      "id": "cylinder-translated",
+      "path": "meshing_cylinder_translated.brep",
+      "sha256": "f2b884ad984405d28a1ae6e8f6ff1610bd27f8f12797782f6f70fee59641bfe4",
+      "tier": "medium",
+      "format": "brep",
+      "supported_input": true,
+      "provenance": { "origin": "repository-generated rigid-transform metamorphic fixture", "exporter": "Open CASCADE BREP", "exporter_version": "repository OCCT build", "license": "RunMat repository license" },
+      "features": ["translation-invariance", "periodic-surfaces", "solid"],
+      "expected": { "outcome": "success", "topology": "translated physical twin of analytic-cylinder", "mass_properties": "volume and area unchanged; centroid translated", "regions": 1, "mesh_error_bounds": "rigid-transform invariant quality" },
+      "test": { "source": "verification/meshing/integration.json", "name": "cylinder-rigid-transform-invariance" }
+    },
+    {
+      "id": "cylinder-rotated",
+      "path": "meshing_cylinder_rotated.brep",
+      "sha256": "9bf957d2b906c97792ef1c3ef493b6b0eb2235cc711ed82b567b5fb5283a6546",
+      "tier": "medium",
+      "format": "brep",
+      "supported_input": true,
+      "provenance": { "origin": "repository-generated rigid-transform metamorphic fixture", "exporter": "Open CASCADE BREP", "exporter_version": "repository OCCT build", "license": "RunMat repository license" },
+      "features": ["rotation-invariance", "periodic-surfaces", "solid"],
+      "expected": { "outcome": "success", "topology": "rotated physical twin of analytic-cylinder", "mass_properties": "volume and area unchanged; centroid rotated", "regions": 1, "mesh_error_bounds": "rigid-transform invariant quality" },
+      "test": { "source": "verification/meshing/integration.json", "name": "cylinder-rigid-transform-invariance" }
     },
     {
       "id": "ansys-wireframe-iges",

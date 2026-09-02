@@ -112,6 +112,7 @@ pub fn mesh_exact_face_partition(
     );
     let refinement_policy = ExactFaceRefinementPolicy {
         quality: context.quality,
+        acceptance: options.acceptance,
         delaunay: options.delaunay,
         refinement: options.refinement,
     };
@@ -157,8 +158,11 @@ pub fn mesh_exact_face_partition(
             .map_err(|error| failure(ExactFacePartitionErrorKind::Refinement(error.kind), error))?
             {
                 ExactFaceChartRefinementOutcome::Converged(mesh) => refined.push(*mesh),
-                ExactFaceChartRefinementOutcome::RequiresCurveSplit { split, .. } => {
-                    splits.push(split.curve_split);
+                ExactFaceChartRefinementOutcome::RequiresCurveSplits {
+                    splits: chart_splits,
+                    ..
+                } => {
+                    splits.extend(chart_splits.into_iter().map(|split| split.curve_split));
                 }
             }
         }

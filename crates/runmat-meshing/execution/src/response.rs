@@ -17,6 +17,7 @@ use crate::{
 
 pub const MESHING_HOST_RESPONSE_SCHEMA_VERSION: u16 = 3;
 const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
+const FAILURE_MESSAGE_PREFIX: &str = "runmat.meshing.failure:";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
@@ -142,10 +143,22 @@ impl MeshingHostResponse {
             },
             Self::Failed { failure, .. } => {
                 runmat_execution_artifact::ProgramExecutionResponse::Failure {
-                    message: failure.to_string(),
+                    message: encode_failure_message(failure)
+                        .unwrap_or_else(|_| failure.to_string()),
                 }
             }
         }
+    }
+
+    /// Recovers a canonical meshing failure from the generic program failure channel.
+    ///
+    /// Portable execution intentionally knows nothing about meshing. The meshing host therefore
+    /// owns this bounded envelope and the meshing executor unwraps it on the other side of the
+    /// process boundary. Unrelated program failures remain ordinary diagnostic strings.
+    pub fn failure_from_program_message(message: &str) -> Option<MeshingFailure> {
+        let encoded = message.strip_prefix(FAILURE_MESSAGE_PREFIX)?;
+        let bytes = decode_hex(encoded)?;
+        MeshingFailure::canonical_decode(&bytes).ok()
     }
 
     fn validate_standalone(&self) -> MeshingExecutionResult<()> {
@@ -216,6 +229,41 @@ impl MeshingHostResponse {
             }
         }
         Ok(())
+    }
+}
+
+fn encode_failure_message(failure: &MeshingFailure) -> MeshingExecutionResult<String> {
+    let bytes = failure.canonical_encode()?;
+    let mut message = String::with_capacity(FAILURE_MESSAGE_PREFIX.len() + bytes.len() * 2);
+    message.push_str(FAILURE_MESSAGE_PREFIX);
+    for byte in bytes {
+        use std::fmt::Write;
+        write!(&mut message, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    Ok(message)
+}
+
+fn decode_hex(encoded: &str) -> Option<Vec<u8>> {
+    if !encoded.len().is_multiple_of(2) {
+        return None;
+    }
+    encoded
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = hex_nibble(pair[0])?;
+            let low = hex_nibble(pair[1])?;
+            Some((high << 4) | low)
+        })
+        .collect()
+}
+
+const fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 

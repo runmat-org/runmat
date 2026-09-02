@@ -3,15 +3,16 @@ use std::collections::BTreeSet;
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
 use super::{
-    construct_delaunay_facet_recovery, error, node_index, segment_error, validate_options,
-    DelaunayConstraints, DelaunayFacetRecovery, DelaunayFacetRecoveryError,
-    DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions, DelaunaySegmentRecovery,
-    DelaunayVolumeTopology, FacetRecoveryWork,
+    error, node_index, segment_error, validate_options, DelaunayConstraints, DelaunayFacetRecovery,
+    DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions,
+    DelaunaySegmentRecovery, DelaunayVolumeTopology, FacetRecoveryWork,
 };
 use crate::cdt::{
     segment_recovery::validate_delaunay_segment_recovery_on_topology,
     validate_delaunay_segment_recovery,
 };
+
+mod evidence;
 
 pub fn validate_delaunay_facet_recovery(
     recovery: &DelaunayFacetRecovery,
@@ -47,6 +48,14 @@ pub fn validate_delaunay_facet_recovery(
         cancellation,
     )?;
     validate_steiner_insertions(recovery, constraints, options)?;
+    let effective_segments = effective_segment_recovery(recovery, constraints);
+    evidence::validate_recovered_facets(
+        recovery,
+        &effective_segments,
+        constraints,
+        options,
+        cancellation,
+    )?;
     let mut protected_faces = recovery
         .facets
         .iter()
@@ -60,7 +69,7 @@ pub fn validate_delaunay_facet_recovery(
     protected_faces.sort_unstable();
     protected_faces.dedup();
     validate_delaunay_segment_recovery_on_topology(
-        &recovery.segment_recovery,
+        &effective_segments,
         &recovery.topology,
         constraints,
         &protected_faces,
@@ -68,20 +77,30 @@ pub fn validate_delaunay_facet_recovery(
         cancellation,
     )
     .map_err(segment_error)?;
-    let expected = construct_delaunay_facet_recovery(
-        recovery.segment_recovery.clone(),
-        constraints,
-        options,
-        cancellation,
-    )?;
-    if recovery != &expected {
-        return Err(error(
-            DelaunayFacetRecoveryErrorKind::InvalidTopology,
-            None,
-            "facet recovery differs from deterministic replay of its segment-recovery prerequisite",
-        ));
-    }
     Ok(())
+}
+
+fn effective_segment_recovery(
+    recovery: &DelaunayFacetRecovery,
+    constraints: &DelaunayConstraints,
+) -> DelaunaySegmentRecovery {
+    let constraint_nodes = constraints
+        .nodes
+        .iter()
+        .map(|node| node.identity)
+        .collect::<BTreeSet<_>>();
+    let mut effective = recovery.segment_recovery.clone();
+    effective.topology = recovery.topology.clone();
+    effective.segments = recovery.recovered_segments.clone();
+    effective.steiner_node_identities = effective
+        .segments
+        .iter()
+        .flat_map(|segment| segment.nodes.iter().map(|node| node.identity))
+        .filter(|identity| !constraint_nodes.contains(identity))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    effective
 }
 
 fn validate_steiner_insertions(
@@ -89,7 +108,15 @@ fn validate_steiner_insertions(
     constraints: &DelaunayConstraints,
     options: DelaunayFacetRecoveryOptions,
 ) -> Result<(), DelaunayFacetRecoveryError> {
-    if recovery.steiner_insertions.len() as u64 > options.maximum_cavity_steiner_nodes
+    let mut insertions_per_constraint = std::collections::BTreeMap::<u32, u64>::new();
+    for insertion in &recovery.steiner_insertions {
+        *insertions_per_constraint
+            .entry(insertion.constraint_index)
+            .or_default() += 1;
+    }
+    if insertions_per_constraint
+        .values()
+        .any(|count| *count > options.maximum_cavity_steiner_nodes)
         || !recovery.steiner_insertions.windows(2).all(|pair| {
             (
                 pair[0].constraint_index,
@@ -126,7 +153,14 @@ fn validate_steiner_insertions(
         .map(|node| node.identity)
         .filter(|identity| !prerequisite_nodes.contains(identity))
         .collect::<BTreeSet<_>>();
+    let refined_segment_nodes = recovery
+        .recovered_segments
+        .iter()
+        .flat_map(|segment| segment.nodes.iter().map(|node| node.identity))
+        .filter(|identity| !prerequisite_nodes.contains(identity))
+        .collect::<BTreeSet<_>>();
     let mut evidenced_nodes = BTreeSet::new();
+    let permitted_support = prerequisite_nodes;
     for insertion in &recovery.steiner_insertions {
         if constraints
             .facets
@@ -139,17 +173,24 @@ fn validate_steiner_insertions(
                 "facet Steiner insertion names an unknown constraint",
             ));
         }
+        let inserted_node = recovery
+            .topology
+            .nodes
+            .binary_search_by_key(&insertion.node_identity, |node| node.identity)
+            .ok()
+            .map(|index| recovery.topology.nodes[index]);
         let mut support = insertion.support_node_identities;
         support.sort_unstable();
         if support != insertion.support_node_identities
             || !support
                 .iter()
-                .all(|identity| prerequisite_nodes.contains(identity))
+                .all(|identity| permitted_support.contains(identity))
             || super::cavity::steiner_identity(
                 support,
                 insertion.insertion_round,
                 insertion.candidate_rank,
             ) != insertion.node_identity
+            || inserted_node.is_none()
             || !evidenced_nodes.insert(insertion.node_identity)
         {
             return Err(error(
@@ -159,7 +200,13 @@ fn validate_steiner_insertions(
             ));
         }
     }
-    if evidenced_nodes != introduced_nodes {
+    if !evidenced_nodes.is_disjoint(&refined_segment_nodes)
+        || evidenced_nodes
+            .union(&refined_segment_nodes)
+            .copied()
+            .collect::<BTreeSet<_>>()
+            != introduced_nodes
+    {
         return Err(error(
             DelaunayFacetRecoveryErrorKind::InvalidTopology,
             None,

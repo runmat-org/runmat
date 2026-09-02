@@ -39,13 +39,44 @@ void require_bounds(const BRepAdaptor_Surface& surface) {
   }
 }
 
-void require_parameters(const BRepAdaptor_Surface& surface, double u, double v) {
-  require_finite(u, "U parameter");
-  require_finite(v, "V parameter");
-  if (u < surface.FirstUParameter() || u > surface.LastUParameter() ||
-      v < surface.FirstVParameter() || v > surface.LastVParameter()) {
+double admitted_parameter(double value,
+                          double start,
+                          double end,
+                          bool periodic,
+                          double period,
+                          const char* role) {
+  require_finite(value, role);
+  if (periodic && (!std::isfinite(period) || period <= 0.0)) {
+    throw std::runtime_error("OCCT exact surface has an invalid period");
+  }
+  const double tolerance = Precision::PConfusion() *
+                           std::max({1.0, std::abs(start), std::abs(end), std::abs(value)});
+  if ((value < start - tolerance || value > end + tolerance) && periodic) {
+    double offset = std::fmod(value - start, period);
+    if (offset < 0.0) {
+      offset += period;
+    }
+    value = start + offset;
+  }
+  if (value < start - tolerance || value > end + tolerance) {
     throw std::runtime_error("OCCT exact surface parameter is outside the face domain");
   }
+  return std::clamp(value, start, end);
+}
+
+void require_parameters(const BRepAdaptor_Surface& surface, double& u, double& v) {
+  u = admitted_parameter(u,
+                         surface.FirstUParameter(),
+                         surface.LastUParameter(),
+                         surface.IsUPeriodic(),
+                         surface.IsUPeriodic() ? surface.UPeriod() : 0.0,
+                         "U parameter");
+  v = admitted_parameter(v,
+                         surface.FirstVParameter(),
+                         surface.LastVParameter(),
+                         surface.IsVPeriodic(),
+                         surface.IsVPeriodic() ? surface.VPeriod() : 0.0,
+                         "V parameter");
 }
 
 double parameter_tolerance(double resolution) {

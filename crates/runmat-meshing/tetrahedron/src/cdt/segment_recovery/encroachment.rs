@@ -1,15 +1,19 @@
-use std::collections::{BTreeSet, VecDeque};
-
 use runmat_meshing_core::{
-    quality::predicate::{diametral_sphere_position, distance, PredicateSign},
+    quality::predicate::{diametral_sphere_position_constructed, distance, PredicateSign},
     StableDigest,
 };
 
 use super::{
-    error, find_node, node_index, DelaunaySegmentRecoveryError, DelaunaySegmentRecoveryErrorKind,
-    DyadicNode, RecoveryWork, SegmentContext,
+    error, find_node, interpolate, node_index, DelaunaySegmentRecoveryError,
+    DelaunaySegmentRecoveryErrorKind, DyadicNode, RecoveryWork, SegmentContext,
 };
 use crate::cdt::insertion::topology_access::TetrahedralTopology;
+
+#[derive(Clone, Copy)]
+pub(super) struct EncroachingPoint {
+    pub(super) vertex: u32,
+    pub(super) relation: PredicateSign,
+}
 
 pub(super) fn encroaching_point(
     topology: &impl TetrahedralTopology,
@@ -17,81 +21,82 @@ pub(super) fn encroaching_point(
     right: StableDigest,
     constraint_index: u32,
     work: &mut RecoveryWork<'_>,
-) -> Result<Option<u32>, DelaunaySegmentRecoveryError> {
+) -> Result<Option<EncroachingPoint>, DelaunaySegmentRecoveryError> {
     let left_index = node_index(topology, left)
         .ok_or_else(|| invalid_topology(constraint_index, "left segment endpoint is missing"))?
         as u32;
     let right_index = node_index(topology, right)
         .ok_or_else(|| invalid_topology(constraint_index, "right segment endpoint is missing"))?
         as u32;
-    let endpoints = [
-        topology.nodes()[left_index as usize].coordinates_m,
-        topology.nodes()[right_index as usize].coordinates_m,
+    let endpoint_nodes = [
+        topology.nodes()[left_index as usize],
+        topology.nodes()[right_index as usize],
     ];
-    let mut queue = topology
-        .vertex_star(left_index)
-        .into_iter()
-        .collect::<VecDeque<_>>();
-    let mut visited_tetrahedra = BTreeSet::new();
-    let mut classified = vec![None; topology.nodes().len()];
-    classified[left_index as usize] = Some(true);
-    classified[right_index as usize] = Some(true);
-    let mut best = None::<(f64, StableDigest, u32)>;
-
-    while let Some(tetrahedron_index) = queue.pop_front() {
+    let endpoints = endpoint_nodes.map(|node| node.coordinates_m);
+    let broad_phase = diametral_broad_phase(endpoints);
+    let mut best = None::<(f64, StableDigest, u32, PredicateSign)>;
+    for (vertex, node) in topology.nodes().iter().enumerate() {
         work.search_step(constraint_index)?;
-        if !visited_tetrahedra.insert(tetrahedron_index) {
+        if vertex == left_index as usize || vertex == right_index as usize {
             continue;
         }
-        let tetrahedron = topology.tetrahedron(tetrahedron_index).ok_or_else(|| {
+        // The sphere is contained by this deliberately conservative cube.
+        // Candidates admitted by the broad phase still receive the exact
+        // constructed predicate below.
+        if broad_phase.is_some_and(|[minimum, maximum]| {
+            (0..3).any(|axis| {
+                node.coordinates_m[axis] < minimum[axis] || node.coordinates_m[axis] > maximum[axis]
+            })
+        }) {
+            continue;
+        }
+        let relation = diametral_sphere_position_constructed(
+            endpoint_nodes.map(|node| {
+                crate::cdt::DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)
+                    .predicate_point()
+            }),
+            crate::cdt::DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)
+                .predicate_point(),
+        )
+        .map_err(|failure| {
             invalid_topology(
                 constraint_index,
-                "encroachment walk reached an inactive tetrahedron",
+                format!("diametral-sphere predicate failed: {failure:?}"),
             )
         })?;
-        for vertex in tetrahedron.vertex_indices {
-            if classified[vertex as usize].is_some() {
-                continue;
-            }
-            let node = topology.nodes()[vertex as usize];
-            let encroaches = matches!(
-                diametral_sphere_position(endpoints, node.coordinates_m).map_err(|failure| {
-                    invalid_topology(
-                        constraint_index,
-                        format!("diametral-sphere predicate failed: {failure:?}"),
-                    )
-                })?,
-                PredicateSign::Negative | PredicateSign::Zero
-            );
-            classified[vertex as usize] = Some(encroaches);
-            if encroaches {
-                let rank = circumradius_rank(endpoints, node.coordinates_m);
-                let candidate = (rank, node.identity, vertex);
-                if best.as_ref().is_none_or(|current| {
-                    candidate.0 > current.0 || candidate.0 == current.0 && candidate.1 < current.1
-                }) {
-                    best = Some(candidate);
-                }
-            }
-        }
-        for opposite in 0..4 {
-            let face_contains_encroaching_vertex = tetrahedron
-                .vertex_indices
-                .iter()
-                .enumerate()
-                .any(|(slot, vertex)| {
-                    slot != opposite && classified[*vertex as usize] == Some(true)
-                });
-            if face_contains_encroaching_vertex {
-                if let Some(neighbor) = tetrahedron.neighbors[opposite] {
-                    if !visited_tetrahedra.contains(&neighbor) {
-                        queue.push_back(neighbor);
-                    }
-                }
+        if matches!(relation, PredicateSign::Negative | PredicateSign::Zero) {
+            let rank = circumradius_rank(endpoints, node.coordinates_m);
+            let candidate = (rank, node.identity, vertex as u32, relation);
+            if best.as_ref().is_none_or(|current| {
+                candidate.0 > current.0 || candidate.0 == current.0 && candidate.1 < current.1
+            }) {
+                best = Some(candidate);
             }
         }
     }
-    Ok(best.map(|(_, _, vertex)| vertex))
+    Ok(best.map(|(_, _, vertex, relation)| EncroachingPoint { vertex, relation }))
+}
+
+fn diametral_broad_phase(endpoints: [[f64; 3]; 2]) -> Option<[[f64; 3]; 2]> {
+    let center = std::array::from_fn(|axis| 0.5 * endpoints[0][axis] + 0.5 * endpoints[1][axis]);
+    // Half the L1 endpoint distance is an upper bound for the Euclidean
+    // diametral radius. Round it outward again to absorb arithmetic error in
+    // both the radius and center construction.
+    let radius = 0.5
+        * (0..3)
+            .map(|axis| (endpoints[1][axis] - endpoints[0][axis]).abs())
+            .sum::<f64>();
+    let scale = center
+        .into_iter()
+        .map(f64::abs)
+        .fold(radius.max(1.0), f64::max);
+    let radius = radius + 16.0 * f64::EPSILON * scale;
+    radius.is_finite().then(|| {
+        [
+            center.map(|coordinate| coordinate - radius),
+            center.map(|coordinate| coordinate + radius),
+        ]
+    })
 }
 
 pub(super) fn split_parameter(
@@ -100,6 +105,7 @@ pub(super) fn split_parameter(
     left: DyadicNode,
     right: DyadicNode,
     witness: u32,
+    acute_lineage: [bool; 2],
 ) -> Result<DyadicNode, DelaunaySegmentRecoveryError> {
     let left_coordinates = find_node(topology, left.identity)
         .ok_or_else(|| invalid_topology(context.constraint_index, "left split node is missing"))?
@@ -115,15 +121,25 @@ pub(super) fn split_parameter(
     let total_length = distance(context.first_coordinates, context.last_coordinates);
     let left_parameter = left.parameter()?;
     let right_parameter = right.parameter()?;
+    let [left_is_acute, right_is_acute] = acute_lineage;
+    if left_is_acute && right_is_acute {
+        return left.midpoint(right, context);
+    }
     let left_distance = distance(left_coordinates, witness_coordinates);
     let right_distance = distance(right_coordinates, witness_coordinates);
-    let projected = if left_distance <= 2.0 * right_distance {
+    let projected = if left_is_acute {
+        distance(context.first_coordinates, witness_coordinates) / total_length
+    } else if right_is_acute {
+        1.0 - distance(context.last_coordinates, witness_coordinates) / total_length
+    } else if 2.0 * left_distance < distance(left_coordinates, right_coordinates) {
         left_parameter + left_distance / total_length
-    } else {
+    } else if 2.0 * right_distance < distance(left_coordinates, right_coordinates) {
         right_parameter - right_distance / total_length
+    } else {
+        left_parameter + 0.5 * (right_parameter - left_parameter)
     };
     let interval = right_parameter - left_parameter;
-    let guarded = if projected.is_finite()
+    let mut guarded = if projected.is_finite()
         && projected > left_parameter + 0.2 * interval
         && projected < right_parameter - 0.2 * interval
     {
@@ -131,6 +147,20 @@ pub(super) fn split_parameter(
     } else {
         left_parameter + 0.5 * interval
     };
+    if left_is_acute || right_is_acute {
+        let projected_coordinates =
+            interpolate(context.first_coordinates, context.last_coordinates, guarded);
+        let nonacute_coordinates = if left_is_acute {
+            right_coordinates
+        } else {
+            left_coordinates
+        };
+        if distance(projected_coordinates, nonacute_coordinates)
+            < distance(projected_coordinates, witness_coordinates)
+        {
+            guarded = left_parameter + 0.5 * interval;
+        }
+    }
     left.near_parameter(right, guarded, context)
 }
 
@@ -191,10 +221,7 @@ mod tests {
     use crate::cdt::{build_delaunay_volume_topology, DelaunayTopologyOptions, DelaunayVolumeNode};
 
     fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
-        DelaunayVolumeNode {
-            identity: StableDigest::from_bytes([identity; 32]),
-            coordinates_m,
-        }
+        DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
     }
 
     #[test]
@@ -229,13 +256,15 @@ mod tests {
         .unwrap()
         .unwrap();
 
-        assert_eq!(witness, 2);
+        assert_eq!(witness.vertex, 2);
+        assert_eq!(witness.relation, PredicateSign::Negative);
         let split = split_parameter(
             &topology,
             context,
             DyadicNode::endpoint(context.first_identity, false),
             DyadicNode::endpoint(context.last_identity, true),
-            witness,
+            witness.vertex,
+            [false, false],
         )
         .unwrap()
         .parameter()

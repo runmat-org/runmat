@@ -8,7 +8,7 @@ use crate::{
 
 use super::{
     ExactFaceAcceptanceError, ExactFaceAcceptanceErrorKind, ExactFaceAcceptanceOptions,
-    ExactFaceAcceptanceReport, ExactFaceTriangleAcceptance,
+    ExactFaceAcceptanceReport, ExactFaceAcceptanceViolation, ExactFaceTriangleAcceptance,
 };
 
 pub fn accept_exact_face_mesh(
@@ -19,6 +19,7 @@ pub fn accept_exact_face_mesh(
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
     let parameterization = ExactFaceChartParameterization::EvaluatorParameters;
     let report = sample(mesh, context, quality, options, &parameterization)?;
+    enforce_report(mesh, &report, quality)?;
     validate_exact_face_acceptance_in_parameterization(
         &report,
         mesh,
@@ -55,6 +56,7 @@ pub(crate) fn accept_exact_face_mesh_in_parameterization(
     parameterization: &ExactFaceChartParameterization,
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
     let report = sample(mesh, context, quality, options, parameterization)?;
+    enforce_report(mesh, &report, quality)?;
     validate_exact_face_acceptance_in_parameterization(
         &report,
         mesh,
@@ -64,6 +66,16 @@ pub(crate) fn accept_exact_face_mesh_in_parameterization(
         parameterization,
     )?;
     Ok(report)
+}
+
+pub(crate) fn sample_exact_face_mesh_in_parameterization(
+    mesh: &ExactFaceRefinedMesh,
+    context: ExactFaceRefinementContext<'_>,
+    quality: SurfaceQualityTargets,
+    options: ExactFaceAcceptanceOptions,
+    parameterization: &ExactFaceChartParameterization,
+) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
+    sample(mesh, context, quality, options, parameterization)
 }
 
 pub(crate) fn validate_exact_face_acceptance_in_parameterization(
@@ -82,6 +94,7 @@ pub(crate) fn validate_exact_face_acceptance_in_parameterization(
             "acceptance report differs from independent exact-surface resampling",
         ));
     }
+    enforce_report(mesh, report, quality)?;
     Ok(())
 }
 
@@ -180,18 +193,13 @@ fn sample(
                 }
             }
         }
-        enforce_quality(
-            mesh,
-            evidence.triangle,
-            triangle_chordal,
-            triangle_normal,
-            quality,
-        )?;
         triangle_reports.push(ExactFaceTriangleAcceptance {
             triangle: evidence.triangle,
             sample_count: budget.consumed - before,
             maximum_chordal_deviation_m: triangle_chordal.value,
+            maximum_chordal_deviation_uv: triangle_chordal.uv,
             maximum_normal_deviation_rad: triangle_normal.value,
+            maximum_normal_deviation_uv: triangle_normal.uv,
         });
     }
     Ok(ExactFaceAcceptanceReport {
@@ -203,6 +211,29 @@ fn sample(
         maximum_normal_deviation_rad: face_normal.value,
         maximum_normal_deviation_uv: face_normal.uv,
     })
+}
+
+fn enforce_report(
+    mesh: &ExactFaceRefinedMesh,
+    report: &ExactFaceAcceptanceReport,
+    quality: SurfaceQualityTargets,
+) -> Result<(), ExactFaceAcceptanceError> {
+    for triangle in &report.triangles {
+        enforce_quality(
+            mesh,
+            triangle.triangle,
+            SampleMaximum {
+                value: triangle.maximum_chordal_deviation_m,
+                uv: triangle.maximum_chordal_deviation_uv,
+            },
+            SampleMaximum {
+                value: triangle.maximum_normal_deviation_rad,
+                uv: triangle.maximum_normal_deviation_uv,
+            },
+            quality,
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_inputs(
@@ -265,7 +296,11 @@ fn enforce_quality(
             ExactFaceAcceptanceErrorKind::UnsatisfiedQuality,
             "adaptive exact-surface samples exceed the chordal-deviation target",
         )
-        .with_witness(triangle, chordal.uv));
+        .with_witness(
+            triangle,
+            chordal.uv,
+            ExactFaceAcceptanceViolation::ChordalDeviation,
+        ));
     }
     if normal.value > quality.maximum_normal_deviation_degrees.to_radians() {
         return Err(error(
@@ -273,7 +308,11 @@ fn enforce_quality(
             ExactFaceAcceptanceErrorKind::UnsatisfiedQuality,
             "adaptive exact-surface samples exceed the normal-deviation target",
         )
-        .with_witness(triangle, normal.uv));
+        .with_witness(
+            triangle,
+            normal.uv,
+            ExactFaceAcceptanceViolation::NormalDeviation,
+        ));
     }
     Ok(())
 }

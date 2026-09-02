@@ -1,12 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{MeshingContractError, PersistentEntityId, PersistentEntityKind, SolverMeshTopology};
+use super::{
+    artifact::validation_checkpoint, MeshingCancellationSignal, MeshingContractError,
+    PersistentEntityId, PersistentEntityKind, SolverMeshTopology,
+};
 
 pub(super) fn validate_classification(
     topology: &SolverMeshTopology,
     element_ids: &BTreeSet<u64>,
     face_ids: &BTreeSet<u64>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
+    validation_checkpoint(cancellation)?;
     if !strictly_increasing_by(&topology.regions, |region| &region.region_id)
         || !strictly_increasing_by(&topology.conformal_interfaces, |interface| {
             &interface.source_face_id
@@ -19,8 +24,9 @@ pub(super) fn validate_classification(
         ));
     }
 
-    let region_ids = validate_regions(topology, element_ids)?;
+    let region_ids = validate_regions(topology, element_ids, cancellation)?;
     for element in &topology.volume_elements {
+        validation_checkpoint(cancellation)?;
         if !region_ids.contains(&element.region_id) {
             return Err(MeshingContractError::invalid(
                 "volume element classification",
@@ -29,20 +35,28 @@ pub(super) fn validate_classification(
         }
     }
     let mut classified_faces = BTreeSet::new();
-    let faces = topology
-        .boundary_faces
-        .iter()
-        .map(|face| (face.face_id, face))
-        .collect::<BTreeMap<_, _>>();
+    let mut faces = BTreeMap::new();
+    for face in &topology.boundary_faces {
+        validation_checkpoint(cancellation)?;
+        faces.insert(face.face_id, face);
+    }
     validate_interfaces(
         topology,
         face_ids,
         &faces,
         &region_ids,
         &mut classified_faces,
+        cancellation,
     )?;
-    validate_contacts(topology, face_ids, &faces, &mut classified_faces)?;
+    validate_contacts(
+        topology,
+        face_ids,
+        &faces,
+        &mut classified_faces,
+        cancellation,
+    )?;
     for face in &topology.boundary_faces {
+        validation_checkpoint(cancellation)?;
         let requires_classification = face.role != super::BoundaryFaceRole::Exterior;
         if classified_faces.contains(&face.face_id) != requires_classification {
             return Err(MeshingContractError::invalid(
@@ -57,10 +71,12 @@ pub(super) fn validate_classification(
 fn validate_regions<'a>(
     topology: &'a SolverMeshTopology,
     element_ids: &BTreeSet<u64>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<BTreeSet<&'a PersistentEntityId>, MeshingContractError> {
     let mut classified_elements = BTreeSet::new();
     let mut region_ids = BTreeSet::new();
     for region in &topology.regions {
+        validation_checkpoint(cancellation)?;
         validate_region_id(&region.region_id)?;
         if region.element_ids.is_empty()
             || !strictly_increasing(&region.element_ids)
@@ -92,8 +108,10 @@ fn validate_interfaces(
     faces: &BTreeMap<u64, &super::SolverBoundaryFace>,
     region_ids: &BTreeSet<&PersistentEntityId>,
     classified_faces: &mut BTreeSet<u64>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
     for interface in &topology.conformal_interfaces {
+        validation_checkpoint(cancellation)?;
         if interface.source_face_id.kind != PersistentEntityKind::Face {
             return Err(MeshingContractError::invalid(
                 "conformal interface source face",
@@ -118,6 +136,7 @@ fn validate_interfaces(
             face_ids,
         )?;
         for face_id in &interface.boundary_face_ids {
+            validation_checkpoint(cancellation)?;
             let face = faces[face_id];
             if face.role != super::BoundaryFaceRole::ConformalInterface
                 || !face.provenance.contains(&interface.source_face_id)
@@ -138,8 +157,10 @@ fn validate_contacts(
     face_ids: &BTreeSet<u64>,
     faces: &BTreeMap<u64, &super::SolverBoundaryFace>,
     classified_faces: &mut BTreeSet<u64>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
     for contact in &topology.contacts {
+        validation_checkpoint(cancellation)?;
         if contact.contact_id.kind != PersistentEntityKind::Contact {
             return Err(MeshingContractError::invalid(
                 "contact id",
@@ -158,6 +179,7 @@ fn validate_contacts(
             super::BoundaryFaceRole::ContactPrimary,
             &contact.contact_id,
             classified_faces,
+            cancellation,
         )?;
         validate_contact_faces(
             faces,
@@ -165,6 +187,7 @@ fn validate_contacts(
             super::BoundaryFaceRole::ContactSecondary,
             &contact.contact_id,
             classified_faces,
+            cancellation,
         )?;
         validate_face_set(
             "contact secondary faces",
@@ -181,8 +204,10 @@ fn validate_contact_faces(
     role: super::BoundaryFaceRole,
     contact_id: &PersistentEntityId,
     classified_faces: &mut BTreeSet<u64>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
     for face_id in face_ids {
+        validation_checkpoint(cancellation)?;
         let face = faces[face_id];
         if face.role != role
             || !face.provenance.contains(contact_id)

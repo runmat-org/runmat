@@ -707,6 +707,14 @@ fn serial_stage_reports_typed_cancellation_and_search_budget_failures() {
         .unwrap()
         .unwrap();
     response.validate_against(&cancelled.host).unwrap();
+    let runmat_execution_artifact::ProgramExecutionResponse::Failure { message } =
+        response.program_response()
+    else {
+        panic!("failed meshing response must use the program failure channel")
+    };
+    let transported = MeshingHostResponse::failure_from_program_message(&message)
+        .expect("program failure must retain its canonical meshing failure");
+    assert_eq!(transported, *stage_failure(&error));
     assert_eq!(
         stage_failure(&error).category,
         MeshingFailureCategory::Cancelled
@@ -1497,6 +1505,7 @@ pub(crate) fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,

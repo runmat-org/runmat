@@ -1,4 +1,5 @@
 use runmat_meshing_core::{predicate::orient2d, MeshingCancellationSignal, PredicateSign};
+use std::collections::BTreeSet;
 
 use crate::{
     exact_face_interior_node_id, validate_exact_face_trimmed_delaunay, ExactFaceBoundary,
@@ -18,6 +19,23 @@ pub fn insert_exact_face_refinement_candidate(
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
 ) -> Result<ExactFaceRefinedTopology, ExactFaceRefinementError> {
+    insert_exact_face_refinement_candidates(
+        boundary,
+        topology,
+        std::slice::from_ref(candidate),
+        cancellation,
+        options,
+    )
+    .map(|(topology, _)| topology)
+}
+
+pub(crate) fn insert_exact_face_refinement_candidates(
+    boundary: &ExactFaceBoundary,
+    topology: &ExactFaceRefinedTopology,
+    candidates: &[ExactFaceRefinementCandidate],
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+) -> Result<(ExactFaceRefinedTopology, u32), ExactFaceRefinementError> {
     let pslg = &topology.pslg;
     validate_exact_face_trimmed_delaunay(
         &topology.trimmed,
@@ -28,16 +46,19 @@ pub fn insert_exact_face_refinement_candidate(
         options,
     )
     .map_err(map_delaunay)?;
-    insert_validated_face_refinement_candidate(topology, candidate, cancellation, options)
+    insert_validated_face_refinement_candidates(topology, candidates, cancellation, options)
 }
 
-pub(crate) fn insert_validated_face_refinement_candidate(
+pub(crate) fn insert_validated_face_refinement_candidates(
     topology: &ExactFaceRefinedTopology,
-    candidate: &ExactFaceRefinementCandidate,
+    candidates: &[ExactFaceRefinementCandidate],
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
-) -> Result<ExactFaceRefinedTopology, ExactFaceRefinementError> {
+) -> Result<(ExactFaceRefinedTopology, u32), ExactFaceRefinementError> {
     let pslg = &topology.pslg;
+    if candidates.is_empty() {
+        return Err(invalid(pslg, "refinement candidate batch is empty"));
+    }
     crate::exact_cdt::validate_face_trimmed_topology(
         &topology.trimmed,
         &topology.constrained,
@@ -46,28 +67,52 @@ pub(crate) fn insert_validated_face_refinement_candidate(
         options,
     )
     .map_err(map_delaunay)?;
-    validate_candidate(pslg, &topology.trimmed, candidate)?;
+    for candidate in candidates {
+        validate_candidate(pslg, &topology.trimmed, candidate)?;
+    }
 
-    let refined_pslg = append_interior_vertex(pslg, candidate.uv)?;
-    let delaunay =
-        crate::exact_cdt::triangulate_validated_face_pslg(&refined_pslg, cancellation, options)
+    let mut seen = BTreeSet::new();
+    let additions = candidates
+        .iter()
+        .filter(|candidate| seen.insert(candidate.uv.map(f64::to_bits)))
+        .map(|candidate| ExactFacePslgVertex {
+            node_id: exact_face_interior_node_id(&pslg.source_face_id, candidate.uv),
+            seam_image: None,
+            uv: candidate.uv,
+        })
+        .collect::<Vec<_>>();
+    let inserted_count = u32::try_from(additions.len()).map_err(|_| {
+        delaunay_error(
+            pslg,
+            ExactFaceDelaunayErrorKind::ElementLimit,
+            "face refinement candidate batch exceeds the vertex identity space",
+        )
+    })?;
+    let (refined_pslg, _) = crate::exact_cdt::insert_pslg_vertices(pslg, &additions)
+        .map_err(|reason| delaunay_error(pslg, ExactFaceDelaunayErrorKind::ElementLimit, reason))?;
+    rebuild_refined_topology(refined_pslg, cancellation, options)
+        .map(|topology| (topology, inserted_count))
+}
+
+fn rebuild_refined_topology(
+    pslg: ExactFacePslg,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+) -> Result<ExactFaceRefinedTopology, ExactFaceRefinementError> {
+    let delaunay = crate::exact_cdt::triangulate_validated_face_pslg(&pslg, cancellation, options)
+        .map_err(map_delaunay)?;
+    let refined_constrained =
+        crate::exact_cdt::recover_validated_face_segments(&delaunay, &pslg, cancellation, options)
             .map_err(map_delaunay)?;
-    let refined_constrained = crate::exact_cdt::recover_validated_face_segments(
-        &delaunay,
-        &refined_pslg,
-        cancellation,
-        options,
-    )
-    .map_err(map_delaunay)?;
     let refined_trimmed = crate::exact_cdt::carve_validated_face_domain(
         &refined_constrained,
-        &refined_pslg,
+        &pslg,
         cancellation,
         options,
     )
     .map_err(map_delaunay)?;
     Ok(ExactFaceRefinedTopology {
-        pslg: refined_pslg,
+        pslg,
         constrained: refined_constrained,
         trimmed: refined_trimmed,
     })
@@ -136,22 +181,6 @@ fn validate_candidate(
         ));
     }
     Ok(())
-}
-
-fn append_interior_vertex(
-    pslg: &ExactFacePslg,
-    uv: [f64; 2],
-) -> Result<ExactFacePslg, ExactFaceRefinementError> {
-    crate::exact_cdt::insert_pslg_vertices(
-        pslg,
-        &[ExactFacePslgVertex {
-            node_id: exact_face_interior_node_id(&pslg.source_face_id, uv),
-            seam_image: None,
-            uv,
-        }],
-    )
-    .map(|(refined, _)| refined)
-    .map_err(|reason| delaunay_error(pslg, ExactFaceDelaunayErrorKind::ElementLimit, reason))
 }
 
 fn within_segment_bounds(point: [f64; 2], endpoints: [[f64; 2]; 2]) -> bool {

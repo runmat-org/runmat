@@ -23,7 +23,7 @@ fn runmat_and_independent_meshers_agree_on_box_invariants() {
     let runmat_triangles = runmat_boundary_triangles(artifact);
     assert_watertight(&runmat_coordinates, &runmat_triangles);
     assert_eq!(oracle_surface.triangles.len(), 12);
-    assert_eq!(artifact.topology.boundary_faces.len(), 16);
+    assert_eq!(artifact.topology.boundary_faces.len(), 12);
     assert_eq!(
         bounds(&oracle_surface.vertices),
         ([0.0, 0.0, 0.0], [1.0, 2.0, 3.0])

@@ -36,9 +36,11 @@ fn topology() -> DelaunayVolumeTopology {
     ]
     .into_iter()
     .enumerate()
-    .map(|(index, coordinates_m)| DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-        coordinates_m,
+    .map(|(index, coordinates_m)| {
+        DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes([(index + 1) as u8; 32]),
+            coordinates_m,
+        )
     })
     .collect();
     let topology = build_delaunay_volume_topology(
@@ -87,6 +89,7 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 10.0,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,
@@ -265,6 +268,7 @@ fn adaptation() -> (
             provenance: &provenance,
             quality: &quality,
             quality_options,
+            fixed_node_identities: &[],
         },
         &[mark],
         DelaunayAdaptiveRefinementOptions::default(),
@@ -291,6 +295,7 @@ fn adaptive_lineage_builds_canonical_refinement_and_coarsening_records() {
         provenance: &provenance,
         quality: &quality,
         quality_options,
+        fixed_node_identities: &[],
     };
     let source = artifact(&topology);
     let refined = artifact(&refinement.topology);
@@ -403,6 +408,7 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
         provenance: &provenance,
         quality: &quality,
         quality_options,
+        fixed_node_identities: &[],
     };
     let source = artifact(&topology);
     let refined = artifact(&refinement.topology);

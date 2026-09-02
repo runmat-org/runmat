@@ -268,6 +268,31 @@ jobs:
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 | tee test.log
 
+      - name: Build native meshing integration runner
+        if: runner.os == 'Linux'
+        run: cargo build --release -p runmat --example meshing-corpus --no-default-features --features occt-native
+
+      - name: Run small governed meshing corpus
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_dir="${GITHUB_WORKSPACE}/target/runmat-meshing-integration"
+          state_dir="${RUNNER_TEMP}/runmat-meshing-integration-${GITHUB_RUN_ID}"
+          mkdir -p "${report_dir}"
+          RUNMAT_EXECUTION_STATE_DIR="${state_dir}" \
+            "${CARGO_TARGET_DIR}/release/examples/meshing-corpus" \
+            --tier small \
+            --report "${report_dir}/small-${MATRIX_NAME}.json"
+
+      - name: Upload meshing integration report
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: meshing-integration-${{ matrix.name }}
+          path: target/runmat-meshing-integration/small-${{ matrix.name }}.json
+          if-no-files-found: error
+
       - name: Build native meshing performance verifier
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         run: cargo build --release -p runmat --example meshing-verification --no-default-features --features occt-native

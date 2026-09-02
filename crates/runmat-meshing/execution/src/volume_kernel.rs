@@ -89,14 +89,18 @@ impl MeshingStageKernel for ExactVolumeKernel {
             "volume_boundary_facets".into(),
             mesh.provenance.facets.len() as u64,
         );
-        entity_counts.insert("volume_mutations".into(), mesh.mutations.len() as u64);
+        let mutation_count = mesh
+            .refinement_insertions
+            .len()
+            .saturating_add(mesh.sliver_mutations.len()) as u64;
+        entity_counts.insert("volume_mutations".into(), mutation_count);
         let checkpoint = MeshingStageCheckpoint {
             completed_work: element_count,
             estimated_work: element_count,
             node_count,
             element_count,
             peak_memory_bytes: (surface_bytes.len() as u64).saturating_add(encoded.len() as u64),
-            iterations: mesh.mutations.len() as u64,
+            iterations: mutation_count,
             entity_counts,
             ..MeshingStageCheckpoint::default()
         };

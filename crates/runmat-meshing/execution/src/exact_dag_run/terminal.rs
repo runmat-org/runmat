@@ -43,7 +43,8 @@ pub(super) fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
         run,
         &mut observations,
     )?;
-    let artifact = decode_serialized_artifact(executor, run, &serialized.root)?;
+    let (artifact, serialized_artifact_bytes) =
+        decode_serialized_artifact(executor, run, &serialized.root)?;
     let wall_time_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let evidence = assemble_meshing_evidence(
         &artifact,
@@ -71,7 +72,13 @@ pub(super) fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
         run.program_revision.clone(),
         run.inventory_limits,
     )?;
-    decode_terminal_publication(executor, run, publication)
+    decode_terminal_publication(
+        executor,
+        run,
+        publication,
+        artifact,
+        &serialized_artifact_bytes,
+    )
 }
 
 fn execute<E: ExactMeshingDagExecutor>(
@@ -94,7 +101,7 @@ fn decode_serialized_artifact(
     source: &impl runmat_execution_artifact::cache::CacheImport,
     run: &ExactMeshingDagRun<'_>,
     root: &runmat_execution::value::ValueRef,
-) -> Result<runmat_meshing_core::SolverMeshArtifact, ExactMeshingDagRunError> {
+) -> Result<(runmat_meshing_core::SolverMeshArtifact, Vec<u8>), ExactMeshingDagRunError> {
     let publication = import_result_publication(
         source,
         root,
@@ -111,15 +118,18 @@ fn decode_serialized_artifact(
     if stream.media_type != MeshingChunkMediaType::SolverMeshArtifact {
         return Err(invalid_terminal());
     }
-    Ok(runmat_meshing_core::SolverMeshArtifact::canonical_decode(
-        record,
-    )?)
+    Ok((
+        runmat_meshing_core::SolverMeshArtifact::canonical_decode(record)?,
+        record.clone(),
+    ))
 }
 
 fn decode_terminal_publication(
     source: &impl runmat_execution_artifact::cache::CacheImport,
     run: &ExactMeshingDagRun<'_>,
     completed: ExecutedStage,
+    artifact: runmat_meshing_core::SolverMeshArtifact,
+    serialized_artifact_bytes: &[u8],
 ) -> Result<ExactMeshingDagRunResult, ExactMeshingDagRunError> {
     let publication = import_result_publication(
         source,
@@ -139,12 +149,17 @@ fn decode_terminal_publication(
     };
     if artifact_stream.media_type != MeshingChunkMediaType::SolverMeshArtifact
         || evidence_stream.media_type != MeshingChunkMediaType::MeshingEvidence
+        || artifact_bytes.as_slice() != serialized_artifact_bytes
     {
         return Err(invalid_terminal());
     }
-    let artifact = runmat_meshing_core::SolverMeshArtifact::canonical_decode(artifact_bytes)?;
     let evidence = MeshingEvidence::canonical_decode(evidence_bytes)?;
-    evidence.validate(&artifact)?;
+    evidence.validate_publication_closure(
+        &artifact.geometry,
+        &artifact.resolved_request,
+        artifact.canonical_digest,
+        artifact_bytes.len() as u64,
+    )?;
     Ok(ExactMeshingDagRunResult {
         root: completed.root,
         result_objects: completed.result_objects,

@@ -1,8 +1,8 @@
-use std::cmp::Ordering;
-
-use num_bigint::BigInt;
-
-use super::{PredicateSign, SpatialPredicateError};
+use super::{
+    adaptive_spatial::{exact_coordinates, validate_points},
+    exact_dyadic::ExactDyadic,
+    Point3Construction, PredicateSign, SpatialPredicateError, SpatialPredicatePoint,
+};
 
 /// Exact classification against the closed sphere whose diameter is `endpoints`.
 ///
@@ -59,6 +59,36 @@ pub fn diametral_sphere_position(
     Ok(exact_dot_sign(endpoints, point))
 }
 
+/// Exact diametral-sphere classification for explicit and dyadic segment-constructed points.
+pub fn diametral_sphere_position_constructed(
+    endpoints: [SpatialPredicatePoint; 2],
+    point: SpatialPredicatePoint,
+) -> Result<PredicateSign, SpatialPredicateError> {
+    let points = [endpoints[0], endpoints[1], point];
+    validate_points(&points)?;
+    if points
+        .iter()
+        .all(|point| point.construction == Point3Construction::Explicit)
+    {
+        return diametral_sphere_position(
+            endpoints.map(|point| point.coordinates),
+            point.coordinates,
+        );
+    }
+    let [left, right, query] = points.map(exact_coordinates);
+    let terms = std::array::from_fn::<_, 3, _>(|axis| {
+        query[axis]
+            .clone()
+            .subtract_exact(left[axis].clone())
+            .multiply_exact(query[axis].clone().subtract_exact(right[axis].clone()))
+    });
+    Ok(terms
+        .into_iter()
+        .reduce(ExactDyadic::add_exact)
+        .unwrap_or_else(ExactDyadic::zero)
+        .sign())
+}
+
 fn validate(endpoints: [[f64; 3]; 2], point: [f64; 3]) -> Result<(), SpatialPredicateError> {
     for (point_index, coordinates) in endpoints.into_iter().chain([point]).enumerate() {
         for (axis, coordinate) in coordinates.into_iter().enumerate() {
@@ -72,81 +102,18 @@ fn validate(endpoints: [[f64; 3]; 2], point: [f64; 3]) -> Result<(), SpatialPred
 
 fn exact_dot_sign(endpoints: [[f64; 3]; 2], point: [f64; 3]) -> PredicateSign {
     let terms = std::array::from_fn::<_, 3, _>(|axis| {
-        Dyadic::from_f64(point[axis])
-            .subtract(Dyadic::from_f64(endpoints[0][axis]))
-            .multiply(Dyadic::from_f64(point[axis]).subtract(Dyadic::from_f64(endpoints[1][axis])))
+        ExactDyadic::from_f64(point[axis])
+            .subtract_exact(ExactDyadic::from_f64(endpoints[0][axis]))
+            .multiply_exact(
+                ExactDyadic::from_f64(point[axis])
+                    .subtract_exact(ExactDyadic::from_f64(endpoints[1][axis])),
+            )
     });
     let sum = terms
         .into_iter()
-        .reduce(Dyadic::add)
-        .unwrap_or_else(Dyadic::zero);
-    match sum.significand.cmp(&BigInt::from(0)) {
-        Ordering::Less => PredicateSign::Negative,
-        Ordering::Equal => PredicateSign::Zero,
-        Ordering::Greater => PredicateSign::Positive,
-    }
-}
-
-struct Dyadic {
-    significand: BigInt,
-    exponent: i16,
-}
-
-impl Dyadic {
-    fn zero() -> Self {
-        Self {
-            significand: BigInt::from(0),
-            exponent: 0,
-        }
-    }
-
-    fn from_f64(value: f64) -> Self {
-        if value == 0.0 {
-            return Self::zero();
-        }
-        let bits = value.to_bits();
-        let negative = bits >> 63 != 0;
-        let encoded_exponent = ((bits >> 52) & 0x7ff) as i16;
-        let fraction = bits & ((1_u64 << 52) - 1);
-        let (mantissa, exponent) = if encoded_exponent == 0 {
-            (fraction, -1074)
-        } else {
-            (fraction | (1_u64 << 52), encoded_exponent - 1023 - 52)
-        };
-        let significand = if negative {
-            -BigInt::from(mantissa)
-        } else {
-            BigInt::from(mantissa)
-        };
-        Self {
-            significand,
-            exponent,
-        }
-    }
-
-    fn subtract(self, right: Self) -> Self {
-        self.add(Self {
-            significand: -right.significand,
-            exponent: right.exponent,
-        })
-    }
-
-    fn add(self, right: Self) -> Self {
-        let exponent = self.exponent.min(right.exponent);
-        let left_shift = usize::from((self.exponent - exponent) as u16);
-        let right_shift = usize::from((right.exponent - exponent) as u16);
-        Self {
-            significand: (self.significand << left_shift) + (right.significand << right_shift),
-            exponent,
-        }
-    }
-
-    fn multiply(self, right: Self) -> Self {
-        Self {
-            significand: self.significand * right.significand,
-            exponent: self.exponent + right.exponent,
-        }
-    }
+        .reduce(ExactDyadic::add_exact)
+        .unwrap_or_else(ExactDyadic::zero);
+    sum.sign()
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
-use runmat_meshing_core::quality::predicate::tetrahedron_volume;
+use runmat_meshing_core::quality::predicate::{tetrahedron_volume, Point3Construction};
 use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
 
 use super::*;
@@ -113,23 +113,28 @@ fn split_boundary_segment_recovery(
     let mut midpoint_identity = [50; 32];
     midpoint_identity[31] = 51;
     let midpoint_identity = StableDigest::from_bytes(midpoint_identity);
-    let mut nodes = vec![DelaunayVolumeNode {
-        identity: constraints.nodes[0].identity,
-        coordinates_m: constraints.nodes[0].coordinates_m,
-    }];
+    let mut nodes = vec![DelaunayVolumeNode::explicit(
+        constraints.nodes[0].identity,
+        constraints.nodes[0].coordinates_m,
+    )];
     nodes.push(DelaunayVolumeNode {
         identity: midpoint_identity,
         coordinates_m: [2.5, 2.5, 0.0],
+        construction: Point3Construction::Segment {
+            endpoints: [
+                constraints.nodes[0].coordinates_m,
+                constraints.nodes[1].coordinates_m,
+            ],
+            parameter_numerator: 1,
+            parameter_exponent: 1,
+        },
     });
     nodes.extend(
         constraints
             .nodes
             .iter()
             .skip(1)
-            .map(|node| DelaunayVolumeNode {
-                identity: node.identity,
-                coordinates_m: node.coordinates_m,
-            }),
+            .map(|node| DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)),
     );
     let topology = build_delaunay_volume_topology(
         nodes,
@@ -273,21 +278,21 @@ fn facet_cavity_enforces_its_tetrahedron_budget() {
 #[test]
 fn facet_star_refill_exceeds_small_exact_cover_inventory() {
     const RING_NODES: usize = 24;
-    let mut nodes = vec![DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([1; 32]),
-        coordinates_m: [0.0, 0.0, 0.0],
-    }];
+    let mut nodes = vec![DelaunayVolumeNode::explicit(
+        StableDigest::from_bytes([1; 32]),
+        [0.0, 0.0, 0.0],
+    )];
     for index in 0..RING_NODES {
         let angle = std::f64::consts::TAU * index as f64 / RING_NODES as f64;
-        nodes.push(DelaunayVolumeNode {
-            identity: StableDigest::from_bytes([(index + 2) as u8; 32]),
-            coordinates_m: [angle.cos(), angle.sin(), 0.0],
-        });
+        nodes.push(DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes([(index + 2) as u8; 32]),
+            [angle.cos(), angle.sin(), 0.0],
+        ));
     }
-    nodes.push(DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([RING_NODES as u8 + 2; 32]),
-        coordinates_m: [0.0, 0.0, 1.0],
-    });
+    nodes.push(DelaunayVolumeNode::explicit(
+        StableDigest::from_bytes([RING_NODES as u8 + 2; 32]),
+        [0.0, 0.0, 1.0],
+    ));
     let apex = RING_NODES as u32 + 1;
     let tetrahedra = (0..RING_NODES)
         .map(|index| {
@@ -426,6 +431,38 @@ fn facet_recovery_never_removes_a_recovered_segment() {
     );
 }
 
+#[test]
+fn facet_candidate_conflict_splits_and_re_evidences_the_segment() {
+    let constraints = constraints(false);
+    let segments = segment_recovery(false, &constraints);
+    let original_nodes = segments.segments[0].nodes.clone();
+    let mut work = FacetRecoveryWork::new(DelaunayFacetRecoveryOptions::default(), &NeverCancelled);
+
+    let refined = super::conforming_split::try_split_recovered_segment_edge(
+        &segments,
+        [original_nodes[0].identity, original_nodes[1].identity],
+        &[],
+        0,
+        &mut work,
+    )
+    .unwrap()
+    .expect("a conflicting recovered segment must be split conformingly");
+
+    assert!(refined.splits.is_empty());
+    assert_eq!(
+        refined.recovery.segments[0].nodes.len(),
+        original_nodes.len() + 1
+    );
+    assert_eq!(refined.recovery.steiner_node_identities.len(), 1);
+    validate_delaunay_segment_recovery(
+        &refined.recovery,
+        &constraints,
+        DelaunaySegmentRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
 struct Cancelled;
 
 impl MeshingCancellationSignal for Cancelled {
@@ -467,6 +504,21 @@ fn facet_recovery_enforces_search_limits_and_cancellation() {
             split_boundary_segment_recovery(&constraints).0,
             &constraints,
             support_bounded,
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayFacetRecoveryErrorKind::ResourceLimit
+    );
+    let queue_bounded = DelaunayFacetRecoveryOptions {
+        maximum_pending_support_triangles: 1,
+        ..DelaunayFacetRecoveryOptions::default()
+    };
+    assert_eq!(
+        recover_delaunay_facets(
+            split_boundary_segment_recovery(&constraints).0,
+            &constraints,
+            queue_bounded,
             &NeverCancelled,
         )
         .unwrap_err()

@@ -166,36 +166,80 @@ fn independent_sample(
                 derivatives: [derivatives.du_m, derivatives.dv_m],
             })
         }
-        ExactFaceChartParameterization::ClosestPointProjection {
-            origin_m,
-            axes,
-            differential_step_m,
-            projection_tolerance_m,
+        ExactFaceChartParameterization::AffineEvaluatorParameters {
+            evaluator_units_per_chart_unit,
+            ..
         } => {
-            let project = |coordinates: [f64; 2]| {
-                let query = std::array::from_fn(|axis| {
-                    origin_m[axis] + coordinates[0] * axes[0][axis] + coordinates[1] * axes[1][axis]
-                });
-                evaluator
-                    .closest_point(evaluator_id, query, *projection_tolerance_m, control)
-                    .map_err(|error| geometry(source_face_id, error))
+            let raw_uv = parameterization
+                .evaluator_parameters(coordinates)
+                .map_err(|reason| invalid(source_face_id, reason))?;
+            let evaluator_uv =
+                evaluator_parameters(evaluator, evaluator_id, source_face_id, raw_uv)?;
+            let derivatives = evaluator
+                .derivatives(evaluator_id, evaluator_uv, control)
+                .map_err(|error| geometry(source_face_id, error))?;
+            Ok(IndependentSample {
+                evaluator_uv,
+                point_m: derivatives.point_m,
+                derivatives: [
+                    derivatives
+                        .du_m
+                        .map(|value| value * evaluator_units_per_chart_unit[0]),
+                    derivatives
+                        .dv_m
+                        .map(|value| value * evaluator_units_per_chart_unit[1]),
+                ],
+            })
+        }
+        ExactFaceChartParameterization::PolarEvaluatorParameters {
+            angular_axis,
+            radial_axis,
+            radial_direction,
+            differential_step,
+            ..
+        } => {
+            let evaluator_uv = parameterization
+                .evaluator_parameters(coordinates)
+                .map_err(|reason| invalid(source_face_id, reason))?;
+            let center = evaluator
+                .derivatives(evaluator_id, evaluator_uv, control)
+                .map_err(|error| geometry(source_face_id, error))?;
+            let radius_squared = coordinates[0] * coordinates[0] + coordinates[1] * coordinates[1];
+            let derivatives = if radius_squared == 0.0 {
+                let mut result = [[0.0; 3]; 2];
+                for axis in 0..2 {
+                    let mut sample_coordinates = [0.0; 2];
+                    sample_coordinates[axis] = *differential_step;
+                    let sample_uv = parameterization
+                        .evaluator_parameters(sample_coordinates)
+                        .map_err(|reason| invalid(source_face_id, reason))?;
+                    let sample = evaluator
+                        .point(evaluator_id, sample_uv, control)
+                        .map_err(|error| geometry(source_face_id, error))?;
+                    result[axis] = std::array::from_fn(|component| {
+                        (sample[component] - center.point_m[component]) / differential_step
+                    });
+                }
+                result
+            } else {
+                let radius = radius_squared.sqrt();
+                let mut jacobian = [[0.0; 2]; 2];
+                jacobian[*angular_axis as usize] = [
+                    -coordinates[1] / radius_squared,
+                    coordinates[0] / radius_squared,
+                ];
+                jacobian[*radial_axis as usize] = [
+                    radial_direction * coordinates[0] / radius,
+                    radial_direction * coordinates[1] / radius,
+                ];
+                [0, 1].map(|chart_axis| {
+                    std::array::from_fn(|component| {
+                        center.du_m[component] * jacobian[0][chart_axis]
+                            + center.dv_m[component] * jacobian[1][chart_axis]
+                    })
+                })
             };
-            let center = project(coordinates)?;
-            let mut derivatives = [[0.0; 3]; 2];
-            for axis in 0..2 {
-                let mut before = coordinates;
-                let mut after = coordinates;
-                before[axis] -= differential_step_m;
-                after[axis] += differential_step_m;
-                let before = project(before)?;
-                let after = project(after)?;
-                derivatives[axis] = std::array::from_fn(|component| {
-                    (after.point_m[component] - before.point_m[component])
-                        / (2.0 * differential_step_m)
-                });
-            }
-            if center
-                .uv
+            if evaluator_uv
                 .iter()
                 .chain(&center.point_m)
                 .chain(derivatives.iter().flatten())
@@ -203,11 +247,11 @@ fn independent_sample(
             {
                 return Err(invalid(
                     source_face_id,
-                    "projected chart evaluation is not finite",
+                    "polar chart evaluation is not finite",
                 ));
             }
             Ok(IndependentSample {
-                evaluator_uv: center.uv,
+                evaluator_uv,
                 point_m: center.point_m,
                 derivatives,
             })

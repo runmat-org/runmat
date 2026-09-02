@@ -8,7 +8,7 @@ use crate::{build_exact_face_pslg, ExactFaceBoundary, ExactFaceBoundaryLoop};
 
 use super::{
     annulus::build_periodic_annulus_pslg,
-    parameterization::{build_projected_parameterization, is_singular},
+    parameterization::{build_singular_parameterization, is_singular},
     ExactFaceChart, ExactFaceChartError, ExactFaceChartErrorKind, ExactFaceChartOptions,
     ExactFaceChartParameterization, ExactFaceCharts,
 };
@@ -96,11 +96,26 @@ fn build_without_validation(
     for loop_boundary in &mut boundary.inner_loops {
         windings.push(lift_loop(loop_boundary, &lift_context)?);
     }
+    if periodicity.into_iter().any(|period| period.is_some()) {
+        // The admitted boundary keeps each OCCT coedge's seam image. Once a
+        // periodic loop has been lifted into one canonical chart, that image is
+        // represented by its lifted UV coordinates instead. Keeping the raw
+        // per-coedge tag here would split otherwise identical endpoints where
+        // a seam coedge meets an ordinary trim coedge.
+        for loop_boundary in
+            std::iter::once(&mut boundary.outer_loop).chain(&mut boundary.inner_loops)
+        {
+            for segment in &mut loop_boundary.segments {
+                segment.seam_image = None;
+            }
+        }
+    }
     let chart_id = chart_id(&source.source_face_id, 0);
     let zero_winding = windings.iter().all(|winding| *winding == [0, 0]);
-    let (parameterization, pslg) = if face.has_singularity && zero_winding {
-        let parameterization = build_projected_parameterization(
+    let (mut parameterization, mut pslg) = if face.has_singularity && zero_winding {
+        let parameterization = build_singular_parameterization(
             &mut boundary,
+            topology,
             &face.surface_evaluator_id,
             evaluator,
             control,
@@ -128,6 +143,19 @@ fn build_without_validation(
             build_periodic_annulus_pslg(&mut boundary, &windings, periodicity, chart_id, options)?;
         (ExactFaceChartParameterization::EvaluatorParameters, pslg)
     };
+    if matches!(
+        parameterization,
+        ExactFaceChartParameterization::EvaluatorParameters
+    ) {
+        parameterization = scale_regular_chart(
+            &mut boundary,
+            &mut pslg,
+            &face.surface_evaluator_id,
+            evaluator,
+            control,
+            options,
+        )?;
+    }
     let chart = ExactFaceChart {
         chart_id,
         source_face_id: source.source_face_id.clone(),
@@ -141,6 +169,103 @@ fn build_without_validation(
         periodicity,
         charts: vec![chart],
     })
+}
+
+fn scale_regular_chart(
+    boundary: &mut ExactFaceBoundary,
+    pslg: &mut crate::ExactFacePslg,
+    evaluator_id: &SurfaceEvaluatorId,
+    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    control: &dyn GeometryEvaluationControl,
+    options: ExactFaceChartOptions,
+) -> Result<ExactFaceChartParameterization, ExactFaceChartError> {
+    let origins: [f64; 2] = std::array::from_fn(|axis| {
+        pslg.vertices
+            .iter()
+            .map(|vertex| vertex.uv[axis])
+            .fold(f64::INFINITY, f64::min)
+    });
+    let ends: [f64; 2] = std::array::from_fn(|axis| {
+        pslg.vertices
+            .iter()
+            .map(|vertex| vertex.uv[axis])
+            .fold(f64::NEG_INFINITY, f64::max)
+    });
+    let spans: [f64; 2] = std::array::from_fn(|axis| ends[axis] - origins[axis]);
+    if origins.iter().any(|value| !value.is_finite())
+        || spans
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+    {
+        return Err(invalid(
+            boundary,
+            "regular face chart requires two finite nondegenerate parameter spans",
+        ));
+    }
+    let reference_uv = std::array::from_fn(|axis| origins[axis] + 0.5 * spans[axis]);
+    let derivatives = evaluator
+        .derivatives(evaluator_id, reference_uv, control)
+        .map_err(|error| {
+            ExactFaceChartError::new(
+                ExactFaceChartErrorKind::GeometryEvaluation(error.kind),
+                &boundary.source_face_id,
+                error.reason,
+            )
+        })?;
+    let physical_units_per_evaluator_unit =
+        [derivatives.du_m, derivatives.dv_m].map(|derivative| {
+            derivative
+                .into_iter()
+                .map(|value| value * value)
+                .sum::<f64>()
+                .sqrt()
+        });
+    if physical_units_per_evaluator_unit
+        .iter()
+        .any(|value| !value.is_finite() || *value <= 0.0)
+    {
+        return Err(invalid(
+            boundary,
+            "regular face chart has a degenerate physical parameter direction at its reference point",
+        ));
+    }
+    let evaluator_units_per_chart_unit =
+        physical_units_per_evaluator_unit.map(|value| value.recip());
+    let coordinate_quantum = canonical_coordinate_quantum(options.projection_tolerance_m);
+    let scale = |uv: [f64; 2]| {
+        let coordinates = [
+            (uv[0] - origins[0]) / evaluator_units_per_chart_unit[0],
+            (uv[1] - origins[1]) / evaluator_units_per_chart_unit[1],
+        ];
+        coordinates.map(|coordinate| canonicalize_coordinate(coordinate, coordinate_quantum))
+    };
+    for vertex in &mut pslg.vertices {
+        vertex.uv = scale(vertex.uv);
+    }
+    for loop_boundary in std::iter::once(&mut boundary.outer_loop).chain(&mut boundary.inner_loops)
+    {
+        for segment in &mut loop_boundary.segments {
+            segment.node_uv = segment.node_uv.map(scale);
+        }
+    }
+    Ok(ExactFaceChartParameterization::AffineEvaluatorParameters {
+        origins,
+        evaluator_units_per_chart_unit,
+    })
+}
+
+fn canonical_coordinate_quantum(projection_tolerance_m: f64) -> f64 {
+    let upper_bound = projection_tolerance_m / 1_024.0;
+    2.0_f64.powf(upper_bound.log2().floor())
+}
+
+fn canonicalize_coordinate(coordinate: f64, quantum: f64) -> f64 {
+    let canonical = (coordinate / quantum).round() * quantum;
+    if canonical == 0.0 {
+        0.0
+    } else {
+        canonical
+    }
 }
 
 struct LoopLiftContext<'a, Evaluator: ?Sized> {
@@ -206,6 +331,7 @@ fn lift_loop<Evaluator: ExactSurfaceEvaluator + ?Sized>(
         let residual = previous_uv[axis] - first_uv[axis];
         let tolerance = scaled_tolerance(previous_uv[axis], first_uv[axis], lift_context.options);
         if residual.abs() <= tolerance {
+            loop_boundary.segments.last_mut().unwrap().node_uv[1][axis] = first_uv[axis];
             continue;
         }
         let Some(period) = lift_context.periodicity[axis] else {
@@ -330,7 +456,11 @@ impl CoordinateLift<'_> {
             )
             .with_witness(self.wire_id, self.axis, residual));
         }
-        Ok(lifted)
+        if require_equivalent {
+            Ok(reference)
+        } else {
+            Ok(lifted)
+        }
     }
 }
 

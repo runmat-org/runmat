@@ -51,14 +51,16 @@ pub struct ExactFaceGeometryVertex {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceTriangleGeometry {
     pub triangle: ExactFaceDelaunayTriangle,
-    pub centroid: ExactFaceMetricEvaluation,
+    pub deviation_samples: [ExactFaceMetricEvaluation; 4],
     pub unit_normal: [f64; 3],
     pub physical_area_m2: f64,
     pub metric_edge_lengths: [f64; 3],
     pub minimum_metric_angle_rad: f64,
     pub physical_aspect_ratio: f64,
     pub chordal_deviation_m: f64,
+    pub chordal_deviation_uv: [f64; 2],
     pub normal_deviation_rad: f64,
+    pub normal_deviation_uv: [f64; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

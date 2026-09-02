@@ -14,6 +14,7 @@ mod meshing_host;
 mod program_session;
 mod protocol;
 mod remote;
+mod runtime_meshing_provider;
 mod service;
 pub mod supervisor;
 mod test_workload;
@@ -24,7 +25,7 @@ pub use driver::NATIVE_OBJECT_STORE_ROOT_ENV;
 pub use error::{NativeExecutionError, NativeExecutionResult};
 pub use exact_geometry_admission::{
     admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,
-    PreparedExactGeometryAdmission,
+    NativeMeshingContactDefinition, PreparedExactGeometryAdmission,
 };
 pub use exact_meshing_executor::{NativeExactMeshingExecutor, NativeMeshingExecutionPolicy};
 pub use exact_meshing_job::{
@@ -46,6 +47,10 @@ pub use remote::{
     RemoteWorkerRelayRequest,
 };
 pub use runmat_execution_artifact::cache::FilesystemObjectStore;
+pub use runtime_meshing_provider::{
+    mesh_source_with_native_execution, native_meshing_execution_provider,
+    NativeMeshingPartitionPolicy, NativeMeshingSourceError, NativeMeshingSourceRequest,
+};
 pub use service::NativeExecutionService;
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
 pub use worker::run_worker_stdio;

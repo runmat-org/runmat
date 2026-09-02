@@ -14,13 +14,14 @@ use runmat_meshing_execution::{
 use crate::{
     admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,
     NativeExactMeshingExecutor, NativeExecutionConfig, NativeExecutionError,
-    NativeMeshingExecutionPolicy, NativeProgramSession,
+    NativeMeshingContactDefinition, NativeMeshingExecutionPolicy, NativeProgramSession,
 };
 
 pub struct NativeExactMeshingJob<'a> {
     pub source_name: &'a str,
     pub source_bytes: &'a [u8],
     pub import_options: ExactCadImportOptions,
+    pub contact_definitions: &'a [NativeMeshingContactDefinition],
     pub request: MeshingRequest,
     pub program_revision: ProgramRevision,
     pub capability_cohort: Option<String>,
@@ -50,6 +51,23 @@ pub enum NativeExactMeshingJobError {
     Run(#[from] ExactMeshingDagRunError),
 }
 
+impl NativeExactMeshingJobError {
+    pub const fn admission_error(&self) -> Option<&ExactGeometryAdmissionError> {
+        match self {
+            Self::Admission(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    pub const fn meshing_failure(&self) -> Option<&runmat_meshing_core::MeshingFailure> {
+        match self {
+            Self::Executor(error) => error.failure(),
+            Self::Run(ExactMeshingDagRunError::Stage(error)) => error.failure(),
+            _ => None,
+        }
+    }
+}
+
 /// Executes exact CAD import through atomic solver-artifact publication in one native session.
 ///
 /// Execution authority is derived from the session, so ordinary local use requires no Server or
@@ -70,6 +88,7 @@ pub fn mesh_exact_geometry(
             job.source_name,
             job.source_bytes,
             &job.import_options,
+            job.contact_definitions,
             &GeometryImportContext::new(),
             job.inventory_limits,
         )?

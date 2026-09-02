@@ -1,9 +1,6 @@
 use std::collections::BTreeSet;
 
-use runmat_meshing_core::{
-    quality::predicate::{orient3d, PredicateSign},
-    Aabb3,
-};
+use runmat_meshing_core::{quality::predicate::PredicateSign, Aabb3};
 
 use super::{
     point_in_tetrahedron, predicate_error, topology_access::TetrahedralTopology,
@@ -54,27 +51,6 @@ impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
         Ok(None)
     }
 
-    pub(super) fn all_containing(
-        &self,
-        node: DelaunayVolumeNode,
-        work: &mut InsertionWork<'_>,
-    ) -> Result<BTreeSet<u32>, DelaunayInsertionError> {
-        let mut containing = BTreeSet::new();
-        for tetrahedron_index in 0..self.topology.tetrahedron_slot_count() {
-            let Some(tetrahedron) = self.topology.tetrahedron(tetrahedron_index as u32) else {
-                continue;
-            };
-            work.checkpoint()?;
-            if expanded_tetrahedron_bounds(self.topology, tetrahedron.vertex_indices)
-                .contains_point(node.coordinates_m)
-                && point_in_tetrahedron(self.topology, tetrahedron.vertex_indices, node, work)?
-            {
-                containing.insert(tetrahedron_index as u32);
-            }
-        }
-        Ok(containing)
-    }
-
     fn walk_containing(
         &self,
         start: usize,
@@ -101,9 +77,14 @@ impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
                 work.predicate()?;
                 let mut points = tetrahedron
                     .vertex_indices
-                    .map(|vertex| self.topology.nodes()[vertex as usize].coordinates_m);
-                points[opposite] = node.coordinates_m;
-                if orient3d(points).map_err(predicate_error)? == PredicateSign::Negative {
+                    .map(|vertex| self.topology.nodes()[vertex as usize]);
+                points[opposite] = node;
+                if self
+                    .topology
+                    .orient_nodes(points)
+                    .map_err(predicate_error)?
+                    == PredicateSign::Negative
+                {
                     crossing = Some(opposite);
                     break;
                 }

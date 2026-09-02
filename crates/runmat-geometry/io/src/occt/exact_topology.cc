@@ -119,6 +119,7 @@ void append_exact_topology(OcctExactShapePayload& result,
     identity_context.append(payload.identity_digest, edge, payload.shape_key, options);
     payload.start_vertex_key = start.IsNull() ? 0 : shape_key(shape_set, start, "edge vertex");
     payload.end_vertex_key = end.IsNull() ? 0 : shape_key(shape_set, end, "edge vertex");
+    payload.tolerance = BRep_Tool::Tolerance(edge);
     payload.closed = closed;
     payload.periodic = closed && curve.IsPeriodic();
     payload.degenerate = BRep_Tool::Degenerated(edge);

@@ -5,9 +5,10 @@ pub mod fixtures;
 pub mod quality;
 pub use contracts::canonical::{
     build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,
-    resolve_meshing_request, solver_boundary_edge_identity, solver_boundary_face_identity,
-    solver_midside_node_identity, solver_volume_element_identity,
-    sort_solver_node_exact_parameters, validate_solver_mesh_topology,
+    decode_stage_manifest_streams_with_cancellation, resolve_meshing_request,
+    solver_boundary_edge_identity, solver_boundary_face_identity, solver_midside_node_identity,
+    solver_volume_element_identity, sort_solver_node_exact_parameters,
+    validate_solver_mesh_topology, validate_solver_mesh_topology_with_cancellation,
     verify_stage_manifest_closure, AlgorithmVersionSet, BoundaryEdgeOrder, BoundaryFaceRole,
     BoundaryTriangleOrder, CacheAdmissionDecision, CancellationPolicy, CanonicalEntityRange,
     CanonicalMeshingContract, ConformalInterface, ContactPair, CurveQualityTargets, ElementOrder,

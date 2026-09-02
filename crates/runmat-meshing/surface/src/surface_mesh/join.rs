@@ -56,6 +56,11 @@ pub fn join_exact_face_mesh_batches(
     let mut boundary_segments = Vec::new();
     let mut maximum_chordal_deviation_m = 0.0_f64;
     let mut maximum_normal_deviation_rad = 0.0_f64;
+    let edge_tolerances = topology
+        .edges
+        .iter()
+        .map(|edge| (&edge.id, edge.tolerance_m))
+        .collect::<BTreeMap<_, _>>();
     for face in &faces {
         maximum_chordal_deviation_m =
             maximum_chordal_deviation_m.max(face.maximum_chordal_deviation_m);
@@ -70,10 +75,22 @@ pub fn join_exact_face_mesh_batches(
                     entry.insert(node.clone());
                 }
                 std::collections::btree_map::Entry::Occupied(mut entry) => {
-                    if distance(entry.get().point_m, node.point_m) > options.coordinate_tolerance_m
-                    {
-                        return Err(invalid("shared face nodes disagree in exact 3D position")
-                            .with_face(&face.source_face_id));
+                    let coordinate_tolerance_m = entry
+                        .get()
+                        .uses
+                        .iter()
+                        .chain(&node.uses)
+                        .flat_map(|use_record| &use_record.exact_edge_parameters)
+                        .filter_map(|parameter| edge_tolerances.get(&parameter.source_edge_id))
+                        .fold(options.coordinate_tolerance_m, |maximum, tolerance| {
+                            maximum.max(*tolerance)
+                        });
+                    let discrepancy_m = distance(entry.get().point_m, node.point_m);
+                    if discrepancy_m > coordinate_tolerance_m {
+                        return Err(invalid(format!(
+                            "shared face nodes disagree by {discrepancy_m:e} m, exceeding the admitted {coordinate_tolerance_m:e} m tolerance"
+                        ))
+                        .with_face(&face.source_face_id));
                     }
                     for use_record in &node.uses {
                         if entry.get().uses.iter().any(|existing| {

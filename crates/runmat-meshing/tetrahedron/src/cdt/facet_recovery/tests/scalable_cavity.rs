@@ -20,9 +20,11 @@ fn boundary_driven_refill_recovers_large_nonstar_tetrahelix() {
     let nodes = coordinates
         .iter()
         .enumerate()
-        .map(|(index, coordinates_m)| DelaunayVolumeNode {
-            identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-            coordinates_m: *coordinates_m,
+        .map(|(index, coordinates_m)| {
+            DelaunayVolumeNode::explicit(
+                StableDigest::from_bytes([(index + 1) as u8; 32]),
+                *coordinates_m,
+            )
         })
         .collect::<Vec<_>>();
     let tetrahedra = (0..TETRAHEDRA)
@@ -176,6 +178,8 @@ fn constructive_facet_steiner_work_is_hard_bounded() {
         node_work.cavity_steiner_node(7).unwrap_err().kind,
         DelaunayFacetRecoveryErrorKind::ResourceLimit
     );
+    node_work.begin_constraint();
+    assert_eq!(node_work.cavity_steiner_node(8).unwrap(), 1);
 
     let mut candidate_work = FacetRecoveryWork::new(
         DelaunayFacetRecoveryOptions {
@@ -192,6 +196,8 @@ fn constructive_facet_steiner_work_is_hard_bounded() {
             .kind,
         DelaunayFacetRecoveryErrorKind::ResourceLimit
     );
+    candidate_work.begin_constraint();
+    candidate_work.cavity_steiner_insertion_attempt(9).unwrap();
 }
 
 fn reflect_across_face(

@@ -1010,7 +1010,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
 
 #[cfg(feature = "plot-core")]
 #[test]
-fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
+fn geometry_preview_preserves_assembly_ownership_and_xray_styling() {
     let owner = CadLabelRef {
         label_entry: "0:1".to_string(),
         name: "Bracket".to_string(),
@@ -1130,4 +1130,22 @@ fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
         .regions
         .iter()
         .any(|region| region.region_id == "face_000002"));
+
+    let figure = geometry_preview_figure(
+        &asset,
+        "Preview",
+        GeometryPreviewFigureOptions {
+            presentation: GeometryPreviewPresentation::Cad,
+            xray: true,
+            ..GeometryPreviewFigureOptions::default()
+        },
+    )
+    .expect("x-ray CAD preview figure should be generated");
+    let Some(runmat_plot::plots::PlotElement::Mesh(mesh)) = figure.plots().next() else {
+        panic!("x-ray CAD preview should contain a mesh plot");
+    };
+    assert_eq!(mesh.face_alpha(), CAD_XRAY_FACE_ALPHA);
+    assert_eq!(mesh.edge_color(), CAD_XRAY_FEATURE_EDGE_COLOR);
+    assert_eq!(mesh.edge_alpha(), 1.0);
+    assert_eq!(mesh.edge_width(), 1.05);
 }

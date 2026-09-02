@@ -11,7 +11,10 @@ mod validation;
 pub use construction::{
     build_delaunay_volume_provenance, validate_delaunay_volume_provenance_sources,
 };
-pub(super) use derivation::derive_delaunay_volume_metric_contexts;
+pub(super) use derivation::{
+    derive_delaunay_volume_metric_contexts,
+    derive_delaunay_volume_metric_contexts_from_admitted_input,
+};
 pub use validation::validate_delaunay_volume_provenance;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

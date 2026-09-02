@@ -10,7 +10,7 @@ use runmat_execution_artifact::{ArtifactResult, LogicalObject};
 use runmat_execution_runner::AttemptSuccess;
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingProgress, StableDigest};
 use runmat_meshing_execution::{
-    build_task_submission, ExactMeshingDagExecutor, MeshingExecutionContext,
+    build_task_submission, ExactMeshingDagExecutor, MeshingExecutionContext, MeshingHostResponse,
     MeshingStageExecutionError, MeshingTaskEffectPolicy, PlannedMeshingStage,
 };
 
@@ -149,7 +149,12 @@ impl<'a> NativeExactMeshingExecutor<'a> {
                             error = %error,
                             "meshing stage failed"
                         );
-                        Err(MeshingStageExecutionError::new(error))
+                        match MeshingHostResponse::failure_from_program_message(&error) {
+                            Some(failure) => {
+                                Err(MeshingStageExecutionError::Failure(Box::new(failure)))
+                            }
+                            None => Err(MeshingStageExecutionError::new(error)),
+                        }
                     }
                 };
             }

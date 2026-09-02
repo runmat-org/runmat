@@ -84,6 +84,68 @@ class CorpusValidatorTests(unittest.TestCase):
         with self.assertRaisesRegex(CorpusError, "test anchor"):
             validate_manifest(self.write(document), self.root)
 
+    def test_accepts_integration_case_as_executable_evidence(self):
+        integration = self.root / "verification" / "meshing" / "integration.json"
+        integration.parent.mkdir(parents=True)
+        integration.write_text(
+            json.dumps({"cases": [{"fixture_id": "shape"}], "metamorphic_relations": []})
+        )
+        document = self.document()
+        document["entries"][0]["test"] = {
+            "source": "verification/meshing/integration.json",
+            "name": "shape",
+        }
+        self.assertEqual(validate_manifest(self.write(document), self.root), 1)
+
+    def test_accepts_covering_integration_metamorphic_relation(self):
+        integration = self.root / "verification" / "meshing" / "integration.json"
+        integration.parent.mkdir(parents=True)
+        integration.write_text(
+            json.dumps(
+                {
+                    "cases": [{"fixture_id": "shape"}],
+                    "metamorphic_relations": [
+                        {
+                            "id": "shape-invariance",
+                            "reference": {"fixture_id": "baseline"},
+                            "comparisons": [{"fixture_id": "shape"}],
+                        }
+                    ],
+                }
+            )
+        )
+        document = self.document()
+        document["entries"][0]["test"] = {
+            "source": "verification/meshing/integration.json",
+            "name": "shape-invariance",
+        }
+        self.assertEqual(validate_manifest(self.write(document), self.root), 1)
+
+    def test_rejects_integration_relation_that_does_not_cover_fixture(self):
+        integration = self.root / "verification" / "meshing" / "integration.json"
+        integration.parent.mkdir(parents=True)
+        integration.write_text(
+            json.dumps(
+                {
+                    "cases": [{"fixture_id": "shape"}],
+                    "metamorphic_relations": [
+                        {
+                            "id": "other-invariance",
+                            "reference": {"fixture_id": "baseline"},
+                            "comparisons": [{"fixture_id": "other"}],
+                        }
+                    ],
+                }
+            )
+        )
+        document = self.document()
+        document["entries"][0]["test"] = {
+            "source": "verification/meshing/integration.json",
+            "name": "other-invariance",
+        }
+        with self.assertRaisesRegex(CorpusError, "does not cover fixture"):
+            validate_manifest(self.write(document), self.root)
+
 
 if __name__ == "__main__":
     unittest.main()

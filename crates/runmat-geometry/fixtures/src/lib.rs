@@ -104,6 +104,7 @@ pub fn exact_circle() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorReg
             curve_evaluator_id: CurveEvaluatorId::new("curve:1").unwrap(),
             start_vertex_id: Some(vertex.clone()),
             end_vertex_id: Some(vertex.clone()),
+            tolerance_m: 1.0e-8,
             is_closed: true,
             is_periodic: true,
             is_degenerate: false,

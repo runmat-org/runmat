@@ -33,8 +33,8 @@ use runmat_meshing_execution::{
     build_task_submission, import_result_publication, prepare_exact_geometry_input,
     prepare_exact_geometry_objects, prepare_faceted_geometry_input,
     prepare_faceted_geometry_objects, MeshingArtifactAccess, MeshingExecutionContext,
-    MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
-    MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
+    MeshingHostResponse, MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
     ValidatedMeshingStageOutput,
 };
 
@@ -333,11 +333,15 @@ async fn parent() {
         &mut progress,
         limits(),
     );
-    assert!(matches!(
-        budget_failure,
-        ProgramExecutionResponse::Failure { message }
-            if message.contains("SearchWorkBudgetExceeded")
-    ));
+    match budget_failure {
+        ProgramExecutionResponse::Failure { message } => assert_eq!(
+            MeshingHostResponse::failure_from_program_message(&message)
+                .expect("canonical meshing budget failure")
+                .category,
+            runmat_meshing_core::MeshingFailureCategory::SearchWorkBudgetExceeded,
+        ),
+        response => panic!("search-budget kernel unexpectedly succeeded: {response:?}"),
+    }
 
     let mut malformed = request;
     malformed.artifact.executable_bytes.push(0);
@@ -941,6 +945,7 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,

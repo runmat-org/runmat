@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use runmat_execution::Digest;
+use runmat_geometry_core::GeometryEvaluationControl;
 use runmat_meshing_core::{
     CanonicalMeshingContract, MeshingChunkMediaType, MeshingChunkStream, MeshingDiagnosticEntry,
     MeshingDiagnosticValue, MeshingFailure, MeshingFailureCategory, MeshingPartitionKind,
@@ -18,9 +19,10 @@ use runmat_meshing_tetrahedron::cdt::{
 
 use crate::volume_kernel::volume_options;
 use crate::{
-    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
-    PreparedMeshingInput, PreparedMeshingResultPublication, ValidatedMeshingStageOutput,
+    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageControl,
+    MeshingStageInvocation, MeshingStageKernel, PortableMeshingEvaluatorProvider,
+    PreparedExactGeometryObjects, PreparedMeshingInput, PreparedMeshingResultPublication,
+    ValidatedMeshingStageOutput,
 };
 
 #[derive(Clone, Debug)]
@@ -60,6 +62,10 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             .control
             .checkpoint(MeshingStageCheckpoint::default())?;
         let surface = sources.surface(&invocation)?;
+        phase_checkpoint(
+            invocation.control,
+            "exact surface artifact decoding and validation",
+        )?;
         let control = invocation.control.geometry_evaluation_control();
         let volume = decode_delaunay_volume_mesh(
             &sources.volume_record()?,
@@ -70,6 +76,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             &control,
         )
         .map_err(|error| failure(MeshingFailureCategory::InvalidGeometry, &error.to_string()))?;
+        geometry_phase_checkpoint(&control, "volume artifact decoding and validation")?;
         let evaluator = self
             .evaluator_provider
             .evaluator(sources.geometry, &control)
@@ -92,6 +99,10 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             &control,
         )
         .map_err(map_solver_error)?;
+        phase_checkpoint(
+            invocation.control,
+            "solver topology construction and validation",
+        )?;
         let projection = SolverMeshProjection {
             schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
             geometry: invocation.host.stage_identity.geometry.clone(),
@@ -104,6 +115,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                 &error.to_string(),
             )
         })?;
+        phase_checkpoint(invocation.control, "solver projection canonical encoding")?;
         let node_count = projection.topology.nodes.len() as u64;
         let element_count = projection.topology.volume_elements.len() as u64;
         let completed_work = node_count.checked_add(element_count).ok_or_else(|| {
@@ -143,6 +155,34 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             final_checkpoint: checkpoint,
         })
     }
+}
+
+fn phase_checkpoint(
+    control: &mut MeshingStageControl<'_>,
+    phase: &'static str,
+) -> Result<(), Box<MeshingFailure>> {
+    control
+        .checkpoint(MeshingStageCheckpoint::default())
+        .map_err(|mut failure| {
+            failure.remediation = format!("{}; phase: {phase}", failure.remediation);
+            failure
+        })
+}
+
+fn geometry_phase_checkpoint(
+    control: &dyn GeometryEvaluationControl,
+    phase: &'static str,
+) -> Result<(), Box<MeshingFailure>> {
+    control.checkpoint().map_err(|error| {
+        let mut failure = failure(
+            MeshingFailureCategory::InternalInvariantViolation,
+            &format!("solver projection phase checkpoint failed after {phase}: {error}"),
+        );
+        failure.remediation = format!(
+            "reduce work inside the phase between mandatory cancellation checkpoints; phase: {phase}"
+        );
+        failure
+    })
 }
 
 struct SolverProjectionSources<'a> {
@@ -268,11 +308,15 @@ fn solver_options(request: &runmat_meshing_core::MeshingRequest) -> DelaunaySolv
         maximum_curved_optimization_candidates: resources.maximum_search_work,
         maximum_curved_optimization_rounds: resources.maximum_iterations.min(u64::from(u32::MAX))
             as u32,
+        maximum_curved_optimization_sweeps: DelaunaySolverTopologyOptions::default()
+            .maximum_curved_optimization_sweeps
+            .min(resources.maximum_iterations.min(u64::from(u32::MAX)) as u32),
         trim_boundary_tolerance_uv: 1.0e-10,
         cancellation_check_interval: request
             .cancellation
             .maximum_work_units_between_checks
-            .max(1),
+            .max(1)
+            .min(DelaunaySolverTopologyOptions::default().cancellation_check_interval),
     }
 }
 
@@ -362,6 +406,21 @@ mod tests {
         assert_eq!(
             resource_category("curved-node candidate work exceeds its hard limit"),
             MeshingFailureCategory::SearchWorkBudgetExceeded
+        );
+    }
+
+    #[test]
+    fn solver_checkpoint_cadence_respects_the_kernel_latency_bound() {
+        let mut request = crate::serial_tests::request();
+        request.cancellation.maximum_work_units_between_checks = u64::MAX;
+        let options = solver_options(&request);
+        assert_eq!(
+            options.cancellation_check_interval,
+            DelaunaySolverTopologyOptions::default().cancellation_check_interval
+        );
+        assert_eq!(
+            options.maximum_curved_optimization_sweeps,
+            DelaunaySolverTopologyOptions::default().maximum_curved_optimization_sweeps
         );
     }
 }

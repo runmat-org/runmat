@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use runmat_execution_runner::{AttemptRequest, AttemptSuccess};
@@ -77,21 +77,22 @@ async fn run_process(
         .map_err(|error| error.to_string())?;
     let mut last_progress_sequence = 0;
     let response = loop {
-        let payload = tokio::select! {
-            response = read_payload(&mut reader, limits) => {
-                response.map_err(|error| {
-                    let stderr = stderr.text();
-                    if stderr.is_empty() { error.to_string() } else { format!("{error}; worker stderr: {stderr}") }
-                })?
-            }
-            _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                if completion.cancelled.load(Ordering::Acquire) {
+        let payload =
+            match read_payload_until_cancelled(&mut reader, limits, &completion.cancelled).await {
+                Ok(Some(payload)) => payload,
+                Ok(None) => {
                     let _ = child.terminate_tree().await;
                     return Err("execution was cancelled".into());
                 }
-                continue;
-            }
-        };
+                Err(error) => {
+                    let stderr = stderr.text();
+                    return Err(if stderr.is_empty() {
+                        error.to_string()
+                    } else {
+                        format!("{error}; worker stderr: {stderr}")
+                    });
+                }
+            };
         if let Ok(message) = serde_json::from_slice::<WorkerProcessMessage>(&payload) {
             match message {
                 WorkerProcessMessage::Progress { progress } => {
@@ -109,6 +110,10 @@ async fn run_process(
                 .map_err(|error| error.to_string())?;
         }
     };
+    // The worker treats EOF on stdin as parent death. Keep the request pipe open until a terminal
+    // response arrives; without this explicit lifetime, non-lexical drop can cancel healthy work
+    // immediately after the one request frame is written.
+    drop(writer);
     let _ = child.wait().await;
     response
         .validate_against(&request)
@@ -126,5 +131,61 @@ async fn run_process(
             result_objects,
         }),
         WorkerResponse::Failure { message } => Err(message),
+    }
+}
+
+async fn read_payload_until_cancelled(
+    reader: &mut (impl tokio::io::AsyncRead + Unpin),
+    limits: FrameLimits,
+    cancelled: &AtomicBool,
+) -> runmat_process_host::ProcessHostResult<Option<Vec<u8>>> {
+    let read = read_payload(reader, limits);
+    tokio::pin!(read);
+    loop {
+        tokio::select! {
+            response = &mut read => return response.map(Some),
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                if cancelled.load(Ordering::Acquire) {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicBool;
+
+    use tokio::io::AsyncWriteExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn cancellation_polling_preserves_a_fragmented_frame() {
+        let (mut writer, mut reader) = tokio::io::duplex(64);
+        let payload = br#"{"message":"fragmented"}"#.to_vec();
+        let length = u32::try_from(payload.len()).unwrap().to_be_bytes();
+        let frame = [length.as_slice(), payload.as_slice()].concat();
+        let sender = tokio::spawn(async move {
+            for byte in frame {
+                writer.write_all(&[byte]).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(12)).await;
+            }
+        });
+
+        let received = read_payload_until_cancelled(
+            &mut reader,
+            FrameLimits {
+                max_message_bytes: 1024,
+            },
+            &AtomicBool::new(false),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        sender.await.unwrap();
+        assert_eq!(received, payload);
     }
 }

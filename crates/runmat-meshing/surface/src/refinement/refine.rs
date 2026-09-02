@@ -1,16 +1,20 @@
 use crate::{
+    acceptance::sample_exact_face_mesh_in_parameterization,
     evaluate_exact_face_geometry_in_parameterization,
-    validate_exact_face_geometry_in_parameterization, ExactFaceBoundary, ExactFaceChart,
+    validate_exact_face_geometry_in_parameterization, ExactFaceAcceptanceError,
+    ExactFaceAcceptanceErrorKind, ExactFaceBoundary, ExactFaceChart,
     ExactFaceChartParameterization, ExactFaceGeometryContext, ExactFaceGeometryError,
 };
 
 use super::{
     classify_exact_face_refinement_candidates_in_parameterization,
-    derive_exact_face_feature_collars, insert_exact_face_refinement_candidates,
-    insert_validated_face_refinement_candidates, select_exact_face_refinement_candidates,
+    derive_exact_face_feature_collars, independent_candidate_batch,
+    insert_exact_face_refinement_candidates, insert_validated_face_refinement_candidates,
+    select_exact_face_refinement_candidates, separate_geometric_witness,
     split_exact_face_chart_cut, ExactFaceRefinedMesh, ExactFaceRefinedTopology,
-    ExactFaceRefinementContext, ExactFaceRefinementError, ExactFaceRefinementErrorKind,
-    ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
+    ExactFaceRefinementCandidate, ExactFaceRefinementContext, ExactFaceRefinementError,
+    ExactFaceRefinementErrorKind, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
+    ExactFaceRefinementReason,
 };
 
 #[derive(Clone, Copy)]
@@ -89,40 +93,72 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
         )
         .map_err(map_geometry)?;
         let collars = derive_exact_face_feature_collars(&current.pslg, &geometry, policy.quality)?;
-        let candidates = select_exact_face_refinement_candidates(
+        let mut candidates = select_exact_face_refinement_candidates(
             &geometry,
             &current.pslg,
             &collars,
             policy.quality,
         )?;
         if candidates.is_empty() {
-            // Independent validation deliberately belongs at the artifact
-            // boundary. Re-evaluating every node and deviation sample after
-            // every interior insertion turns refinement into a quadratic
-            // sequence of full-prefix audits without protecting any additional
-            // externally observable state.
-            validate_exact_face_geometry_in_parameterization(
-                &geometry,
-                &current.trimmed,
-                &current.pslg,
+            let provisional = ExactFaceRefinedMesh {
+                topology: current.clone(),
+                geometry: geometry.clone(),
+                feature_collars: collars.clone(),
+                interior_insertion_count: insertion_count,
+            };
+            let report = sample_exact_face_mesh_in_parameterization(
+                &provisional,
+                context,
+                policy.quality,
+                policy.acceptance,
                 domain.parameterization(),
-                ExactFaceGeometryContext::new(
-                    context.topology,
-                    context.metric_request,
-                    context.evaluator,
-                    context.geometry_control,
-                ),
             )
-            .map_err(map_geometry)?;
-            return Ok((
-                ExactFaceRefinementOutcome::Converged(Box::new(ExactFaceRefinedMesh {
-                    topology: current,
+            .map_err(map_acceptance)?;
+            for (triangle_index, triangle) in report.triangles.iter().enumerate() {
+                let (reason, witness_uv) = if triangle.maximum_chordal_deviation_m
+                    > policy.quality.maximum_chordal_deviation_m
+                {
+                    (
+                        ExactFaceRefinementReason::ChordalDeviation,
+                        triangle.maximum_chordal_deviation_uv,
+                    )
+                } else if triangle.maximum_normal_deviation_rad
+                    > policy.quality.maximum_normal_deviation_degrees.to_radians()
+                {
+                    (
+                        ExactFaceRefinementReason::NormalDeviation,
+                        triangle.maximum_normal_deviation_uv,
+                    )
+                } else {
+                    continue;
+                };
+                let uv = separate_geometric_witness(
+                    witness_uv,
+                    triangle_index,
+                    &geometry,
+                    &current.pslg,
+                    policy.quality.minimum_metric_edge_length,
+                )
+                .unwrap_or(witness_uv);
+                candidates.push(ExactFaceRefinementCandidate {
+                    source_face_id: current.pslg.source_face_id.clone(),
+                    triangle_index: triangle_index as u32,
+                    triangle: triangle.triangle,
+                    reason,
+                    uv,
+                });
+            }
+            if candidates.is_empty() {
+                return finish_refinement(
+                    domain,
+                    current,
                     geometry,
-                    feature_collars: collars,
-                    interior_insertion_count: insertion_count,
-                })),
-                chart_cut_split_count,
-            ));
+                    collars,
+                    context,
+                    insertion_count,
+                    chart_cut_split_count,
+                );
+            }
         }
 
         let classifications = classify_exact_face_refinement_candidates_in_parameterization(
@@ -180,8 +216,28 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                 ));
             }
             let remaining = policy.refinement.maximum_interior_insertions - insertion_count;
-            let mut candidates = classifications.insertions;
+            let mut candidates = independent_candidate_batch(
+                classifications.insertions,
+                &geometry,
+                &current.pslg,
+                policy.quality.minimum_metric_edge_length,
+            )?;
             candidates.truncate(remaining as usize);
+            if candidates.is_empty() {
+                // Only shape candidates may be suppressed by the spacing collar. Their insertion
+                // would create an edge below the hard minimum, so the current constrained mesh is
+                // the terminal result. Geometry-deviation and metric-size candidates fail above
+                // instead of being silently accepted.
+                return finish_refinement(
+                    domain,
+                    current,
+                    geometry,
+                    collars,
+                    context,
+                    insertion_count,
+                    chart_cut_split_count,
+                );
+            }
             let (refined, inserted) = match domain {
                 ExactFaceRefinementDomain::ExactBoundary(boundary) => {
                     insert_exact_face_refinement_candidates(
@@ -211,10 +267,64 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
     }
 }
 
+fn finish_refinement(
+    domain: ExactFaceRefinementDomain<'_>,
+    topology: ExactFaceRefinedTopology,
+    geometry: crate::ExactFaceGeometry,
+    feature_collars: super::ExactFaceFeatureCollars,
+    context: ExactFaceRefinementContext<'_>,
+    interior_insertion_count: u32,
+    chart_cut_split_count: u32,
+) -> Result<(ExactFaceRefinementOutcome, u32), ExactFaceRefinementError> {
+    // Independent validation belongs at the artifact boundary. Re-evaluating every node and
+    // deviation sample after every insertion turns refinement into a quadratic prefix audit
+    // without protecting additional externally observable state.
+    validate_exact_face_geometry_in_parameterization(
+        &geometry,
+        &topology.trimmed,
+        &topology.pslg,
+        domain.parameterization(),
+        ExactFaceGeometryContext::new(
+            context.topology,
+            context.metric_request,
+            context.evaluator,
+            context.geometry_control,
+        ),
+    )
+    .map_err(map_geometry)?;
+    Ok((
+        ExactFaceRefinementOutcome::Converged(Box::new(ExactFaceRefinedMesh {
+            topology,
+            geometry,
+            feature_collars,
+            interior_insertion_count,
+        })),
+        chart_cut_split_count,
+    ))
+}
+
 fn map_geometry(error: ExactFaceGeometryError) -> ExactFaceRefinementError {
     ExactFaceRefinementError::new(
         ExactFaceRefinementErrorKind::Geometry(error.kind),
         &error.source_face_id,
         error.reason,
     )
+}
+
+fn map_acceptance(error: ExactFaceAcceptanceError) -> ExactFaceRefinementError {
+    let kind = match error.kind {
+        ExactFaceAcceptanceErrorKind::ResourceLimit => ExactFaceRefinementErrorKind::ResourceLimit,
+        ExactFaceAcceptanceErrorKind::UnsatisfiedQuality => {
+            ExactFaceRefinementErrorKind::UnsatisfiedQuality
+        }
+        ExactFaceAcceptanceErrorKind::Metric(kind) => ExactFaceRefinementErrorKind::Metric(kind),
+        ExactFaceAcceptanceErrorKind::Geometry(kind) => {
+            ExactFaceRefinementErrorKind::Geometry(kind)
+        }
+        ExactFaceAcceptanceErrorKind::InvalidOptions => {
+            ExactFaceRefinementErrorKind::InvalidOptions
+        }
+        ExactFaceAcceptanceErrorKind::InvalidInput => ExactFaceRefinementErrorKind::InvalidGeometry,
+    };
+    ExactFaceRefinementError::new(kind, &error.source_face_id, error.reason)
 }

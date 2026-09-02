@@ -41,6 +41,13 @@ impl<'a> FacetRecoveryWork<'a> {
         self.last_rejection = None;
     }
 
+    pub(super) fn begin_constraint(&mut self) {
+        self.cavity_apex_attempts = 0;
+        self.cavity_steiner_nodes = 0;
+        self.cavity_steiner_insertion_attempts = 0;
+        self.last_rejection = None;
+    }
+
     pub(super) fn reject(&mut self, reason: impl Into<String>) {
         self.last_rejection = Some(reason.into());
     }

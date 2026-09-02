@@ -7,7 +7,7 @@ use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, signature_help_at, CompatMode,
 };
 
-const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 10] = [
+const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 9] = [
     "fea.compare",
     "fea.domain",
     "fea.field",
@@ -17,7 +17,6 @@ const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 10] = [
     "fea.materialAssignment",
     "fea.model",
     "fea.plan",
-    "fea.plot",
 ];
 
 const FEA_INTEGER_CONSTRUCTORS: [&str; 4] = [
@@ -27,13 +26,12 @@ const FEA_INTEGER_CONSTRUCTORS: [&str; 4] = [
     "fea.material",
 ];
 
-const FEA_INTEGER_INAPPLICABLE: [&str; 6] = [
+const FEA_INTEGER_INAPPLICABLE: [&str; 5] = [
     "fea.compare",
     "fea.field",
     "fea.materialAssignment",
     "fea.model",
     "fea.plan",
-    "fea.plot",
 ];
 
 const INTEGER_CLASSES: [BuiltinIntegerClass; 8] = [
@@ -81,7 +79,6 @@ fn fea_modeling_and_postprocessing_descriptors_are_visible_to_signature_help() {
         ),
         ("model", "out = fea.model(\"model\", \"geometry\");"),
         ("plan", "out = fea.plan(\"study.fea\");"),
-        ("plot", "out = fea.plot(\"run\", \"stress\");"),
     ] {
         let help = signature_help(source, lookup);
         assert!(!help.signatures.is_empty(), "{lookup} signatures");

@@ -23,17 +23,18 @@ use topology::{
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct LocalTetrahedron {
     pub tetrahedron_id: u32,
     pub node_ids: [u32; 4],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalTetrahedronFlipKind {
     TwoToThreeFace,
     ThreeToTwoEdge,
+    EdgeStar,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -2,7 +2,7 @@ use super::*;
 use crate::cdt::{build_delaunay_volume_point_set, DelaunayPointSetOptions};
 
 #[test]
-fn one_facet_recovers_both_unfillable_sides_with_bounded_insertions() {
+fn one_facet_recovers_both_sides_without_unnecessary_insertions() {
     let constraints = constraints();
     let point_set = build_delaunay_volume_point_set(
         constraints.volume_nodes(),
@@ -33,19 +33,7 @@ fn one_facet_recovers_both_unfillable_sides_with_bounded_insertions() {
     .unwrap();
 
     assert_eq!(recovered, repeated);
-    assert_eq!(recovered.steiner_insertions.len(), 2);
-    assert!(recovered
-        .steiner_insertions
-        .iter()
-        .all(|insertion| insertion.constraint_index == 0));
-    assert_eq!(
-        recovered
-            .steiner_insertions
-            .iter()
-            .map(|insertion| insertion.insertion_round)
-            .collect::<Vec<_>>(),
-        vec![0, 1]
-    );
+    assert!(recovered.steiner_insertions.is_empty());
     validate_delaunay_facet_recovery(
         &recovered,
         &constraints,
@@ -54,7 +42,7 @@ fn one_facet_recovers_both_unfillable_sides_with_bounded_insertions() {
     )
     .unwrap();
 
-    let failure = recover_delaunay_facets(
+    let bounded = recover_delaunay_facets(
         segments,
         &constraints,
         DelaunayFacetRecoveryOptions {
@@ -63,8 +51,8 @@ fn one_facet_recovers_both_unfillable_sides_with_bounded_insertions() {
         },
         &NeverCancelled,
     )
-    .unwrap_err();
-    assert_eq!(failure.kind, DelaunayFacetRecoveryErrorKind::ResourceLimit);
+    .unwrap();
+    assert_eq!(bounded, recovered);
 }
 
 fn constraints() -> DelaunayConstraints {

@@ -5,11 +5,12 @@ artifact contains nodes, tetrahedra, boundary topology, persistent regions, inte
 contacts, field mappings, the resolved meshing request, and a canonical identity. A companion
 evidence artifact records each stage's checks and resource usage.
 
-Meshing has three entry points:
+Meshing has four entry points:
 
 | Goal | Entry point |
 | --- | --- |
-| Generate and inspect a mesh directly | `runmat mesh part.step` |
+| Generate, inspect, and display a mesh in RunMat code | `part = geometry.load(...); solverMesh = meshing.generate(part); mesh(solverMesh)` |
+| Generate canonical artifacts directly from a shell | `runmat mesh part.step` |
 | Mesh as part of an analysis | Add a `mesh:` block to a `.fea` study and run `runmat run study.fea` |
 | Integrate meshing into another host | Use the canonical meshing request, DAG, and execution-host APIs from Rust |
 
@@ -18,6 +19,135 @@ require a RunMat build with the native Open CASCADE (OCCT) capability. Official 
 Desktop builds include it.
 
 ## Quick Start
+
+From RunMat code, load the source geometry with explicit units, inspect the admitted geometry, and
+generate a solver mesh:
+
+```matlab
+part = geometry.load("bracket.step", "Units", "millimeter");
+mesh(part);
+
+solverMesh = meshing.generate(part, ...
+    "TargetSize", 0.005, ...
+    "MaximumDeviation", 0.00005, ...
+    "MaximumGradingRatio", 1.3, ...
+    "ElementOrder", "tet10", ...
+    "MaximumElements", uint64(2000000), ...
+    "Seed", uint64(42));
+
+mesh(solverMesh);
+```
+
+`geometry.load` returns a `geometry.Asset`: admitted geometry in metres, exact CAD authority when
+the source is STEP, IGES, or BREP, persistent topology, and render tessellation. `mesh(part)` is a
+view of that geometry; it does not generate solver elements. `meshing.generate` returns an immutable
+`meshing.Mesh` whose canonical solver artifact and matching evidence have already passed joint
+validation. `mesh(solverMesh)` displays its solver boundary. These overloads use RunMat's object
+dispatch; ordinary numeric `mesh(X, Y, Z)` behavior is unchanged.
+
+Geometry display options are visual only:
+
+```matlab
+mesh(part, "Edges", true, "XRay", false);
+```
+
+Solver-mesh display can select physical volume regions or cut a section. Region identifiers come
+from `meshing.regions`, not material names:
+
+```matlab
+regions = meshing.regions(solverMesh);
+firstRegionInfo = regions{1};
+firstRegion = firstRegionInfo.id;
+mesh(solverMesh, "Regions", firstRegion);
+
+nodeData = meshing.nodes(solverMesh);
+coordinates = nodeData.coordinates;
+xMid = (min(coordinates(:, 1)) + max(coordinates(:, 1))) / 2;
+mesh(solverMesh, "Section", [1 0 0 -xMid], "Edges", true);
+```
+
+The section vector is the plane `[a b c d]` in metres, with `a*x + b*y + c*z + d = 0`.
+
+### Inspect topology, quality, and evidence
+
+The inspection functions return script-friendly data while preserving topology identifiers as
+typed `uint64` values:
+
+```matlab
+nodes = meshing.nodes(solverMesh);
+elements = meshing.elements(solverMesh);
+faces = meshing.boundaryFaces(solverMesh);
+regions = meshing.regions(solverMesh);
+
+quality = meshing.quality(solverMesh);
+disp(quality.minimum_corner_scaled_jacobian);
+disp(quality.p05_corner_scaled_jacobian);
+disp(quality.maximum_corner_aspect_ratio);
+disp(quality.p95_corner_aspect_ratio);
+disp(quality.total_corner_volume_m3);
+
+evidence = meshing.evidence(solverMesh);
+disp(evidence.artifact_digest);
+disp(evidence.generated_elements);
+disp(evidence.wall_time_ms);
+disp(evidence.stages);
+```
+
+`quality.corner_scaled_jacobian`, `quality.corner_aspect_ratio`, and
+`quality.corner_volume_m3` are per-element column vectors aligned with `quality.element_ids`. They
+describe each tetrahedron's four corner nodes. For Tet4 they describe the element itself; for Tet10,
+the bound evidence is the authority for certified curved isoparametric Jacobians and achieved
+high-order geometry checks. The summary fields make quick corner-quality checks convenient. The
+evidence also remains authoritative for admission-stage invariants, achieved distributions, and
+resource measurements. `evidence.resources` and each record in `evidence.stages` retain counters as
+typed `uint64` values; stage records include progress, memory/scratch peaks, search and iteration
+work, elapsed time, cancellation checkpoints, and invariant results.
+
+Save and reload the jointly validated pair when a script needs explicit artifact paths:
+
+```matlab
+meshing.save(solverMesh, ...
+    "artifacts/bracket.solver-mesh.cbor", ...
+    "artifacts/bracket.meshing-evidence.cbor");
+
+loadedMesh = meshing.load( ...
+    "artifacts/bracket.solver-mesh.cbor", ...
+    "artifacts/bracket.meshing-evidence.cbor");
+```
+
+Existing destinations are protected. Add `"Force", true` only for intentional replacement. Files
+are staged before either destination is replaced, and a publication error rolls the pair back;
+`meshing.load` decodes both and rejects a mismatched or invalid pair.
+
+### Hand a mesh to FEA
+
+Meshing owns geometry discretization and persistent regions. FEA owns materials, assignments,
+loads, boundary conditions, solver configuration, fields, and result visualization:
+
+```matlab
+study = fea.study("bracket_static", part, ...
+    "Profile", "linear_static_structural", ...
+    "Mesh", solverMesh, ...
+    "Materials", steel, ...
+    "MaterialAssignments", assignments, ...
+    "BoundaryConditions", supports, ...
+    "Loads", loadCases);
+
+run = fea.run(study);
+stress = fea.field(fea.results(run), "structural.von_mises");
+plot(stress);
+```
+
+Passing `"Mesh", solverMesh` content-addresses the already validated canonical pair in the FEA
+artifact store and binds it to the study. It does not regenerate the mesh. Material assignment is
+therefore by persistent FEA region and never an option to `meshing.generate`.
+
+RunMat code does not choose local versus remote placement in the meshing request. The installed
+native host supplies its existing execution provider, pool, queue, trust, retry, cancellation, and
+artifact-transfer policy. The same code therefore uses local parallel workers on a local host and
+compatible distributed capacity when the product host is configured for it.
+
+### Command-line generation
 
 Given `bracket.step`, generate a linear tetrahedral mesh in metres:
 
@@ -48,8 +178,8 @@ runmat mesh geometry/bracket.step \
 ```
 
 Existing output files are protected. Pass `--force` only when replacing both outputs is intended.
-RunMat writes each file atomically, decodes it again, validates it, and verifies that the evidence
-and mesh identities agree before reporting success.
+RunMat stages the pair before publication, rolls back publication errors, decodes both outputs,
+validates them, and verifies that the evidence and mesh identities agree before reporting success.
 
 ### Run the repository fixture
 
@@ -189,7 +319,9 @@ exact geometry admission and bounded healing
   -> constrained Delaunay tetrahedralization
   -> segment and facet recovery
   -> region/void carving
-  -> refinement and sliver treatment
+  -> solver-coordinate materialization and protected legalization
+  -> size and radius-edge refinement
+  -> scaled-Jacobian sliver optimization
   -> Tet10 elevation when requested
   -> independent validation
   -> canonical serialization and atomic publication
@@ -209,6 +341,14 @@ other contractually independent components may run separately and join in canoni
 Every accepted topology mutation preserves recovered constraints, positive orientation, region
 ownership, and source provenance. The final validator rechecks the artifact independently of the
 generator before publication.
+
+Constraint recovery retains exact constructed-point representations while it proves authored edge
+and facet incidence. Once those facets are protected, RunMat materializes the coordinates stored in
+the solver artifact and re-legalizes only interior topology; protected boundary facets and region
+interfaces cannot be crossed. Refinement then inserts points for metric edge-length and radius-edge
+violations. A separate optimization pass handles scaled-Jacobian slivers through bounded local
+relocation or deletion. Keeping those stages separate prevents a shape threshold from driving an
+unbounded insertion loop, while the final quality gate still requires every configured bound.
 
 ## Quality and Statistics
 

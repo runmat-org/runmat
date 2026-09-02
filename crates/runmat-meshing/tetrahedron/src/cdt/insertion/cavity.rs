@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use runmat_meshing_core::{
-    quality::predicate::{insphere3d, orient2d, orient3d, PredicateSign},
+    quality::predicate::{orient2d, PredicateSign},
     StableDigest,
 };
 
@@ -9,6 +9,66 @@ use super::{
     error, predicate_error, resource, topology_access::TetrahedralTopology, DelaunayInsertionError,
     DelaunayInsertionErrorKind, DelaunayVolumeNode, InsertionWork,
 };
+
+pub(super) fn cavity_is_star_shaped(
+    topology: &impl TetrahedralTopology,
+    cavity: &BTreeSet<u32>,
+    node: DelaunayVolumeNode,
+    work: &mut InsertionWork<'_>,
+) -> Result<bool, DelaunayInsertionError> {
+    for index in cavity {
+        let tetrahedron = topology.tetrahedron(*index).ok_or_else(|| {
+            error(
+                DelaunayInsertionErrorKind::InvalidTopology,
+                "cavity visibility check reached an inactive tetrahedron",
+            )
+        })?;
+        for (opposite, neighbor) in tetrahedron.neighbors.iter().enumerate() {
+            if neighbor.is_some_and(|neighbor| cavity.contains(&neighbor)) {
+                continue;
+            }
+            if neighbor.is_none()
+                && node_lies_on_face(topology, tetrahedron.vertex_indices, opposite, node, work)?
+            {
+                continue;
+            }
+            work.predicate()?;
+            let mut face = [topology.nodes()[tetrahedron.vertex_indices[0] as usize]; 3];
+            let mut cursor = 0;
+            for (slot, vertex) in tetrahedron.vertex_indices.iter().enumerate() {
+                if slot != opposite {
+                    face[cursor] = topology.nodes()[*vertex as usize];
+                    cursor += 1;
+                }
+            }
+            let interior = topology.nodes()[tetrahedron.vertex_indices[opposite] as usize];
+            let interior_sign = topology
+                .orient_nodes([face[0], face[1], face[2], interior])
+                .map_err(predicate_error)?;
+            let node_sign = topology
+                .orient_nodes([face[0], face[1], face[2], node])
+                .map_err(predicate_error)?;
+            if node_sign == PredicateSign::Zero {
+                if neighbor.is_none()
+                    && node_lies_on_face(
+                        topology,
+                        tetrahedron.vertex_indices,
+                        opposite,
+                        node,
+                        work,
+                    )?
+                {
+                    continue;
+                }
+                return Ok(false);
+            }
+            if node_sign != interior_sign {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
 
 pub(super) fn connected_cavity<T: TetrahedralTopology>(
     topology: &T,
@@ -69,7 +129,118 @@ pub(super) fn connected_cavity<T: TetrahedralTopology>(
     Ok(cavity)
 }
 
-fn node_lies_on_face(
+/// A protected face is an insertion barrier, but an open constrained patch can
+/// be reached from its other side without traversing that face. If both
+/// incident tetrahedra enter the conflict cavity, ordinary cavity replacement
+/// would erase the constraint. Keep only the incident side containing the new
+/// point, then discard any conflict islands disconnected from the containing
+/// tetrahedron.
+pub(super) fn restrict_cavity_to_protected_side(
+    topology: &impl TetrahedralTopology,
+    cavity: &mut BTreeSet<u32>,
+    seed: u32,
+    node: DelaunayVolumeNode,
+    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    work: &mut InsertionWork<'_>,
+) -> Result<(), DelaunayInsertionError> {
+    if protected_faces.is_empty() {
+        return Ok(());
+    }
+    let mut remove = BTreeSet::new();
+    for index in cavity.iter().copied() {
+        let tetrahedron = topology.tetrahedron(index).ok_or_else(|| {
+            error(
+                DelaunayInsertionErrorKind::InvalidTopology,
+                "protected-side restriction reached an inactive tetrahedron",
+            )
+        })?;
+        for (opposite, neighbor) in tetrahedron.neighbors.iter().enumerate() {
+            let Some(neighbor) = *neighbor else {
+                continue;
+            };
+            if neighbor <= index
+                || !cavity.contains(&neighbor)
+                || !protected_faces.contains(&stable_face(
+                    topology,
+                    tetrahedron.vertex_indices,
+                    opposite,
+                ))
+            {
+                continue;
+            }
+            let mut face = [topology.nodes()[tetrahedron.vertex_indices[0] as usize]; 3];
+            let mut cursor = 0;
+            for (slot, vertex) in tetrahedron.vertex_indices.iter().enumerate() {
+                if slot != opposite {
+                    face[cursor] = topology.nodes()[*vertex as usize];
+                    cursor += 1;
+                }
+            }
+            let apex = topology.nodes()[tetrahedron.vertex_indices[opposite] as usize];
+            work.predicate()?;
+            let apex_sign = topology
+                .orient_nodes([face[0], face[1], face[2], apex])
+                .map_err(predicate_error)?;
+            work.predicate()?;
+            let node_sign = topology
+                .orient_nodes([face[0], face[1], face[2], node])
+                .map_err(predicate_error)?;
+            if node_sign == PredicateSign::Zero {
+                let stable = stable_face(topology, tetrahedron.vertex_indices, opposite);
+                if node_lies_on_face(topology, tetrahedron.vertex_indices, opposite, node, work)? {
+                    return Err(error(
+                        DelaunayInsertionErrorKind::InvalidNode,
+                        format!(
+                            "inserted node {:?} at {:?} lies on protected face {:?} at {:?}",
+                            node.identity,
+                            node.coordinates_m,
+                            stable,
+                            face.map(|vertex| vertex.coordinates_m),
+                        ),
+                    ));
+                }
+                // A point on the supporting plane but outside the bounded face cannot be coned
+                // to that face without creating a zero-volume tetrahedron. Keep both incident
+                // tetrahedra; the connected conflict component containing the insertion seed is
+                // retained below.
+                remove.insert(index);
+                remove.insert(neighbor);
+                continue;
+            }
+            if node_sign == apex_sign {
+                remove.insert(neighbor);
+            } else {
+                remove.insert(index);
+            }
+        }
+    }
+    cavity.retain(|index| !remove.contains(index));
+    if !cavity.contains(&seed) {
+        return Err(error(
+            DelaunayInsertionErrorKind::InvalidTopology,
+            "protected-side restriction removed the containing tetrahedron",
+        ));
+    }
+    let mut connected = BTreeSet::new();
+    let mut queue = VecDeque::from([seed]);
+    while let Some(index) = queue.pop_front() {
+        if !cavity.contains(&index) || !connected.insert(index) {
+            continue;
+        }
+        let tetrahedron = topology
+            .tetrahedron(index)
+            .expect("restricted cavity tetrahedra remain active");
+        for neighbor in tetrahedron.neighbors.into_iter().flatten() {
+            if cavity.contains(&neighbor) && !connected.contains(&neighbor) {
+                queue.push_back(neighbor);
+            }
+        }
+    }
+    *cavity = connected;
+    Ok(())
+}
+
+pub(super) fn node_lies_on_face(
     topology: &impl TetrahedralTopology,
     vertices: [u32; 4],
     opposite: usize,
@@ -155,16 +326,17 @@ pub(super) fn node_coplanar_with_face(
     work: &mut InsertionWork<'_>,
 ) -> Result<bool, DelaunayInsertionError> {
     work.predicate()?;
-    let mut points = [[0.0; 3]; 4];
+    let mut points = [topology.nodes()[vertices[0] as usize]; 4];
     let mut cursor = 0;
     for (vertex_index, vertex) in vertices.iter().enumerate() {
         if vertex_index != opposite {
-            points[cursor] = topology.nodes()[*vertex as usize].coordinates_m;
+            points[cursor] = topology.nodes()[*vertex as usize];
             cursor += 1;
         }
     }
-    points[3] = node.coordinates_m;
-    orient3d(points)
+    points[3] = node;
+    topology
+        .orient_nodes(points)
         .map(|sign| sign == PredicateSign::Zero)
         .map_err(predicate_error)
 }
@@ -175,10 +347,12 @@ fn in_circumsphere(
     node: DelaunayVolumeNode,
     work: &mut InsertionWork<'_>,
 ) -> Result<bool, DelaunayInsertionError> {
-    // Taking the closed circumsphere keeps the cavity coherent when several
-    // tetrahedra are exactly cospherical.
-    circumsphere_relation(topology, vertices, node, work)
+    work.predicate()?;
+    let points = vertices.map(|vertex| topology.nodes()[vertex as usize]);
+    topology
+        .insphere_nodes([points[0], points[1], points[2], points[3], node])
         .map(|sign| matches!(sign, PredicateSign::Positive | PredicateSign::Zero))
+        .map_err(predicate_error)
 }
 
 pub(super) fn circumsphere_relation(
@@ -188,15 +362,79 @@ pub(super) fn circumsphere_relation(
     work: &mut InsertionWork<'_>,
 ) -> Result<PredicateSign, DelaunayInsertionError> {
     work.predicate()?;
-    let points = vertices.map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
-    insphere3d([
-        points[0],
-        points[1],
-        points[2],
-        points[3],
-        node.coordinates_m,
-    ])
-    .map_err(predicate_error)
+    let points = vertices.map(|vertex| topology.nodes()[vertex as usize]);
+    let relation = topology
+        .insphere_nodes([points[0], points[1], points[2], points[3], node])
+        .map_err(predicate_error)?;
+    if relation != PredicateSign::Zero {
+        return Ok(relation);
+    }
+    symbolic_circumsphere_relation(topology, vertices, node)
+}
+
+fn symbolic_circumsphere_relation(
+    topology: &impl TetrahedralTopology,
+    vertices: [u32; 4],
+    node: DelaunayVolumeNode,
+) -> Result<PredicateSign, DelaunayInsertionError> {
+    let mut points = vertices
+        .map(|vertex| topology.nodes()[vertex as usize])
+        .to_vec();
+    points.push(node);
+    let mut inversions = 0_u8;
+    for left in 0..points.len() {
+        for right in (left + 1)..points.len() {
+            inversions ^= u8::from(
+                compare_symbolic_nodes(&points[left], &points[right])
+                    == std::cmp::Ordering::Greater,
+            );
+        }
+    }
+    points.sort_unstable_by(compare_symbolic_nodes);
+    let parity_is_odd = inversions != 0;
+    let leading = topology
+        .orient_nodes([points[1], points[2], points[3], points[4]])
+        .map_err(predicate_error)?;
+    if leading != PredicateSign::Zero {
+        return Ok(if parity_is_odd {
+            reverse_sign(leading)
+        } else {
+            leading
+        });
+    }
+    let trailing = topology
+        .orient_nodes([points[0], points[2], points[3], points[4]])
+        .map_err(predicate_error)?;
+    if trailing == PredicateSign::Zero {
+        return Err(error(
+            DelaunayInsertionErrorKind::InvalidTopology,
+            "symbolic circumsphere perturbation encountered five affinely degenerate nodes",
+        ));
+    }
+    Ok(if parity_is_odd {
+        trailing
+    } else {
+        reverse_sign(trailing)
+    })
+}
+
+fn compare_symbolic_nodes(
+    left: &DelaunayVolumeNode,
+    right: &DelaunayVolumeNode,
+) -> std::cmp::Ordering {
+    left.coordinates_m
+        .iter()
+        .zip(right.coordinates_m.iter())
+        .find_map(|(left, right)| (left != right).then(|| left.total_cmp(right)))
+        .unwrap_or_else(|| left.identity.cmp(&right.identity))
+}
+
+fn reverse_sign(sign: PredicateSign) -> PredicateSign {
+    match sign {
+        PredicateSign::Negative => PredicateSign::Positive,
+        PredicateSign::Zero => PredicateSign::Zero,
+        PredicateSign::Positive => PredicateSign::Negative,
+    }
 }
 
 #[cfg(test)]
@@ -209,10 +447,7 @@ mod tests {
     };
 
     fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
-        DelaunayVolumeNode {
-            identity: StableDigest::from_bytes([identity; 32]),
-            coordinates_m,
-        }
+        DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
     }
 
     #[test]
@@ -252,5 +487,105 @@ mod tests {
             &mut work,
         )
         .unwrap());
+    }
+
+    #[test]
+    fn protected_face_restriction_keeps_only_the_inserted_point_side() {
+        let topology = build_delaunay_volume_topology(
+            vec![
+                node(10, [0.0, 0.0, 0.0]),
+                node(20, [1.0, 0.0, 0.0]),
+                node(30, [0.0, 1.0, 0.0]),
+                node(40, [0.0, 0.0, 1.0]),
+                node(50, [0.0, 0.0, -1.0]),
+            ],
+            vec![[0, 1, 2, 3], [0, 2, 1, 4]],
+            DelaunayTopologyOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap();
+        let seed = topology
+            .tetrahedra
+            .iter()
+            .position(|tetrahedron| {
+                tetrahedron
+                    .vertex_indices
+                    .iter()
+                    .any(|vertex| topology.nodes[*vertex as usize].coordinates_m == [0.0, 0.0, 1.0])
+            })
+            .unwrap() as u32;
+        let mut cavity = BTreeSet::from([0, 1]);
+        let protected = BTreeSet::from([[
+            StableDigest::from_bytes([10; 32]),
+            StableDigest::from_bytes([20; 32]),
+            StableDigest::from_bytes([30; 32]),
+        ]]);
+        let mut work = InsertionWork::new(DelaunayInsertionOptions::default(), &NeverCancelled);
+
+        restrict_cavity_to_protected_side(
+            &topology,
+            &mut cavity,
+            seed,
+            node(60, [0.2, 0.2, 0.2]),
+            &protected,
+            &mut work,
+        )
+        .unwrap();
+
+        assert_eq!(cavity, BTreeSet::from([seed]));
+    }
+
+    #[test]
+    fn protected_face_restriction_keeps_both_incident_tets_for_coplanar_outside_point() {
+        let topology = build_delaunay_volume_topology(
+            vec![
+                node(10, [0.0, 0.0, 0.0]),
+                node(20, [1.0, 0.0, 0.0]),
+                node(30, [0.0, 1.0, 0.0]),
+                node(40, [0.0, 0.0, 1.0]),
+                node(50, [0.0, 0.0, -1.0]),
+                node(60, [10.0, 10.0, 1.0]),
+                node(70, [11.0, 10.0, 1.0]),
+                node(80, [10.0, 11.0, 1.0]),
+                node(90, [10.0, 10.0, 2.0]),
+            ],
+            vec![[0, 1, 2, 3], [0, 2, 1, 4], [5, 6, 7, 8]],
+            DelaunayTopologyOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap();
+        let protected = BTreeSet::from([[
+            StableDigest::from_bytes([10; 32]),
+            StableDigest::from_bytes([20; 32]),
+            StableDigest::from_bytes([30; 32]),
+        ]]);
+        let seed = topology
+            .tetrahedra
+            .iter()
+            .position(|tetrahedron| {
+                tetrahedron
+                    .vertex_indices
+                    .iter()
+                    .all(|vertex| topology.nodes[*vertex as usize].coordinates_m[0] >= 10.0)
+            })
+            .unwrap() as u32;
+        let incident = (0..topology.tetrahedra.len() as u32)
+            .filter(|index| *index != seed)
+            .collect::<BTreeSet<_>>();
+        let mut cavity = BTreeSet::from_iter(0..topology.tetrahedra.len() as u32);
+        let mut work = InsertionWork::new(DelaunayInsertionOptions::default(), &NeverCancelled);
+
+        restrict_cavity_to_protected_side(
+            &topology,
+            &mut cavity,
+            seed,
+            node(100, [2.0, 2.0, 0.0]),
+            &protected,
+            &mut work,
+        )
+        .unwrap();
+
+        assert_eq!(cavity, BTreeSet::from([seed]));
+        assert!(incident.is_disjoint(&cavity));
     }
 }

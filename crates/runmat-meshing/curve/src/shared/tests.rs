@@ -623,6 +623,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         maximum_metric_edge_length: 1.5,
     };
     let surface_quality = runmat_meshing_core::SurfaceQualityTargets {
+        minimum_metric_edge_length: 0.1,
         minimum_metric_angle_degrees: 20.0,
         maximum_physical_aspect_ratio: 10.0,
         maximum_chordal_deviation_m: 0.001,

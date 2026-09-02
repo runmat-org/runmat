@@ -71,7 +71,7 @@ pub(crate) fn validate_exact_face_partition_result_with_boundary(
                 faces,
                 topology,
             )?;
-            validate_curve_boundary(faces, boundary)
+            validate_curve_boundary(faces, boundary, topology)
         }
         ExactFacePartitionOutcome::RequiresCurveSplits { splits } => {
             validate_split_ownership(&result.partition, topology, splits)?;
@@ -84,16 +84,27 @@ pub(crate) fn validate_exact_face_partition_result_with_boundary(
 fn validate_curve_boundary(
     faces: &[crate::ExactFaceMesh],
     boundary: &crate::ExactSurfaceBoundary,
+    topology: &ExactBRepTopology,
 ) -> Result<(), ExactSurfaceMeshError> {
+    let degenerate_edges = topology
+        .edges
+        .iter()
+        .filter(|edge| edge.is_degenerate)
+        .map(|edge| &edge.id)
+        .collect::<BTreeSet<_>>();
     for mesh in faces {
         let expected_face = boundary
             .faces
             .iter()
             .find(|face| face.source_face_id == mesh.source_face_id)
             .ok_or_else(|| invalid("face result is absent from the shared curve boundary"))?;
-        let expected = std::iter::once(&expected_face.outer_loop)
+        let expected_segments = std::iter::once(&expected_face.outer_loop)
             .chain(&expected_face.inner_loops)
             .flat_map(|face_loop| &face_loop.segments)
+            .filter(|segment| !degenerate_edges.contains(&segment.source_edge_id))
+            .collect::<Vec<_>>();
+        let expected = expected_segments
+            .iter()
             .map(|segment| {
                 (
                     &segment.source_coedge_id,
@@ -115,14 +126,12 @@ fn validate_curve_boundary(
                 )
             })
             .collect::<BTreeSet<_>>();
-        if expected.len()
-            != expected_face.outer_loop.segments.len()
-                + expected_face
-                    .inner_loops
-                    .iter()
-                    .map(|face_loop| face_loop.segments.len())
-                    .sum::<usize>()
+        if expected.len() != expected_segments.len()
             || actual.len() != mesh.boundary_segments.len()
+            || mesh
+                .boundary_segments
+                .iter()
+                .any(|segment| degenerate_edges.contains(&segment.source_edge_id))
             || actual != expected
         {
             return Err(invalid(

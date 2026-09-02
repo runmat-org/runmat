@@ -50,9 +50,9 @@ pub(crate) fn insert_pslg_vertices(
 }
 
 fn compare_vertex(left: ExactFacePslgVertex, right: ExactFacePslgVertex) -> std::cmp::Ordering {
-    left.node_id
-        .cmp(&right.node_id)
-        .then_with(|| left.seam_image.cmp(&right.seam_image))
-        .then_with(|| left.uv[0].total_cmp(&right.uv[0]))
+    left.uv[0]
+        .total_cmp(&right.uv[0])
         .then_with(|| left.uv[1].total_cmp(&right.uv[1]))
+        .then_with(|| left.seam_image.cmp(&right.seam_image))
+        .then_with(|| left.node_id.cmp(&right.node_id))
 }

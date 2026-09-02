@@ -3,6 +3,7 @@ mod adaptive_planar;
 mod adaptive_spatial;
 mod circumsphere;
 mod distance;
+mod exact_dyadic;
 mod ray;
 mod simplex;
 mod solve;
@@ -10,17 +11,20 @@ mod surface;
 mod types;
 mod vector;
 
-pub use adaptive_metric::diametral_sphere_position;
+pub use adaptive_metric::{diametral_sphere_position, diametral_sphere_position_constructed};
 pub use adaptive_planar::{
     incircle2d, incircle2d_symbolic, orient2d, orient2d_symbolic, PlanarPredicateError,
     PlanarPredicatePoint, PredicateSign,
 };
 pub use adaptive_spatial::{
-    insphere3d, insphere3d_symbolic, orient3d, orient3d_symbolic, SpatialPredicateError,
+    compose_dyadic_point, insphere3d, insphere3d_constructed, insphere3d_symbolic, orient3d,
+    orient3d_constructed, orient3d_symbolic, points_collinear_constructed,
+    triangle_normal_alignment_constructed, Point3Construction, SpatialPredicateError,
     SpatialPredicatePoint,
 };
 pub use circumsphere::{tetrahedron_circumsphere, tetrahedron_circumsphere_contains_point};
 pub use distance::{closest_point_on_triangle, point_triangle_distance};
+pub use exact_dyadic::ExactDyadic;
 pub use ray::ray_triangle_intersection;
 pub use simplex::{
     orient_tetrahedron_node_ids, tetrahedron_centroid, tetrahedron_edge_aspect_ratio,

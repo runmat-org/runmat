@@ -90,6 +90,7 @@ fn validate_curve(
     validate_nodes(
         curve,
         edge,
+        context.topology,
         context.curves,
         context.control,
         transform,
@@ -158,6 +159,7 @@ fn validate_curve(
 fn validate_nodes(
     curve: &SharedCurve,
     edge: &ExactEdge,
+    topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
     control: &dyn GeometryEvaluationControl,
     transform: GeometryTransform,
@@ -170,7 +172,19 @@ fn validate_nodes(
             .point(&edge.curve_evaluator_id, node.parameter, control)
             .map(|point| transform.transform_point(point))
             .map_err(|error| geometry_error(edge, error))?;
-        if length(sub(point_m, node.coordinates_m)) > options.geometry_absolute_error_m {
+        let coordinate_tolerance_m = node
+            .source_vertex_id
+            .as_ref()
+            .and_then(|vertex_id| {
+                topology
+                    .vertices
+                    .binary_search_by(|vertex| vertex.id.cmp(vertex_id))
+                    .ok()
+                    .map(|index| topology.vertices[index].tolerance_m)
+            })
+            .unwrap_or(0.0)
+            .max(options.geometry_absolute_error_m);
+        if length(sub(point_m, node.coordinates_m)) > coordinate_tolerance_m {
             return Err(mismatch(
                 edge,
                 "curve node coordinates",

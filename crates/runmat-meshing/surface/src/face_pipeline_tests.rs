@@ -425,6 +425,7 @@ fn curve_split_demands_have_one_canonical_order() {
 
 fn permissive_quality() -> SurfaceQualityTargets {
     SurfaceQualityTargets {
+        minimum_metric_edge_length: 0.001,
         minimum_metric_angle_degrees: 0.01,
         maximum_physical_aspect_ratio: 1.0e9,
         maximum_chordal_deviation_m: 1.0e9,

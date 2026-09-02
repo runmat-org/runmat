@@ -2,9 +2,11 @@ use crate::quality::tolerance::MeshingTolerance;
 
 use super::{
     distance::point_triangle_distance,
+    orient2d, orient3d,
     ray::ray_triangle_intersection,
     types::{Point3, PointInClosedSurface, Triangle3},
     vector::{add, scale},
+    PredicateSign,
 };
 
 pub fn point_in_closed_triangle_surface(
@@ -12,10 +14,16 @@ pub fn point_in_closed_triangle_surface(
     triangles: &[Triangle3],
     tolerance: MeshingTolerance,
 ) -> PointInClosedSurface {
-    if triangles
-        .iter()
-        .any(|triangle| point_triangle_distance(point, *triangle) <= tolerance.absolute_m)
-    {
+    let on_boundary = if tolerance.absolute_m == 0.0 {
+        triangles
+            .iter()
+            .any(|triangle| point_on_triangle_exact(point, *triangle))
+    } else {
+        triangles
+            .iter()
+            .any(|triangle| point_triangle_distance(point, *triangle) <= tolerance.absolute_m)
+    };
+    if on_boundary {
         return PointInClosedSurface::OnBoundary;
     }
     let epsilon = tolerance.absolute_m;
@@ -40,6 +48,31 @@ pub fn point_in_closed_triangle_surface(
     } else {
         PointInClosedSurface::Outside
     }
+}
+
+fn point_on_triangle_exact(point: Point3, triangle: Triangle3) -> bool {
+    if orient3d([triangle[0], triangle[1], triangle[2], point]) != Ok(PredicateSign::Zero) {
+        return false;
+    }
+    for axes in [[0, 1], [0, 2], [1, 2]] {
+        let projected = triangle.map(|vertex| [vertex[axes[0]], vertex[axes[1]]]);
+        if orient2d(projected).is_ok_and(|sign| sign == PredicateSign::Zero) {
+            continue;
+        }
+        let query = [point[axes[0]], point[axes[1]]];
+        let signs = [
+            orient2d([projected[0], projected[1], query]),
+            orient2d([projected[1], projected[2], query]),
+            orient2d([projected[2], projected[0], query]),
+        ];
+        if signs.iter().any(Result::is_err) {
+            return false;
+        }
+        let signs = signs.map(Result::unwrap);
+        return !(signs.contains(&PredicateSign::Positive)
+            && signs.contains(&PredicateSign::Negative));
+    }
+    false
 }
 
 pub fn ray_has_odd_surface_intersections(

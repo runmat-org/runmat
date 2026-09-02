@@ -255,6 +255,22 @@ impl MetricFieldRequest {
         resolved.validate()?;
         Ok(resolved)
     }
+
+    /// Applies one coordinate-basis transform to every metric tensor and
+    /// restores canonical contribution order in the transformed basis.
+    pub fn transform_metrics(
+        &self,
+        mut transform: impl FnMut(MetricTensor3) -> MetricTensor3,
+    ) -> Result<Self, MetricContractError> {
+        let mut transformed = self.clone();
+        transformed.global_metric = transform(transformed.global_metric);
+        for contribution in &mut transformed.contributions {
+            contribution.metric = transform(contribution.metric);
+        }
+        transformed.contributions.sort_by(compare_contributions);
+        transformed.validate()?;
+        Ok(transformed)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

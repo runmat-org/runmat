@@ -1,8 +1,13 @@
 use runmat_geometry_core::PersistentEntityId;
 
+use runmat_meshing_core::quality::predicate::{PredicateSign, SpatialPredicateError};
 use runmat_meshing_core::StableDigest;
 
-use crate::cdt::{mutation::TopologyMutation, DelaunayVolumeNode, DelaunayVolumeTopology};
+use crate::cdt::{
+    mutation::TopologyMutation,
+    topology::{insphere_materialized_volume_nodes, orient_materialized_volume_nodes},
+    DelaunayVolumeNode, DelaunayVolumeTopology,
+};
 
 #[derive(Clone, Copy)]
 pub(in crate::cdt) struct TetrahedronRef<'a> {
@@ -17,6 +22,18 @@ pub(in crate::cdt) trait TetrahedralTopology {
     fn tetrahedron(&self, index: u32) -> Option<TetrahedronRef<'_>>;
     fn vertex_star(&self, vertex: u32) -> Vec<u32>;
     fn node_index(&self, identity: StableDigest) -> Option<u32>;
+    fn orient_nodes(
+        &self,
+        nodes: [DelaunayVolumeNode; 4],
+    ) -> Result<PredicateSign, SpatialPredicateError> {
+        orient_materialized_volume_nodes(nodes)
+    }
+    fn insphere_nodes(
+        &self,
+        nodes: [DelaunayVolumeNode; 5],
+    ) -> Result<PredicateSign, SpatialPredicateError> {
+        insphere_materialized_volume_nodes(nodes)
+    }
 }
 
 impl TetrahedralTopology for DelaunayVolumeTopology {
@@ -80,5 +97,19 @@ impl TetrahedralTopology for TopologyMutation {
 
     fn node_index(&self, identity: StableDigest) -> Option<u32> {
         self.node_indices.get(&identity).copied()
+    }
+
+    fn orient_nodes(
+        &self,
+        nodes: [DelaunayVolumeNode; 4],
+    ) -> Result<PredicateSign, SpatialPredicateError> {
+        orient_materialized_volume_nodes(nodes)
+    }
+
+    fn insphere_nodes(
+        &self,
+        nodes: [DelaunayVolumeNode; 5],
+    ) -> Result<PredicateSign, SpatialPredicateError> {
+        insphere_materialized_volume_nodes(nodes)
     }
 }

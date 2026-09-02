@@ -78,9 +78,10 @@ pub fn validate_delaunay_volume_provenance(
         validate_entities(&binding.region_ids, &[PersistentEntityKind::Region])?;
         let incident_regions = incident_regions(topology, binding.node_identities)?;
         if binding.region_ids != incident_regions {
-            return Err(invalid(
-                "facet provenance regions must exactly match topological incidence",
-            ));
+            return Err(invalid(format!(
+                "facet provenance {:?} declares regions {:?}, but topological incidence resolves {:?}",
+                binding.node_identities, binding.region_ids, incident_regions
+            )));
         }
     }
     Ok(())
@@ -131,28 +132,31 @@ fn simplex_exists<const N: usize>(
     topology: &DelaunayVolumeTopology,
     identities: &[StableDigest; N],
 ) -> bool {
-    topology.tetrahedra.iter().any(|tetrahedron| {
-        let tetrahedron_identities = tetrahedron
-            .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].identity);
-        identities
-            .iter()
-            .all(|identity| tetrahedron_identities.contains(identity))
-    })
+    let Some(indices) = simplex_indices(topology, identities) else {
+        return false;
+    };
+    topology.incidence.vertex_stars[indices[0]]
+        .iter()
+        .any(|tetrahedron| {
+            let vertices = topology.tetrahedra[*tetrahedron as usize].vertex_indices;
+            indices
+                .iter()
+                .all(|index| vertices.contains(&(*index as u32)))
+        })
 }
 
 fn incident_regions(
     topology: &DelaunayVolumeTopology,
     identities: [StableDigest; 3],
 ) -> Result<Vec<PersistentEntityId>, DelaunayVolumeProvenanceError> {
+    let indices = simplex_indices(topology, &identities)
+        .ok_or_else(|| invalid("provenance facet references an absent topology node"))?;
     let mut regions = BTreeSet::new();
-    for tetrahedron in &topology.tetrahedra {
-        let tetrahedron_identities = tetrahedron
-            .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].identity);
-        if identities
+    for tetrahedron in &topology.incidence.vertex_stars[indices[0]] {
+        let tetrahedron = &topology.tetrahedra[*tetrahedron as usize];
+        if indices
             .iter()
-            .all(|identity| tetrahedron_identities.contains(identity))
+            .all(|index| tetrahedron.vertex_indices.contains(&(*index as u32)))
         {
             let region = tetrahedron.region_id.clone().ok_or_else(|| {
                 error(
@@ -167,6 +171,20 @@ fn incident_regions(
         return Err(invalid("provenance facet is absent from the topology"));
     }
     Ok(regions.into_iter().collect())
+}
+
+fn simplex_indices<const N: usize>(
+    topology: &DelaunayVolumeTopology,
+    identities: &[StableDigest; N],
+) -> Option<[usize; N]> {
+    let mut indices = [0; N];
+    for (slot, identity) in identities.iter().enumerate() {
+        indices[slot] = topology
+            .nodes
+            .binary_search_by_key(identity, |node| node.identity)
+            .ok()?;
+    }
+    Some(indices)
 }
 
 fn invalid(reason: impl Into<String>) -> DelaunayVolumeProvenanceError {

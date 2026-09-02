@@ -3,12 +3,20 @@ use std::collections::BTreeSet;
 use runmat_meshing_core::MeshingCancellationSignal;
 
 use super::{
-    edge_exists, error, find_node, interpolate, validate_delaunay_constraints,
-    validate_delaunay_volume_topology, validate_options, DelaunayConstraints,
-    DelaunaySegmentRecovery, DelaunaySegmentRecoveryError, DelaunaySegmentRecoveryErrorKind,
-    DelaunaySegmentRecoveryOptions, DelaunayVolumeTopology, RecoveryWork,
+    coordinates_share_representable_location, edge_exists, error, find_node, interpolate,
+    validate_delaunay_constraints, validate_delaunay_volume_topology, validate_options,
+    DelaunayConstraints, DelaunaySegmentRecovery, DelaunaySegmentRecoveryError,
+    DelaunaySegmentRecoveryErrorKind, DelaunaySegmentRecoveryOptions, DelaunayVolumeTopology,
+    RecoveryWork,
 };
 use crate::cdt::insertion::validate_constrained_delaunay_volume_topology;
+use crate::cdt::insertion::validate_locally_delaunay_volume_topology;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SegmentRecoveryInputContract {
+    ExternalUnconstrainedTopology,
+    CertifiedPointSet,
+}
 
 pub fn validate_delaunay_segment_recovery(
     recovery: &DelaunaySegmentRecovery,
@@ -37,16 +45,16 @@ pub(in crate::cdt) fn validate_delaunay_segment_recovery_on_topology(
     validate_options(options)?;
     validate_delaunay_constraints(constraints, options.constraints, cancellation)
         .map_err(super::constraint_error)?;
-    if protected_faces.is_empty() {
-        validate_delaunay_volume_topology(topology, options.insertion, cancellation)
-    } else {
-        validate_constrained_delaunay_volume_topology(
-            topology,
-            protected_faces,
-            options.insertion,
-            cancellation,
-        )
-    }
+    // A recovered segment is already a constraint, even before any facets are protected.
+    // Validate the local constrained-Delaunay topology here; the unconstrained prerequisite was
+    // validated before recovery and its global empty-sphere property is neither required nor, in
+    // general, preserved by constraint recovery.
+    validate_constrained_delaunay_volume_topology(
+        topology,
+        protected_faces,
+        options.insertion,
+        cancellation,
+    )
     .map_err(|validation| super::insertion_error(validation, 0))?;
     validate_constraint_nodes(topology, constraints)?;
     if recovery.recovery_passes == 0
@@ -96,13 +104,19 @@ pub(in crate::cdt) fn validate_delaunay_segment_recovery_on_topology(
                     "recovered chain references a missing topology node",
                 )
             })?;
-            if topology_node.coordinates_m
-                != interpolate(first.coordinates_m, last.coordinates_m, parameter)
+            let endpoint = node.identity == first.identity || node.identity == last.identity;
+            let expected_coordinates =
+                interpolate(first.coordinates_m, last.coordinates_m, parameter);
+            if !endpoint
+                && !coordinates_share_representable_location(
+                    topology_node.coordinates_m,
+                    expected_coordinates,
+                )
             {
                 return Err(error(
                     DelaunaySegmentRecoveryErrorKind::InvalidTopology,
                     Some(expected_index as u32),
-                    "recovered chain node is not at its declared dyadic segment parameter",
+                    "recovered chain node is not at the representable location of its declared dyadic segment parameter",
                 ));
             }
             previous_parameter = Some(parameter);
@@ -131,13 +145,20 @@ pub(super) fn validate_inputs(
     constraints: &DelaunayConstraints,
     options: DelaunaySegmentRecoveryOptions,
     cancellation: &dyn MeshingCancellationSignal,
-    require_unassigned: bool,
+    input_contract: SegmentRecoveryInputContract,
 ) -> Result<(), DelaunaySegmentRecoveryError> {
     validate_delaunay_constraints(constraints, options.constraints, cancellation)
         .map_err(super::constraint_error)?;
-    validate_delaunay_volume_topology(topology, options.insertion, cancellation)
-        .map_err(|validation| super::insertion_error(validation, 0))?;
-    if require_unassigned && !topology.incidence.regions.is_empty() {
+    match input_contract {
+        SegmentRecoveryInputContract::ExternalUnconstrainedTopology => {
+            validate_delaunay_volume_topology(topology, options.insertion, cancellation)
+        }
+        SegmentRecoveryInputContract::CertifiedPointSet => {
+            validate_locally_delaunay_volume_topology(topology, options.insertion, cancellation)
+        }
+    }
+    .map_err(|validation| super::insertion_error(validation, 0))?;
+    if !topology.incidence.regions.is_empty() {
         return Err(error(
             DelaunaySegmentRecoveryErrorKind::InvalidTopology,
             None,

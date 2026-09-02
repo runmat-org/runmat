@@ -75,6 +75,27 @@ pub(in crate::cdt::solver_topology::order_elevation) fn edge_geometry(
     }))
 }
 
+pub(in crate::cdt::solver_topology::order_elevation) fn surface_geometry(
+    input: &DelaunaySolverTopologyInput<'_>,
+    evaluation: DelaunayExactEvaluation<'_>,
+    options: DelaunaySolverTopologyOptions,
+    surface_use: &SurfaceUse,
+    evaluator_uv: [f64; 2],
+) -> Result<Option<ExactEdgePoint>, DelaunaySolverTopologyError> {
+    Ok(
+        evaluate_surface_candidate(input, surface_use, evaluator_uv, evaluation, options)?.map(
+            |coordinates_m| ExactEdgePoint {
+                coordinates_m,
+                exact_parameters: vec![SolverNodeExactParameter::Surface {
+                    source_face_id: surface_use.source_face_id.clone(),
+                    chart_id: surface_use.chart_id,
+                    evaluator_uv,
+                }],
+            },
+        ),
+    )
+}
+
 fn curve_midpoint(
     input: &DelaunaySolverTopologyInput<'_>,
     evaluation: DelaunayExactEvaluation<'_>,
@@ -84,8 +105,8 @@ fn curve_midpoint(
     let edge_id = request
         .exact_edge_id
         .ok_or_else(|| invalid("curve point has no exact edge owner"))?;
-    let left_parameter = curve_parameter(request.left, edge_id)?;
-    let right_parameter = curve_parameter(request.right, edge_id)?;
+    let (left_parameter, right_parameter) =
+        compatible_curve_parameters(request.left, request.right, edge_id)?;
     let parameter = interpolate(left_parameter, right_parameter, request.fraction);
     let edge = exact_edge(input.exact_topology, edge_id)?;
     evaluation.control.checkpoint().map_err(error::geometry)?;
@@ -106,20 +127,21 @@ fn curve_midpoint(
         parameter,
     }];
     for surface_use in request.surface_uses {
-        let evaluator_uv = pcurve_uv(input, edge_id, parameter, surface_use, evaluation)?;
-        let Some(surface_point) =
-            evaluate_surface_candidate(input, surface_use, evaluator_uv, evaluation, options)?
-        else {
-            return Ok(None);
-        };
-        if !points_match(input, coordinates_m, surface_point) {
-            return Ok(None);
+        for evaluator_uv in pcurve_uvs(input, edge_id, parameter, surface_use, evaluation)? {
+            let Some(surface_point) =
+                evaluate_surface_candidate(input, surface_use, evaluator_uv, evaluation, options)?
+            else {
+                return Ok(None);
+            };
+            if !points_match(input, coordinates_m, surface_point) {
+                return Ok(None);
+            }
+            parameters.push(SolverNodeExactParameter::Surface {
+                source_face_id: surface_use.source_face_id.clone(),
+                chart_id: surface_use.chart_id,
+                evaluator_uv,
+            });
         }
-        parameters.push(SolverNodeExactParameter::Surface {
-            source_face_id: surface_use.source_face_id.clone(),
-            chart_id: surface_use.chart_id,
-            evaluator_uv,
-        });
     }
     Ok(Some(ExactEdgePoint {
         coordinates_m,
@@ -136,8 +158,8 @@ fn surface_midpoint(
     let mut coordinates = None;
     let mut parameters = Vec::with_capacity(request.surface_uses.len());
     for surface_use in request.surface_uses {
-        let left_uv = surface_parameter(request.left, surface_use)?;
-        let right_uv = surface_parameter(request.right, surface_use)?;
+        let (left_uv, right_uv) =
+            compatible_surface_parameters(request.left, request.right, surface_use)?;
         let evaluator_uv = interpolate2(left_uv, right_uv, request.fraction);
         let Some(point) =
             evaluate_surface_candidate(input, surface_use, evaluator_uv, evaluation, options)?
@@ -164,13 +186,13 @@ fn surface_midpoint(
     }))
 }
 
-pub(super) fn pcurve_uv(
+pub(super) fn pcurve_uvs(
     input: &DelaunaySolverTopologyInput<'_>,
     edge_id: &PersistentEntityId,
     parameter: f64,
     surface_use: &SurfaceUse,
     evaluation: DelaunayExactEvaluation<'_>,
-) -> Result<[f64; 2], DelaunaySolverTopologyError> {
+) -> Result<Vec<[f64; 2]>, DelaunaySolverTopologyError> {
     let mut coedge_ids = input
         .exact_surface
         .nodes
@@ -196,28 +218,34 @@ pub(super) fn pcurve_uv(
                 .map(|coedge| coedge.id.clone()),
         );
     }
-    if coedge_ids.len() != 1 {
-        return Err(invalid(
-            "exact chart does not identify one coedge image for a curve midpoint",
-        ));
+    if coedge_ids.is_empty() {
+        return Err(invalid("exact chart has no coedge image"));
     }
-    let coedge_id = coedge_ids
+    let mut images = coedge_ids
         .into_iter()
-        .next()
-        .ok_or_else(|| invalid("exact chart has no coedge image"))?;
-    let coedge = input
-        .exact_topology
-        .coedges
-        .iter()
-        .find(|coedge| coedge.id == coedge_id)
-        .ok_or_else(|| invalid("exact chart references an absent coedge"))?;
-    ExactPcurveEvaluator::point(
-        evaluation.evaluator,
-        &coedge.pcurve_evaluator_id,
-        parameter,
-        evaluation.control,
-    )
-    .map_err(error::geometry)
+        .map(|coedge_id| {
+            let coedge = input
+                .exact_topology
+                .coedges
+                .iter()
+                .find(|coedge| coedge.id == coedge_id)
+                .ok_or_else(|| invalid("exact chart references an absent coedge"))?;
+            ExactPcurveEvaluator::point(
+                evaluation.evaluator,
+                &coedge.pcurve_evaluator_id,
+                parameter,
+                evaluation.control,
+            )
+            .map_err(error::geometry)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    images.sort_by(|left, right| {
+        left[0]
+            .total_cmp(&right[0])
+            .then_with(|| left[1].total_cmp(&right[1]))
+    });
+    images.dedup_by(|left, right| left.map(f64::to_bits) == right.map(f64::to_bits));
+    Ok(images)
 }
 
 pub(super) fn evaluate_surface(
@@ -284,6 +312,38 @@ fn exact_edge<'a>(
         .ok_or_else(|| invalid("boundary edge provenance references an absent exact edge"))
 }
 
+fn compatible_curve_parameters(
+    left: &SolverMeshNode,
+    right: &SolverMeshNode,
+    edge_id: &PersistentEntityId,
+) -> Result<(f64, f64), DelaunaySolverTopologyError> {
+    let parameters = |node: &SolverMeshNode| {
+        node.exact_parameters
+            .iter()
+            .filter_map(|parameter| match parameter {
+                SolverNodeExactParameter::Curve {
+                    source_edge_id,
+                    parameter,
+                } if source_edge_id == edge_id => Some(*parameter),
+                SolverNodeExactParameter::Curve { .. }
+                | SolverNodeExactParameter::Surface { .. } => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let left = parameters(left);
+    let right = parameters(right);
+    left.iter()
+        .flat_map(|left| right.iter().map(move |right| (*left, *right)))
+        .min_by(|(left_a, right_a), (left_b, right_b)| {
+            (left_a - right_a)
+                .abs()
+                .total_cmp(&(left_b - right_b).abs())
+                .then_with(|| left_a.total_cmp(left_b))
+                .then_with(|| right_a.total_cmp(right_b))
+        })
+        .ok_or_else(|| invalid("exact curve edge endpoint has no matching parameter"))
+}
+
 pub(super) fn curve_parameter(
     node: &SolverMeshNode,
     edge_id: &PersistentEntityId,
@@ -302,37 +362,46 @@ pub(super) fn curve_parameter(
         .ok_or_else(|| invalid("exact curve edge endpoint has no matching parameter"))
 }
 
-fn surface_parameter(
-    node: &SolverMeshNode,
+fn compatible_surface_parameters(
+    left: &SolverMeshNode,
+    right: &SolverMeshNode,
     surface_use: &SurfaceUse,
-) -> Result<[f64; 2], DelaunaySolverTopologyError> {
-    node.exact_parameters
-        .iter()
-        .find_map(|parameter| match parameter {
-            SolverNodeExactParameter::Surface {
-                source_face_id,
-                chart_id,
-                evaluator_uv,
-            } if source_face_id == &surface_use.source_face_id
-                && chart_id == &surface_use.chart_id =>
-            {
-                Some(*evaluator_uv)
-            }
-            SolverNodeExactParameter::Curve { .. } | SolverNodeExactParameter::Surface { .. } => {
-                None
-            }
+) -> Result<([f64; 2], [f64; 2]), DelaunaySolverTopologyError> {
+    let parameters = |node: &SolverMeshNode| {
+        node.exact_parameters
+            .iter()
+            .filter_map(|parameter| match parameter {
+                SolverNodeExactParameter::Surface {
+                    source_face_id,
+                    chart_id,
+                    evaluator_uv,
+                } if source_face_id == &surface_use.source_face_id
+                    && chart_id == &surface_use.chart_id =>
+                {
+                    Some(*evaluator_uv)
+                }
+                SolverNodeExactParameter::Curve { .. }
+                | SolverNodeExactParameter::Surface { .. } => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let left = parameters(left);
+    let right = parameters(right);
+    left.iter()
+        .flat_map(|left| right.iter().map(move |right| (*left, *right)))
+        .min_by(|(left_a, right_a), (left_b, right_b)| {
+            squared_parameter_distance(*left_a, *right_a)
+                .total_cmp(&squared_parameter_distance(*left_b, *right_b))
+                .then_with(|| left_a[0].total_cmp(&left_b[0]))
+                .then_with(|| left_a[1].total_cmp(&left_b[1]))
+                .then_with(|| right_a[0].total_cmp(&right_b[0]))
+                .then_with(|| right_a[1].total_cmp(&right_b[1]))
         })
-        .ok_or_else(|| {
-            invalid(format!(
-                "surface edge endpoint {} ({:?}) has no parameter for face {:?}, chart {:?}; \
-                 available exact parameters: {:?}",
-                node.node_id,
-                node.stable_identity,
-                surface_use.source_face_id,
-                surface_use.chart_id,
-                node.exact_parameters
-            ))
-        })
+        .ok_or_else(|| invalid("surface edge endpoints have no matching chart parameters"))
+}
+
+fn squared_parameter_distance(left: [f64; 2], right: [f64; 2]) -> f64 {
+    (left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2)
 }
 
 pub(super) fn require_matching_points(
@@ -384,4 +453,97 @@ fn interpolate3(left: [f64; 3], right: [f64; 3], fraction: f64) -> [f64; 3] {
 
 fn invalid(reason: impl Into<String>) -> DelaunaySolverTopologyError {
     error::failure(DelaunaySolverTopologyErrorKind::InvalidGeometry, reason)
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_geometry_core::PersistentEntityKind;
+    use runmat_meshing_core::StableDigest;
+
+    use super::*;
+
+    fn edge() -> PersistentEntityId {
+        PersistentEntityId {
+            kind: PersistentEntityKind::Edge,
+            source_topology_id: "edge:closed".to_owned(),
+            assembly_path: Vec::new(),
+        }
+    }
+
+    fn node(parameters: &[f64], edge: &PersistentEntityId) -> SolverMeshNode {
+        SolverMeshNode {
+            node_id: 1,
+            stable_identity: StableDigest::from_bytes([1; 32]),
+            coordinates_m: [0.0; 3],
+            provenance: vec![edge.clone()],
+            exact_parameters: parameters
+                .iter()
+                .map(|parameter| SolverNodeExactParameter::Curve {
+                    source_edge_id: edge.clone(),
+                    parameter: *parameter,
+                })
+                .collect(),
+        }
+    }
+
+    fn surface_node(
+        parameters: &[[f64; 2]],
+        face: &PersistentEntityId,
+        chart: StableDigest,
+    ) -> SolverMeshNode {
+        SolverMeshNode {
+            node_id: 1,
+            stable_identity: StableDigest::from_bytes([1; 32]),
+            coordinates_m: [0.0; 3],
+            provenance: vec![face.clone()],
+            exact_parameters: parameters
+                .iter()
+                .map(|evaluator_uv| SolverNodeExactParameter::Surface {
+                    source_face_id: face.clone(),
+                    chart_id: chart,
+                    evaluator_uv: *evaluator_uv,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn closed_curve_midpoint_uses_the_nearest_parameter_images() {
+        let edge = edge();
+        let seam = node(&[0.0, std::f64::consts::TAU], &edge);
+
+        assert_eq!(
+            compatible_curve_parameters(&seam, &node(&[0.25], &edge), &edge).unwrap(),
+            (0.0, 0.25)
+        );
+        assert_eq!(
+            compatible_curve_parameters(&seam, &node(&[6.0], &edge), &edge).unwrap(),
+            (std::f64::consts::TAU, 6.0)
+        );
+    }
+
+    #[test]
+    fn periodic_surface_midpoint_uses_the_nearest_chart_images() {
+        let face = PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: "face:periodic".to_owned(),
+            assembly_path: Vec::new(),
+        };
+        let chart = StableDigest::from_bytes([2; 32]);
+        let surface_use = SurfaceUse {
+            source_face_id: face.clone(),
+            chart_id: chart,
+        };
+        let seam = surface_node(&[[0.0, 0.5], [std::f64::consts::TAU, 0.5]], &face, chart);
+
+        assert_eq!(
+            compatible_surface_parameters(
+                &seam,
+                &surface_node(&[[6.0, 0.5]], &face, chart),
+                &surface_use,
+            )
+            .unwrap(),
+            ([std::f64::consts::TAU, 0.5], [6.0, 0.5])
+        );
+    }
 }

@@ -105,7 +105,6 @@ impl MeshingChunkDescriptor {
             || self.schema_version == 0
             || self.encoded_length == 0
             || self.decoded_length == 0
-            || self.logical_entity_count == 0
         {
             return Err(MeshingContractError::invalid(
                 "meshing chunk descriptor",

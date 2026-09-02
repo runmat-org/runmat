@@ -30,6 +30,7 @@ pub mod analysis;
 pub mod builtin;
 pub mod dispatcher;
 pub mod geometry;
+pub mod meshing;
 pub mod operations;
 
 pub mod callsite;

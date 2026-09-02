@@ -52,12 +52,13 @@ fn resource_category(stage: DelaunayVolumeMeshStage) -> MeshingFailureCategory {
         DelaunayVolumeMeshStage::PointSet | DelaunayVolumeMeshStage::Refinement => {
             MeshingFailureCategory::NodeBudgetExceeded
         }
-        DelaunayVolumeMeshStage::SegmentRecovery | DelaunayVolumeMeshStage::FacetRecovery => {
-            MeshingFailureCategory::SearchWorkBudgetExceeded
-        }
+        DelaunayVolumeMeshStage::SegmentRecovery
+        | DelaunayVolumeMeshStage::FacetRecovery
+        | DelaunayVolumeMeshStage::Optimization => MeshingFailureCategory::SearchWorkBudgetExceeded,
         DelaunayVolumeMeshStage::Constraints
         | DelaunayVolumeMeshStage::Carving
         | DelaunayVolumeMeshStage::Provenance
+        | DelaunayVolumeMeshStage::CoordinateMaterialization
         | DelaunayVolumeMeshStage::Quality => MeshingFailureCategory::ElementBudgetExceeded,
     }
 }

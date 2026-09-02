@@ -76,10 +76,7 @@ impl DelaunayConstraints {
     pub fn volume_nodes(&self) -> Vec<DelaunayVolumeNode> {
         self.nodes
             .iter()
-            .map(|node| DelaunayVolumeNode {
-                identity: node.identity,
-                coordinates_m: node.coordinates_m,
-            })
+            .map(|node| DelaunayVolumeNode::explicit(node.identity, node.coordinates_m))
             .collect()
     }
 }

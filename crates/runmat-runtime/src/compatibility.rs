@@ -2215,7 +2215,6 @@ mod tests {
                 "fea.materialAssignment",
                 "fea.model",
                 "fea.plan",
-                "fea.plot",
                 "fea.run",
                 "fea.step",
                 "fea.study",

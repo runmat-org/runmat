@@ -62,6 +62,9 @@ pub(crate) fn map_surface_error(error: ExactFacePartitionError) -> Box<MeshingFa
         ExactFacePartitionErrorKind::Refinement(ExactFaceRefinementErrorKind::InvalidQuality) => {
             MeshingFailureCategory::SizingConflict
         }
+        ExactFacePartitionErrorKind::Refinement(
+            ExactFaceRefinementErrorKind::UnsatisfiedQuality,
+        ) => MeshingFailureCategory::QualityTargetUnreachable,
         ExactFacePartitionErrorKind::InvalidPartition
         | ExactFacePartitionErrorKind::Boundary(_)
         | ExactFacePartitionErrorKind::Chart(_)

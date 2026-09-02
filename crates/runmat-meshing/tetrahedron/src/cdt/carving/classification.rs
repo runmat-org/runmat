@@ -317,11 +317,13 @@ fn flood(
         let slot = &mut classifications[tetrahedron_index as usize];
         match slot {
             Some(existing) if *existing == classification => continue,
-            Some(_) => {
+            Some(existing) => {
                 return Err(error(
                     DelaunayCarvingErrorKind::AmbiguousClassification,
                     constraint_index,
-                    "carving facet-side flood conflicts with an existing component classification",
+                    format!(
+                        "carving facet-side flood attempted {classification:?} on tetrahedron {tetrahedron_index}, already classified {existing:?}",
+                    ),
                 ));
             }
             None => *slot = Some(classification.clone()),

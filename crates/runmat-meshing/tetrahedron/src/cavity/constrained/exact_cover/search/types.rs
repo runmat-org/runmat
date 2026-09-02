@@ -44,6 +44,7 @@ pub(in super::super::super) enum ForcedInteriorMateFailure {
         reason: ForcedInteriorMateNoAddableReason,
     },
     VolumeOverflow {
+        face: [u32; 3],
         current_volume_m3: f64,
         candidate_volume_m3: f64,
         target_volume_m3: f64,
@@ -63,7 +64,7 @@ impl ForcedInteriorMateFailure {
     pub(in super::super::super) fn face(self) -> Option<[u32; 3]> {
         match self {
             ForcedInteriorMateFailure::NoAddableMate { face, .. } => face,
-            ForcedInteriorMateFailure::VolumeOverflow { .. } => None,
+            ForcedInteriorMateFailure::VolumeOverflow { face, .. } => Some(face),
         }
     }
 
@@ -74,6 +75,7 @@ impl ForcedInteriorMateFailure {
                 current_volume_m3,
                 candidate_volume_m3,
                 target_volume_m3,
+                ..
             } => Some((current_volume_m3, candidate_volume_m3, target_volume_m3)),
         }
     }

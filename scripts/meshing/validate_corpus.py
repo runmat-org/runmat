@@ -109,7 +109,9 @@ def validate_manifest(manifest_path: Path, repo_root: Path = REPO_ROOT) -> int:
         if not isinstance(expected.get("regions"), int) or expected["regions"] < 0:
             raise CorpusError(f"{entry_id}.expected.regions must be a non-negative integer")
 
-        require_test_anchor(repo_root, entry.get("test"), f"{entry_id}.test")
+        require_fixture_evidence_anchor(
+            repo_root, entry.get("test"), entry_id, f"{entry_id}.test"
+        )
 
     fixture_paths = {
         path.relative_to(fixture_root)
@@ -121,6 +123,49 @@ def validate_manifest(manifest_path: Path, repo_root: Path = REPO_ROOT) -> int:
         stale = sorted(str(path) for path in paths - fixture_paths)
         raise CorpusError(f"corpus inventory mismatch; unregistered={missing}, stale={stale}")
     return len(entries)
+
+
+def require_fixture_evidence_anchor(
+    repo_root: Path, test: object, fixture_id: str, context: str
+) -> None:
+    test_object = object_value(test, context)
+    source_path = relative_path(test_object.get("source"), f"{context}.source")
+    name = string_value(test_object.get("name"), f"{context}.name")
+    if source_path != Path("verification/meshing/integration.json"):
+        require_test_anchor(repo_root, test_object, context)
+        return
+
+    source = repo_root / source_path
+    integration = read_document(source, "meshing integration manifest")
+    cases = integration.get("cases")
+    relations = integration.get("metamorphic_relations")
+    if not isinstance(cases, list) or not isinstance(relations, list):
+        raise CorpusError(f"{context}: integration evidence is incomplete")
+
+    case_ids = {
+        case.get("fixture_id")
+        for case in cases
+        if isinstance(case, dict) and isinstance(case.get("fixture_id"), str)
+    }
+    if name == fixture_id and name in case_ids:
+        return
+
+    for relation in relations:
+        if not isinstance(relation, dict) or relation.get("id") != name:
+            continue
+        references = [relation.get("reference")]
+        comparisons = relation.get("comparisons")
+        if isinstance(comparisons, list):
+            references.extend(comparisons)
+        if any(
+            isinstance(reference, dict)
+            and reference.get("fixture_id") == fixture_id
+            for reference in references
+        ):
+            return
+    raise CorpusError(
+        f"{context}: integration anchor {name} does not cover fixture {fixture_id}"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

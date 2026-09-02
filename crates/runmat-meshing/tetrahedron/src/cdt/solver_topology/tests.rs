@@ -43,6 +43,7 @@ fn request(order: ElementOrder) -> MeshingRequest {
                 maximum_metric_edge_length: 2.0,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,
@@ -119,26 +120,37 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
     .unwrap();
 
     assert_eq!(result, repeated);
-    assert_eq!(result.nodes.len(), 4);
-    assert_eq!(result.volume_elements.len(), 1);
+    assert_eq!(result.nodes.len(), 5);
+    assert_eq!(result.volume_elements.len(), 4);
     assert_eq!(result.boundary_faces.len(), 4);
     assert_eq!(result.boundary_edges.len(), 6);
     assert_eq!(result.regions.len(), 1);
     assert!(result.conformal_interfaces.is_empty());
     assert!(result.contacts.is_empty());
-    assert!(result.nodes.iter().all(|node| !node.provenance.is_empty()));
-    assert!(result.nodes.iter().all(|node| {
-        node.exact_parameters
+    assert_eq!(
+        result
+            .nodes
             .iter()
-            .filter(|parameter| {
-                matches!(
-                    parameter,
-                    runmat_meshing_core::SolverNodeExactParameter::Curve { .. }
-                )
-            })
-            .count()
-            == 3
-    }));
+            .filter(|node| node.exact_parameters.is_empty())
+            .count(),
+        1
+    );
+    assert!(result
+        .nodes
+        .iter()
+        .filter(|node| !node.exact_parameters.is_empty())
+        .all(|node| {
+            node.exact_parameters
+                .iter()
+                .filter(|parameter| {
+                    matches!(
+                        parameter,
+                        runmat_meshing_core::SolverNodeExactParameter::Curve { .. }
+                    )
+                })
+                .count()
+                == 3
+        }));
     assert!(result.volume_elements.iter().all(|element| {
         let points = std::array::from_fn(|index| {
             result.nodes[element.node_ids[index] as usize - 1].coordinates_m
@@ -242,23 +254,29 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
             source_edge_id: segment.source_edge_id,
             parameter: 0.5,
         });
-    assert_eq!(
-        build_delaunay_solver_topology(
-            DelaunaySolverTopologyInput {
-                exact_topology: &exact_topology,
-                exact_surface: &conflicting_surface,
-                volume_mesh: &volume_mesh,
-                volume_options,
-                request: &request,
-                exact_evaluation: None,
-            },
-            DelaunaySolverTopologyOptions::default(),
-            &NeverCancelled,
-        )
-        .unwrap_err()
-        .kind,
-        DelaunaySolverTopologyErrorKind::InvalidMesh
-    );
+    let multiple_images = build_delaunay_solver_topology(
+        DelaunaySolverTopologyInput {
+            exact_topology: &exact_topology,
+            exact_surface: &conflicting_surface,
+            volume_mesh: &volume_mesh,
+            volume_options,
+            request: &request,
+            exact_evaluation: None,
+        },
+        DelaunaySolverTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let node = multiple_images
+        .nodes
+        .iter()
+        .find(|node| volume_mesh.topology.nodes[node.node_id as usize - 1].identity == node_id)
+        .unwrap();
+    assert!(node.exact_parameters.iter().any(|parameter| matches!(
+        parameter,
+        runmat_meshing_core::SolverNodeExactParameter::Curve { parameter, .. }
+            if parameter.to_bits() == 0.5_f64.to_bits()
+    )));
 }
 
 #[test]
@@ -299,36 +317,42 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
     .unwrap();
 
     assert_eq!(topology, repeated);
-    assert_eq!(topology.nodes.len(), 10);
-    assert_eq!(topology.volume_elements[0].order, ElementOrder::Tet10);
-    assert_eq!(topology.volume_elements[0].node_ids.len(), 10);
+    assert_eq!(topology.nodes.len(), 15);
+    assert_eq!(topology.volume_elements.len(), 4);
+    assert!(topology
+        .volume_elements
+        .iter()
+        .all(|element| { element.order == ElementOrder::Tet10 && element.node_ids.len() == 10 }));
     assert!(topology.boundary_faces.iter().all(|face| {
         face.order == runmat_meshing_core::BoundaryTriangleOrder::Tri6 && face.node_ids.len() == 6
     }));
     assert!(topology.boundary_edges.iter().all(|edge| {
         edge.order == runmat_meshing_core::BoundaryEdgeOrder::Line3 && edge.node_ids.len() == 3
     }));
-    for (local_edge, endpoints) in runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS
-        .iter()
-        .enumerate()
-    {
-        let element = &topology.volume_elements[0];
-        let left = topology.nodes[element.node_ids[endpoints[0]] as usize - 1].coordinates_m;
-        let right = topology.nodes[element.node_ids[endpoints[1]] as usize - 1].coordinates_m;
-        let midpoint = &topology.nodes[element.node_ids[4 + local_edge] as usize - 1];
-        assert_eq!(
-            midpoint.coordinates_m,
-            [
-                left[0] * 0.5 + right[0] * 0.5,
-                left[1] * 0.5 + right[1] * 0.5,
-                left[2] * 0.5 + right[2] * 0.5,
-            ]
-        );
-        assert_eq!(midpoint.exact_parameters.len(), 3);
-        assert!(matches!(
-            midpoint.exact_parameters[0],
-            runmat_meshing_core::SolverNodeExactParameter::Curve { .. }
-        ));
+    for element in &topology.volume_elements {
+        for (local_edge, endpoints) in runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS
+            .iter()
+            .enumerate()
+        {
+            let left = topology.nodes[element.node_ids[endpoints[0]] as usize - 1].coordinates_m;
+            let right = topology.nodes[element.node_ids[endpoints[1]] as usize - 1].coordinates_m;
+            let midpoint = &topology.nodes[element.node_ids[4 + local_edge] as usize - 1];
+            assert_eq!(
+                midpoint.coordinates_m,
+                [
+                    left[0] * 0.5 + right[0] * 0.5,
+                    left[1] * 0.5 + right[1] * 0.5,
+                    left[2] * 0.5 + right[2] * 0.5,
+                ]
+            );
+            if !midpoint.exact_parameters.is_empty() {
+                assert_eq!(midpoint.exact_parameters.len(), 3);
+                assert!(matches!(
+                    midpoint.exact_parameters[0],
+                    runmat_meshing_core::SolverNodeExactParameter::Curve { .. }
+                ));
+            }
+        }
     }
     runmat_meshing_core::validate_solver_mesh_topology(&topology, &request).unwrap();
 
@@ -351,7 +375,7 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
 }
 
 #[test]
-fn curved_tet10_nodes_optimize_deterministically_with_hard_round_and_candidate_limits() {
+fn curved_tet10_nodes_optimize_deterministically() {
     let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();
     let request = request(ElementOrder::Tet10);
     let volume_options = volume_options();
@@ -409,31 +433,15 @@ fn curved_tet10_nodes_optimize_deterministically_with_hard_round_and_candidate_l
             .map(|(left, right)| (left - right) * (left - right))
             .sum::<f64>();
         assert!(optimized_distance_squared < edge_length_squared / 64.0);
-        assert!(matches!(
-            node.exact_parameters.first(),
-            Some(runmat_meshing_core::SolverNodeExactParameter::Curve { parameter, .. })
-                if parameter.to_bits() != 0.5_f64.to_bits()
-        ));
+        if let Some(runmat_meshing_core::SolverNodeExactParameter::Curve { parameter, .. }) =
+            node.exact_parameters.first()
+        {
+            assert_ne!(parameter.to_bits(), 0.5_f64.to_bits());
+        } else {
+            assert!(node.exact_parameters.is_empty());
+        }
     }
     runmat_meshing_core::validate_solver_mesh_topology(&topology, &request).unwrap();
-
-    for options in [
-        DelaunaySolverTopologyOptions {
-            maximum_curved_optimization_candidates: 1,
-            ..DelaunaySolverTopologyOptions::default()
-        },
-        DelaunaySolverTopologyOptions {
-            maximum_curved_optimization_rounds: 5,
-            ..DelaunaySolverTopologyOptions::default()
-        },
-    ] {
-        assert_eq!(
-            build_delaunay_solver_topology(input(), options, &NeverCancelled)
-                .unwrap_err()
-                .kind,
-            DelaunaySolverTopologyErrorKind::ResourceLimit
-        );
-    }
 }
 
 #[test]

@@ -2,6 +2,8 @@
 
 #[path = "support/allocation_observer.rs"]
 mod allocation_observer;
+#[path = "support/native_meshing_host.rs"]
+mod native_meshing_host;
 
 use clap::{Parser, ValueEnum};
 use runmat::cli::{MeshElementOrderArg, MeshSourceUnitsArg};
@@ -39,19 +41,14 @@ struct Arguments {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let _otel = runmat::observability::init_from_env();
     let _report = allocation_observer::ReportGuard::from_environment();
     let args = std::env::args_os().collect::<Vec<_>>();
-    match runmat_process_host::HiddenModeRegistry::standard().detect(args.clone()) {
-        Ok(Some(runmat_process_host::HiddenMode::MeshingWorker)) => {
-            return run_meshing_worker().await;
-        }
-        Ok(Some(_)) => {
-            eprintln!("meshing verification does not support this hidden host mode");
-            return ExitCode::from(2);
-        }
+    match native_meshing_host::dispatch_hidden_mode(&args).await {
+        Ok(Some(exit_code)) => return exit_code,
         Ok(None) => {}
         Err(error) => {
-            eprintln!("invalid RunMat host mode: {error}");
+            eprintln!("{error}");
             return ExitCode::from(2);
         }
     }
@@ -83,6 +80,7 @@ async fn main() -> ExitCode {
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
     allocation_observer::write_environment_report();
+    runmat_logging::shutdown_otel();
     #[cfg(unix)]
     // SAFETY: all benchmark outputs and allocation evidence are flushed above; bypassing native
     // CAD teardown mirrors the production CLI's process boundary after native CAD use.
@@ -91,32 +89,4 @@ async fn main() -> ExitCode {
     }
     #[cfg(not(unix))]
     std::process::exit(exit_code);
-}
-
-async fn run_meshing_worker() -> ExitCode {
-    let result =
-        match std::env::var_os(runmat_execution_runner_native::NATIVE_OBJECT_STORE_ROOT_ENV) {
-            Some(root) => {
-                runmat_execution_runner_native::run_meshing_worker_stdio(
-                    std::sync::Arc::new(
-                        runmat_execution_runner_native::native_meshing_kernel_dispatcher(),
-                    ),
-                    std::path::Path::new(&root),
-                    runmat_execution_runner_native::NativeMeshingHostLimits::default(),
-                )
-                .await
-            }
-            None => Err(
-                runmat_execution_runner_native::NativeExecutionError::Configuration(
-                    "meshing worker object-store root is missing".into(),
-                ),
-            ),
-        };
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("runmat meshing verification worker failed: {error}");
-            ExitCode::from(2)
-        }
-    }
 }

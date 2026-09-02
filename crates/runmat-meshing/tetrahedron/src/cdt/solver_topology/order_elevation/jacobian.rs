@@ -1,12 +1,21 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
     quality::predicate::{orient3d, PredicateSign},
-    MeshingCancellationSignal, SolverMeshTopology, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+    MeshingCancellationSignal, SolverMeshTopology,
 };
 
 use crate::cdt::solver_topology::{
     error, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
+};
+
+mod exact;
+mod interval;
+
+use exact::{build_exact_reference_jacobians, exact_bernstein_coefficients_are_positive};
+use interval::{
+    determinant_columns, determinant_enclosure, has_certified_nonpositive_vertex, jacobian_at,
+    mixed_determinant, Interval,
 };
 
 const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
@@ -30,6 +39,12 @@ pub(super) fn validate(
     cancellation: &dyn MeshingCancellationSignal,
     work: &mut u64,
 ) -> Result<(), DelaunaySolverTopologyError> {
+    if cancellation_check_interval == 0 {
+        return Err(error::failure(
+            DelaunaySolverTopologyErrorKind::InvalidOptions,
+            "Tet10 Jacobian cancellation-check interval must be greater than zero",
+        ));
+    }
     let element_indices = 0..topology.volume_elements.len();
     validate_elements(
         topology,
@@ -61,19 +76,7 @@ pub(super) fn validate_elements(
             .volume_elements
             .get(element_index)
             .ok_or_else(|| invalid("Tet10 Jacobian element index is out of bounds"))?;
-        let coordinates = element
-            .node_ids
-            .iter()
-            .map(|node_id| {
-                node_by_id
-                    .get(node_id)
-                    .copied()
-                    .ok_or_else(|| invalid("Tet10 Jacobian references an absent node"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let coordinates: [[f64; 3]; 10] = coordinates
-            .try_into()
-            .map_err(|_| invalid("Tet10 Jacobian requires exactly ten nodes"))?;
+        let coordinates = element_coordinates(element, &node_by_id)?;
         certify_element(
             coordinates,
             maximum_search_work,
@@ -81,19 +84,150 @@ pub(super) fn validate_elements(
             cancellation_check_interval,
             cancellation,
             work,
-        )?;
+        )
+        .map_err(|failure| DelaunaySolverTopologyError {
+            kind: failure.kind,
+            reason: format!(
+                "Tet10 element {} (stable identity {:?}) failed certification: {}",
+                element.element_id, element.stable_identity, failure.reason
+            ),
+        })?;
     }
     Ok(())
 }
 
-fn certify_element(
-    coordinates: [[f64; 3]; 10],
+pub(super) fn invalid_element_indices(
+    topology: &SolverMeshTopology,
     maximum_search_work: u64,
     maximum_recursion_depth: u32,
     cancellation_check_interval: u64,
     cancellation: &dyn MeshingCancellationSignal,
     work: &mut u64,
-) -> Result<(), DelaunaySolverTopologyError> {
+) -> Result<BTreeSet<usize>, DelaunaySolverTopologyError> {
+    let node_by_id = topology
+        .nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+    let mut invalid_indices = BTreeSet::new();
+    for (element_index, element) in topology.volume_elements.iter().enumerate() {
+        let coordinates = element_coordinates(element, &node_by_id)?;
+        match certify_element(
+            coordinates,
+            maximum_search_work,
+            maximum_recursion_depth,
+            cancellation_check_interval,
+            cancellation,
+            work,
+        ) {
+            Ok(()) => {}
+            Err(failure) if failure.kind == DelaunaySolverTopologyErrorKind::InvalidMesh => {
+                invalid_indices.insert(element_index);
+            }
+            Err(failure) => return Err(failure),
+        }
+    }
+    Ok(invalid_indices)
+}
+
+fn element_coordinates(
+    element: &runmat_meshing_core::SolverVolumeElement,
+    node_by_id: &BTreeMap<u64, [f64; 3]>,
+) -> Result<[[f64; 3]; 10], DelaunaySolverTopologyError> {
+    element
+        .node_ids
+        .iter()
+        .map(|node_id| {
+            node_by_id
+                .get(node_id)
+                .copied()
+                .ok_or_else(|| invalid("Tet10 Jacobian references an absent node"))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .try_into()
+        .map_err(|_| invalid("Tet10 Jacobian requires exactly ten nodes"))
+}
+
+pub(super) fn optimization_margin_profile_elements(
+    topology: &SolverMeshTopology,
+    element_indices: impl IntoIterator<Item = usize>,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Vec<u64>, DelaunaySolverTopologyError> {
+    let mut profile = Vec::new();
+    for element_index in element_indices {
+        margin_checkpoint(cancellation)?;
+        let element = topology
+            .volume_elements
+            .get(element_index)
+            .ok_or_else(|| invalid("Tet10 optimization element index is out of bounds"))?;
+        profile.push(margin_priority_key(bernstein_margin(
+            element_coordinates_from_topology(element, topology)?,
+            cancellation,
+        )?));
+    }
+    profile.sort_unstable();
+    if profile.is_empty() {
+        return Err(invalid("Tet10 optimization margin profile is empty"));
+    }
+    Ok(profile)
+}
+
+pub(super) fn worst_invalid_element(
+    topology: &SolverMeshTopology,
+    invalid_elements: &BTreeSet<usize>,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Option<usize>, DelaunaySolverTopologyError> {
+    let mut worst = None::<(u64, usize)>;
+    for &element_index in invalid_elements {
+        margin_checkpoint(cancellation)?;
+        let element = topology
+            .volume_elements
+            .get(element_index)
+            .ok_or_else(|| invalid("Tet10 optimization element index is out of bounds"))?;
+        let margin = bernstein_margin(
+            element_coordinates_from_topology(element, topology)?,
+            cancellation,
+        )?;
+        let key = margin_priority_key(margin);
+        if worst.as_ref().is_none_or(|(worst_key, worst_index)| {
+            key < *worst_key || (key == *worst_key && element_index < *worst_index)
+        }) {
+            worst = Some((key, element_index));
+        }
+    }
+    Ok(worst.map(|(_, index)| index))
+}
+
+pub(super) fn margin_priority_key(margin: f64) -> u64 {
+    const DISCARDED_MANTISSA_BITS: u32 = 12;
+    crate::cdt::volume_quality::ordered_float_key(margin) >> DISCARDED_MANTISSA_BITS
+}
+
+fn element_coordinates_from_topology(
+    element: &runmat_meshing_core::SolverVolumeElement,
+    topology: &SolverMeshTopology,
+) -> Result<[[f64; 3]; 10], DelaunaySolverTopologyError> {
+    element
+        .node_ids
+        .iter()
+        .map(|node_id| {
+            topology
+                .nodes
+                .binary_search_by_key(node_id, |node| node.node_id)
+                .ok()
+                .map(|index| topology.nodes[index].coordinates_m)
+                .ok_or_else(|| invalid("Tet10 Jacobian references an absent node"))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .try_into()
+        .map_err(|_| invalid("Tet10 Jacobian requires exactly ten nodes"))
+}
+
+fn bernstein_margin(
+    coordinates: [[f64; 3]; 10],
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<f64, DelaunaySolverTopologyError> {
+    margin_checkpoint(cancellation)?;
     let orientation = match orient3d([
         coordinates[0],
         coordinates[1],
@@ -106,6 +240,75 @@ fn certify_element(
         PredicateSign::Negative => 1.0,
         PredicateSign::Zero => return Err(invalid("Tet10 corners are exactly coplanar")),
     };
+    let corner_scale = determinant_columns([
+        std::array::from_fn(|axis| Interval::exact(coordinates[1][axis] - coordinates[0][axis])),
+        std::array::from_fn(|axis| Interval::exact(coordinates[2][axis] - coordinates[0][axis])),
+        std::array::from_fn(|axis| Interval::exact(coordinates[3][axis] - coordinates[0][axis])),
+    ]);
+    let scale = corner_scale.lower.abs().max(corner_scale.upper.abs());
+    if !scale.is_finite() || scale == 0.0 {
+        return Err(invalid("Tet10 optimization has no finite corner scale"));
+    }
+    let jacobians = REFERENCE_TETRAHEDRON.map(|barycentric| jacobian_at(coordinates, barycentric));
+    let mut margin = f64::INFINITY;
+    for first in 0..4 {
+        for second in first..4 {
+            for third in second..4 {
+                margin_checkpoint(cancellation)?;
+                let coefficient =
+                    mixed_determinant([&jacobians[first], &jacobians[second], &jacobians[third]])
+                        .scaled(orientation);
+                let midpoint = coefficient.lower * 0.5 + coefficient.upper * 0.5;
+                margin = margin.min(midpoint / scale);
+            }
+        }
+    }
+    if margin.is_finite() {
+        Ok(margin)
+    } else {
+        Err(invalid("Tet10 optimization margin is not finite"))
+    }
+}
+
+fn margin_checkpoint(
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), DelaunaySolverTopologyError> {
+    if cancellation.is_cancelled() {
+        return Err(error::failure(
+            DelaunaySolverTopologyErrorKind::Cancelled,
+            "cancelled",
+        ));
+    }
+    Ok(())
+}
+
+fn certify_element(
+    coordinates: [[f64; 3]; 10],
+    maximum_search_work: u64,
+    maximum_recursion_depth: u32,
+    cancellation_check_interval: u64,
+    cancellation: &dyn MeshingCancellationSignal,
+    work: &mut u64,
+) -> Result<(), DelaunaySolverTopologyError> {
+    if cancellation_check_interval == 0 {
+        return Err(error::failure(
+            DelaunaySolverTopologyErrorKind::InvalidOptions,
+            "Tet10 Jacobian cancellation-check interval must be greater than zero",
+        ));
+    }
+    let orientation = match orient3d([
+        coordinates[0],
+        coordinates[1],
+        coordinates[2],
+        coordinates[3],
+    ])
+    .map_err(|failure| invalid(format!("Tet10 corner orientation failed: {failure:?}")))?
+    {
+        PredicateSign::Positive => -1.0,
+        PredicateSign::Negative => 1.0,
+        PredicateSign::Zero => return Err(invalid("Tet10 corners are exactly coplanar")),
+    };
+    let mut exact_reference_jacobians = None;
     let mut pending = vec![(REFERENCE_TETRAHEDRON, 0_u32)];
     while let Some((cell, depth)) = pending.pop() {
         *work = work
@@ -116,9 +319,7 @@ fn certify_element(
                 "Tet10 Jacobian certification exceeds its hard search-work limit of {maximum_search_work}"
             )));
         }
-        if (*work == 4 || (*work).is_multiple_of(cancellation_check_interval))
-            && cancellation.is_cancelled()
-        {
+        if cancellation.is_cancelled() {
             return Err(error::failure(
                 DelaunaySolverTopologyErrorKind::Cancelled,
                 "cancelled",
@@ -133,9 +334,38 @@ fn certify_element(
                 "Tet10 isoparametric mapping has a certified nonpositive Jacobian region",
             ));
         }
+        if has_certified_nonpositive_vertex(coordinates, cell, orientation) {
+            return Err(invalid(
+                "Tet10 isoparametric mapping has a certified nonpositive Jacobian point",
+            ));
+        }
+        if depth == 0 || depth >= maximum_recursion_depth {
+            if exact_reference_jacobians.is_none() {
+                exact_reference_jacobians = Some(build_exact_reference_jacobians(
+                    coordinates,
+                    maximum_search_work,
+                    cancellation,
+                    work,
+                )?);
+            }
+            let exact_reference_jacobians = exact_reference_jacobians
+                .as_ref()
+                .expect("exact reference Jacobians were initialized");
+            if exact_bernstein_coefficients_are_positive(
+                exact_reference_jacobians,
+                cell,
+                orientation,
+                maximum_search_work,
+                cancellation,
+                work,
+            )? {
+                continue;
+            }
+        }
         if depth >= maximum_recursion_depth {
             return Err(invalid(format!(
-                "Tet10 isoparametric Jacobian could not be certified positive by recursion depth {maximum_recursion_depth}"
+                "Tet10 isoparametric Jacobian enclosure [{:.17e}, {:.17e}] could not be certified positive by recursion depth {maximum_recursion_depth} at barycentric cell {:?}",
+                determinant.lower, determinant.upper, cell
             )));
         }
         let (left, right) = bisect(cell);
@@ -143,63 +373,6 @@ fn certify_element(
         pending.push((left, depth + 1));
     }
     Ok(())
-}
-
-fn determinant_enclosure(
-    coordinates: [[f64; 3]; 10],
-    cell: [[f64; 4]; 4],
-) -> Result<Interval, DelaunaySolverTopologyError> {
-    let mut hull = [[Interval::empty(); 3]; 3];
-    for barycentric in cell {
-        let jacobian = jacobian_at(coordinates, barycentric);
-        for row in 0..3 {
-            for column in 0..3 {
-                hull[row][column] = hull[row][column].hull(jacobian[row][column]);
-            }
-        }
-    }
-    let determinant = hull[0][0] * (hull[1][1] * hull[2][2] - hull[1][2] * hull[2][1])
-        - hull[0][1] * (hull[1][0] * hull[2][2] - hull[1][2] * hull[2][0])
-        + hull[0][2] * (hull[1][0] * hull[2][1] - hull[1][1] * hull[2][0]);
-    if !determinant.lower.is_finite()
-        || !determinant.upper.is_finite()
-        || determinant.lower > determinant.upper
-    {
-        return Err(invalid(
-            "Tet10 isoparametric Jacobian interval is not finite",
-        ));
-    }
-    Ok(determinant)
-}
-
-fn jacobian_at(coordinates: [[f64; 3]; 10], barycentric: [f64; 4]) -> [[Interval; 3]; 3] {
-    let barycentric = barycentric.map(Interval::exact);
-    let mut result = [[Interval::zero(); 3]; 3];
-    for node in 0..4 {
-        let factor = barycentric[node] * Interval::exact(4.0) - Interval::exact(1.0);
-        for reference_axis in 0..3 {
-            let derivative =
-                factor * Interval::exact(BARYCENTRIC_DERIVATIVES[node][reference_axis]);
-            for (physical_axis, result_row) in result.iter_mut().enumerate() {
-                result_row[reference_axis] = result_row[reference_axis]
-                    + derivative * Interval::exact(coordinates[node][physical_axis]);
-            }
-        }
-    }
-    for (local_edge, [left, right]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.into_iter().enumerate() {
-        for reference_axis in 0..3 {
-            let derivative = Interval::exact(4.0)
-                * (barycentric[right]
-                    * Interval::exact(BARYCENTRIC_DERIVATIVES[left][reference_axis])
-                    + barycentric[left]
-                        * Interval::exact(BARYCENTRIC_DERIVATIVES[right][reference_axis]));
-            for (physical_axis, result_row) in result.iter_mut().enumerate() {
-                result_row[reference_axis] = result_row[reference_axis]
-                    + derivative * Interval::exact(coordinates[4 + local_edge][physical_axis]);
-            }
-        }
-    }
-    result
 }
 
 fn bisect(mut cell: [[f64; 4]; 4]) -> ([[f64; 4]; 4], [[f64; 4]; 4]) {
@@ -227,117 +400,6 @@ fn bisect(mut cell: [[f64; 4]; 4]) -> ([[f64; 4]; 4], [[f64; 4]; 4]) {
     (cell, right)
 }
 
-#[derive(Clone, Copy)]
-struct Interval {
-    lower: f64,
-    upper: f64,
-}
-
-impl Interval {
-    const fn exact(value: f64) -> Self {
-        Self {
-            lower: value,
-            upper: value,
-        }
-    }
-
-    const fn zero() -> Self {
-        Self::exact(0.0)
-    }
-
-    const fn empty() -> Self {
-        Self {
-            lower: f64::INFINITY,
-            upper: f64::NEG_INFINITY,
-        }
-    }
-
-    fn hull(self, other: Self) -> Self {
-        Self {
-            lower: self.lower.min(other.lower),
-            upper: self.upper.max(other.upper),
-        }
-    }
-
-    fn scaled(self, factor: f64) -> Self {
-        if factor > 0.0 {
-            self
-        } else {
-            Self {
-                lower: -self.upper,
-                upper: -self.lower,
-            }
-        }
-    }
-}
-
-impl std::ops::Add for Interval {
-    type Output = Self;
-
-    fn add(self, right: Self) -> Self {
-        Self {
-            lower: next_down(self.lower + right.lower),
-            upper: next_up(self.upper + right.upper),
-        }
-    }
-}
-
-impl std::ops::Sub for Interval {
-    type Output = Self;
-
-    fn sub(self, right: Self) -> Self {
-        Self {
-            lower: next_down(self.lower - right.upper),
-            upper: next_up(self.upper - right.lower),
-        }
-    }
-}
-
-impl std::ops::Mul for Interval {
-    type Output = Self;
-
-    fn mul(self, right: Self) -> Self {
-        let products = [
-            self.lower * right.lower,
-            self.lower * right.upper,
-            self.upper * right.lower,
-            self.upper * right.upper,
-        ];
-        Self {
-            lower: next_down(products.into_iter().fold(f64::INFINITY, f64::min)),
-            upper: next_up(products.into_iter().fold(f64::NEG_INFINITY, f64::max)),
-        }
-    }
-}
-
-fn next_down(value: f64) -> f64 {
-    if value.is_nan() || value == f64::NEG_INFINITY {
-        return value;
-    }
-    if value == 0.0 {
-        return -f64::from_bits(1);
-    }
-    if value > 0.0 {
-        f64::from_bits(value.to_bits() - 1)
-    } else {
-        f64::from_bits(value.to_bits() + 1)
-    }
-}
-
-fn next_up(value: f64) -> f64 {
-    if value.is_nan() || value == f64::INFINITY {
-        return value;
-    }
-    if value == 0.0 {
-        return f64::from_bits(1);
-    }
-    if value > 0.0 {
-        f64::from_bits(value.to_bits() + 1)
-    } else {
-        f64::from_bits(value.to_bits() - 1)
-    }
-}
-
 fn invalid(reason: impl Into<String>) -> DelaunaySolverTopologyError {
     error::failure(DelaunaySolverTopologyErrorKind::InvalidMesh, reason)
 }
@@ -347,73 +409,4 @@ fn resource(reason: impl Into<String>) -> DelaunaySolverTopologyError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use runmat_meshing_core::NeverCancelled;
-
-    fn straight() -> [[f64; 3]; 10] {
-        let corners = [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ];
-        [
-            corners[0],
-            corners[1],
-            corners[2],
-            corners[3],
-            midpoint(corners[0], corners[1]),
-            midpoint(corners[1], corners[2]),
-            midpoint(corners[2], corners[0]),
-            midpoint(corners[0], corners[3]),
-            midpoint(corners[1], corners[3]),
-            midpoint(corners[2], corners[3]),
-        ]
-    }
-
-    #[test]
-    fn interval_certificate_accepts_linear_mapping_and_rejects_curved_inversion() {
-        let mut work = 0;
-        certify_element(straight(), 10_000, 16, 1, &NeverCancelled, &mut work).unwrap();
-
-        let mut inverted = straight();
-        inverted[4] = [0.5, 0.0, 4.0];
-        let mut work = 0;
-        assert_eq!(
-            certify_element(inverted, 100_000, 24, 1, &NeverCancelled, &mut work)
-                .unwrap_err()
-                .kind,
-            DelaunaySolverTopologyErrorKind::InvalidMesh
-        );
-    }
-
-    #[test]
-    fn interval_certificate_enforces_work_and_cancellation() {
-        let mut work = 0;
-        assert_eq!(
-            certify_element(straight(), 3, 16, 1, &NeverCancelled, &mut work)
-                .unwrap_err()
-                .kind,
-            DelaunaySolverTopologyErrorKind::ResourceLimit
-        );
-
-        struct Cancelled;
-        impl MeshingCancellationSignal for Cancelled {
-            fn is_cancelled(&self) -> bool {
-                true
-            }
-        }
-        let mut work = 0;
-        assert_eq!(
-            certify_element(straight(), 10_000, 16, 1, &Cancelled, &mut work)
-                .unwrap_err()
-                .kind,
-            DelaunaySolverTopologyErrorKind::Cancelled
-        );
-    }
-
-    fn midpoint(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-        std::array::from_fn(|axis| left[axis] * 0.5 + right[axis] * 0.5)
-    }
-}
+mod tests;

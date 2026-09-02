@@ -3,8 +3,9 @@ use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::{validate_inventory, ObjectInventoryLimits};
 use runmat_execution_artifact::{ArtifactError, LogicalObject, ObjectDescriptor, ObjectNamespace};
 use runmat_meshing_core::{
-    verify_stage_manifest_closure, CanonicalMeshingContract, EncodedMeshingChunk,
-    MeshingStageManifest, MeshingStageResultIdentity, StableDigest,
+    decode_stage_manifest_streams_with_cancellation, verify_stage_manifest_closure,
+    CanonicalMeshingContract, EncodedMeshingChunk, MeshingCancellationSignal, MeshingStageManifest,
+    MeshingStageResultIdentity, StableDigest,
 };
 
 use crate::object_support::{
@@ -65,6 +66,19 @@ impl PreparedMeshingStageObjects {
         )?)
     }
 
+    pub fn decoded_streams_with_cancellation(
+        &self,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> MeshingExecutionResult<Vec<runmat_meshing_core::MeshingChunkStream>> {
+        let chunks = self.encoded_chunks_with_cancellation(cancellation)?;
+        Ok(decode_stage_manifest_streams_with_cancellation(
+            &self.manifest,
+            &self.result_identity,
+            &chunks,
+            cancellation,
+        )?)
+    }
+
     fn encoded_chunks(&self) -> MeshingExecutionResult<Vec<EncodedMeshingChunk>> {
         let mut chunks = Vec::with_capacity(self.manifest.chunks.len());
         for descriptor in &self.manifest.chunks {
@@ -81,6 +95,41 @@ impl PreparedMeshingStageObjects {
         }
         Ok(chunks)
     }
+
+    fn encoded_chunks_with_cancellation(
+        &self,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> MeshingExecutionResult<Vec<EncodedMeshingChunk>> {
+        let mut chunks = Vec::with_capacity(self.manifest.chunks.len());
+        for descriptor in &self.manifest.chunks {
+            ensure_active(cancellation)?;
+            let digest = execution_digest(descriptor.digest);
+            let object = self
+                .objects
+                .iter()
+                .find(|object| object.descriptor.digest == digest)
+                .ok_or(MeshingExecutionError::MissingObject(digest))?;
+            let mut bytes = Vec::with_capacity(object.bytes.len());
+            for block in object.bytes.chunks(1024 * 1024) {
+                ensure_active(cancellation)?;
+                bytes.extend_from_slice(block);
+            }
+            chunks.push(EncodedMeshingChunk {
+                descriptor: descriptor.clone(),
+                bytes,
+            });
+        }
+        Ok(chunks)
+    }
+}
+
+fn ensure_active(cancellation: &dyn MeshingCancellationSignal) -> MeshingExecutionResult<()> {
+    if cancellation.is_cancelled() {
+        return Err(MeshingExecutionError::Invalid(
+            "meshing stream reconstruction was cancelled".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn prepare_stage_objects(

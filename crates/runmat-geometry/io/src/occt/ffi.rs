@@ -199,6 +199,7 @@ pub(crate) mod bridge {
         identity_digest: Vec<u8>,
         start_vertex_key: u64,
         end_vertex_key: u64,
+        tolerance: f64,
         closed: bool,
         periodic: bool,
         degenerate: bool,

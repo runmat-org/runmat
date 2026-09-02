@@ -44,6 +44,37 @@ fn tetrahedron_scaled_jacobian_reports_shape_quality() {
 }
 
 #[test]
+fn tetrahedron_scaled_jacobian_is_invariant_under_small_uniform_scales() {
+    let tetrahedron = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ];
+    let small = tetrahedron.map(|point| point.map(|coordinate| coordinate * 1.0e-9));
+
+    let reference = tetrahedron_scaled_jacobian(tetrahedron);
+    let scaled = tetrahedron_scaled_jacobian(small);
+
+    assert!(reference > 0.0);
+    assert!((scaled - reference).abs() <= 32.0 * f64::EPSILON);
+}
+
+#[test]
+fn tetrahedron_scaled_jacobian_retains_an_extreme_positive_sliver() {
+    let sliver = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.5, 0.5, 1.0e-200],
+    ];
+
+    let quality = tetrahedron_scaled_jacobian(sliver);
+    assert!(quality > 0.0);
+    assert!(quality < 1.0e-190);
+}
+
+#[test]
 fn ray_triangle_intersection_returns_distance_and_barycentric_coordinates() {
     let hit = ray_triangle_intersection(
         [-1.0, 0.25, 0.25],
@@ -96,6 +127,25 @@ fn circumsphere_contains_regular_tetrahedron_center() {
         [2.0, 2.0, 2.0],
         MeshingTolerance::default()
     ));
+}
+
+#[test]
+fn circumsphere_radius_is_translation_invariant() {
+    let tetrahedron = [
+        [0.0, 0.0, 0.0],
+        [0.25, 0.0, 0.0],
+        [0.0, 0.25, 0.0],
+        [0.0, 0.0, 0.25],
+    ];
+    let translated = tetrahedron.map(|point| point.map(|coordinate| coordinate + 1.0e12));
+    let tolerance = MeshingTolerance {
+        absolute_m: 0.0,
+        relative: 0.0,
+    };
+    let (_, original_radius_squared) = tetrahedron_circumsphere(tetrahedron, tolerance).unwrap();
+    let (_, translated_radius_squared) = tetrahedron_circumsphere(translated, tolerance).unwrap();
+
+    assert_eq!(original_radius_squared, translated_radius_squared);
 }
 
 fn cube_triangles() -> Vec<Triangle3> {

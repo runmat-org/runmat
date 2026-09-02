@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
@@ -50,9 +52,11 @@ fn topology(points: [[f64; 3]; 4]) -> DelaunayVolumeTopology {
     let nodes = points
         .into_iter()
         .enumerate()
-        .map(|(index, coordinates_m)| DelaunayVolumeNode {
-            identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-            coordinates_m,
+        .map(|(index, coordinates_m)| {
+            DelaunayVolumeNode::explicit(
+                StableDigest::from_bytes([(index + 1) as u8; 32]),
+                coordinates_m,
+            )
         })
         .collect();
     let topology = build_delaunay_volume_topology(
@@ -120,6 +124,124 @@ fn quality(
     (quality, options)
 }
 
+#[test]
+fn batch_admission_requires_lexicographic_quality_progress() {
+    let topology = topology([
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]);
+    let provenance = context(&topology);
+    let (baseline, _) = quality(&topology, &provenance, 0.5);
+    let template = baseline.tetrahedra[0].clone();
+    let with_ratios = |ratios: &[f64]| {
+        let mut result = baseline.clone();
+        result.tetrahedra = ratios
+            .iter()
+            .map(|ratio| {
+                let mut tetrahedron = template.clone();
+                tetrahedron.refinement_violation_ratio = *ratio;
+                tetrahedron
+            })
+            .collect();
+        result
+    };
+    let prior = with_ratios(&[4.0, 2.0]);
+
+    assert!(super::batch::quality_strictly_improves(
+        &prior,
+        &with_ratios(&[4.0, 1.5])
+    ));
+    assert!(super::batch::quality_strictly_improves(
+        &prior,
+        &with_ratios(&[3.9, 3.0])
+    ));
+    assert!(!super::batch::quality_strictly_improves(
+        &prior,
+        &with_ratios(&[4.0, 2.0])
+    ));
+    assert!(!super::batch::quality_strictly_improves(
+        &prior,
+        &with_ratios(&[4.0, 2.0, 1.1])
+    ));
+}
+
+#[test]
+fn batch_refinement_applies_separated_cavities_in_one_transaction() {
+    let coordinates = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [10.0, 0.0, 0.0],
+        [11.0, 0.0, 0.0],
+        [10.0, 1.0, 0.0],
+        [10.0, 0.0, 1.0],
+    ];
+    let nodes = coordinates
+        .into_iter()
+        .enumerate()
+        .map(|(index, coordinates_m)| {
+            DelaunayVolumeNode::explicit(
+                StableDigest::from_bytes([(index + 1) as u8; 32]),
+                coordinates_m,
+            )
+        })
+        .collect();
+    let topology = build_delaunay_volume_topology(
+        nodes,
+        vec![[0, 1, 2, 3], [4, 5, 6, 7]],
+        DelaunayTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let topology = assign_delaunay_volume_regions(
+        topology,
+        vec![region(), region()],
+        DelaunayTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let provenance = context(&topology);
+    let metric_request = metric();
+    let (mut quality, quality_options) = quality(&topology, &provenance, 0.75);
+    for tetrahedron in &mut quality.tetrahedra {
+        tetrahedron.refinement_violation_ratio = 100.0;
+    }
+    quality.worst_refinement_tetrahedron = quality
+        .tetrahedra
+        .iter()
+        .map(|tetrahedron| tetrahedron.node_identities)
+        .min();
+    let mut excluded = BTreeSet::new();
+
+    let outcome = super::batch::insert_independent_refinement_batch(
+        refinement_input(
+            &topology,
+            &metric_request,
+            &provenance,
+            &quality,
+            quality_options,
+        ),
+        DelaunayVolumeRefinementStepOptions::default(),
+        &mut excluded,
+        8,
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    let super::batch::RefinementBatchOutcome::Admitted(batch) = outcome else {
+        panic!("two separated violating cavities should form one admitted batch");
+    };
+    assert_eq!(batch.inserted_nodes.len(), 2);
+    assert_eq!(batch.step.topology.nodes.len(), topology.nodes.len() + 2);
+    assert!(super::batch::quality_strictly_improves(
+        &quality,
+        &batch.step.quality
+    ));
+}
+
 fn refinement_input<'a>(
     topology: &'a DelaunayVolumeTopology,
     metric_request: &'a MetricFieldRequest,
@@ -133,6 +255,7 @@ fn refinement_input<'a>(
         provenance,
         quality,
         quality_options,
+        fixed_node_identities: &[],
     }
 }
 
@@ -146,9 +269,11 @@ fn two_region_topology() -> DelaunayVolumeTopology {
     ]
     .into_iter()
     .enumerate()
-    .map(|(index, coordinates_m)| DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-        coordinates_m,
+    .map(|(index, coordinates_m)| {
+        DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes([(index + 1) as u8; 32]),
+            coordinates_m,
+        )
     })
     .collect();
     let topology = build_delaunay_volume_topology(
@@ -279,7 +404,47 @@ fn refinement_selects_a_deterministic_interior_metric_circumcenter() {
         anisotropic.kind,
         DelaunayRefinementCandidateKind::MetricCircumcenter
     );
-    assert_ne!(anisotropic.node.identity, first.node.identity);
+    assert_ne!(anisotropic.node.coordinates_m, first.node.coordinates_m);
+    assert_eq!(anisotropic.node.identity, first.node.identity);
+}
+
+#[test]
+fn refinement_selects_the_next_canonical_candidate_after_sliver_deletion() {
+    let topology = topology([
+        [0.0, 0.0, 0.0],
+        [2.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]);
+    let provenance = context(&topology);
+    let request = metric();
+    let (quality, options) = quality(&topology, &provenance, 0.5);
+    let input = refinement_input(&topology, &request, &provenance, &quality, options);
+    let first = select_delaunay_volume_refinement_candidate(
+        input,
+        DelaunayVolumeRefinementCandidateOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap()
+    .unwrap();
+    let second = select_delaunay_volume_refinement_candidate_excluding(
+        input,
+        DelaunayVolumeRefinementCandidateOptions::default(),
+        &BTreeSet::from([first.node.identity]),
+        &NeverCancelled,
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_ne!(second.node.identity, first.node.identity);
+    assert_ne!(second.node.coordinates_m, first.node.coordinates_m);
+    validate_delaunay_volume_refinement_candidate(
+        input,
+        &Some(second),
+        DelaunayVolumeRefinementCandidateOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -308,7 +473,7 @@ fn refinement_uses_an_interior_centroid_when_circumcenter_is_exterior() {
     .unwrap();
     assert_eq!(
         selected.kind,
-        DelaunayRefinementCandidateKind::InteriorCentroid
+        DelaunayRefinementCandidateKind::InteriorPoint
     );
     assert_eq!(selected.node.coordinates_m, [0.5, 0.25, 0.25]);
 }
@@ -359,6 +524,7 @@ fn refinement_handles_convergence_tampering_limits_and_cancellation() {
         &NeverCancelled,
     )
     .unwrap();
+    let admitted_candidate = candidate.clone();
     candidate.as_mut().unwrap().node.coordinates_m[0] += 0.1;
     assert_eq!(
         validate_delaunay_volume_refinement_candidate(
@@ -370,6 +536,28 @@ fn refinement_handles_convergence_tampering_limits_and_cancellation() {
                 quality_options,
             ),
             &candidate,
+            DelaunayVolumeRefinementCandidateOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeRefinementCandidateErrorKind::InvalidCandidate
+    );
+    let mut false_construction = admitted_candidate;
+    false_construction
+        .as_mut()
+        .unwrap()
+        .construction_node_identities[0] = StableDigest::ZERO;
+    assert_eq!(
+        validate_delaunay_volume_refinement_candidate(
+            refinement_input(
+                &topology,
+                &metric_request,
+                &contexts,
+                &quality,
+                quality_options,
+            ),
+            &false_construction,
             DelaunayVolumeRefinementCandidateOptions::default(),
             &NeverCancelled,
         )
@@ -441,6 +629,7 @@ fn refinement_insertion_preserves_region_interface_and_rederives_quality() {
     let quality_options = DelaunayVolumeQualityOptions {
         maximum_metric_edge_length: 0.5,
         maximum_radius_edge_ratio: 10.0,
+        minimum_metric_scaled_jacobian: 1.0e-12,
         ..DelaunayVolumeQualityOptions::default()
     };
     let initial_quality = evaluate_delaunay_volume_quality(
@@ -648,17 +837,13 @@ fn refinement_loop_preserves_converged_input_and_rejects_false_lineage() {
     assert_eq!(first, second);
     assert_eq!(first.topology, topology);
     assert_eq!(first.quality, quality);
-    assert!(first.mutations.is_empty());
+    assert!(first.insertions.is_empty());
 
     let mut tampered = first;
-    tampered
-        .mutations
-        .push(DelaunayVolumeRefinementMutation::Inserted(
-            DelaunayVolumeNode {
-                identity: StableDigest::from_bytes([9; 32]),
-                coordinates_m: [0.25; 3],
-            },
-        ));
+    tampered.insertions.push(DelaunayVolumeNode::explicit(
+        StableDigest::from_bytes([9; 32]),
+        [0.25; 3],
+    ));
     assert_eq!(
         validate_delaunay_volume_refinement(
             input,

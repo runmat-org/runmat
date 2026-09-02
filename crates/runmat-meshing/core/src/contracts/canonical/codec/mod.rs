@@ -10,11 +10,11 @@ mod contracts;
 #[cfg(test)]
 mod tests;
 
-use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
+use runmat_canonical_codec::{CanonicalCodecControl, CanonicalCodecError, CanonicalLimits};
 use serde::{de::DeserializeOwned, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use super::{MeshingContractError, StableDigest};
+use super::{MeshingCancellationSignal, MeshingContractError, StableDigest};
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-canonical-cbor/v1\0";
 
@@ -97,6 +97,46 @@ fn decode_contract<T: DeserializeOwned>(
 ) -> Result<T, MeshingContractError> {
     runmat_canonical_codec::decode_contract(CODEC_PREFIX, domain, bytes, limits.into())
         .map_err(map_codec_error)
+}
+
+struct MeshingCodecControl<'a>(&'a dyn MeshingCancellationSignal);
+
+impl CanonicalCodecControl for MeshingCodecControl<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+}
+
+pub(super) fn decode_contract_with_cancellation<T: DeserializeOwned>(
+    domain: &str,
+    bytes: &[u8],
+    limits: MeshingCanonicalLimits,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<T, MeshingContractError> {
+    runmat_canonical_codec::decode_contract_with_control(
+        CODEC_PREFIX,
+        domain,
+        bytes,
+        limits.into(),
+        &MeshingCodecControl(cancellation),
+    )
+    .map_err(map_codec_error)
+}
+
+pub(super) fn encode_contract_with_cancellation<T: Serialize>(
+    domain: &str,
+    contract: &T,
+    limits: MeshingCanonicalLimits,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Vec<u8>, MeshingContractError> {
+    runmat_canonical_codec::encode_contract_with_control(
+        CODEC_PREFIX,
+        domain,
+        contract,
+        limits.into(),
+        &MeshingCodecControl(cancellation),
+    )
+    .map_err(map_codec_error)
 }
 
 fn map_codec_error(error: CanonicalCodecError) -> MeshingContractError {

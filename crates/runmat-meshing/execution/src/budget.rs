@@ -46,6 +46,7 @@ pub struct MeshingStageControl<'a> {
     progress: &'a mut dyn MeshingProgressSink,
     started: Instant,
     last_checkpoint_at: Arc<Mutex<Instant>>,
+    maximum_observed_checkpoint_latency_ms: Arc<AtomicU64>,
     last_checkpoint_search_work: Arc<AtomicU64>,
     last: MeshingStageCheckpoint,
     last_progress: Option<MeshingProgress>,
@@ -77,6 +78,7 @@ impl<'a> MeshingStageControl<'a> {
             progress,
             started: now,
             last_checkpoint_at: Arc::new(Mutex::new(now)),
+            maximum_observed_checkpoint_latency_ms: Arc::new(AtomicU64::new(0)),
             last_checkpoint_search_work: Arc::new(AtomicU64::new(0)),
             last: MeshingStageCheckpoint::default(),
             last_progress: None,
@@ -93,6 +95,7 @@ impl<'a> MeshingStageControl<'a> {
             self.cancellation,
             self.started,
             Arc::clone(&self.last_checkpoint_at),
+            Arc::clone(&self.maximum_observed_checkpoint_latency_ms),
             Arc::clone(&self.last_checkpoint_search_work),
             &self.request.resources,
             &self.request.cancellation,
@@ -129,7 +132,10 @@ impl<'a> MeshingStageControl<'a> {
                 None,
             )
         })?;
-        let checkpoint_latency_ms = elapsed_millis(last_checkpoint_at, now);
+        let checkpoint_latency_ms = elapsed_millis(last_checkpoint_at, now).max(
+            self.maximum_observed_checkpoint_latency_ms
+                .load(Ordering::Relaxed),
+        );
         if checkpoint_latency_ms > self.request.cancellation.maximum_checkpoint_latency_ms {
             return Err(failure(
                 self.stage,
@@ -189,7 +195,12 @@ impl<'a> MeshingStageControl<'a> {
                 None,
             )
         })?;
-        let checkpoint_latency_ms = elapsed_millis(*last_checkpoint_at, now);
+        let current_checkpoint_latency_ms = elapsed_millis(*last_checkpoint_at, now);
+        self.maximum_observed_checkpoint_latency_ms
+            .fetch_max(current_checkpoint_latency_ms, Ordering::Relaxed);
+        let checkpoint_latency_ms = self
+            .maximum_observed_checkpoint_latency_ms
+            .load(Ordering::Relaxed);
         if self.cancellation.is_cancelled() {
             return Err(failure(
                 self.stage,

@@ -153,6 +153,7 @@ fn exact_cover_trace_reports_forced_mate_volume_overflow() {
     assert_eq!(
         result,
         Err(ForcedInteriorMateFailure::VolumeOverflow {
+            face: [0, 1, 3],
             current_volume_m3: 0.0,
             candidate_volume_m3: 0.2,
             target_volume_m3: 0.1,

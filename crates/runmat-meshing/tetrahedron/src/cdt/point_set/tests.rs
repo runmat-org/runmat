@@ -1,12 +1,10 @@
 use runmat_meshing_core::{NeverCancelled, StableDigest};
 
 use super::*;
+use crate::cdt::{insert_delaunay_volume_node, validate_delaunay_volume_topology};
 
 fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
-    DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([identity; 32]),
-        coordinates_m,
-    }
+    DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
 }
 
 fn point_set() -> Vec<DelaunayVolumeNode> {
@@ -20,7 +18,7 @@ fn point_set() -> Vec<DelaunayVolumeNode> {
 }
 
 #[test]
-fn point_set_bootstrap_is_canonical_and_removes_enclosing_nodes() {
+fn point_set_bootstrap_is_canonical_and_closes_the_hull() {
     let expected_nodes = point_set();
     let mut reversed = expected_nodes.clone();
     reversed.reverse();
@@ -94,6 +92,45 @@ fn point_set_bootstrap_resolves_cospherical_topology_by_stable_identity() {
 }
 
 #[test]
+fn point_set_bootstrap_closes_the_convex_hull_of_a_torus_point_cloud() {
+    let mut points = Vec::new();
+    let mut identity = 1_u8;
+    for major_index in 0..12 {
+        let major = std::f64::consts::TAU * major_index as f64 / 12.0;
+        for minor_index in 0..6 {
+            let minor = std::f64::consts::TAU * minor_index as f64 / 6.0;
+            let radius = 2.0 + 0.5 * minor.cos();
+            points.push(node(
+                identity,
+                [
+                    radius * major.cos(),
+                    radius * major.sin(),
+                    0.5 * minor.sin(),
+                ],
+            ));
+            identity += 1;
+        }
+    }
+    let first = points[3].coordinates_m;
+    let last = points[9].coordinates_m;
+    let midpoint = std::array::from_fn(|axis| first[axis] * 0.5 + last[axis] * 0.5);
+    let topology = build_delaunay_volume_point_set(
+        points,
+        DelaunayPointSetOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    insert_delaunay_volume_node(
+        topology,
+        node(250, midpoint),
+        DelaunayInsertionOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
+#[test]
 fn point_set_bootstrap_rejects_degenerate_and_duplicate_inputs() {
     let coplanar = vec![
         node(10, [0.0, 0.0, 0.0]),
@@ -144,7 +181,6 @@ fn point_set_bootstrap_enforces_limits_and_cancellation() {
             },
             ..DelaunayInsertionOptions::default()
         },
-        ..DelaunayPointSetOptions::default()
     };
     assert_eq!(
         build_delaunay_volume_point_set(point_set(), bounded, &NeverCancelled)
@@ -160,7 +196,6 @@ fn point_set_bootstrap_enforces_limits_and_cancellation() {
             },
             ..DelaunayInsertionOptions::default()
         },
-        ..DelaunayPointSetOptions::default()
     };
     assert_eq!(
         build_delaunay_volume_point_set(point_set(), bounded_intermediate, &NeverCancelled,)
@@ -181,7 +216,7 @@ fn point_set_bootstrap_enforces_limits_and_cancellation() {
 }
 
 #[test]
-fn point_set_bootstrap_handles_construction_identity_collision_and_extreme_range() {
+fn point_set_bootstrap_handles_low_identity_and_extreme_range() {
     let mut collision = point_set()[..4].to_vec();
     let mut reserved = [0; 32];
     reserved[31] = 1;

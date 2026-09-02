@@ -76,23 +76,33 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | Builtin | Use |
 | --- | --- |
 | `geometry.inspect(path)` | Read a geometry file and return a `geometry.InspectResult` object. |
-| `geometry.load(path)` | Read a geometry file and return a `geometry.Asset` object. |
+| `geometry.load(path, "Units", units)` | Read geometry with explicit source units and return a `geometry.Asset` object. |
 | `geometry.listRegions(asset)` | Return imported regions from a `geometry.Asset`. |
 | `geometry.meshes(asset)` | Return patch-ready surface mesh topology with vertices, faces/triangles, and region mappings. |
+| `mesh(asset, Name, Value, ...)` | Display a `geometry.Asset`; `Edges` and `XRay` are visual options. |
+| `meshing.generate(asset, Name, Value, ...)` | Generate a validated `meshing.Mesh` through the installed execution provider. |
+| `meshing.load(meshPath, evidencePath)` | Decode and jointly validate canonical solver-mesh and evidence artifacts. |
+| `meshing.save(mesh, meshPath, evidencePath, Name, Value, ...)` | Stage and transactionally publish the canonical pair; existing paths require `Force`, true. |
+| `meshing.nodes(mesh)`, `meshing.elements(mesh)`, `meshing.boundaryFaces(mesh)` | Return coordinates and exact typed topology identifiers/connectivity. |
+| `meshing.regions(mesh)` | Return persistent physical-region ids and element counts. |
+| `meshing.quality(mesh)` | Return per-element and summary Jacobian, aspect-ratio, and volume statistics. |
+| `meshing.evidence(mesh)` | Return the evidence identity and resource summary bound to the mesh. |
+| `mesh(mesh, Name, Value, ...)` | Display solver topology with `Edges`, `Regions`, and `Section` options. |
 | `fea.load(path)` | Load a `.fea` study or sweep file and return `fea.Study` or `fea.Sweep`. |
 | `fea.material(...)`, `fea.materialAssignment(...)` | Create typed material data and region assignments. |
 | `fea.boundaryCondition(...)`, `fea.loadCase(...)` | Create typed constraints, loads, and sources. |
 | `fea.step(...)`, `fea.domain(...)`, `fea.interface(...)` | Create typed analysis steps, physics domains, and interfaces. |
 | `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
 | `fea.model(id, geometry, Name, Value, ...)` | Assemble an explicit model from geometry and typed components. |
-| `fea.study(id, geometry, Name, Value, ...)` | Create a `fea.Study` from geometry, physics profile/model data, backend, and run options. |
+| `fea.study(id, geometry, Name, Value, ...)` | Create a `fea.Study` from geometry, optional validated `Mesh`, physics profile/model data, backend, and run options. |
 | `fea.sweep(id, studies, Name, Value, ...)` | Create a deterministic sweep from `fea.Study` objects. |
 | `fea.validate(study)` | Validate a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.plan(study)` | Plan a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.run(study)` | Run a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.results(runOrId, Name, Value, ...)` | Load result data from a run result object or persisted run id. |
 | `fea.field(resultsOrRun, fieldId)` | Extract one field from a result query. |
-| `fea.plot(runOrResultsOrField, fieldId)` | Create a RunMat figure for a result field using the study geometry context. |
+| `plot(field, Name, Value, ...)` | Plot an `fea.Field` using its retained study geometry and solver topology context. Field selection remains in `fea.field`. |
+| `mesh(runOrResultsOrField, Name, Value, ...)` | Display the solver mesh by default; `Source` accepts `solver`, `cad`, `cad_reference`, or `auto`, and `Edges` controls the solver-edge overlay. |
 | `fea.compare(baselineRunId, candidateRunId)` | Compare two persisted runs; no Name, Value options are accepted. |
 | `fea.trends(Name, Value, ...)` | Summarize recent persisted runs. |
 
@@ -100,7 +110,7 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 
 `fea.material`, `fea.loadCase`, `fea.domain`, and `fea.interface` are also RunMat-native host constructors. Their documented finite real physical fields accept all eight built-in integer classes, preserve exact input through kind/field/shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. The nested thermo-field-source revision is a structural nonnegative integer and remains exact.
 
-`fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, `fea.plot`, and `fea.compare` accept structural objects and text rather than integer arrays. Discrete output metadata remains integer typed: model and geometry revisions, plan counts and indexes, field shape/component/element/size metadata, and comparison count deltas do not pass through a physical-value binary64 boundary. The conventional figure handle remains a double at the scripting boundary. Input arity and structural identity are validated before artifact lookup, planning, field projection, comparison, or figure creation.
+`fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, and `fea.compare` accept structural objects and text rather than integer arrays. FEA objects overload the ordinary `plot` and `mesh` functions through the runtime object protocol; numeric calls keep their MATLAB-compatible behavior. Discrete output metadata remains integer typed: model and geometry revisions, plan counts and indexes, field shape/component/element/size metadata, and comparison count deltas do not pass through a physical-value binary64 boundary. The conventional figure handle remains a double at the scripting boundary. Input arity and structural identity are validated before artifact lookup, planning, field projection, comparison, or figure creation.
 
 These constructors, planning operations, field projections, comparisons, and plots do not intrinsically require native OCCT. Existing geometry assets, STL or synthetic geometry, and persisted mesh/result artifacts use their normal paths without OCCT; only document resolution that must import topology-bearing CAD may require an OCCT-enabled geometry backend.
 

@@ -41,6 +41,13 @@ impl<'a> InsertionWork<'a> {
         if self.predicate_evaluations > self.options.maximum_predicate_evaluations {
             return Err(resource("predicate-evaluation limit exceeded"));
         }
+        if self
+            .predicate_evaluations
+            .is_multiple_of(self.options.topology.cancellation_check_interval)
+            && self.cancellation.is_cancelled()
+        {
+            return Err(error(DelaunayInsertionErrorKind::Cancelled, "cancelled"));
+        }
         Ok(())
     }
 

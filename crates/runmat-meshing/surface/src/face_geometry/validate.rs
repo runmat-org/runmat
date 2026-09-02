@@ -102,27 +102,30 @@ pub fn validate_exact_face_geometry_in_parameterization(
         let first = first?;
         let second = second?;
         let third = third?;
-        let expected_uv = [
-            (first.evaluation.uv[0] + second.evaluation.uv[0] + third.evaluation.uv[0]) / 3.0,
-            (first.evaluation.uv[1] + second.evaluation.uv[1] + third.evaluation.uv[1]) / 3.0,
+        let sample_weights = independent_sample_weights();
+        let corner_uv = [
+            first.evaluation.uv,
+            second.evaluation.uv,
+            third.evaluation.uv,
         ];
-        if actual.centroid.source_face_id != geometry.source_face_id
-            || actual.centroid.uv != expected_uv
-        {
-            return Err(invalid(
-                &geometry.source_face_id,
-                "face triangle centroid query is inconsistent",
-            ));
+        for (sample, weights) in actual.deviation_samples.iter().zip(sample_weights) {
+            let expected_uv = independent_weighted_point_2d(corner_uv, weights);
+            if sample.source_face_id != geometry.source_face_id || sample.uv != expected_uv {
+                return Err(invalid(
+                    &geometry.source_face_id,
+                    "face triangle deviation sample identity or UV is inconsistent",
+                ));
+            }
+            validate_exact_face_metric_evaluation_in_parameterization(
+                sample,
+                context.topology,
+                context.metric_request,
+                parameterization,
+                context.evaluator,
+                context.control,
+            )
+            .map_err(|error| metric(&geometry.source_face_id, error))?;
         }
-        validate_exact_face_metric_evaluation_in_parameterization(
-            &actual.centroid,
-            context.topology,
-            context.metric_request,
-            parameterization,
-            context.evaluator,
-            context.control,
-        )
-        .map_err(|error| metric(&geometry.source_face_id, error))?;
         let points = [
             first.evaluation.point_m,
             second.evaluation.point_m,
@@ -160,24 +163,39 @@ pub fn validate_exact_face_geometry_in_parameterization(
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .fold(f64::INFINITY, f64::min);
-        let linear_centroid = multiply(sum(sum(points[0], points[1]), points[2]), 1.0 / 3.0);
-        let chordal = magnitude(difference(actual.centroid.point_m, linear_centroid));
-        let centroid_normal = independent_surface_normal(&actual.centroid)?;
-        let normal_deviation = [
-            normal_angle(expected_normal, first.unit_normal),
-            normal_angle(expected_normal, second.unit_normal),
-            normal_angle(expected_normal, third.unit_normal),
-            normal_angle(expected_normal, centroid_normal),
-        ]
-        .into_iter()
-        .fold(0.0, f64::max);
+        let mut chordal = 0.0_f64;
+        let mut chordal_uv = actual.deviation_samples[3].uv;
+        let mut normal_deviation = 0.0_f64;
+        let mut normal_uv = actual.deviation_samples[3].uv;
+        for (sample, weights) in actual.deviation_samples.iter().zip(sample_weights) {
+            let linear = independent_weighted_point_3d(points, weights);
+            let sample_chordal = magnitude(difference(sample.point_m, linear));
+            if sample_chordal > chordal {
+                chordal = sample_chordal;
+                chordal_uv = sample.uv;
+            }
+            let sample_normal = normal_angle(expected_normal, independent_surface_normal(sample)?);
+            if sample_normal > normal_deviation {
+                normal_deviation = sample_normal;
+                normal_uv = sample.uv;
+            }
+        }
+        for vertex in [first, second, third] {
+            let corner_normal = normal_angle(expected_normal, vertex.unit_normal);
+            if corner_normal > normal_deviation {
+                normal_deviation = corner_normal;
+                normal_uv = vertex.evaluation.uv;
+            }
+        }
         if !same_vector(actual.unit_normal, expected_normal)
             || !same_measure(actual.physical_area_m2, physical_area_m2)
             || !same_vector(actual.metric_edge_lengths, metric_edges)
             || !same_angle(actual.minimum_metric_angle_rad, minimum_angle)
             || !same_measure(actual.physical_aspect_ratio, aspect)
             || !same_measure(actual.chordal_deviation_m, chordal)
+            || actual.chordal_deviation_uv != chordal_uv
             || !same_angle(actual.normal_deviation_rad, normal_deviation)
+            || actual.normal_deviation_uv != normal_uv
         {
             return Err(invalid(
                 &geometry.source_face_id,
@@ -214,6 +232,27 @@ pub fn validate_exact_face_geometry_in_parameterization(
         ));
     }
     Ok(())
+}
+
+fn independent_sample_weights() -> [[f64; 3]; 4] {
+    [
+        [0.5, 0.5, 0.0],
+        [0.0, 0.5, 0.5],
+        [0.5, 0.0, 0.5],
+        [1.0 / 3.0; 3],
+    ]
+}
+
+fn independent_weighted_point_2d(points: [[f64; 2]; 3], weights: [f64; 3]) -> [f64; 2] {
+    std::array::from_fn(|axis| {
+        points[0][axis] * weights[0] + points[1][axis] * weights[1] + points[2][axis] * weights[2]
+    })
+}
+
+fn independent_weighted_point_3d(points: [[f64; 3]; 3], weights: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|axis| {
+        points[0][axis] * weights[0] + points[1][axis] * weights[1] + points[2][axis] * weights[2]
+    })
 }
 
 fn independent_metric_edge(
@@ -305,10 +344,6 @@ fn invalid(
         face_id,
         reason,
     )
-}
-
-fn sum(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
 }
 
 fn difference(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {

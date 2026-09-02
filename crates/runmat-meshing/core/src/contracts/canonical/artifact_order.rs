@@ -1,26 +1,30 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    solver_midside_node_identity, BoundaryEdgeOrder, BoundaryTriangleOrder, ElementOrder,
-    MeshingContractError, MeshingRequest, PersistentEntityKind, SolverMeshTopology,
-    SolverNodeExactParameter, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+    artifact::validation_checkpoint, solver_midside_node_identity, BoundaryEdgeOrder,
+    BoundaryTriangleOrder, ElementOrder, MeshingCancellationSignal, MeshingContractError,
+    MeshingRequest, PersistentEntityKind, SolverMeshTopology, SolverNodeExactParameter,
+    TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
 
 pub(super) fn validate_order_topology(
     topology: &SolverMeshTopology,
     request: &MeshingRequest,
     node_ids: &BTreeSet<u64>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
     match request.element_order {
-        ElementOrder::Tet4 => validate_linear(topology, node_ids),
-        ElementOrder::Tet10 => validate_quadratic(topology, node_ids),
+        ElementOrder::Tet4 => validate_linear(topology, node_ids, cancellation),
+        ElementOrder::Tet10 => validate_quadratic(topology, node_ids, cancellation),
     }
 }
 
 fn validate_linear(
     topology: &SolverMeshTopology,
     node_ids: &BTreeSet<u64>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
+    validation_checkpoint(cancellation)?;
     if topology
         .boundary_faces
         .iter()
@@ -34,23 +38,25 @@ fn validate_linear(
             "Tet4 topology requires Tri3 faces and Line2 boundary edges",
         ));
     }
-    let referenced = topology
-        .volume_elements
-        .iter()
-        .flat_map(|element| element.node_ids.iter().copied())
-        .collect::<BTreeSet<_>>();
+    let mut referenced = BTreeSet::new();
+    for element in &topology.volume_elements {
+        validation_checkpoint(cancellation)?;
+        referenced.extend(element.node_ids.iter().copied());
+    }
     if &referenced != node_ids {
         return Err(invalid(
             "every Tet4 node must be referenced as a volume corner",
         ));
     }
-    validate_boundary_faces(topology, &BTreeMap::new())
+    validate_boundary_faces(topology, &BTreeMap::new(), cancellation)
 }
 
 fn validate_quadratic(
     topology: &SolverMeshTopology,
     node_ids: &BTreeSet<u64>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
+    validation_checkpoint(cancellation)?;
     if topology
         .boundary_faces
         .iter()
@@ -67,12 +73,13 @@ fn validate_quadratic(
     let mut corners = BTreeSet::new();
     let mut midside_nodes = BTreeSet::new();
     let mut midpoint_by_edge = BTreeMap::new();
-    let stable_identity_by_node = topology
-        .nodes
-        .iter()
-        .map(|node| (node.node_id, node.stable_identity))
-        .collect::<BTreeMap<_, _>>();
+    let mut stable_identity_by_node = BTreeMap::new();
+    for node in &topology.nodes {
+        validation_checkpoint(cancellation)?;
+        stable_identity_by_node.insert(node.node_id, node.stable_identity);
+    }
     for element in &topology.volume_elements {
+        validation_checkpoint(cancellation)?;
         corners.extend(element.node_ids[..4].iter().copied());
         for (local_edge, endpoints) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
             let edge = sorted_pair([
@@ -110,13 +117,14 @@ fn validate_quadratic(
             "Tet10 corner and midside nodes must be disjoint and complete",
         ));
     }
-    validate_boundary_faces(topology, &midpoint_by_edge)?;
-    let nodes = topology
-        .nodes
-        .iter()
-        .map(|node| (node.node_id, node))
-        .collect::<BTreeMap<_, _>>();
+    validate_boundary_faces(topology, &midpoint_by_edge, cancellation)?;
+    let mut nodes = BTreeMap::new();
+    for node in &topology.nodes {
+        validation_checkpoint(cancellation)?;
+        nodes.insert(node.node_id, node);
+    }
     for face in &topology.boundary_faces {
+        validation_checkpoint(cancellation)?;
         let source_faces = face
             .provenance
             .iter()
@@ -139,6 +147,7 @@ fn validate_quadratic(
         }
     }
     for edge in &topology.boundary_edges {
+        validation_checkpoint(cancellation)?;
         let key = sorted_pair([edge.node_ids[0], edge.node_ids[1]]);
         if midpoint_by_edge.get(&key) != edge.node_ids.get(2) {
             return Err(invalid(
@@ -173,13 +182,15 @@ fn validate_quadratic(
 fn validate_boundary_faces(
     topology: &SolverMeshTopology,
     midpoint_by_edge: &BTreeMap<[u64; 2], u64>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
-    let elements = topology
-        .volume_elements
-        .iter()
-        .map(|element| (element.element_id, &element.node_ids[..4]))
-        .collect::<BTreeMap<_, _>>();
+    let mut elements = BTreeMap::new();
+    for element in &topology.volume_elements {
+        validation_checkpoint(cancellation)?;
+        elements.insert(element.element_id, &element.node_ids[..4]);
+    }
     for face in &topology.boundary_faces {
+        validation_checkpoint(cancellation)?;
         let corners = &face.node_ids[..3];
         if face.adjacent_volume_element_ids.iter().any(|element_id| {
             elements

@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::PersistentEntityId;
-use runmat_meshing_core::quality::predicate::{orient3d, PredicateSign};
+use runmat_meshing_core::quality::predicate::PredicateSign;
 use runmat_meshing_core::StableDigest;
 
-use crate::cdt::{DelaunayVolumeNode, DelaunayVolumeTopology};
+use crate::cdt::{
+    topology::orient_materialized_volume_nodes, DelaunayVolumeNode, DelaunayVolumeTopology,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::cdt) struct TopologyMutationError {
@@ -147,15 +149,21 @@ impl TopologyMutation {
         if unique.windows(2).any(|pair| pair[0] == pair[1]) {
             return Err(error("mutable tetrahedron repeats a node"));
         }
-        match orient3d(vertices.map(|vertex| self.nodes[vertex as usize].coordinates_m)).map_err(
-            |failure| error(format!("mutable orientation predicate failed: {failure:?}")),
-        )? {
+        let nodes = vertices.map(|vertex| self.nodes[vertex as usize]);
+        let sign = orient_materialized_volume_nodes(nodes).map_err(|failure| {
+            error(format!(
+                "mutable materialized orientation predicate failed: {failure:?}"
+            ))
+        })?;
+        match sign {
             PredicateSign::Positive => Ok(vertices),
             PredicateSign::Negative => {
                 vertices.swap(0, 1);
                 Ok(vertices)
             }
-            PredicateSign::Zero => Err(error("mutable tetrahedron is exactly coplanar")),
+            PredicateSign::Zero => Err(error(format!(
+                "mutable tetrahedron {vertices:?} is coplanar at materialized solver coordinates: nodes={nodes:?}",
+            ))),
         }
     }
 

@@ -96,7 +96,7 @@ where
             edge,
             coedge,
             face,
-            tolerance_m,
+            tolerance_m.max(edge.tolerance_m),
             control,
             &additional_parameters,
         )?;

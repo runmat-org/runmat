@@ -3,14 +3,14 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
-use runmat_geometry_core::GeometryAsset;
+use runmat_geometry_core::{GeometryAsset, UnitSystem};
+use runmat_geometry_io::GeometryImportOptions;
 use runmat_macros::runtime_builtin;
 use runmat_types::MemberAccess;
 use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use crate::builtins::io::json::jsondecode::value_from_json;
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
@@ -25,6 +25,10 @@ const GEOMETRY_LOAD_NAME: &str = "geometry.load";
 const GEOMETRY_INSPECT_NAME: &str = "geometry.inspect";
 const GEOMETRY_LIST_REGIONS_NAME: &str = "geometry.listRegions";
 const GEOMETRY_MESHES_NAME: &str = "geometry.meshes";
+const GEOMETRY_MESH_METHOD_NAME: &str = "__runmat_geometry_mesh";
+
+static GEOMETRY_CLASSES_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(GEOMETRY_ASSET_CLASS);
 
 pub const GEOMETRY_LIST_REGIONS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {
@@ -38,6 +42,12 @@ pub const GEOMETRY_MESHES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "geometry.meshes accepts only a geometry.Asset object and returns host mesh structs; vertices, 1-based faces/triangles, and region ranges are deliberate double-valued API outputs rather than a typed-integer input surface.",
     };
+pub const GEOMETRY_MESH_METHOD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "mesh(asset, ...) accepts a geometry.Asset and logical display controls; it has no integer input role.",
+    };
 
 const STRUCT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "result",
@@ -46,6 +56,13 @@ const STRUCT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Operation result as a struct.",
 }];
+const FIGURE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "figure",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Figure handle.",
+}];
 const PATH_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "path",
     ty: BuiltinParamType::StringScalar,
@@ -53,10 +70,26 @@ const PATH_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Path to the geometry file.",
 }];
+const LOAD_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Path to the geometry file.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional Units Name, Value pair.",
+    },
+];
 
 const GEOMETRY_LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "asset = geometry.load(path)",
-    inputs: &PATH_INPUT,
+    label: "asset = geometry.load(path, Name, Value, ...)",
+    inputs: &LOAD_INPUTS,
     outputs: &STRUCT_OUTPUT,
 }];
 const GEOMETRY_INSPECT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -75,6 +108,28 @@ const GEOMETRY_MESHES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
     inputs: &STRUCT_OUTPUT,
     outputs: &STRUCT_OUTPUT,
 }];
+const GEOMETRY_MESH_DISPLAY_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "asset",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Loaded geometry.Asset object.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Geometry display options: Edges and XRay.",
+    },
+];
+const GEOMETRY_MESH_DISPLAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "figure = mesh(asset, Name, Value, ...)",
+        inputs: &GEOMETRY_MESH_DISPLAY_INPUTS,
+        outputs: &FIGURE_OUTPUT,
+    }];
 
 const GEOMETRY_LOAD_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GEOMETRY.LOAD.IO",
@@ -147,6 +202,12 @@ pub const GEOMETRY_MESHES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &GEOMETRY_INSPECT_ERRORS,
 };
+pub const GEOMETRY_MESH_METHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GEOMETRY_MESH_DISPLAY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &GEOMETRY_INSPECT_ERRORS,
+};
 
 #[runtime_builtin(
     name = "geometry.load",
@@ -156,13 +217,27 @@ pub const GEOMETRY_MESHES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     descriptor(crate::builtins::geometry::GEOMETRY_LOAD_DESCRIPTOR),
     builtin_path = "crate::builtins::geometry"
 )]
-pub async fn geometry_load_builtin(path: String) -> BuiltinResult<Value> {
+pub async fn geometry_load_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let (path, options) = args.split_first().ok_or_else(|| {
+        builtin_error(
+            GEOMETRY_LOAD_NAME,
+            &GEOMETRY_LOAD_ERROR_INTERNAL,
+            "geometry.load requires a path",
+        )
+    })?;
+    let path = scalar_text(path, GEOMETRY_LOAD_NAME)?;
+    let import_options = parse_geometry_load_options(options)?;
     let bytes = read_file(GEOMETRY_LOAD_NAME, &GEOMETRY_LOAD_ERROR_IO, &path).await?;
     operation_result_to_value(
         GEOMETRY_LOAD_NAME,
         &GEOMETRY_LOAD_ERROR_OPERATION,
         &GEOMETRY_LOAD_ERROR_INTERNAL,
-        crate::geometry::geometry_load_op(&path, &bytes, OperationContext::new(None, None)),
+        crate::geometry::geometry_load_with_options_op(
+            &path,
+            &bytes,
+            import_options,
+            OperationContext::new(None, None),
+        ),
         Some(GEOMETRY_ASSET_CLASS),
         Some(GEOMETRY_ASSET_JSON_PROPERTY),
     )
@@ -223,6 +298,143 @@ pub async fn geometry_meshes_builtin(asset: Value) -> BuiltinResult<Value> {
     geometry_meshes_value(&asset)
 }
 
+#[runtime_builtin(
+    name = "__runmat_geometry_mesh",
+    category = "geometry",
+    summary = "Implement mesh display for geometry.Asset objects.",
+    keywords = "geometry,mesh,display,cad",
+    descriptor(crate::builtins::geometry::GEOMETRY_MESH_METHOD_DESCRIPTOR),
+    integer_audit(crate::builtins::geometry::GEOMETRY_MESH_METHOD_INTEGER_AUDIT),
+    builtin_path = "crate::builtins::geometry"
+)]
+pub async fn geometry_mesh_method_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    #[cfg(feature = "plot-core")]
+    {
+        let (asset, options) = args.split_first().ok_or_else(|| {
+            builtin_error(
+                "mesh",
+                &GEOMETRY_INSPECT_ERROR_INTERNAL,
+                "mesh requires a geometry.Asset",
+            )
+        })?;
+        let asset = geometry_asset_from_value_with_builtin(asset, "mesh")?;
+        let (show_edges, xray) = parse_geometry_mesh_options(options)?;
+        let mut preview_options = crate::geometry::GeometryPreviewFigureOptions::cad_preview();
+        preview_options.edge_overlay_triangle_limit = if show_edges { usize::MAX } else { 0 };
+        preview_options.xray = xray;
+        let figure = crate::geometry::geometry_preview_figure(&asset, "Geometry", preview_options)
+            .map_err(|message| builtin_error("mesh", &GEOMETRY_INSPECT_ERROR_OPERATION, message))?;
+        let handle = crate::builtins::plotting::import_runtime_figure(figure);
+        Ok(Value::Num(f64::from(handle)))
+    }
+    #[cfg(not(feature = "plot-core"))]
+    {
+        let _ = args;
+        Err(builtin_error(
+            "mesh",
+            &GEOMETRY_INSPECT_ERROR_OPERATION,
+            "mesh display requires the plot-core runtime feature",
+        ))
+    }
+}
+
+fn parse_geometry_load_options(args: &[Value]) -> BuiltinResult<GeometryImportOptions> {
+    if !args.len().is_multiple_of(2) {
+        return Err(builtin_error(
+            GEOMETRY_LOAD_NAME,
+            &GEOMETRY_LOAD_ERROR_INTERNAL,
+            "geometry.load options must be Name, Value pairs",
+        ));
+    }
+    let mut options = GeometryImportOptions::default();
+    let mut units_seen = false;
+    for pair in args.chunks(2) {
+        let key = scalar_text(&pair[0], GEOMETRY_LOAD_NAME)?
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect::<String>();
+        if key != "units" || units_seen {
+            let detail = if units_seen && key == "units" {
+                "duplicate Units option"
+            } else {
+                "unsupported geometry.load option"
+            };
+            return Err(builtin_error(
+                GEOMETRY_LOAD_NAME,
+                &GEOMETRY_LOAD_ERROR_INTERNAL,
+                detail,
+            ));
+        }
+        units_seen = true;
+        options.units = match scalar_text(&pair[1], GEOMETRY_LOAD_NAME)?
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "m" | "meter" | "meters" | "metre" | "metres" => UnitSystem::Meter,
+            "mm" | "millimeter" | "millimeters" | "millimetre" | "millimetres" => {
+                UnitSystem::Millimeter
+            }
+            "in" | "inch" | "inches" => UnitSystem::Inch,
+            other => {
+                return Err(builtin_error(
+                    GEOMETRY_LOAD_NAME,
+                    &GEOMETRY_LOAD_ERROR_INTERNAL,
+                    format!("unsupported geometry unit `{other}`"),
+                ))
+            }
+        };
+    }
+    Ok(options)
+}
+
+#[cfg(feature = "plot-core")]
+fn parse_geometry_mesh_options(args: &[Value]) -> BuiltinResult<(bool, bool)> {
+    if !args.len().is_multiple_of(2) {
+        return Err(builtin_error(
+            "mesh",
+            &GEOMETRY_INSPECT_ERROR_INTERNAL,
+            "mesh options must be Name, Value pairs",
+        ));
+    }
+    let mut show_edges = true;
+    let mut xray = false;
+    for pair in args.chunks(2) {
+        let key = scalar_text(&pair[0], "mesh")?.to_ascii_lowercase();
+        let Value::Bool(value) = pair[1] else {
+            return Err(builtin_error(
+                "mesh",
+                &GEOMETRY_INSPECT_ERROR_INTERNAL,
+                format!("{key} must be logical"),
+            ));
+        };
+        match key.as_str() {
+            "edges" => show_edges = value,
+            "xray" => xray = value,
+            other => {
+                return Err(builtin_error(
+                    "mesh",
+                    &GEOMETRY_INSPECT_ERROR_INTERNAL,
+                    format!("unsupported geometry mesh option `{other}`"),
+                ))
+            }
+        }
+    }
+    Ok((show_edges, xray))
+}
+
+fn scalar_text(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
+    match value {
+        Value::String(value) => Ok(value.clone()),
+        Value::CharArray(value) if value.rows == 1 => Ok(value.data.iter().collect()),
+        _ => Err(builtin_error(
+            builtin,
+            &GEOMETRY_INSPECT_ERROR_INTERNAL,
+            "expected a text scalar",
+        )),
+    }
+}
+
 async fn read_file(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
@@ -237,7 +449,7 @@ fn geometry_asset_from_value(value: &Value) -> BuiltinResult<GeometryAsset> {
     geometry_asset_from_value_with_builtin(value, GEOMETRY_LIST_REGIONS_NAME)
 }
 
-fn geometry_asset_from_value_with_builtin(
+pub(crate) fn geometry_asset_from_value_with_builtin(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<GeometryAsset> {
@@ -441,8 +653,7 @@ fn serializable_to_object<T: Serialize>(
 }
 
 fn ensure_geometry_classes_registered() {
-    static REGISTER: OnceLock<()> = OnceLock::new();
-    REGISTER.get_or_init(|| {
+    GEOMETRY_CLASSES_REGISTERED.ensure(|| {
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: GEOMETRY_ASSET_CLASS.to_string(),
             parent: None,
@@ -461,6 +672,7 @@ fn ensure_geometry_classes_registered() {
 
 fn geometry_asset_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     [
+        ("mesh", GEOMETRY_MESH_METHOD_NAME),
         ("listRegions", GEOMETRY_LIST_REGIONS_NAME),
         ("meshes", GEOMETRY_MESHES_NAME),
     ]
@@ -565,8 +777,10 @@ mod tests {
         )
         .unwrap();
 
-        let asset = block_on(geometry_load_builtin(path.to_string_lossy().to_string()))
-            .expect("geometry should load");
+        let asset = block_on(geometry_load_builtin(vec![Value::String(
+            path.to_string_lossy().to_string(),
+        )]))
+        .expect("geometry should load");
         let regions =
             block_on(geometry_list_regions_builtin(asset)).expect("regions should be listed");
 
@@ -586,8 +800,10 @@ mod tests {
         )
         .unwrap();
 
-        let asset = block_on(geometry_load_builtin(path.to_string_lossy().to_string()))
-            .expect("geometry should load");
+        let asset = block_on(geometry_load_builtin(vec![Value::String(
+            path.to_string_lossy().to_string(),
+        )]))
+        .expect("geometry should load");
         let meshes = block_on(geometry_meshes_builtin(asset)).expect("meshes should project");
 
         let Value::Cell(cell) = meshes else {
@@ -606,5 +822,62 @@ mod tests {
         };
         assert_eq!(faces.shape, vec![1, 3]);
         assert_eq!(faces.materialize_f64(), vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn geometry_load_builtin_applies_explicit_source_units() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("part.stl");
+        std::fs::write(
+            &path,
+            "solid demo\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid demo\n",
+        )
+        .unwrap();
+
+        let value = block_on(geometry_load_builtin(vec![
+            Value::String(path.to_string_lossy().to_string()),
+            Value::String("Units".to_string()),
+            Value::String("millimeter".to_string()),
+        ]))
+        .expect("geometry should load with explicit units");
+        let asset = geometry_asset_from_value_with_builtin(&value, GEOMETRY_LOAD_NAME)
+            .expect("asset should decode");
+
+        assert_eq!(asset.units, UnitSystem::Millimeter);
+        assert_eq!(asset.surface_meshes[0].vertices[1][0], 0.001);
+        assert_eq!(asset.source.sha256.len(), 64);
+        assert!(asset
+            .source
+            .sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn geometry_asset_registers_standard_mesh_method() {
+        ensure_geometry_classes_registered();
+        let (method, _) = crate::class_registry::lookup_method(GEOMETRY_ASSET_CLASS, "mesh")
+            .expect("geometry.Asset should overload mesh");
+        assert_eq!(method.function_name, GEOMETRY_MESH_METHOD_NAME);
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn standard_mesh_dispatches_geometry_assets_through_object_protocol() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("part.stl");
+        std::fs::write(
+            &path,
+            "solid demo\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid demo\n",
+        )
+        .unwrap();
+        let asset = block_on(geometry_load_builtin(vec![Value::String(
+            path.to_string_lossy().to_string(),
+        )]))
+        .expect("geometry should load");
+
+        let handle = block_on(crate::call_builtin_async("mesh", &[asset]))
+            .expect("standard mesh should dispatch geometry.Asset");
+        assert!(matches!(handle, Value::Num(value) if value > 0.0));
     }
 }

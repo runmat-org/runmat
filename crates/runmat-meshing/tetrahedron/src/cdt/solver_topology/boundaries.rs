@@ -20,7 +20,7 @@ pub(super) fn build_faces(
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(Vec<SolverBoundaryFace>, Vec<ProjectedFaceClass>), DelaunaySolverTopologyError> {
-    let uses = tetrahedron_face_uses(input);
+    let uses = tetrahedron_face_uses(input, options, cancellation)?;
     let classifications = ClassificationIndex::new(input.exact_topology);
     let mut faces = Vec::new();
     let mut classes = Vec::new();
@@ -123,10 +123,15 @@ fn oriented_face_nodes(
     ))
 }
 
-fn tetrahedron_face_uses(input: &DelaunaySolverTopologyInput<'_>) -> BTreeMap<[u32; 3], Vec<u32>> {
+fn tetrahedron_face_uses(
+    input: &DelaunaySolverTopologyInput<'_>,
+    options: DelaunaySolverTopologyOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<BTreeMap<[u32; 3], Vec<u32>>, DelaunaySolverTopologyError> {
     let mut uses = BTreeMap::<[u32; 3], Vec<u32>>::new();
     for (tetrahedron_index, tetrahedron) in input.volume_mesh.topology.tetrahedra.iter().enumerate()
     {
+        checkpoint(tetrahedron_index as u64, options, cancellation)?;
         for opposite in 0..4 {
             let mut face = [0; 3];
             let mut cursor = 0;
@@ -140,7 +145,7 @@ fn tetrahedron_face_uses(input: &DelaunaySolverTopologyInput<'_>) -> BTreeMap<[u
             uses.entry(face).or_default().push(tetrahedron_index as u32);
         }
     }
-    uses
+    Ok(uses)
 }
 
 pub(super) fn build_edges(
@@ -149,21 +154,16 @@ pub(super) fn build_edges(
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<SolverBoundaryEdge>, DelaunaySolverTopologyError> {
-    let identity_by_node = input
-        .volume_mesh
-        .topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (index as u64 + 1, node.identity))
-        .collect::<BTreeMap<_, _>>();
-    let segment_provenance = input
-        .volume_mesh
-        .provenance
-        .segments
-        .iter()
-        .map(|segment| (segment.node_identities, segment.entity_ids.as_slice()))
-        .collect::<BTreeMap<_, _>>();
+    let mut identity_by_node = BTreeMap::new();
+    for (index, node) in input.volume_mesh.topology.nodes.iter().enumerate() {
+        checkpoint(index as u64, options, cancellation)?;
+        identity_by_node.insert(index as u64 + 1, node.identity);
+    }
+    let mut segment_provenance = BTreeMap::new();
+    for (index, segment) in input.volume_mesh.provenance.segments.iter().enumerate() {
+        checkpoint(index as u64, options, cancellation)?;
+        segment_provenance.insert(segment.node_identities, segment.entity_ids.as_slice());
+    }
     let mut edges = BTreeMap::<[u64; 2], (BTreeSet<u64>, BTreeSet<PersistentEntityId>)>::new();
     for (index, face) in faces.iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
@@ -190,29 +190,28 @@ pub(super) fn build_edges(
             ),
         ));
     }
-    edges
-        .into_iter()
-        .enumerate()
-        .map(|(index, (node_ids, (face_ids, provenance)))| {
-            if provenance.is_empty()
-                || provenance.len() > super::construction::MAX_PROVENANCE_PER_ENTITY
-            {
-                return Err(invalid_mesh(
-                    "boundary edge provenance is empty or exceeds its bound",
-                ));
-            }
-            Ok(SolverBoundaryEdge {
-                edge_id: index as u64 + 1,
-                stable_identity: solver_boundary_edge_identity(
-                    node_ids.map(|node_id| identity_by_node[&node_id]),
-                ),
-                order: BoundaryEdgeOrder::Line2,
-                node_ids: node_ids.into(),
-                adjacent_boundary_face_ids: face_ids.into_iter().collect(),
-                provenance: provenance.into_iter().collect(),
-            })
-        })
-        .collect()
+    let mut result = Vec::with_capacity(edges.len());
+    for (index, (node_ids, (face_ids, provenance))) in edges.into_iter().enumerate() {
+        checkpoint(index as u64, options, cancellation)?;
+        if provenance.is_empty()
+            || provenance.len() > super::construction::MAX_PROVENANCE_PER_ENTITY
+        {
+            return Err(invalid_mesh(
+                "boundary edge provenance is empty or exceeds its bound",
+            ));
+        }
+        result.push(SolverBoundaryEdge {
+            edge_id: index as u64 + 1,
+            stable_identity: solver_boundary_edge_identity(
+                node_ids.map(|node_id| identity_by_node[&node_id]),
+            ),
+            order: BoundaryEdgeOrder::Line2,
+            node_ids: node_ids.into(),
+            adjacent_boundary_face_ids: face_ids.into_iter().collect(),
+            provenance: provenance.into_iter().collect(),
+        });
+    }
+    Ok(result)
 }
 
 fn invalid_mesh(reason: impl Into<String>) -> DelaunaySolverTopologyError {

@@ -3,7 +3,8 @@ use runmat_geometry_core::{
     ExactTrimClassifier, GeometryEvaluationControl,
 };
 use runmat_meshing_core::{
-    validate_solver_mesh_topology, MeshingCancellationSignal, MeshingRequest, SolverMeshTopology,
+    validate_solver_mesh_topology_with_cancellation, MeshingCancellationSignal, MeshingRequest,
+    SolverMeshTopology,
 };
 use runmat_meshing_surface::ExactSurfaceMesh;
 
@@ -53,6 +54,7 @@ pub struct DelaunaySolverTopologyOptions {
     pub maximum_boundary_edges: u64,
     pub maximum_curved_optimization_candidates: u64,
     pub maximum_curved_optimization_rounds: u32,
+    pub maximum_curved_optimization_sweeps: u32,
     pub trim_boundary_tolerance_uv: f64,
     pub cancellation_check_interval: u64,
 }
@@ -64,6 +66,7 @@ impl Default for DelaunaySolverTopologyOptions {
             maximum_boundary_edges: 3_000_000_000,
             maximum_curved_optimization_candidates: 12_000_000_000,
             maximum_curved_optimization_rounds: 4_096,
+            maximum_curved_optimization_sweeps: 64,
             trim_boundary_tolerance_uv: 1.0e-10,
             cancellation_check_interval: 1_024,
         }
@@ -94,7 +97,8 @@ pub fn build_delaunay_solver_topology(
             order_elevation::elevate(&input, linear, options, cancellation)?
         }
     };
-    validate_solver_mesh_topology(&result, input.request).map_err(error::solver)?;
+    validate_solver_mesh_topology_with_cancellation(&result, input.request, cancellation)
+        .map_err(error::solver)?;
     Ok(result)
 }
 
@@ -105,6 +109,7 @@ fn validate_options(
         || options.maximum_boundary_edges == 0
         || options.maximum_curved_optimization_candidates == 0
         || options.maximum_curved_optimization_rounds == 0
+        || options.maximum_curved_optimization_sweeps == 0
         || !options.trim_boundary_tolerance_uv.is_finite()
         || options.trim_boundary_tolerance_uv < 0.0
         || options.cancellation_check_interval == 0

@@ -27,13 +27,12 @@ const FEA_INTEGER_CONSTRUCTORS: [&str; 4] = [
     "fea.material",
 ];
 
-const FEA_INTEGER_INAPPLICABLE: [&str; 6] = [
+const FEA_INTEGER_INAPPLICABLE: [&str; 5] = [
     "fea.compare",
     "fea.field",
     "fea.materialAssignment",
     "fea.model",
     "fea.plan",
-    "fea.plot",
 ];
 
 #[test]
@@ -79,7 +78,6 @@ fn fea_object_and_text_roles_reject_every_integer_class_without_coercion() {
             format!("value = fea.materialAssignment({constructor}(1), \"steel\");"),
             format!("value = fea.model({constructor}(1), {constructor}(2));"),
             format!("value = fea.plan({constructor}(1));"),
-            format!("value = fea.plot({constructor}(1));"),
         ] {
             let error = execute_source(&source).expect_err("integer object/text role must reject");
             assert_eq!(

@@ -16,6 +16,23 @@ pub fn derive_delaunay_volume_metric_contexts(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<DelaunayVolumeMetricContext>, DelaunayVolumeProvenanceError> {
     validate_delaunay_volume_provenance(topology, provenance, options, cancellation)?;
+    derive_delaunay_volume_metric_contexts_from_admitted_input(
+        topology,
+        provenance,
+        options,
+        cancellation,
+    )
+}
+
+/// Derives per-cell metric context after the caller has admitted the topology and
+/// persistent boundary provenance. Internal topology mutations use this path so
+/// they do not revalidate immutable provenance for every speculative candidate.
+pub(in crate::cdt) fn derive_delaunay_volume_metric_contexts_from_admitted_input(
+    topology: &DelaunayVolumeTopology,
+    provenance: &DelaunayVolumeProvenance,
+    options: DelaunayVolumeProvenanceOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Vec<DelaunayVolumeMetricContext>, DelaunayVolumeProvenanceError> {
     let nodes = provenance
         .nodes
         .iter()

@@ -200,6 +200,10 @@ pub(super) fn validate_refill_options(
         || options.volume_relative_tolerance < 0.0
         || !options.min_protected_node_distance_m.is_finite()
         || options.min_protected_node_distance_m < 0.0
+        || !options.classification_tolerance.absolute_m.is_finite()
+        || options.classification_tolerance.absolute_m < 0.0
+        || !options.classification_tolerance.relative.is_finite()
+        || options.classification_tolerance.relative < 0.0
     {
         return Err(ConstrainedCavityRefillError::InvalidOptions);
     }

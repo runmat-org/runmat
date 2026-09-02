@@ -10,8 +10,9 @@ use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_meshing_core::{
-    CacheAdmissionDecision, MeshingEvidence, MeshingRequest, PlatformBuildIdentity,
-    SizingResolutionEvidence, SolverMeshArtifact,
+    CacheAdmissionDecision, MeshingEvidence, MeshingFailure, MeshingFailureCategory,
+    MeshingOperation, MeshingRequest, MeshingStageKind, PlatformBuildIdentity,
+    SizingResolutionEvidence, SolverMeshArtifact, MESHING_FAILURE_SCHEMA_VERSION,
 };
 
 use crate::{ExactMeshingDagPlanner, MeshingArtifactAccess, PreparedExactGeometryInput};
@@ -130,6 +131,21 @@ fn validate_run(run: &ExactMeshingDagRun<'_>) -> Result<(), ExactMeshingDagRunEr
     if run.preferred_edges_per_partition == 0 || run.preferred_faces_per_partition == 0 {
         return Err(ExactMeshingDagRunError::Invalid(
             "edge and face partition sizes must be nonzero".into(),
+        ));
+    }
+    if run.geometry.geometry_objects().topology.regions.is_empty() {
+        return Err(ExactMeshingDagRunError::Stage(
+            MeshingStageExecutionError::Failure(Box::new(MeshingFailure {
+                schema_version: MESHING_FAILURE_SCHEMA_VERSION,
+                category: MeshingFailureCategory::InvalidGeometry,
+                stage: MeshingStageKind::GeometryAdmission,
+                operation: MeshingOperation::AdmitGeometry,
+                entity_ids: Vec::new(),
+                witnesses: Vec::new(),
+                request_values: Vec::new(),
+                achieved_values: Vec::new(),
+                remediation: "select geometry containing at least one closed solid region".into(),
+            })),
         ));
     }
     Ok(())

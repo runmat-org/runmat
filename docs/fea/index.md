@@ -9,7 +9,7 @@ RunMat FEA lets you start with a CAD or mesh file and run repeatable physics stu
 | If you want to... | Use |
 | --- | --- |
 | Run a repeatable study from the terminal or CI | `runmat check model.fea` and `runmat run model.fea` |
-| Build or generate a study from RunMat code | `geometry.load(...)`, `fea.model(...)`, `fea.study(...)`, `fea.validate(...)`, `fea.run(...)` |
+| Build or generate a study from RunMat code | `geometry.load(...)`, `meshing.generate(...)`, `fea.model(...)`, `fea.study(...)`, `fea.validate(...)`, `fea.run(...)` |
 | Build or generate a study from a `.fea` file | A `.fea` YAML document can be loaded by `fea.load(...)` or run with `runmat run` |
 | Inspect geometry before modeling | `geometry.inspect(...)` and geometry runtime operations |
 | Integrate from Rust or a host application | Versioned runtime operations such as `fea.create_model/v1` and `fea.run_study/v1` |

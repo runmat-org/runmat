@@ -60,6 +60,13 @@ pub fn join_exact_face_charts(
     let mut cut_ids = BTreeSet::new();
     let mut maximum_chordal_deviation_m = 0.0_f64;
     let mut maximum_normal_deviation_rad = 0.0_f64;
+    let edge_tolerances = context
+        .refinement
+        .topology
+        .edges
+        .iter()
+        .map(|edge| (&edge.id, edge.tolerance_m))
+        .collect::<BTreeMap<_, _>>();
 
     for ((chart, mesh), report) in charts.charts.iter().zip(refined).zip(acceptance) {
         validate_chart_inputs(
@@ -106,12 +113,23 @@ pub fn join_exact_face_charts(
                     });
                 }
                 std::collections::btree_map::Entry::Occupied(mut entry) => {
-                    if distance(entry.get().point_m, vertex.evaluation.point_m)
-                        > join_options.coordinate_tolerance_m
-                    {
+                    let coordinate_tolerance_m = entry
+                        .get()
+                        .uses
+                        .iter()
+                        .chain(std::iter::once(&use_record))
+                        .flat_map(|use_record| &use_record.exact_edge_parameters)
+                        .filter_map(|parameter| edge_tolerances.get(&parameter.source_edge_id))
+                        .fold(join_options.coordinate_tolerance_m, |maximum, tolerance| {
+                            maximum.max(*tolerance)
+                        });
+                    let discrepancy_m = distance(entry.get().point_m, vertex.evaluation.point_m);
+                    if discrepancy_m > coordinate_tolerance_m {
                         return Err(invalid(
                             &charts.source_face_id,
-                            "shared node images disagree in 3D",
+                            format!(
+                                "shared node images disagree by {discrepancy_m:e} m, exceeding the admitted {coordinate_tolerance_m:e} m tolerance"
+                            ),
                         )
                         .with_chart(chart.chart_id));
                     }
@@ -158,11 +176,10 @@ pub fn join_exact_face_charts(
                 )
                 .with_chart(chart.chart_id));
             }
-            let (node_ids, metric_edge_lengths, unit_normal) = match face_orientation {
-                TopologicalOrientation::Forward => {
-                    (node_ids, geometry.metric_edge_lengths, geometry.unit_normal)
-                }
-                TopologicalOrientation::Reversed => (
+            let reverses_orientation = (face_orientation == TopologicalOrientation::Reversed)
+                ^ chart.parameterization.reverses_evaluator_orientation();
+            let (node_ids, metric_edge_lengths, unit_normal) = if reverses_orientation {
+                (
                     [node_ids[0], node_ids[2], node_ids[1]],
                     [
                         geometry.metric_edge_lengths[2],
@@ -170,7 +187,9 @@ pub fn join_exact_face_charts(
                         geometry.metric_edge_lengths[0],
                     ],
                     geometry.unit_normal.map(|value| -value),
-                ),
+                )
+            } else {
+                (node_ids, geometry.metric_edge_lengths, geometry.unit_normal)
             };
             let (node_ids, rotation) = canonical_triangle(node_ids);
             triangles.push(ExactFaceMeshTriangle {
@@ -411,7 +430,7 @@ fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
         .sqrt()
 }
 
-fn invalid(face_id: &PersistentEntityId, reason: &str) -> ExactFaceJoinError {
+fn invalid(face_id: &PersistentEntityId, reason: impl Into<String>) -> ExactFaceJoinError {
     ExactFaceJoinError::new(ExactFaceJoinErrorKind::InvalidInput, face_id, reason)
 }
 

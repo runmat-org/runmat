@@ -23,7 +23,7 @@ use runmat_meshing_execution::{
 
 const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
 const EXPECTED_BOX_ARTIFACT_DIGEST: &str =
-    "15477bc5436facd3e152c1fd53be94d959222808a3b608f9a69dea8d4ca7e7b6";
+    "db671df44a5e6c9c1eda01312223222ec07efbec28581b7d661e27e0fa73e6d6";
 
 #[path = "occt_exact_meshing/differential.rs"]
 mod differential;
@@ -165,6 +165,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
                 maximum_metric_edge_length: 10.0,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.01,
                 minimum_metric_angle_degrees: 0.1,
                 maximum_physical_aspect_ratio: 1_000.0,
                 maximum_chordal_deviation_m: 0.1,

@@ -22,6 +22,7 @@ pub mod introspection;
 pub mod io;
 pub mod logical;
 pub mod math;
+pub mod meshing;
 pub mod missing;
 #[cfg(feature = "plot-core")]
 pub mod plotting;

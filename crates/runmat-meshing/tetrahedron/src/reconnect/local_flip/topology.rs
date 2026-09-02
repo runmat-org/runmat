@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::quality::predicate::{
-    orient3d, Point3, PredicateSign, SpatialPredicateError,
+    orient3d_constructed, PredicateSign, SpatialPredicateError, SpatialPredicatePoint,
 };
 
 pub fn local_tetrahedron_boundary_faces(tetrahedra: &[[u32; 4]]) -> BTreeSet<[u32; 3]> {
@@ -24,7 +24,7 @@ pub fn local_tetrahedron_boundary_faces(tetrahedra: &[[u32; 4]]) -> BTreeSet<[u3
 pub fn two_to_three_geometry_is_admissible(
     left: [u32; 4],
     right: [u32; 4],
-    coordinates: impl Fn(u32) -> Point3,
+    point: impl Fn(u32) -> SpatialPredicatePoint,
 ) -> Result<bool, SpatialPredicateError> {
     let Some(face) = shared_face(left, right) else {
         return Ok(false);
@@ -36,11 +36,11 @@ pub fn two_to_three_geometry_is_admissible(
         return Ok(false);
     };
     let signs = [[face[0], face[1]], [face[1], face[2]], [face[2], face[0]]].map(|edge| {
-        orient3d([
-            coordinates(left_apex),
-            coordinates(right_apex),
-            coordinates(edge[0]),
-            coordinates(edge[1]),
+        orient3d_constructed([
+            point(left_apex),
+            point(right_apex),
+            point(edge[0]),
+            point(edge[1]),
         ])
     });
     let [first, second, third] = signs;

@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet, BinaryHeap},
+};
 
 use crate::metric::{MetricContractError, MetricTensor3, ResolvedMetricEvaluation};
 
@@ -30,23 +33,31 @@ pub fn grade_metric_evaluations<Identity: Clone + Ord>(
         .collect::<Result<BTreeMap<_, _>, MetricContractError>>()?;
     let original_caps = size_caps.clone();
 
-    // Bellman-Ford relaxation computes min(source_size * ratio^graph_distance). A simple
-    // canonical pass is preferable here to queue ordering that could expose floating ties.
-    for _ in 1..size_caps.len() {
-        let previous = size_caps.clone();
-        let mut changed = false;
-        for (entity, neighbors) in adjacency {
-            let source = previous[entity];
-            for neighbor in neighbors {
-                let candidate = source * maximum_grading_ratio;
-                if candidate.is_finite() && candidate < size_caps[neighbor] {
-                    size_caps.insert(neighbor.clone(), candidate);
-                    changed = true;
-                }
-            }
+    // Every entity is a source. Dijkstra propagation over the nonnegative,
+    // uniform log(ratio) edge weight computes
+    // min(source_size * ratio^graph_distance) without quadratic graph sweeps.
+    // Total floating-point ordering plus the identity tie-break makes queue
+    // traversal canonical; strict relaxation keeps equal paths irrelevant.
+    let mut frontier = BinaryHeap::new();
+    for (entity, size_cap) in &size_caps {
+        frontier.push(GradingFrontier {
+            size_cap: *size_cap,
+            entity: entity.clone(),
+        });
+    }
+    while let Some(current) = frontier.pop() {
+        if current.size_cap.to_bits() != size_caps[&current.entity].to_bits() {
+            continue;
         }
-        if !changed {
-            break;
+        for neighbor in &adjacency[&current.entity] {
+            let candidate = current.size_cap * maximum_grading_ratio;
+            if candidate.is_finite() && candidate < size_caps[neighbor] {
+                size_caps.insert(neighbor.clone(), candidate);
+                frontier.push(GradingFrontier {
+                    size_cap: candidate,
+                    entity: neighbor.clone(),
+                });
+            }
         }
     }
 
@@ -64,6 +75,36 @@ pub fn grade_metric_evaluations<Identity: Clone + Ord>(
         }
     }
     Ok(())
+}
+
+struct GradingFrontier<Identity> {
+    size_cap: f64,
+    entity: Identity,
+}
+
+impl<Identity: Ord> PartialEq for GradingFrontier<Identity> {
+    fn eq(&self, other: &Self) -> bool {
+        self.size_cap.to_bits() == other.size_cap.to_bits() && self.entity == other.entity
+    }
+}
+
+impl<Identity: Ord> Eq for GradingFrontier<Identity> {}
+
+impl<Identity: Ord> PartialOrd for GradingFrontier<Identity> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<Identity: Ord> Ord for GradingFrontier<Identity> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // BinaryHeap is a max-heap, so reverse both comparisons to pop the
+        // smallest cap and then the smallest canonical identity first.
+        other
+            .size_cap
+            .total_cmp(&self.size_cap)
+            .then_with(|| other.entity.cmp(&self.entity))
+    }
 }
 
 fn validate_graph<Identity: Ord>(
@@ -168,6 +209,82 @@ mod tests {
         ]);
         let mut evaluations = BTreeMap::from([(left, evaluation(0.1)), (right, evaluation(1.0))]);
         assert!(grade_metric_evaluations(1.2, &adjacency, &mut evaluations).is_err());
+    }
+
+    #[test]
+    fn grading_propagates_over_long_paths_from_every_source() {
+        let entities = (0..8).map(entity).collect::<Vec<_>>();
+        let adjacency = entities
+            .iter()
+            .enumerate()
+            .map(|(index, current)| {
+                let mut neighbors = BTreeSet::new();
+                if index > 0 {
+                    neighbors.insert(entities[index - 1].clone());
+                }
+                if index + 1 < entities.len() {
+                    neighbors.insert(entities[index + 1].clone());
+                }
+                (current.clone(), neighbors)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut evaluations = entities
+            .iter()
+            .enumerate()
+            .map(|(index, current)| {
+                let length = match index {
+                    0 => 0.01,
+                    7 => 0.02,
+                    _ => 10.0,
+                };
+                (current.clone(), evaluation(length))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        grade_metric_evaluations(2.0, &adjacency, &mut evaluations).unwrap();
+
+        let expected = [0.01, 0.02, 0.04, 0.08, 0.16, 0.08, 0.04, 0.02];
+        for (current, expected) in entities.iter().zip(expected) {
+            let actual = evaluations[current]
+                .metric
+                .conservative_minimum_length_m()
+                .unwrap();
+            assert!(actual <= expected);
+            assert!(actual > expected * 0.99);
+        }
+    }
+
+    #[test]
+    fn unit_grading_ratio_propagates_the_global_minimum() {
+        let entities = [entity(1), entity(2), entity(3)];
+        let adjacency = BTreeMap::from([
+            (entities[0].clone(), BTreeSet::from([entities[1].clone()])),
+            (
+                entities[1].clone(),
+                BTreeSet::from([entities[0].clone(), entities[2].clone()]),
+            ),
+            (entities[2].clone(), BTreeSet::from([entities[1].clone()])),
+        ]);
+        let mut evaluations = BTreeMap::from([
+            (entities[0].clone(), evaluation(0.25)),
+            (entities[1].clone(), evaluation(1.0)),
+            (entities[2].clone(), evaluation(2.0)),
+        ]);
+
+        grade_metric_evaluations(1.0, &adjacency, &mut evaluations).unwrap();
+
+        let propagated = entities[1..]
+            .iter()
+            .map(|current| {
+                evaluations[current]
+                    .metric
+                    .conservative_minimum_length_m()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(propagated.iter().all(|length| *length < 0.25));
+        assert_eq!(evaluations[&entities[1]].clipped_contribution_count, 1);
+        assert_eq!(evaluations[&entities[2]].clipped_contribution_count, 1);
     }
 
     fn evaluation(length_m: f64) -> ResolvedMetricEvaluation {

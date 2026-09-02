@@ -154,6 +154,35 @@ pub fn analysis_generate_study_run_figures(
     Ok(figures)
 }
 
+pub fn analysis_generate_study_run_mesh_figure(
+    study: &AnalysisStudySpec,
+    run_id: &str,
+    options: AnalysisFigureGenerationOptions,
+) -> Result<AnalysisGeneratedFigure, String> {
+    let run = storage::load_run_result(run_id)?
+        .ok_or_else(|| format!("FEA run_id '{run_id}' was not found"))?;
+    let render_topology = run
+        .render_topology
+        .as_ref()
+        .filter(|topology| render_topology_has_meshes(topology));
+    let title = match options.mesh_source {
+        AnalysisFigureMeshSource::Solver => "FEA solver mesh",
+        AnalysisFigureMeshSource::Cad => "FEA CAD geometry",
+        AnalysisFigureMeshSource::CadReference => "FEA mesh and CAD reference",
+        AnalysisFigureMeshSource::Auto => "FEA mesh",
+    };
+    let figure = base_mesh_figure_for_run_source(&study.geometry, render_topology, title, options)
+        .ok_or_else(|| "FEA run does not contain renderable mesh topology".to_string())?;
+    Ok(AnalysisGeneratedFigure {
+        kind: AnalysisGeneratedFigureKind::MeshResult,
+        title: title.to_string(),
+        field_ids: Vec::new(),
+        topology_ids: Vec::new(),
+        warnings: Vec::new(),
+        figure,
+    })
+}
+
 fn generate_run_figures(
     geometry: &runmat_geometry_core::GeometryAsset,
     model: Option<&AnalysisModel>,

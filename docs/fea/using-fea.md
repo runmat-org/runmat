@@ -154,7 +154,11 @@ Sweeps execute sequentially in `v1`. `fail_fast: false` lets planning or running
 The RunMat-code API can express the same study content as `.fea`. Use typed FEA objects when the study is generated, parameterized, or mixed with normal numeric code.
 
 ```matlab
-geom = geometry.load("geometry/bracket.step");
+geom = geometry.load("geometry/bracket.step", "Units", "millimeter");
+solverMesh = meshing.generate(geom, ...
+    "TargetSize", 0.005, ...
+    "MaximumDeviation", 0.00005, ...
+    "ElementOrder", "tet10");
 
 steel = fea.material("steel", ...
     "YoungsModulusPa", 200e9, ...
@@ -178,6 +182,7 @@ opts = fea.runOptions("linear_static", ...
 
 study = fea.study("bracket_static", geom, ...
     "Profile", "linear_static_structural", ...
+    "Mesh", solverMesh, ...
     "Backend", "cpu", ...
     "Model", model, ...
     "RunOptions", opts);
@@ -186,8 +191,9 @@ validation = fea.validate(study);
 plan = fea.plan(study);
 result = fea.run(study);
 results = fea.results(result);
-stress = fea.field(results, "von_mises");
-fea.plot(result, "von_mises");
+stress = fea.field(results, "structural.von_mises");
+mesh(results);
+plot(stress);
 print("bracket_von_mises.png", "-dpng");
 ```
 
@@ -199,7 +205,7 @@ The same host-only physical-value boundary applies to the documented numeric fie
 
 `fea.results` uses positive one-based exact vectors for `ModeIndices` and `TransientSnapshotIndices`, matching normal RunMat indexing. Its inclusion flags accept logical scalars or exact numeric zero and one. Selector shape, positivity, integrality, and range are validated before artifact lookup; resident selectors reject without provider access. Structural result metadata such as shapes, counts, indexes, byte sizes, iteration counts, and fingerprints remains exact, while field values and physical/timing/residual quantities remain double. `fea.trends("WindowSize", n)` applies the same exact structural rule to a positive scalar and defaults to 16.
 
-`fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, `fea.plot`, and `fea.compare` have no integer-array input role. Their inputs are exact text identifiers, typed FEA or geometry objects, or document paths, while any integer-valued metadata they return follows the structural-output rule. `fea.compare` accepts exactly the baseline and candidate run identifiers and has no Name, Value options.
+`fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, and `fea.compare` have no integer-array input role. Their inputs are exact text identifiers, typed FEA or geometry objects, or document paths, while any integer-valued metadata they return follows the structural-output rule. The ordinary `plot(...)` and `mesh(...)` functions dispatch FEA objects through their visualization methods without changing the numeric MATLAB-compatible forms. `fea.compare` accepts exactly the baseline and candidate run identifiers and has no Name, Value options.
 
 Use `.fea` when the study definition should be checked in as a portable declarative artifact:
 
@@ -212,16 +218,26 @@ stress = result.field("structural.von_mises");
 peakStressPa = max(stress.values);
 ```
 
-`fea.load(...)` returns either a `fea.Study` or `fea.Sweep` object. `geometry.load(...)` returns a `geometry.Asset` object. The workflow builtins accept `.fea` paths, `fea.Study` objects, or `fea.Sweep` objects. `fea.RunResult` objects expose `results()`, `field(fieldId)`, and `plot(fieldId)` methods. `fea.Field` objects expose script-friendly `values`, `shape`, `unit`, `location`, `kind`, `family`, and `quantity` properties.
+`fea.load(...)` returns either a `fea.Study` or `fea.Sweep` object. `geometry.load(...)` returns a `geometry.Asset` object, and `meshing.generate(...)` returns a validated `meshing.Mesh`. The workflow builtins accept `.fea` paths, `fea.Study` objects, or `fea.Sweep` objects. `fea.RunResult` objects expose `results()`, `field(fieldId)`, and `mesh()` methods. `fea.Field` objects expose script-friendly `values`, `shape`, `unit`, `location`, `kind`, `family`, and `quantity` properties plus `plot()` and `mesh()` visualization methods. Field selection belongs to `fea.field`; it is not a plotting option.
 
 The typed constructors and post-processing helpers do not intrinsically require native OCCT. They can consume an existing `geometry.Asset`, STL-backed or synthetic geometry, and persisted mesh/result artifacts without OCCT; only an earlier import of topology-bearing CAD such as STEP, IGES, or BREP may require the configured OCCT geometry backend.
 
 Argument decoding for `fea.run`, and artifact filtering for `fea.results` and `fea.trends`, is host-side. The solver invoked by `fea.run` is different: it may execute through the CPU or configured GPU backend selected by the study. Result queries return stored device references as metadata and do not gather or execute them.
 
-For manual visualization, `geometry.meshes(asset)` returns patch-ready surface topology:
+The ordinary `mesh` function displays geometry and solver-mesh objects directly:
 
 ```matlab
-asset = geometry.load("geometry/bracket.step");
+asset = geometry.load("geometry/bracket.step", "Units", "millimeter");
+mesh(asset);
+
+solverMesh = meshing.generate(asset, "TargetSize", 0.005);
+mesh(solverMesh, "Edges", true);
+```
+
+For low-level custom visualization, `geometry.meshes(asset)` returns patch-ready surface topology:
+
+```matlab
+asset = geometry.load("geometry/bracket.step", "Units", "millimeter");
 meshes = geometry.meshes(asset);
 m = meshes{1};
 patch("Faces", m.faces, "Vertices", m.vertices);
@@ -242,7 +258,8 @@ The typed constructors are:
 | `fea.model(...)` | Explicit model assembled from typed components. |
 | `fea.study(...)` | Study assembled from geometry, physics profile/model data, backend, and run options. |
 | `fea.sweep(...)` | Study sweep assembled from `fea.Study` objects. |
-| `fea.plot(...)` | Create a RunMat figure for a result field on the study geometry mesh. |
+| `plot(field, ...)` | Plot an `fea.Field` through the ordinary plotting function. |
+| `mesh(runOrResultsOrField, ...)` | Display solver topology, CAD geometry, or both through the ordinary mesh function. |
 
 Region strings in these constructors use the same selector grammar as `.fea`: direct region id, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, or `tag:<tag>`.
 

@@ -52,8 +52,8 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
     .unwrap();
 
     result.evidence.validate(&result.artifact).unwrap();
-    assert_eq!(result.artifact.topology.nodes.len(), 10);
-    assert_eq!(result.artifact.topology.volume_elements.len(), 1);
+    assert_eq!(result.artifact.topology.nodes.len(), 15);
+    assert_eq!(result.artifact.topology.volume_elements.len(), 4);
     assert_eq!(
         result.evidence.stages.last().unwrap().stage,
         MeshingStageKind::Serialization
@@ -147,7 +147,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         &NeverCancelled,
     )
     .unwrap();
-    assert_eq!(mesh.topology.tetrahedra.len(), 1);
+    assert_eq!(mesh.topology.tetrahedra.len(), 4);
     assert_eq!(mesh.topology.incidence.regions.len(), 1);
     assert_eq!(mesh.provenance.facets.len(), 4);
 
@@ -185,8 +185,8 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     )
     .unwrap();
     solver_projection.validate().unwrap();
-    assert_eq!(solver_projection.topology.nodes.len(), 10);
-    assert_eq!(solver_projection.topology.volume_elements.len(), 1);
+    assert_eq!(solver_projection.topology.nodes.len(), 15);
+    assert_eq!(solver_projection.topology.volume_elements.len(), 4);
 
     let projection_root = root(projection.publication().root_output());
     let validation_stage = planner.solver_validation(projection_root.clone()).unwrap();

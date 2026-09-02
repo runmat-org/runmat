@@ -4,16 +4,15 @@ use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
 use super::{
     build_delaunay_volume_topology, error, insertion_error, insertion_error_at_node, resource,
-    topology_error, validate_delaunay_volume_topology, DelaunayPointSetError,
-    DelaunayPointSetErrorKind, DelaunayPointSetOptions, DelaunayVolumeNode, DelaunayVolumeTopology,
+    topology_error, DelaunayPointSetError, DelaunayPointSetErrorKind, DelaunayPointSetOptions,
+    DelaunayVolumeNode, DelaunayVolumeTopology,
 };
-use crate::cdt::{
-    insertion::{
-        insert_delaunay_volume_node_into_mutation, insert_delaunay_volume_node_mutation,
-        MutableInsertionOutcome,
-    },
-    mutation::TopologyMutation,
+use crate::cdt::insertion::{
+    insert_delaunay_volume_node_into_mutation,
+    legalize_delaunay_volume_topology_completely_with_barriers,
+    validate_locally_delaunay_volume_topology,
 };
+use crate::cdt::mutation::TopologyMutation;
 
 pub(super) fn enclosing_point_set(
     nodes: &[DelaunayVolumeNode],
@@ -38,37 +37,22 @@ pub(super) fn enclosing_point_set(
         cancellation,
     )
     .map_err(topology_error)?;
-    let mut mutation = TopologyMutation::from_canonical(topology);
-    for (index, node) in nodes.iter().copied().enumerate() {
-        let outcome = insert_delaunay_volume_node_into_mutation(
-            &mut mutation,
+    let mut topology = TopologyMutation::from_canonical(topology);
+    let mut insertion_nodes = nodes.to_vec();
+    insertion_nodes.sort_by(super::compare_geometric_nodes);
+    for (index, node) in insertion_nodes.iter().copied().enumerate() {
+        insert_delaunay_volume_node_into_mutation(
+            &mut topology,
             node,
             working_options,
             cancellation,
         )
         .map_err(|failure| insertion_error_at_node(failure, index, node))?;
-        if outcome == MutableInsertionOutcome::RequiresCanonicalFallback {
-            let topology = mutation
-                .clone()
-                .freeze(working_options.topology, cancellation)
-                .map_err(mutation_error)?;
-            let topology =
-                insert_delaunay_volume_node_mutation(topology, node, working_options, cancellation)
-                    .map_err(|failure| insertion_error_at_node(failure, index, node))?;
-            mutation = TopologyMutation::from_canonical(topology);
-        }
-        if (index as u64 + 1).is_multiple_of(options.validation_check_interval) {
-            let snapshot = mutation
-                .clone()
-                .freeze(working_options.topology, cancellation)
-                .map_err(mutation_error)?;
-            validate_delaunay_volume_topology(&snapshot, working_options, cancellation)
-                .map_err(insertion_error)?;
-        }
     }
-    let topology = mutation
+    let topology = topology
         .freeze(working_options.topology, cancellation)
-        .map_err(mutation_error)?;
+        .map_err(crate::cdt::insertion::mutation_topology_error)
+        .map_err(insertion_error)?;
     let result_index = nodes
         .iter()
         .enumerate()
@@ -101,24 +85,16 @@ pub(super) fn enclosing_point_set(
         cancellation,
     )
     .map_err(topology_error)?;
-    validate_delaunay_volume_topology(&result, options.insertion, cancellation)
+    let result = legalize_delaunay_volume_topology_completely_with_barriers(
+        result,
+        &[],
+        options.insertion,
+        cancellation,
+    )
+    .map_err(insertion_error)?;
+    validate_locally_delaunay_volume_topology(&result, options.insertion, cancellation)
         .map_err(insertion_error)?;
     Ok(result)
-}
-
-fn mutation_error(failure: crate::cdt::mutation::TopologyMutationError) -> DelaunayPointSetError {
-    let kind = match failure.kind {
-        crate::cdt::mutation::TopologyMutationErrorKind::ResourceLimit => {
-            DelaunayPointSetErrorKind::ResourceLimit
-        }
-        crate::cdt::mutation::TopologyMutationErrorKind::Cancelled => {
-            DelaunayPointSetErrorKind::Cancelled
-        }
-        crate::cdt::mutation::TopologyMutationErrorKind::InvalidTopology => {
-            DelaunayPointSetErrorKind::InvalidTopology
-        }
-    };
-    error(kind, failure.reason)
 }
 
 fn enclosing_tetrahedron(
@@ -157,9 +133,11 @@ fn enclosing_tetrahedron(
         .map(|node| node.identity)
         .collect::<BTreeSet<_>>();
     let identities = construction_identities(&occupied);
-    let result = std::array::from_fn(|index| DelaunayVolumeNode {
-        identity: identities[index],
-        coordinates_m: std::array::from_fn(|axis| center[axis] + offsets[index][axis]),
+    let result = std::array::from_fn(|index| {
+        DelaunayVolumeNode::explicit(
+            identities[index],
+            std::array::from_fn(|axis| center[axis] + offsets[index][axis]),
+        )
     });
     if result
         .iter()

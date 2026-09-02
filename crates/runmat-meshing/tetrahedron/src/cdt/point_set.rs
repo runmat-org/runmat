@@ -6,13 +6,15 @@ use runmat_meshing_core::{
 };
 
 use super::insertion::{
-    insert_delaunay_volume_node_mutation,
+    insert_delaunay_volume_node_into_mutation,
     legalize_delaunay_volume_topology_completely_with_barriers,
+    validate_locally_delaunay_volume_topology,
 };
+use super::mutation::TopologyMutation;
 use super::{
-    build_delaunay_volume_topology, validate_delaunay_volume_topology, DelaunayInsertionError,
-    DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunayTopologyError,
-    DelaunayTopologyErrorKind, DelaunayVolumeNode, DelaunayVolumeTopology,
+    build_delaunay_volume_topology, DelaunayInsertionError, DelaunayInsertionErrorKind,
+    DelaunayInsertionOptions, DelaunayTopologyError, DelaunayTopologyErrorKind, DelaunayVolumeNode,
+    DelaunayVolumeTopology,
 };
 
 mod enclosing;
@@ -21,26 +23,9 @@ mod hull;
 use enclosing::enclosing_point_set;
 use hull::convex_hull_seed;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DelaunayPointSetOptions {
     pub insertion: DelaunayInsertionOptions,
-    /// Full local-Delaunay validation cadence while constructing a point set.
-    ///
-    /// This is intentionally independent of the Rust build profile. Exact
-    /// validation scans the complete working complex, so silently changing the
-    /// cadence in debug and test builds makes representative governed fixtures
-    /// quadratic and prevents those fixtures from exercising later stages.
-    /// Every returned topology is still validated in full.
-    pub validation_check_interval: u64,
-}
-
-impl Default for DelaunayPointSetOptions {
-    fn default() -> Self {
-        Self {
-            insertion: DelaunayInsertionOptions::default(),
-            validation_check_interval: 256,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,7 +76,9 @@ pub fn build_delaunay_volume_point_set(
         Err(failure) => return Err(failure),
     }
 
-    let seed = convex_hull_seed(&nodes, options, cancellation)?;
+    let mut geometric_nodes = nodes.clone();
+    geometric_nodes.sort_by(compare_geometric_nodes);
+    let seed = convex_hull_seed(&geometric_nodes, options, cancellation)?;
     let working_options = options.insertion;
     let topology = build_delaunay_volume_topology(
         seed.nodes,
@@ -100,27 +87,27 @@ pub fn build_delaunay_volume_point_set(
         cancellation,
     )
     .map_err(topology_error)?;
-    let mut topology = legalize_delaunay_volume_topology_completely_with_barriers(
-        topology,
-        &[],
-        working_options,
-        cancellation,
-    )
-    .map_err(insertion_error)?;
+    let topology = ensure_locally_delaunay(topology, working_options, cancellation)?;
     validate_convex_hull_closure(&topology, options, cancellation)?;
 
-    for (index, node) in nodes.iter().copied().enumerate() {
+    let mut topology = TopologyMutation::from_canonical(topology);
+    for (index, node) in geometric_nodes.iter().copied().enumerate() {
         if seed.identities.contains(&node.identity) {
             continue;
         }
-        topology =
-            insert_delaunay_volume_node_mutation(topology, node, working_options, cancellation)
-                .map_err(|failure| insertion_error_at_node(failure, index, node))?;
-        if (index as u64 + 1).is_multiple_of(options.validation_check_interval) {
-            validate_delaunay_volume_topology(&topology, working_options, cancellation)
-                .map_err(insertion_error)?;
-        }
+        insert_delaunay_volume_node_into_mutation(
+            &mut topology,
+            node,
+            working_options,
+            cancellation,
+        )
+        .map_err(|failure| insertion_error_at_node(failure, index, node))?;
     }
+    let topology = topology
+        .freeze(working_options.topology, cancellation)
+        .map_err(super::insertion::mutation_topology_error)
+        .map_err(insertion_error)?;
+    let topology = ensure_locally_delaunay(topology, working_options, cancellation)?;
 
     if topology.nodes.len() != nodes.len() {
         return Err(error(
@@ -128,10 +115,33 @@ pub fn build_delaunay_volume_point_set(
             "convex-hull bootstrap did not retain every admitted point",
         ));
     }
-    validate_delaunay_volume_topology(&topology, options.insertion, cancellation)
+    validate_locally_delaunay_volume_topology(&topology, options.insertion, cancellation)
         .map_err(insertion_error)?;
     validate_convex_hull_closure(&topology, options, cancellation)?;
     Ok(topology)
+}
+
+/// Bowyer-Watson insertion normally leaves the point set locally Delaunay. The
+/// complete flip search is a deterministic repair path for degenerate cases,
+/// not work every successful construction should pay unconditionally.
+fn ensure_locally_delaunay(
+    topology: DelaunayVolumeTopology,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayVolumeTopology, DelaunayPointSetError> {
+    match validate_locally_delaunay_volume_topology(&topology, options, cancellation) {
+        Ok(()) => Ok(topology),
+        Err(failure) if failure.kind == DelaunayInsertionErrorKind::InvalidTopology => {
+            legalize_delaunay_volume_topology_completely_with_barriers(
+                topology,
+                &[],
+                options,
+                cancellation,
+            )
+            .map_err(insertion_error)
+        }
+        Err(failure) => Err(insertion_error(failure)),
+    }
 }
 
 fn validate_coordinate_range(nodes: &[DelaunayVolumeNode]) -> Result<(), DelaunayPointSetError> {
@@ -236,6 +246,10 @@ fn validate_and_order_nodes(
     if nodes.len() as u64 > options.insertion.topology.maximum_nodes {
         return Err(resource("node limit exceeded"));
     }
+    // Persistent identities deliberately bind nodes to one source revision. They
+    // must not decide the geometry produced for an equivalent point cloud.
+    // Canonical volume coordinates are exact dyadic values, so their total order
+    // provides a stable insertion schedule across source units and rigid motion.
     nodes.sort_by_key(|node| node.identity);
     let mut positions = BTreeSet::new();
     for (index, node) in nodes.iter().enumerate() {
@@ -258,6 +272,17 @@ fn validate_and_order_nodes(
     Ok(())
 }
 
+fn compare_geometric_nodes(
+    left: &DelaunayVolumeNode,
+    right: &DelaunayVolumeNode,
+) -> std::cmp::Ordering {
+    left.coordinates_m
+        .iter()
+        .zip(right.coordinates_m.iter())
+        .find_map(|(left, right)| (left != right).then(|| left.total_cmp(right)))
+        .unwrap_or_else(|| left.identity.cmp(&right.identity))
+}
+
 fn coordinate_bits(value: f64) -> u64 {
     if value == 0.0 {
         0
@@ -267,8 +292,7 @@ fn coordinate_bits(value: f64) -> u64 {
 }
 
 fn validate_options(options: DelaunayPointSetOptions) -> Result<(), DelaunayPointSetError> {
-    if options.validation_check_interval == 0
-        || options.insertion.topology.maximum_nodes < 4
+    if options.insertion.topology.maximum_nodes < 4
         || options.insertion.topology.maximum_tetrahedra == 0
         || options.insertion.topology.cancellation_check_interval == 0
         || options.insertion.maximum_cavity_tetrahedra == 0
@@ -277,7 +301,7 @@ fn validate_options(options: DelaunayPointSetOptions) -> Result<(), DelaunayPoin
     {
         return Err(error(
             DelaunayPointSetErrorKind::InvalidOptions,
-            "all point-set, topology, insertion, and validation limits must be nonzero",
+            "all point-set, topology, and insertion limits must be nonzero",
         ));
     }
     Ok(())

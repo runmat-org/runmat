@@ -8,7 +8,7 @@ From `.m` code:
 
 ```matlab
 info = geometry.inspect("geometry/bracket.step");
-geom = geometry.load("geometry/bracket.step");
+geom = geometry.load("geometry/bracket.step", "Units", "millimeter");
 ```
 
 From a `.fea` file:
@@ -75,7 +75,7 @@ Supported selectors are:
 Always inspect the loaded geometry before writing selectors:
 
 ```matlab
-geom = geometry.load("geometry/bracket.step");
+geom = geometry.load("geometry/bracket.step", "Units", "millimeter");
 regions = geometry.listRegions(geom);
 ```
 

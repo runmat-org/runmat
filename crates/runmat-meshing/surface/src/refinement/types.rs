@@ -91,6 +91,7 @@ pub struct ExactFaceChartRefinementOptions {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExactFaceRefinementPolicy {
     pub quality: SurfaceQualityTargets,
+    pub acceptance: crate::ExactFaceAcceptanceOptions,
     pub delaunay: crate::ExactFaceDelaunayOptions,
     pub refinement: ExactFaceRefinementOptions,
 }
@@ -156,9 +157,9 @@ pub struct ExactFaceChartRefinedMesh {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExactFaceChartRefinementOutcome {
     Converged(Box<ExactFaceChartRefinedMesh>),
-    RequiresCurveSplit {
+    RequiresCurveSplits {
         chart_id: runmat_meshing_core::StableDigest,
-        split: Box<ExactProtectedSegmentSplit>,
+        splits: Vec<ExactProtectedSegmentSplit>,
         completed_interior_insertions: u32,
         completed_chart_cut_splits: u32,
     },
@@ -169,8 +170,8 @@ pub enum ExactFaceRefinementOutcome {
     Converged(Box<ExactFaceRefinedMesh>),
     /// The global shared curve must be rebuilt before this face is restarted. Any provisional
     /// face-owned insertions are intentionally not authoritative across that boundary change.
-    RequiresCurveSplit {
-        split: Box<ExactProtectedSegmentSplit>,
+    RequiresCurveSplits {
+        splits: Vec<ExactProtectedSegmentSplit>,
         completed_interior_insertions: u32,
     },
     RequiresChartCutSplit {
@@ -184,6 +185,7 @@ pub enum ExactFaceRefinementErrorKind {
     InvalidOptions,
     InvalidQuality,
     InvalidGeometry,
+    UnsatisfiedQuality,
     Metric(ExactFaceMetricErrorKind),
     Geometry(ExactFaceGeometryErrorKind),
     Delaunay(ExactFaceDelaunayErrorKind),

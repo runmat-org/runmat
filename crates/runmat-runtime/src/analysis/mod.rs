@@ -72,7 +72,7 @@ mod fea_document_authoring;
 #[cfg(feature = "plot-core")]
 mod figures;
 mod mesh_summary;
-mod meshing;
+pub(crate) mod meshing;
 mod policy;
 mod promotion;
 mod solver_mesh_artifact;
@@ -204,16 +204,13 @@ pub use fea_document_authoring::{
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{
-    analysis_generate_study_run_figures, AnalysisFigureGenerationOptions, AnalysisFigureMeshSource,
-    AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
+    analysis_generate_study_run_figures, analysis_generate_study_run_mesh_figure,
+    AnalysisFigureGenerationOptions, AnalysisFigureMeshSource, AnalysisGeneratedFigure,
+    AnalysisGeneratedFigureKind,
 };
 pub use mesh_summary::{
     AnalysisMeshBoundaryRegion, AnalysisMeshPhysicalRegion, AnalysisMeshRegionSummary,
     AnalysisMeshSummary, AnalysisMeshTopologySummary, ANALYSIS_MESH_SUMMARY_SCHEMA_VERSION,
-};
-pub use meshing::{
-    replace_analysis_meshing_provider, AnalysisMeshingOutput, AnalysisMeshingProvider,
-    AnalysisMeshingProviderGuard, AnalysisMeshingRequest,
 };
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 pub use study_authoring::analysis_author_study_op;

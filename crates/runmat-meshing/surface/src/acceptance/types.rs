@@ -15,7 +15,7 @@ impl Default for ExactFaceAcceptanceOptions {
     fn default() -> Self {
         Self {
             minimum_subdivision_depth: 2,
-            maximum_subdivision_depth: 8,
+            maximum_subdivision_depth: 4,
             refinement_margin_ratio: 0.5,
             maximum_samples: 10_000_000,
         }
@@ -44,7 +44,9 @@ pub struct ExactFaceTriangleAcceptance {
     pub triangle: ExactFaceDelaunayTriangle,
     pub sample_count: u64,
     pub maximum_chordal_deviation_m: f64,
+    pub maximum_chordal_deviation_uv: [f64; 2],
     pub maximum_normal_deviation_rad: f64,
+    pub maximum_normal_deviation_uv: [f64; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,12 +59,19 @@ pub enum ExactFaceAcceptanceErrorKind {
     UnsatisfiedQuality,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExactFaceAcceptanceViolation {
+    ChordalDeviation,
+    NormalDeviation,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceAcceptanceError {
     pub kind: ExactFaceAcceptanceErrorKind,
     pub source_face_id: Box<PersistentEntityId>,
     pub triangle: Option<ExactFaceDelaunayTriangle>,
     pub witness_uv: Option<[f64; 2]>,
+    pub violation: Option<ExactFaceAcceptanceViolation>,
     pub reason: String,
 }
 
@@ -77,6 +86,7 @@ impl ExactFaceAcceptanceError {
             source_face_id: Box::new(source_face_id.clone()),
             triangle: None,
             witness_uv: None,
+            violation: None,
             reason: reason.into(),
         }
     }
@@ -85,9 +95,11 @@ impl ExactFaceAcceptanceError {
         mut self,
         triangle: ExactFaceDelaunayTriangle,
         uv: [f64; 2],
+        violation: ExactFaceAcceptanceViolation,
     ) -> Self {
         self.triangle = Some(triangle);
         self.witness_uv = Some(uv);
+        self.violation = Some(violation);
         self
     }
 }

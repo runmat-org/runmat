@@ -49,6 +49,7 @@ pub(super) fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,
@@ -306,6 +307,46 @@ fn artifact_and_evidence_round_trip_with_complete_canonical_topology() {
 }
 
 #[test]
+fn publication_evidence_closes_over_serialized_artifact_identity_and_bytes() {
+    let artifact = artifact();
+    let evidence = evidence(&artifact);
+    let artifact_bytes = artifact.canonical_encode().unwrap().len() as u64;
+    evidence
+        .validate_publication_closure(
+            &artifact.geometry,
+            &artifact.resolved_request,
+            artifact.canonical_digest,
+            artifact_bytes,
+        )
+        .unwrap();
+
+    assert_eq!(
+        evidence
+            .validate_publication_closure(
+                &artifact.geometry,
+                &artifact.resolved_request,
+                digest(99),
+                artifact_bytes,
+            )
+            .unwrap_err()
+            .field,
+        "meshing publication evidence"
+    );
+    assert_eq!(
+        evidence
+            .validate_publication_closure(
+                &artifact.geometry,
+                &artifact.resolved_request,
+                artifact.canonical_digest,
+                artifact_bytes + 1,
+            )
+            .unwrap_err()
+            .field,
+        "meshing publication evidence"
+    );
+}
+
+#[test]
 fn solver_projection_validation_forms_an_acyclic_final_artifact_chain() {
     let expected = artifact();
     let projection = SolverMeshProjection {
@@ -432,10 +473,19 @@ fn solver_node_exact_parameters_are_typed_bounded_and_canonical() {
             source_edge_id: edge.clone(),
             parameter: 0.25,
         },
+        SolverNodeExactParameter::Curve {
+            source_edge_id: edge.clone(),
+            parameter: 0.75,
+        },
         SolverNodeExactParameter::Surface {
             source_face_id: face.clone(),
             chart_id: chart,
             evaluator_uv: [0.1, 0.2],
+        },
+        SolverNodeExactParameter::Surface {
+            source_face_id: face.clone(),
+            chart_id: chart,
+            evaluator_uv: [6.3, 0.2],
         },
     ];
     let validate = |candidate: &SolverMeshArtifact| {
@@ -480,7 +530,7 @@ fn solver_node_exact_parameters_are_typed_bounded_and_canonical() {
     );
 
     let mut invalid = valid.clone();
-    invalid.topology.nodes[0].exact_parameters[1] = SolverNodeExactParameter::Surface {
+    invalid.topology.nodes[0].exact_parameters[2] = SolverNodeExactParameter::Surface {
         source_face_id: face.clone(),
         chart_id: StableDigest::ZERO,
         evaluator_uv: [0.1, 0.2],
@@ -688,4 +738,27 @@ fn solver_artifact_rejects_unknown_legacy_backend_evidence() {
     let mut value = serde_json::to_value(artifact()).unwrap();
     value["backend"] = serde_json::json!("removed");
     assert!(serde_json::from_value::<SolverMeshArtifact>(value).is_err());
+}
+
+#[test]
+fn solver_topology_validation_observes_execution_cancellation() {
+    struct Cancelled;
+
+    impl MeshingCancellationSignal for Cancelled {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+    }
+
+    let artifact = artifact();
+    assert_eq!(
+        validate_solver_mesh_topology_with_cancellation(
+            &artifact.topology,
+            &artifact.resolved_request,
+            &Cancelled,
+        )
+        .unwrap_err()
+        .field,
+        "solver mesh validation"
+    );
 }

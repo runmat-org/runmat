@@ -50,7 +50,7 @@
       "features": ["seam-and-pole-cases"],
       "supported_input": true,
       "expected": { "outcome": "success", "topology": "regular projected chart over a spherical pole singularity", "mass_properties": "not applicable to a surface-chart case", "regions": "one sheet face", "error_bounds": "projected chart and exact-surface acceptance bounds" },
-      "test": { "source": "crates/runmat-meshing/surface/src/chart/tests.rs", "name": "singular_spherical_wedge_uses_a_canonical_regular_projection" }
+      "test": { "source": "crates/runmat-meshing/surface/src/chart/tests.rs", "name": "singular_spherical_wedge_uses_an_exact_bounded_polar_chart" }
     },
     {
       "id": "bounded-small-topology-healing",

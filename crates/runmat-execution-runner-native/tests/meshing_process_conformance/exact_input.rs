@@ -128,7 +128,7 @@ fn execute_native_dag(
     )
     .unwrap();
     result.evidence.validate(&result.artifact).unwrap();
-    assert_eq!(result.artifact.topology.volume_elements.len(), 1);
+    assert_eq!(result.artifact.topology.volume_elements.len(), 4);
     assert!(!executor.drain_progress().is_empty());
     result.artifact
 }

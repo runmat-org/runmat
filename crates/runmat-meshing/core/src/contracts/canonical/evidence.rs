@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     validate_finite, validate_token, AlgorithmVersionSet, CanonicalMeshingContract,
-    GeometryRevisionRef, MeshingContractError, MeshingPartitionDescriptor, MeshingResourceBudget,
-    MeshingStageKind, PersistentEntityId, StableDigest,
+    GeometryRevisionRef, MeshingContractError, MeshingPartitionDescriptor, MeshingRequest,
+    MeshingResourceBudget, MeshingStageKind, PersistentEntityId, StableDigest,
 };
 
 pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 3;
@@ -292,6 +292,38 @@ impl MeshingEvidence {
         }
         self.resources
             .validate_against(&artifact.resolved_request.resources)
+    }
+
+    /// Validates the terminal evidence against the identities and byte inventory sealed by the
+    /// serialization stage. Serialization owns full artifact validation; publication verifies
+    /// that the independently supplied evidence closes over that validated result without
+    /// reconstructing the complete solver topology a second time.
+    pub fn validate_publication_closure(
+        &self,
+        geometry: &GeometryRevisionRef,
+        resolved_request: &MeshingRequest,
+        artifact_digest: StableDigest,
+        artifact_bytes: u64,
+    ) -> Result<(), MeshingContractError> {
+        self.validate_standalone()?;
+        if self.geometry != *geometry
+            || self.resolved_request_digest != resolved_request.canonical_digest()?
+            || self.artifact_digest != artifact_digest
+            || self.algorithms != resolved_request.algorithms
+            || self.deterministic_seed != resolved_request.deterministic_seed
+        {
+            return Err(MeshingContractError::invalid(
+                "meshing publication evidence",
+                "geometry, request, artifact, algorithm, or seed identity does not close over the serialized artifact",
+            ));
+        }
+        if self.resources.artifact_bytes != artifact_bytes {
+            return Err(MeshingContractError::invalid(
+                "meshing publication evidence",
+                "artifact byte inventory does not match the serialized artifact",
+            ));
+        }
+        self.resources.validate_against(&resolved_request.resources)
     }
 
     pub(super) fn validate_standalone(&self) -> Result<(), MeshingContractError> {

@@ -9,7 +9,15 @@ const MAX_PSLG_PAIR_TESTS: usize = 10_000_000;
 
 pub(super) fn validate_face_segment_intersections(
     face: &ExactFaceBoundary,
+    periodicity: [bool; 2],
 ) -> Result<(), ExactSurfaceBoundaryError> {
+    // Raw pcurve coordinates on a periodic surface are separate parameter-space
+    // images, not one Euclidean chart. Testing them here can therefore report a
+    // false crossing at the seam. The chart builder lifts those images into its
+    // canonical chart and validates the resulting PSLG before triangulation.
+    if periodicity.into_iter().any(|periodic| periodic) {
+        return Ok(());
+    }
     let mut segments = std::iter::once(&face.outer_loop)
         .chain(&face.inner_loops)
         .flat_map(|loop_boundary| &loop_boundary.segments)
@@ -172,7 +180,7 @@ mod tests {
             inner_loops: Vec::new(),
         };
 
-        let error = validate_face_segment_intersections(&face).unwrap_err();
+        let error = validate_face_segment_intersections(&face, [false, false]).unwrap_err();
         assert_eq!(error.kind, ExactSurfaceBoundaryErrorKind::InvalidPslg);
         let conflict = error.conflict.unwrap();
         assert_eq!(conflict.source_edge_ids[0].source_topology_id, "a");
@@ -194,7 +202,25 @@ mod tests {
             },
             inner_loops: Vec::new(),
         };
-        validate_face_segment_intersections(&face).unwrap();
+        validate_face_segment_intersections(&face, [false, false]).unwrap();
+    }
+
+    #[test]
+    fn periodic_raw_pcurve_images_defer_crossing_checks_to_the_lifted_chart() {
+        let face = ExactFaceBoundary {
+            source_face_id: id(PersistentEntityKind::Face, "face"),
+            outer_loop: ExactFaceBoundaryLoop {
+                source_wire_id: id(PersistentEntityKind::Wire, "wire"),
+                orientation: runmat_geometry_core::TopologicalOrientation::Forward,
+                segments: vec![
+                    segment("a", 1, 2, [[0.0, 0.0], [1.0, 1.0]]),
+                    segment("b", 3, 4, [[0.0, 1.0], [1.0, 0.0]]),
+                ],
+            },
+            inner_loops: Vec::new(),
+        };
+
+        validate_face_segment_intersections(&face, [true, false]).unwrap();
     }
 
     fn segment(edge: &str, start: u8, end: u8, node_uv: [[f64; 2]; 2]) -> ExactFaceBoundarySegment {

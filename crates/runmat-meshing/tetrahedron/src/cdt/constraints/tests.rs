@@ -179,6 +179,26 @@ fn exact_surface_build_is_canonical_and_retains_persistent_provenance() {
 }
 
 #[test]
+fn exact_surface_build_rejects_one_reversed_region_facet() {
+    let (topology, mut surface) = tetrahedron();
+    surface.triangles[0].node_ids.swap(1, 2);
+    surface.triangles[0].node_ids = canonical_triangle(surface.triangles[0].node_ids);
+
+    let failure = build_delaunay_constraints(
+        &topology,
+        &surface,
+        DelaunayConstraintOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap_err();
+
+    assert_eq!(failure.kind, DelaunayConstraintErrorKind::InvalidBoundary);
+    assert!(failure
+        .reason
+        .contains("consistently oriented two-manifold"));
+}
+
+#[test]
 fn shell_orientation_places_outer_region_on_the_positive_side_when_reversed() {
     let (mut topology, surface) = tetrahedron();
     topology.shells[0].orientation = TopologicalOrientation::Reversed;
@@ -566,6 +586,7 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
                 curve_evaluator_id: CurveEvaluatorId::new(format!("curve:{index}")).unwrap(),
                 start_vertex_id: Some(vertices[endpoints[0]].clone()),
                 end_vertex_id: Some(vertices[endpoints[1]].clone()),
+                tolerance_m: 1.0e-10,
                 is_closed: false,
                 is_periodic: false,
                 is_degenerate: false,

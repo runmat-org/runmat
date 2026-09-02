@@ -420,6 +420,12 @@ impl ExactBRepTopology {
         }
         for edge in &self.edges {
             edge.curve_evaluator_id.validate()?;
+            if !edge.tolerance_m.is_finite() || edge.tolerance_m < 0.0 {
+                return Err(invalid(
+                    "exact edge geometry",
+                    "edge tolerance must be finite and nonnegative",
+                ));
+            }
             for vertex in [&edge.start_vertex_id, &edge.end_vertex_id]
                 .into_iter()
                 .flatten()

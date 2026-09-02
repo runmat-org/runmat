@@ -109,10 +109,10 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         false
     };
 
-    let _analysis_meshing_provider = runmat_runtime::analysis::replace_analysis_meshing_provider(
-        Some(crate::commands::mesh::analysis_meshing_provider()),
+    let _meshing_execution_provider = runmat_runtime::meshing::replace_meshing_execution_provider(
+        Some(crate::commands::mesh::meshing_execution_provider()),
     )
-    .map_err(|error| anyhow::anyhow!("failed to install native analysis meshing: {error}"))?;
+    .map_err(|error| anyhow::anyhow!("failed to install native meshing execution: {error}"))?;
 
     dispatch::dispatch(&cli, &config).await
 }

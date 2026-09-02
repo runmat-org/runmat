@@ -105,6 +105,7 @@ pub(super) fn project_exact_contracts(
                     edge.occurrence_index,
                     path,
                 )?,
+                tolerance_m: edge.tolerance * meters_per_source_unit,
                 is_closed: edge.closed,
                 is_periodic: edge.periodic,
                 is_degenerate: edge.degenerate,

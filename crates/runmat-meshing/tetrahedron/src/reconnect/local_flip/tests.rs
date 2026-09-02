@@ -7,6 +7,10 @@ use runmat_meshing_core::contracts::{
     TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
     TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
 };
+use runmat_meshing_core::{
+    quality::predicate::{Point3Construction, SpatialPredicatePoint},
+    StableDigest,
+};
 use std::collections::BTreeMap;
 
 #[test]
@@ -45,8 +49,12 @@ fn two_to_three_geometry_requires_a_strictly_convex_bipyramid() {
         [1.0 / 3.0, 1.0 / 3.0, -1.0],
     ];
     assert!(
-        two_to_three_geometry_is_admissible(left, right, |node| convex[node as usize])
-            .expect("finite points must admit exact predicates")
+        two_to_three_geometry_is_admissible(left, right, |node| SpatialPredicatePoint {
+            identity: StableDigest::from_bytes([(node + 1) as u8; 32]),
+            coordinates: convex[node as usize],
+            construction: Point3Construction::Explicit,
+        })
+        .expect("finite points must admit exact predicates")
     );
 
     let boundary_apex = [
@@ -57,8 +65,12 @@ fn two_to_three_geometry_requires_a_strictly_convex_bipyramid() {
         [0.75, 1.0, 0.0],
     ];
     assert!(
-        !two_to_three_geometry_is_admissible(left, right, |node| boundary_apex[node as usize])
-            .expect("finite points must admit exact predicates")
+        !two_to_three_geometry_is_admissible(left, right, |node| SpatialPredicatePoint {
+            identity: StableDigest::from_bytes([(node + 1) as u8; 32]),
+            coordinates: boundary_apex[node as usize],
+            construction: Point3Construction::Explicit,
+        })
+        .expect("finite points must admit exact predicates")
     );
 }
 

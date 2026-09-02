@@ -1,24 +1,27 @@
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::PersistentEntityId;
-use runmat_meshing_core::{SolverNodeExactParameter, StableDigest};
+use runmat_meshing_core::{MeshingCancellationSignal, SolverNodeExactParameter, StableDigest};
 
 use super::{
-    error, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
-    DelaunaySolverTopologyInput,
+    checkpoint, error, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
+    DelaunaySolverTopologyInput, DelaunaySolverTopologyOptions,
 };
 
-type CurveParameters = BTreeMap<PersistentEntityId, f64>;
-type SurfaceParameters = BTreeMap<(PersistentEntityId, StableDigest), [f64; 2]>;
+type CurveParameters = BTreeMap<PersistentEntityId, BTreeMap<u64, f64>>;
+type SurfaceParameters = BTreeMap<(PersistentEntityId, StableDigest), BTreeMap<[u64; 2], [f64; 2]>>;
 
 pub(super) fn build_node_exact_parameters(
     input: &DelaunaySolverTopologyInput<'_>,
     indices: &BTreeMap<StableDigest, u32>,
+    options: DelaunaySolverTopologyOptions,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<Vec<SolverNodeExactParameter>>, DelaunaySolverTopologyError> {
     let mut curves = vec![CurveParameters::new(); indices.len()];
     let mut surfaces = vec![SurfaceParameters::new(); indices.len()];
 
-    for segment in &input.volume_mesh.provenance.segments {
+    for (work, segment) in input.volume_mesh.provenance.segments.iter().enumerate() {
+        checkpoint(work as u64, options, cancellation)?;
         let edge = segment
             .entity_ids
             .first()
@@ -29,8 +32,15 @@ pub(super) fn build_node_exact_parameters(
         }
     }
 
-    for node in &input.exact_surface.nodes {
-        let index = resolve_index(indices, &node.node_id)?;
+    for (work, node) in input.exact_surface.nodes.iter().enumerate() {
+        checkpoint(work as u64, options, cancellation)?;
+        // A mixed exact model may contain independent sheet bodies in addition to solids. Those
+        // sheets are valid analysis geometry, but their surface-only nodes are deliberately absent
+        // after the volume mesh is carved. Parameters are projected only for nodes retained by the
+        // volume topology; parameters on retained solid-boundary nodes remain mandatory below.
+        let Some(index) = indices.get(&node.node_id).map(|index| *index as usize) else {
+            continue;
+        };
         for use_record in &node.uses {
             insert_surface(
                 &mut surfaces[index],
@@ -48,32 +58,37 @@ pub(super) fn build_node_exact_parameters(
         }
     }
 
-    Ok(curves
-        .into_iter()
-        .zip(surfaces)
-        .map(|(curves, surfaces)| {
+    let mut result = Vec::with_capacity(indices.len());
+    for (work, (curves, surfaces)) in curves.into_iter().zip(surfaces).enumerate() {
+        checkpoint(work as u64, options, cancellation)?;
+        result.push(
             curves
                 .into_iter()
-                .map(
-                    |(source_edge_id, parameter)| SolverNodeExactParameter::Curve {
-                        source_edge_id,
-                        parameter,
-                    },
-                )
+                .flat_map(|(source_edge_id, parameters)| {
+                    parameters
+                        .into_values()
+                        .map(move |parameter| SolverNodeExactParameter::Curve {
+                            source_edge_id: source_edge_id.clone(),
+                            parameter,
+                        })
+                })
                 .chain(
                     surfaces
                         .into_iter()
-                        .map(|((source_face_id, chart_id), evaluator_uv)| {
-                            SolverNodeExactParameter::Surface {
-                                source_face_id,
-                                chart_id,
-                                evaluator_uv,
-                            }
+                        .flat_map(|((source_face_id, chart_id), parameters)| {
+                            parameters.into_values().map(move |evaluator_uv| {
+                                SolverNodeExactParameter::Surface {
+                                    source_face_id: source_face_id.clone(),
+                                    chart_id,
+                                    evaluator_uv,
+                                }
+                            })
                         }),
                 )
-                .collect()
-        })
-        .collect())
+                .collect(),
+        );
+    }
+    Ok(result)
 }
 
 fn resolve_index(
@@ -91,14 +106,14 @@ fn insert_curve(
     edge: &PersistentEntityId,
     parameter: f64,
 ) -> Result<(), DelaunaySolverTopologyError> {
-    if target
-        .insert(edge.clone(), parameter)
-        .is_some_and(|existing| existing.to_bits() != parameter.to_bits())
-    {
-        return Err(invalid(
-            "one solver node has conflicting parameters on an exact edge",
-        ));
+    if !parameter.is_finite() {
+        return Err(invalid("exact edge parameter is not finite"));
     }
+    target
+        .entry(edge.clone())
+        .or_default()
+        .entry(parameter.to_bits())
+        .or_insert(parameter);
     Ok(())
 }
 
@@ -108,14 +123,14 @@ fn insert_surface(
     chart: StableDigest,
     evaluator_uv: [f64; 2],
 ) -> Result<(), DelaunaySolverTopologyError> {
-    if target
-        .insert((face.clone(), chart), evaluator_uv)
-        .is_some_and(|existing| existing.map(f64::to_bits) != evaluator_uv.map(f64::to_bits))
-    {
-        return Err(invalid(
-            "one solver node has conflicting parameters in an exact surface chart",
-        ));
+    if evaluator_uv.iter().any(|value| !value.is_finite()) {
+        return Err(invalid("exact surface parameter is not finite"));
     }
+    target
+        .entry((face.clone(), chart))
+        .or_default()
+        .entry(evaluator_uv.map(f64::to_bits))
+        .or_insert(evaluator_uv);
     Ok(())
 }
 

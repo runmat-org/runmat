@@ -2,13 +2,10 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock, RwLock};
 
 use runmat_analysis_core::AnalysisModel;
-use runmat_geometry_core::{PersistentEntityId, UnitSystem};
-use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingEvidence, MeshingRequestSettings, SolverMeshArtifact,
-};
+use runmat_geometry_core::PersistentEntityId;
+use runmat_meshing_core::CanonicalMeshingContract;
 use sha2::{Digest as _, Sha256};
 
 use super::{
@@ -16,55 +13,7 @@ use super::{
     solver_mesh_artifact, AnalysisStudySpec,
 };
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct AnalysisMeshingRequest {
-    pub source_path: PathBuf,
-    pub source_units: UnitSystem,
-    pub settings: MeshingRequestSettings,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct AnalysisMeshingOutput {
-    pub artifact: SolverMeshArtifact,
-    pub evidence: MeshingEvidence,
-    pub boundary_region_ids: BTreeMap<String, PersistentEntityId>,
-}
-
-pub type AnalysisMeshingProvider = Arc<
-    dyn Fn(&AnalysisMeshingRequest) -> Result<AnalysisMeshingOutput, String>
-        + Send
-        + Sync
-        + 'static,
->;
-
-fn provider_slot() -> &'static RwLock<Option<AnalysisMeshingProvider>> {
-    static PROVIDER: OnceLock<RwLock<Option<AnalysisMeshingProvider>>> = OnceLock::new();
-    PROVIDER.get_or_init(|| RwLock::new(None))
-}
-
-pub struct AnalysisMeshingProviderGuard {
-    previous: Option<AnalysisMeshingProvider>,
-}
-
-impl Drop for AnalysisMeshingProviderGuard {
-    fn drop(&mut self) {
-        if let Ok(mut provider) = provider_slot().write() {
-            *provider = self.previous.take();
-        }
-    }
-}
-
-pub fn replace_analysis_meshing_provider(
-    provider: Option<AnalysisMeshingProvider>,
-) -> Result<AnalysisMeshingProviderGuard, String> {
-    let mut slot = provider_slot()
-        .write()
-        .map_err(|_| "analysis meshing provider lock poisoned".to_string())?;
-    let previous = std::mem::replace(&mut *slot, provider);
-    Ok(AnalysisMeshingProviderGuard { previous })
-}
-
-pub(super) struct ResolvedStudyMesh {
+pub(crate) struct ResolvedStudyMesh {
     pub artifact_path: Option<String>,
     pub evidence_path: Option<String>,
     pub boundary_region_ids: BTreeMap<String, PersistentEntityId>,
@@ -87,17 +36,12 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
             boundary_region_ids: BTreeMap::new(),
         });
     };
-    let provider = provider_slot()
-        .read()
-        .map_err(|_| "analysis meshing provider lock poisoned".to_string())?
-        .clone()
-        .ok_or_else(|| {
-            "this host cannot execute the requested meshing workload; use a native RunMat host or configure compatible execution capacity".to_string()
-        })?;
-    let output = provider(&AnalysisMeshingRequest {
+    let output = crate::meshing::execute_meshing(&crate::meshing::MeshingExecutionRequest {
         source_path: PathBuf::from(&spec.geometry.source.path),
         source_units: spec.geometry.units,
+        expected_source_sha256: crate::meshing::parse_source_sha256(&spec.geometry.source.sha256)?,
         settings,
+        contact_definitions: meshing_contact_definitions(spec),
     })?;
     output
         .evidence
@@ -106,7 +50,28 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
     persist_mesh_output(&output)
 }
 
-fn persist_mesh_output(output: &AnalysisMeshingOutput) -> Result<ResolvedStudyMesh, String> {
+fn meshing_contact_definitions(
+    spec: &AnalysisStudySpec,
+) -> Vec<crate::meshing::MeshingContactDefinition> {
+    spec.model
+        .iter()
+        .flat_map(|model| &model.interfaces)
+        .filter(|interface| {
+            matches!(
+                interface.kind,
+                runmat_analysis_core::AnalysisInterfaceKind::Contact(_)
+            )
+        })
+        .map(|interface| crate::meshing::MeshingContactDefinition {
+            side_a_face_selectors: vec![interface.primary_region_id.clone()],
+            side_b_face_selectors: vec![interface.secondary_region_id.clone()],
+        })
+        .collect()
+}
+
+pub(crate) fn persist_mesh_output(
+    output: &crate::meshing::MeshingExecutionOutput,
+) -> Result<ResolvedStudyMesh, String> {
     let artifact_digest = encode_digest(output.artifact.canonical_digest.bytes());
     let root = current_fea_runtime_config()
         .artifact_root
@@ -141,7 +106,7 @@ fn persist_mesh_output(output: &AnalysisMeshingOutput) -> Result<ResolvedStudyMe
     })
 }
 
-pub(super) fn apply_boundary_region_ids(
+pub(crate) fn apply_boundary_region_ids(
     model: &mut AnalysisModel,
     aliases: &BTreeMap<String, PersistentEntityId>,
 ) {

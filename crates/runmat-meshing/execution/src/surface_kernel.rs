@@ -226,7 +226,11 @@ fn surface_options(host: &crate::MeshingHostWorkload) -> ExactFacePartitionOptio
     let resources = &host.resolved_request.resources;
     let maximum_elements = usize::try_from(resources.maximum_elements).unwrap_or(usize::MAX);
     let maximum_iterations = resources.maximum_iterations.min(u64::from(u32::MAX)) as u32;
-    let maximum_depth = resources.maximum_recursion_depth.min(16) as u8;
+    let acceptance_defaults = runmat_meshing_surface::ExactFaceAcceptanceOptions::default();
+    let maximum_depth = resources
+        .maximum_recursion_depth
+        .min(u32::from(acceptance_defaults.maximum_subdivision_depth))
+        as u8;
     let cancellation_check_interval = host
         .resolved_request
         .cancellation
@@ -253,10 +257,14 @@ fn surface_options(host: &crate::MeshingHostWorkload) -> ExactFacePartitionOptio
             maximum_chart_cut_splits: maximum_iterations,
         },
         acceptance: runmat_meshing_surface::ExactFaceAcceptanceOptions {
-            minimum_subdivision_depth: 1_u8.min(maximum_depth),
+            minimum_subdivision_depth: acceptance_defaults
+                .minimum_subdivision_depth
+                .min(maximum_depth),
             maximum_subdivision_depth: maximum_depth,
-            refinement_margin_ratio: 0.5,
-            maximum_samples: resources.maximum_search_work,
+            refinement_margin_ratio: acceptance_defaults.refinement_margin_ratio,
+            maximum_samples: resources
+                .maximum_search_work
+                .min(acceptance_defaults.maximum_samples),
         },
         face_join: surface_join_options(host),
     }

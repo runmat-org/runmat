@@ -23,11 +23,11 @@ pub(super) fn construct(
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<SolverMeshTopology, DelaunaySolverTopologyError> {
-    let node_indices = node_indices(input)?;
+    let node_indices = node_indices(input, options, cancellation)?;
     validate_regions(input)?;
     let nodes = build_nodes(input, &node_indices, options, cancellation)?;
-    let volume_elements = build_elements(input)?;
-    let neighbors = build_neighbors(input)?;
+    let volume_elements = build_elements(input, options, cancellation)?;
+    let neighbors = build_neighbors(input, options, cancellation)?;
     let (boundary_faces, classes) = build_faces(input, &node_indices, options, cancellation)?;
     let boundary_edges = build_edges(input, &boundary_faces, options, cancellation)?;
     let regions = build_regions(input)?;
@@ -54,15 +54,14 @@ pub(super) fn construct(
 
 fn node_indices(
     input: &DelaunaySolverTopologyInput<'_>,
+    options: DelaunaySolverTopologyOptions,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<BTreeMap<StableDigest, u32>, DelaunaySolverTopologyError> {
-    let indices = input
-        .volume_mesh
-        .topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.identity, index as u32))
-        .collect::<BTreeMap<_, _>>();
+    let mut indices = BTreeMap::new();
+    for (index, node) in input.volume_mesh.topology.nodes.iter().enumerate() {
+        checkpoint(index as u64, options, cancellation)?;
+        indices.insert(node.identity, index as u32);
+    }
     if indices.len() != input.volume_mesh.topology.nodes.len() {
         return Err(invalid_mesh("volume nodes repeat a stable identity"));
     }
@@ -136,7 +135,7 @@ fn build_nodes(
             &binding.entity_ids,
         )?;
     }
-    let exact_parameters = build_node_exact_parameters(input, indices)?;
+    let exact_parameters = build_node_exact_parameters(input, indices, options, cancellation)?;
     input
         .volume_mesh
         .topology
@@ -179,59 +178,50 @@ fn extend_nodes<const N: usize>(
 
 fn build_elements(
     input: &DelaunaySolverTopologyInput<'_>,
+    options: DelaunaySolverTopologyOptions,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<SolverVolumeElement>, DelaunaySolverTopologyError> {
-    input
-        .volume_mesh
-        .topology
-        .tetrahedra
-        .iter()
-        .enumerate()
-        .map(|(index, tetrahedron)| {
-            let region = tetrahedron
-                .region_id
-                .clone()
-                .ok_or_else(|| invalid_mesh("volume tetrahedron has no assigned region"))?;
-            let (vertices, _) = solver_vertices(input, tetrahedron.vertex_indices)?;
-            Ok(SolverVolumeElement {
-                element_id: index as u64 + 1,
-                stable_identity: solver_volume_element_identity(
-                    vertices
-                        .map(|vertex| input.volume_mesh.topology.nodes[vertex as usize].identity),
-                ),
-                order: ElementOrder::Tet4,
-                node_ids: vertices.iter().map(|vertex| *vertex as u64 + 1).collect(),
-                region_id: region.clone(),
-                provenance: vec![region],
-            })
-        })
-        .collect()
+    let mut result = Vec::with_capacity(input.volume_mesh.topology.tetrahedra.len());
+    for (index, tetrahedron) in input.volume_mesh.topology.tetrahedra.iter().enumerate() {
+        checkpoint(index as u64, options, cancellation)?;
+        let region = tetrahedron
+            .region_id
+            .clone()
+            .ok_or_else(|| invalid_mesh("volume tetrahedron has no assigned region"))?;
+        let (vertices, _) = solver_vertices(input, tetrahedron.vertex_indices)?;
+        result.push(SolverVolumeElement {
+            element_id: index as u64 + 1,
+            stable_identity: solver_volume_element_identity(
+                vertices.map(|vertex| input.volume_mesh.topology.nodes[vertex as usize].identity),
+            ),
+            order: ElementOrder::Tet4,
+            node_ids: vertices.iter().map(|vertex| *vertex as u64 + 1).collect(),
+            region_id: region.clone(),
+            provenance: vec![region],
+        });
+    }
+    Ok(result)
 }
 
 fn build_neighbors(
     input: &DelaunaySolverTopologyInput<'_>,
+    options: DelaunaySolverTopologyOptions,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<MeshNeighbor>, DelaunaySolverTopologyError> {
-    input
-        .volume_mesh
-        .topology
-        .tetrahedra
-        .iter()
-        .enumerate()
-        .map(|(index, tetrahedron)| {
-            let (_, source_face_by_solver_face) =
-                solver_vertices(input, tetrahedron.vertex_indices)?;
-            Ok(source_face_by_solver_face
-                .into_iter()
-                .enumerate()
-                .map(|(face, source_face)| MeshNeighbor {
-                    element_id: index as u64 + 1,
-                    local_face_index: face as u8,
-                    adjacent_element_id: tetrahedron.neighbors[source_face]
-                        .map(|value| value as u64 + 1),
-                })
-                .collect::<Vec<_>>())
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|neighbors| neighbors.into_iter().flatten().collect())
+    let mut result = Vec::with_capacity(input.volume_mesh.topology.tetrahedra.len() * 4);
+    for (index, tetrahedron) in input.volume_mesh.topology.tetrahedra.iter().enumerate() {
+        checkpoint(index as u64, options, cancellation)?;
+        let (_, source_face_by_solver_face) = solver_vertices(input, tetrahedron.vertex_indices)?;
+        result.extend(source_face_by_solver_face.into_iter().enumerate().map(
+            |(face, source_face)| MeshNeighbor {
+                element_id: index as u64 + 1,
+                local_face_index: face as u8,
+                adjacent_element_id:
+                    tetrahedron.neighbors[source_face].map(|value| value as u64 + 1),
+            },
+        ));
+    }
+    Ok(result)
 }
 
 /// Converts the CDT's robust-predicate orientation into the positive Jacobian convention used

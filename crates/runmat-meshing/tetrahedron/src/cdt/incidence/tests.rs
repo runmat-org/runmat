@@ -10,10 +10,7 @@ use crate::cdt::{
 };
 
 fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
-    DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([identity; 32]),
-        coordinates_m,
-    }
+    DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
 }
 
 fn region(id: &str) -> PersistentEntityId {

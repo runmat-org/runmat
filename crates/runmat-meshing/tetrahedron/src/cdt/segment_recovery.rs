@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use runmat_meshing_core::quality::predicate::{Point3Construction, PredicateSign};
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
 use super::{
@@ -10,13 +11,15 @@ use super::{
 };
 use crate::cdt::{
     insertion::{
+        insert_delaunay_volume_node_into_mutation,
         insert_delaunay_volume_node_into_mutation_with_barriers,
-        insert_delaunay_volume_node_with_barriers, topology_access::TetrahedralTopology,
-        MutableInsertionOutcome,
+        legalize_delaunay_volume_topology_completely_with_barriers,
+        topology_access::TetrahedralTopology, validate_constrained_delaunay_volume_topology,
     },
     mutation::{TopologyMutation, TopologyMutationError, TopologyMutationErrorKind},
 };
 
+mod acute;
 mod encroachment;
 mod flip;
 mod location;
@@ -24,13 +27,23 @@ mod parameter;
 mod validation;
 mod work;
 
+use acute::classify_acute_vertices;
 use encroachment::{encroaching_point, split_parameter};
-use flip::{try_recover_edge_with_face_flip, try_recover_edge_with_face_flip_mutation};
-use location::coordinates_share_representable_location;
+use flip::{try_recover_edge_with_face_flip, try_recover_edge_with_local_flip_mutation};
+pub(in crate::cdt) use location::coordinates_share_representable_location;
 use parameter::{interpolate, steiner_identity, DyadicNode, SegmentContext};
+
+struct IntervalRecoveryContext<'a, 'w, F> {
+    segment: SegmentContext,
+    protected_edges: &'a [[StableDigest; 2]],
+    protected_faces: &'a [[StableDigest; 3]],
+    split_strong_gabriel: bool,
+    identity_for_node: &'a mut F,
+    work: &'a mut RecoveryWork<'w>,
+}
 pub use validation::validate_delaunay_segment_recovery;
 pub(in crate::cdt) use validation::validate_delaunay_segment_recovery_on_topology;
-use validation::validate_inputs;
+use validation::{validate_inputs, SegmentRecoveryInputContract};
 use work::RecoveryWork;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,6 +105,121 @@ pub struct DelaunaySegmentRecovery {
     pub recovery_passes: u32,
 }
 
+pub(in crate::cdt) fn recovered_segment_midpoint(
+    recovery: &DelaunaySegmentRecovery,
+    segment_index: usize,
+    interval_index: usize,
+) -> Result<(DelaunayVolumeNode, DelaunayRecoveredSegmentNode), DelaunaySegmentRecoveryError> {
+    let segment = recovery.segments.get(segment_index).ok_or_else(|| {
+        error(
+            DelaunaySegmentRecoveryErrorKind::InvalidConstraints,
+            Some(segment_index as u32),
+            "recovered segment index is outside the evidence inventory",
+        )
+    })?;
+    let [left, right] = segment
+        .nodes
+        .get(interval_index..=interval_index + 1)
+        .and_then(|pair| <&[DelaunayRecoveredSegmentNode; 2]>::try_from(pair).ok())
+        .copied()
+        .ok_or_else(|| {
+            error(
+                DelaunaySegmentRecoveryErrorKind::InvalidConstraints,
+                Some(segment.constraint_index),
+                "recovered segment interval is outside the chain",
+            )
+        })?;
+    let first = segment
+        .nodes
+        .first()
+        .copied()
+        .expect("validated segment chain");
+    let last = segment
+        .nodes
+        .last()
+        .copied()
+        .expect("validated segment chain");
+    let first_coordinates = find_node(&recovery.topology, first.identity)
+        .ok_or_else(|| invalid_segment_node(segment.constraint_index))?
+        .coordinates_m;
+    let last_coordinates = find_node(&recovery.topology, last.identity)
+        .ok_or_else(|| invalid_segment_node(segment.constraint_index))?
+        .coordinates_m;
+    let context = SegmentContext {
+        constraint_index: segment.constraint_index,
+        first_identity: first.identity,
+        last_identity: last.identity,
+        first_coordinates,
+        last_coordinates,
+    };
+    let midpoint = DyadicNode {
+        identity: left.identity,
+        numerator: left.parameter_numerator,
+        exponent: left.parameter_exponent,
+    }
+    .midpoint(
+        DyadicNode {
+            identity: right.identity,
+            numerator: right.parameter_numerator,
+            exponent: right.parameter_exponent,
+        },
+        context,
+    )?;
+    let identity = steiner_identity(context, midpoint);
+    let recovered = DelaunayRecoveredSegmentNode {
+        identity,
+        parameter_numerator: midpoint.numerator,
+        parameter_exponent: midpoint.exponent,
+    };
+    Ok((
+        DelaunayVolumeNode {
+            identity,
+            coordinates_m: interpolate(first_coordinates, last_coordinates, midpoint.parameter()?),
+            construction: Point3Construction::Segment {
+                endpoints: [first_coordinates, last_coordinates],
+                parameter_numerator: midpoint.numerator,
+                parameter_exponent: midpoint.exponent,
+            },
+        },
+        recovered,
+    ))
+}
+
+pub(in crate::cdt) fn record_recovered_segment_split(
+    recovery: &mut DelaunaySegmentRecovery,
+    segment_index: usize,
+    interval_index: usize,
+    node: DelaunayRecoveredSegmentNode,
+) -> Result<(), DelaunaySegmentRecoveryError> {
+    let segment = recovery.segments.get_mut(segment_index).ok_or_else(|| {
+        error(
+            DelaunaySegmentRecoveryErrorKind::InvalidConstraints,
+            Some(segment_index as u32),
+            "recovered segment index is outside the evidence inventory",
+        )
+    })?;
+    if interval_index + 1 >= segment.nodes.len() {
+        return Err(error(
+            DelaunaySegmentRecoveryErrorKind::InvalidConstraints,
+            Some(segment.constraint_index),
+            "recovered segment interval is outside the chain",
+        ));
+    }
+    segment.nodes.insert(interval_index + 1, node);
+    recovery.steiner_node_identities.push(node.identity);
+    recovery.steiner_node_identities.sort_unstable();
+    recovery.steiner_node_identities.dedup();
+    Ok(())
+}
+
+fn invalid_segment_node(constraint_index: u32) -> DelaunaySegmentRecoveryError {
+    error(
+        DelaunaySegmentRecoveryErrorKind::InvalidTopology,
+        Some(constraint_index),
+        "recovered segment endpoint is missing from topology",
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunaySegmentRecoveryErrorKind {
     InvalidOptions,
@@ -128,13 +256,51 @@ pub fn recover_delaunay_segments(
     options: DelaunaySegmentRecoveryOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunaySegmentRecovery, DelaunaySegmentRecoveryError> {
+    recover_delaunay_segments_with_contract(
+        topology,
+        constraints,
+        options,
+        cancellation,
+        SegmentRecoveryInputContract::ExternalUnconstrainedTopology,
+    )
+}
+
+pub(in crate::cdt) fn recover_delaunay_segments_from_point_set(
+    topology: DelaunayVolumeTopology,
+    constraints: &DelaunayConstraints,
+    options: DelaunaySegmentRecoveryOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunaySegmentRecovery, DelaunaySegmentRecoveryError> {
+    recover_delaunay_segments_with_contract(
+        topology,
+        constraints,
+        options,
+        cancellation,
+        SegmentRecoveryInputContract::CertifiedPointSet,
+    )
+}
+
+fn recover_delaunay_segments_with_contract(
+    topology: DelaunayVolumeTopology,
+    constraints: &DelaunayConstraints,
+    options: DelaunaySegmentRecoveryOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+    input_contract: SegmentRecoveryInputContract,
+) -> Result<DelaunaySegmentRecovery, DelaunaySegmentRecoveryError> {
     validate_options(options)?;
-    validate_inputs(&topology, constraints, options, cancellation, true)?;
+    validate_inputs(
+        &topology,
+        constraints,
+        options,
+        cancellation,
+        input_contract,
+    )?;
     let constraint_identities = constraints
         .nodes
         .iter()
         .map(|node| node.identity)
         .collect::<BTreeSet<_>>();
+    let acute_vertices = classify_acute_vertices(constraints, options, cancellation)?;
     let mut topology = TopologyMutation::from_canonical(topology);
     let mut work = RecoveryWork::new(options, cancellation);
 
@@ -151,15 +317,26 @@ pub fn recover_delaunay_segments(
                 last_coordinates: last.coordinates_m,
             };
             let mut nodes = Vec::<DelaunayRecoveredSegmentNode>::new();
+            let mut identity_for_node = |context, midpoint, _| steiner_identity(context, midpoint);
+            let mut interval = IntervalRecoveryContext {
+                segment: context,
+                protected_edges: &[],
+                protected_faces: &[],
+                split_strong_gabriel: true,
+                identity_for_node: &mut identity_for_node,
+                work: &mut work,
+            };
             recover_interval(
                 &mut topology,
-                context,
                 DyadicNode::endpoint(first.identity, false),
                 DyadicNode::endpoint(last.identity, true),
+                [
+                    acute_vertices[segment.vertex_indices[0] as usize],
+                    acute_vertices[segment.vertex_indices[1] as usize],
+                ],
                 0,
                 &mut nodes,
-                &[],
-                &mut work,
+                &mut interval,
             )?;
             recovered.push(DelaunayRecoveredSegment {
                 constraint_index: constraint_index as u32,
@@ -177,7 +354,6 @@ pub fn recover_delaunay_segments(
             .into_iter()
             .collect();
         let canonical = topology
-            .clone()
             .freeze(options.insertion.topology, cancellation)
             .map_err(mutation_error)?;
         let result = DelaunaySegmentRecovery {
@@ -196,24 +372,324 @@ pub fn recover_delaunay_segments(
     ))
 }
 
-pub(in crate::cdt) fn try_recover_delaunay_edge_with_face_flip(
+fn local_flip_can_connect_endpoints(
     topology: &DelaunayVolumeTopology,
     endpoints: [StableDigest; 2],
+) -> bool {
+    let [Ok(left), Ok(right)] = endpoints.map(|identity| {
+        topology
+            .nodes
+            .binary_search_by_key(&identity, |node| node.identity)
+    }) else {
+        return false;
+    };
+    let mut right_link = vec![false; topology.nodes.len()];
+    for tetrahedron in &topology.incidence.vertex_stars[right] {
+        for node in topology.tetrahedra[*tetrahedron as usize].vertex_indices {
+            if node as usize != right {
+                right_link[node as usize] = true;
+            }
+        }
+    }
+    for tetrahedron in &topology.incidence.vertex_stars[left] {
+        let vertices = topology.tetrahedra[*tetrahedron as usize].vertex_indices;
+        for first in 0..4 {
+            if vertices[first] as usize == left || !right_link[vertices[first] as usize] {
+                continue;
+            }
+            for second in (first + 1)..4 {
+                if vertices[second] as usize != left && right_link[vertices[second] as usize] {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+pub(in crate::cdt) fn try_recover_delaunay_edges_with_local_flips(
+    topology: &DelaunayVolumeTopology,
+    endpoints: &[[StableDigest; 2]],
+    protected_edges: &[[StableDigest; 2]],
     protected_faces: &[[StableDigest; 3]],
     constraint_index: u32,
     options: DelaunaySegmentRecoveryOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Option<DelaunayVolumeTopology>, DelaunaySegmentRecoveryError> {
     validate_options(options)?;
+    let endpoints = endpoints
+        .iter()
+        .copied()
+        .filter(|endpoints| local_flip_can_connect_endpoints(topology, *endpoints))
+        .collect::<Vec<_>>();
+    if endpoints.is_empty() {
+        return Ok(None);
+    }
     let mut work = RecoveryWork::new(options, cancellation);
-    try_recover_edge_with_face_flip(
-        topology,
-        endpoints[0],
-        endpoints[1],
+    let mut mutation = TopologyMutation::from_canonical(topology.clone());
+    let mut changed = false;
+    for endpoints in &endpoints {
+        if edge_exists(
+            &mutation,
+            endpoints[0],
+            endpoints[1],
+            constraint_index,
+            &mut work,
+        )? {
+            continue;
+        }
+        changed |= try_recover_edge_with_local_flip_mutation(
+            &mut mutation,
+            endpoints[0],
+            endpoints[1],
+            protected_edges,
+            protected_faces,
+            constraint_index,
+            &mut work,
+        )?;
+    }
+    if !changed {
+        return Ok(None);
+    }
+    admit_face_flip_mutation(
+        mutation,
         protected_faces,
         constraint_index,
-        &mut work,
+        options,
+        cancellation,
     )
+}
+
+pub(in crate::cdt) struct TemporarySegmentRecovery {
+    pub(in crate::cdt) topology: DelaunayVolumeTopology,
+    pub(in crate::cdt) chain: Vec<DelaunayRecoveredSegmentNode>,
+    pub(in crate::cdt) inserted_nodes: Vec<DelaunayVolumeNode>,
+    pub(in crate::cdt) conflicting_protected_edges: Vec<[StableDigest; 2]>,
+}
+
+pub(in crate::cdt) struct TemporarySegmentRequest<'a> {
+    pub endpoints: [StableDigest; 2],
+    pub protected_edges: &'a [[StableDigest; 2]],
+    pub protected_faces: &'a [[StableDigest; 3]],
+    pub constraint_index: u32,
+    pub options: DelaunaySegmentRecoveryOptions,
+    pub cancellation: &'a dyn MeshingCancellationSignal,
+}
+
+/// Recovers a temporary facet-support segment with the same bounded interval algorithm used for
+/// authored PLC segments. The temporary chain is returned to the facet layer rather than added to
+/// authored segment evidence.
+pub(in crate::cdt) fn recover_temporary_delaunay_segment(
+    topology: &DelaunayVolumeTopology,
+    request: TemporarySegmentRequest<'_>,
+    mut identity_for_node: impl FnMut(u64, u8, [f64; 3]) -> StableDigest,
+) -> Result<TemporarySegmentRecovery, DelaunaySegmentRecoveryError> {
+    let TemporarySegmentRequest {
+        endpoints,
+        protected_edges,
+        protected_faces,
+        constraint_index,
+        options,
+        cancellation,
+    } = request;
+    validate_options(options)?;
+    let [Some(first), Some(last)] = endpoints.map(|identity| find_node(topology, identity)) else {
+        return Err(error(
+            DelaunaySegmentRecoveryErrorKind::InvalidTopology,
+            Some(constraint_index),
+            "temporary segment endpoint is missing from topology",
+        ));
+    };
+    let context = SegmentContext {
+        constraint_index,
+        first_identity: first.identity,
+        last_identity: last.identity,
+        first_coordinates: first.coordinates_m,
+        last_coordinates: last.coordinates_m,
+    };
+    let original_identities = topology
+        .nodes
+        .iter()
+        .map(|node| node.identity)
+        .collect::<BTreeSet<_>>();
+    let mut work = RecoveryWork::new(options, cancellation);
+    let mut current = topology.clone();
+    for _ in 0..options.maximum_recovery_passes {
+        let mut mutation = TopologyMutation::from_canonical(current);
+        let mut chain = Vec::new();
+        let mut interval_identity = |_, midpoint: DyadicNode, coordinates| {
+            identity_for_node(midpoint.numerator, midpoint.exponent, coordinates)
+        };
+        let mut interval = IntervalRecoveryContext {
+            segment: context,
+            protected_edges,
+            protected_faces,
+            split_strong_gabriel: true,
+            identity_for_node: &mut interval_identity,
+            work: &mut work,
+        };
+        recover_interval(
+            &mut mutation,
+            DyadicNode::endpoint(first.identity, false),
+            DyadicNode::endpoint(last.identity, true),
+            [false, false],
+            0,
+            &mut chain,
+            &mut interval,
+        )?;
+        let recovered = DelaunayRecoveredSegment {
+            constraint_index,
+            nodes: chain.clone(),
+        };
+        let candidate = mutation
+            .freeze(options.insertion.topology, cancellation)
+            .map_err(mutation_error)?;
+        let candidate = legalize_delaunay_volume_topology_completely_with_barriers(
+            candidate,
+            protected_faces,
+            options.insertion,
+            cancellation,
+        )
+        .map_err(|failure| insertion_error(failure, constraint_index))?;
+        let conflicting_protected_edges = protected_edges
+            .iter()
+            .copied()
+            .filter(|edge| !canonical_edge_exists(&candidate, *edge))
+            .collect::<Vec<_>>();
+        if !conflicting_protected_edges.is_empty()
+            || recovered_edges_exist(&candidate, &[recovered], &mut work)?
+        {
+            validate_constrained_delaunay_volume_topology(
+                &candidate,
+                protected_faces,
+                options.insertion,
+                cancellation,
+            )
+            .map_err(|failure| insertion_error(failure, constraint_index))?;
+            let inserted_nodes = candidate
+                .nodes
+                .iter()
+                .copied()
+                .filter(|node| !original_identities.contains(&node.identity))
+                .collect();
+            return Ok(TemporarySegmentRecovery {
+                topology: candidate,
+                chain,
+                inserted_nodes,
+                conflicting_protected_edges,
+            });
+        }
+        current = candidate;
+    }
+    Err(error(
+        DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,
+        Some(constraint_index),
+        "temporary support segment chain did not remain simultaneous within the recovery-pass limit",
+    ))
+}
+
+fn canonical_edge_exists(topology: &DelaunayVolumeTopology, endpoints: [StableDigest; 2]) -> bool {
+    let [Ok(first), Ok(second)] = endpoints.map(|identity| {
+        topology
+            .nodes
+            .binary_search_by_key(&identity, |node| node.identity)
+    }) else {
+        return false;
+    };
+    topology.incidence.vertex_stars[first]
+        .iter()
+        .any(|tetrahedron| {
+            topology.tetrahedra[*tetrahedron as usize]
+                .vertex_indices
+                .contains(&(second as u32))
+        })
+}
+
+/// Restores a previously simultaneous set of constrained edges after a local point insertion.
+///
+/// Point insertion can remove a constrained edge when its entire tetrahedral star belongs to the
+/// conflict cavity. Facet recovery uses this transaction before admitting a Steiner point: every
+/// missing edge is recovered with local flips while the other segment edges and all recovered
+/// facets remain barriers. Returning `None` leaves the caller's topology untouched.
+pub(in crate::cdt) fn try_restore_delaunay_edges_with_local_flips(
+    topology: &DelaunayVolumeTopology,
+    required_edges: &[[StableDigest; 2]],
+    protected_faces: &[[StableDigest; 3]],
+    constraint_index: u32,
+    options: DelaunaySegmentRecoveryOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Option<DelaunayVolumeTopology>, DelaunaySegmentRecoveryError> {
+    validate_options(options)?;
+    let mut current = topology.clone();
+    for _ in 0..options.maximum_recovery_passes {
+        let mut work = RecoveryWork::new(options, cancellation);
+        let missing = required_edges
+            .iter()
+            .copied()
+            .filter_map(|edge| {
+                match edge_exists(&current, edge[0], edge[1], constraint_index, &mut work) {
+                    Ok(true) => None,
+                    Ok(false) => Some(Ok(edge)),
+                    Err(failure) => Some(Err(failure)),
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if missing.is_empty() {
+            return Ok(Some(current));
+        }
+        let Some(updated) = try_recover_delaunay_edges_with_local_flips(
+            &current,
+            &missing,
+            required_edges,
+            protected_faces,
+            constraint_index,
+            options,
+            cancellation,
+        )?
+        else {
+            return Ok(None);
+        };
+        if updated == current {
+            return Ok(None);
+        }
+        current = updated;
+    }
+    Ok(None)
+}
+
+fn admit_face_flip_mutation(
+    mutation: TopologyMutation,
+    protected_faces: &[[StableDigest; 3]],
+    constraint_index: u32,
+    options: DelaunaySegmentRecoveryOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Option<DelaunayVolumeTopology>, DelaunaySegmentRecoveryError> {
+    let candidate = match mutation.freeze(options.insertion.topology, cancellation) {
+        Ok(candidate) => candidate,
+        Err(failure) if failure.kind == TopologyMutationErrorKind::InvalidTopology => {
+            return Ok(None)
+        }
+        Err(failure) => return Err(mutation_error(failure)),
+    };
+    match validate_constrained_delaunay_volume_topology(
+        &candidate,
+        protected_faces,
+        options.insertion,
+        cancellation,
+    ) {
+        Ok(()) => Ok(Some(candidate)),
+        Err(failure) if failure.kind == DelaunayInsertionErrorKind::ResourceLimit => Err(error(
+            DelaunaySegmentRecoveryErrorKind::ResourceLimit,
+            Some(constraint_index),
+            failure.to_string(),
+        )),
+        Err(failure) if failure.kind == DelaunayInsertionErrorKind::Cancelled => Err(error(
+            DelaunaySegmentRecoveryErrorKind::Cancelled,
+            Some(constraint_index),
+            failure.to_string(),
+        )),
+        Err(_) => Ok(None),
+    }
 }
 
 fn recovered_edges_exist(
@@ -237,16 +713,20 @@ fn recovered_edges_exist(
     Ok(true)
 }
 
-fn recover_interval(
+fn recover_interval<F>(
     topology: &mut TopologyMutation,
-    context: SegmentContext,
     left: DyadicNode,
     right: DyadicNode,
+    acute_lineage: [bool; 2],
     depth: u8,
     output: &mut Vec<DelaunayRecoveredSegmentNode>,
-    protected_faces: &[[StableDigest; 3]],
-    work: &mut RecoveryWork<'_>,
-) -> Result<(), DelaunaySegmentRecoveryError> {
+    recovery: &mut IntervalRecoveryContext<'_, '_, F>,
+) -> Result<(), DelaunaySegmentRecoveryError>
+where
+    F: FnMut(SegmentContext, DyadicNode, [f64; 3]) -> StableDigest,
+{
+    let context = recovery.segment;
+    let work = &mut *recovery.work;
     work.recovery_step(context.constraint_index)?;
     if edge_exists(
         topology,
@@ -259,122 +739,147 @@ fn recover_interval(
         push_chain_node(output, right);
         return Ok(());
     }
-    if try_recover_edge_with_face_flip_mutation(
-        topology,
-        left.identity,
-        right.identity,
-        protected_faces,
-        context.constraint_index,
-        work,
-    )? {
-        push_chain_node(output, left);
-        push_chain_node(output, right);
-        return Ok(());
-    }
-    if depth >= work.options.maximum_split_depth {
-        let left_coordinates = find_node(topology, left.identity).map(|node| node.coordinates_m);
-        let right_coordinates = find_node(topology, right.identity).map(|node| node.coordinates_m);
-        return Err(error(
-            DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,
-            Some(context.constraint_index),
-            format!(
-                "segment {:?} terminal subinterval {:?} at {left_coordinates:?} -> {right_coordinates:?} did not recover within the dyadic split-depth limit",
-                [context.first_identity, context.last_identity],
-                [left.identity, right.identity],
-            ),
-        ));
-    }
     let witness = encroaching_point(
         topology,
         left.identity,
         right.identity,
         context.constraint_index,
         work,
-    )?
-    .ok_or_else(|| {
-        error(
+    )?;
+    if witness.is_none_or(|witness| witness.relation == PredicateSign::Zero) {
+        let current = topology
+            .snapshot(work.options.insertion.topology, work.cancellation)
+            .map_err(mutation_error)?;
+        if let Some(updated) = try_recover_edge_with_face_flip(
+            &current,
+            left.identity,
+            right.identity,
+            recovery.protected_edges,
+            recovery.protected_faces,
+            context.constraint_index,
+            work,
+        )? {
+            *topology = TopologyMutation::from_canonical(updated);
+            push_chain_node(output, left);
+            push_chain_node(output, right);
+            return Ok(());
+        }
+    }
+    if witness.is_none() && !recovery.split_strong_gabriel {
+        return Err(error(
             DelaunaySegmentRecoveryErrorKind::InvalidTopology,
             Some(context.constraint_index),
-            "missing Delaunay segment has no encroaching vertex witness",
-        )
-    })?;
-    let midpoint = split_parameter(topology, context, left, right, witness)?;
+            format!(
+                "Delaunay topology omits strongly Gabriel segment {:?} at recovery depth {depth}",
+                [left.identity, right.identity],
+            ),
+        ));
+    }
+    if depth >= work.options.maximum_split_depth {
+        let left_coordinates = find_node(topology, left.identity).map(|node| node.coordinates_m);
+        let right_coordinates = find_node(topology, right.identity).map(|node| node.coordinates_m);
+        let witness = witness.map(|witness| {
+            let witness_node = topology.nodes()[witness.vertex as usize];
+            (witness_node.identity, witness_node.coordinates_m)
+        });
+        return Err(error(
+            DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,
+            Some(context.constraint_index),
+            format!(
+                "segment {:?} terminal subinterval {:?} at {left_coordinates:?} -> {right_coordinates:?} with encroaching witness {witness:?} did not recover within the dyadic split-depth limit",
+                [context.first_identity, context.last_identity],
+                [left.identity, right.identity],
+            ),
+        ));
+    }
+    let midpoint = if let Some(witness) = witness {
+        split_parameter(
+            topology,
+            context,
+            left,
+            right,
+            witness.vertex,
+            acute_lineage,
+        )?
+    } else {
+        left.midpoint(right, context)?
+    };
+    let construction = Point3Construction::Segment {
+        endpoints: [context.first_coordinates, context.last_coordinates],
+        parameter_numerator: midpoint.numerator,
+        parameter_exponent: midpoint.exponent,
+    };
     let coordinates = interpolate(
         context.first_coordinates,
         context.last_coordinates,
         midpoint.parameter()?,
     );
-    let identity = if let Some(existing) = topology
+    let derived_identity = (recovery.identity_for_node)(context, midpoint, coordinates);
+    let identity = if let Some(existing) = find_node(topology, derived_identity) {
+        if existing.construction != construction {
+            return Err(error(
+                DelaunaySegmentRecoveryErrorKind::IdentityCollision,
+                Some(context.constraint_index),
+                "segment Steiner identity collides with a different node",
+            ));
+        }
+        derived_identity
+    } else if let Some(existing) = topology
         .nodes()
         .iter()
         .find(|node| coordinates_share_representable_location(node.coordinates_m, coordinates))
     {
         existing.identity
     } else {
-        let identity = steiner_identity(context, midpoint);
-        if let Some(existing) = find_node(topology, identity) {
-            if existing.coordinates_m != coordinates {
-                return Err(error(
-                    DelaunaySegmentRecoveryErrorKind::IdentityCollision,
-                    Some(context.constraint_index),
-                    "segment Steiner identity collides with a different node",
-                ));
-            }
-        } else {
-            work.inserted_node(context.constraint_index)?;
-            let outcome = insert_delaunay_volume_node_into_mutation_with_barriers(
+        work.inserted_node(context.constraint_index)?;
+        let node = DelaunayVolumeNode {
+            identity: derived_identity,
+            coordinates_m: coordinates,
+            construction,
+        };
+        if recovery.protected_faces.is_empty() {
+            insert_delaunay_volume_node_into_mutation(
                 topology,
-                DelaunayVolumeNode {
-                    identity,
-                    coordinates_m: coordinates,
-                },
-                protected_faces,
+                node,
+                work.options.insertion,
+                work.cancellation,
+            )
+        } else {
+            insert_delaunay_volume_node_into_mutation_with_barriers(
+                topology,
+                node,
+                recovery.protected_faces,
                 true,
                 work.options.insertion,
                 work.cancellation,
             )
-            .map_err(|insertion| insertion_error(insertion, context.constraint_index))?;
-            if outcome == MutableInsertionOutcome::RequiresCanonicalFallback {
-                let current = topology
-                    .clone()
-                    .freeze(work.options.insertion.topology, work.cancellation)
-                    .map_err(mutation_error)?;
-                let updated = insert_delaunay_volume_node_with_barriers(
-                    current,
-                    DelaunayVolumeNode {
-                        identity,
-                        coordinates_m: coordinates,
-                    },
-                    protected_faces,
-                    work.options.insertion,
-                    work.cancellation,
-                )
-                .map_err(|insertion| insertion_error(insertion, context.constraint_index))?;
-                *topology = TopologyMutation::from_canonical(updated);
-            }
         }
-        identity
+        .map_err(|insertion| insertion_error(insertion, context.constraint_index))?;
+        derived_identity
     };
     let midpoint = midpoint.with_identity(identity);
+    let (left_acute_lineage, right_acute_lineage) = if acute_lineage == [true, true] {
+        ([true, false], [false, true])
+    } else {
+        (acute_lineage, acute_lineage)
+    };
     recover_interval(
         topology,
-        context,
         left,
         midpoint,
+        left_acute_lineage,
         depth + 1,
         output,
-        protected_faces,
-        work,
+        recovery,
     )?;
     recover_interval(
         topology,
-        context,
         midpoint,
         right,
+        right_acute_lineage,
         depth + 1,
         output,
-        protected_faces,
-        work,
+        recovery,
     )
 }
 

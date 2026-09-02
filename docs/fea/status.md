@@ -20,7 +20,7 @@ V&V levels are defined in [Verification & Validation](/docs/fea/validation). The
 | Can I run `.m` and `.fea` with the same command? | Yes. `runmat run` accepts `.m` scripts and `.fea` study/sweep files. | `.fea` files do not accept positional script arguments or bytecode emission. |
 | Can I check before running? | Yes. `runmat check` supports `.m` scripts and `.fea` documents. | `.m` check compiles the source path; `.fea` check validates and plans but does not solve. |
 | Can I use named entrypoints? | Yes. Project entrypoints can target `.m` or `.fea` paths. | Entrypoint resolution must resolve to an actual file. |
-| Can I use RunMat code? | Yes. `geometry.inspect`, `geometry.load`, `geometry.listRegions`, typed `fea.*` constructors, workflow builtins, and result-query builtins are registered. | `.m` code and `.fea` files can express the same study content; use `.m` when generation or parameterization is the better shape. |
+| Can I use RunMat code? | Yes. Typed geometry, meshing, FEA construction, workflow, and result-query builtins are registered. | `.m` code and `.fea` files can express the same study content; use `.m` when generation or parameterization is the better shape. |
 | Can I define studies in files? | Yes. `.fea` supports geometry loading, model scaffolds or explicit model data, run options, studies, and sweeps. | `.fea` is YAML with extension `.fea`; legacy `.study.yaml` contracts are no longer the user-facing format. |
 | Can hosts call lower-level operations? | Yes. Runtime operations cover geometry, model creation, validation, run families, results, studies, and sweeps. | Rust function names still use internal `analysis_*` APIs, while public operation identifiers are `fea.*`. |
 | Are artifacts configurable? | Yes. `[runtime.fea]` configures FEA run, study, and thermo-field artifact roots. | Environment configuration uses the documented `RUNMAT_FEA_*` variables. |
@@ -35,6 +35,15 @@ V&V levels are defined in [Verification & Validation](/docs/fea/validation). The
 | Regions and entities | Works today | list/query operation tests | Mesh/group regions are format dependent. OCCT CAD import produces mapped face regions. STEP and IGES produce additional selectable semantic regions for CAD labels, bodies, components, assemblies, layers, colors, and materials when the exchange file contains that ownership data. |
 | Statistics | Works today | geometry stats tests | Statistics are import-derived and do not prove model suitability. |
 | View capture | Works today with adapter fallback | capture operation tests | Output depends on configured capture adapter. |
+
+## Meshing Status
+
+| Capability | Status | Evidence | Boundary |
+| --- | --- | --- | --- |
+| Exact CAD meshing | Works today on OCCT-capable native hosts | Canonical meshing-core, execution-DAG, native-worker, CLI, and runtime builtin tests | STEP, IGES, and BREP require the native OCCT capability. The installed host chooses local or compatible distributed execution; placement is not part of the logical request. |
+| Typed mesh inspection | Works today | `meshing.Mesh` object, topology, region, quality, evidence, and display tests | Quality summaries describe the generated discretization; engineering conclusions still require convergence and physics validation. |
+| Canonical persistence | Works today | Joint artifact/evidence validation and protected publication tests | Mesh and evidence must be retained and loaded as a matching pair. |
+| FEA handoff | Works today | Typed `fea.study(..., "Mesh", solverMesh)` parsing and canonical artifact-store integration | Meshing owns persistent geometric topology; FEA owns materials, assignments, loads, fields, and result visualization. |
 
 ## Physics Family Status
 
@@ -58,6 +67,7 @@ V&V levels are defined in [Verification & Validation](/docs/fea/validation). The
 | Operation family | Status |
 | --- | --- |
 | `geometry.inspect`, `geometry.load`, `geometry.compute_stats`, `geometry.list_regions`, `geometry.query_entities`, `geometry.capture_view` | Contracted and tested. |
+| `meshing.generate`, `meshing.load`, `meshing.save`, topology/region/quality/evidence inspection, and `mesh(meshing.Mesh)` | Contracted and tested. |
 | `fea.create_model`, `fea.validate` | Contracted and tested. |
 | `fea.run_linear_static`, `fea.run_modal`, `fea.run_thermal`, `fea.run_transient`, `fea.run_nonlinear`, `fea.run_electromagnetic` | Contracted, tested, artifact-backed, and dedicated or family-specific paths. |
 | `fea.run_acoustic` | Contracted, tested, artifact-backed, and backed by acoustic-specific domain-graph, known-answer, and invalid-authoring gates. |
@@ -65,7 +75,7 @@ V&V levels are defined in [Verification & Validation](/docs/fea/validation). The
 | `fea.results`, `fea.results_compare`, `fea.trends` | Contracted and tested. |
 | `fea.validate_study`, `fea.plan_study`, `fea.run_study` | Contracted, tested, and artifact-backed. |
 | `fea.validate_study_sweep`, `fea.plan_study_sweep`, `fea.run_study_sweep` | Contracted, tested, and artifact-backed. |
-| RunMat builtins | Geometry builtins, typed `fea.*` constructors, workflow builtins, and result-query builtins are registered and covered by focused tests. |
+| RunMat builtins | Geometry, meshing, typed FEA construction, workflow, visualization, and result-query builtins are registered and covered by focused tests. |
 
 ## Verification Commands
 
@@ -77,6 +87,7 @@ cargo test -p runmat-runtime --test operation_contracts --no-fail-fast
 cargo test -p runmat-runtime --test analysis --no-fail-fast
 cargo test -p runmat-runtime --lib builtins::fea --no-fail-fast
 cargo test -p runmat-runtime --lib builtins::geometry --no-fail-fast
+cargo test -p runmat-runtime --lib builtins::meshing --no-fail-fast
 cargo test -p runmat-config --no-fail-fast
 cargo check -p runmat-runtime -p runmat -p runmat-config
 ```

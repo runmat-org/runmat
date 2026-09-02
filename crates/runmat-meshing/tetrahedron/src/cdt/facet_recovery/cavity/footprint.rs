@@ -77,10 +77,19 @@ fn coplanar_triangles_overlap_interior(
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let axes = projection_axes(left, constraint_index, work)?;
+    let Some(axes) = projection_axes(left, constraint_index, work)? else {
+        return Ok(false);
+    };
     let project = |point: [f64; 3]| [point[axes[0]], point[axes[1]]];
     let left = left.map(project);
     let right = right.map(project);
+    // Exact edge insertion can leave symbolic faces whose three coordinates are
+    // collinear. Such a face has no geometric interior, so it cannot cross the
+    // positive-area interior of the recovered facet. It remains relevant to the
+    // surrounding topology, but not to this triangle-interior overlap query.
+    if planar_orientation(right, constraint_index, work)? == PredicateSign::Zero {
+        return Ok(false);
+    }
     triangles_overlap_across_every_edge(left, right, constraint_index, work).and_then(|overlap| {
         if overlap {
             triangles_overlap_across_every_edge(right, left, constraint_index, work)
@@ -127,7 +136,7 @@ fn triangles_overlap_across_every_edge(
     Ok(true)
 }
 
-fn segment_hits_triangle_interior(
+pub(in crate::cdt::facet_recovery) fn segment_hits_triangle_interior(
     topology: &DelaunayVolumeTopology,
     segment: [u32; 2],
     triangle: [u32; 3],
@@ -213,7 +222,9 @@ fn point_strictly_inside_triangle(
 ) -> Result<bool, DelaunayFacetRecoveryError> {
     let coordinates = |node: u32| topology.nodes[node as usize].coordinates_m;
     let points = triangle.map(coordinates);
-    let axes = projection_axes(points, constraint_index, work)?;
+    let Some(axes) = projection_axes(points, constraint_index, work)? else {
+        return Ok(false);
+    };
     let projected = |point: [f64; 3]| [point[axes[0]], point[axes[1]]];
     let query = projected(coordinates(node));
     let signs = [
@@ -241,7 +252,7 @@ fn projection_axes(
     triangle: [[f64; 3]; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
-) -> Result<[usize; 2], DelaunayFacetRecoveryError> {
+) -> Result<Option<[usize; 2]>, DelaunayFacetRecoveryError> {
     for axes in [[0, 1], [0, 2], [1, 2]] {
         if planar_orientation(
             triangle.map(|point| [point[axes[0]], point[axes[1]]]),
@@ -249,13 +260,10 @@ fn projection_axes(
             work,
         )? != PredicateSign::Zero
         {
-            return Ok(axes);
+            return Ok(Some(axes));
         }
     }
-    Err(invalid_topology(
-        constraint_index,
-        "facet-footprint triangle is exactly collinear",
-    ))
+    Ok(None)
 }
 
 fn orientation(
@@ -329,6 +337,14 @@ mod tests {
         assert!(!overlaps(
             target,
             [[1.0, 0.0, 0.0], [3.0, 0.0, 0.0], [2.0, -2.0, 0.0]],
+        ));
+        assert!(!overlaps(
+            target,
+            [[1.0, 1.0, 0.0], [2.0, 2.0, 0.0], [3.0, 3.0, 0.0]],
+        ));
+        assert!(!overlaps(
+            [[1.0, 1.0, 0.0], [2.0, 2.0, 0.0], [3.0, 3.0, 0.0]],
+            target,
         ));
     }
 }

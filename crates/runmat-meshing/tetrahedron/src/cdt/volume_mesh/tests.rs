@@ -25,7 +25,7 @@ fn volume_options() -> DelaunayVolumeMeshOptions {
 }
 
 #[test]
-fn exact_surface_constructs_one_validated_general_volume_mesh() {
+fn exact_surface_constructs_one_seeded_validated_general_volume_mesh() {
     let (topology, surface) = crate::cdt::constraints::tests::tetrahedron();
     let options = volume_options();
     let result = construct_delaunay_volume_mesh(
@@ -46,12 +46,14 @@ fn exact_surface_constructs_one_validated_general_volume_mesh() {
     .unwrap();
 
     assert_eq!(result, repeated);
-    assert_eq!(result.topology.tetrahedra.len(), 1);
+    assert_eq!(result.topology.nodes.len(), 5);
+    assert_eq!(result.topology.tetrahedra.len(), 4);
     assert_eq!(result.provenance.nodes.len(), 4);
     assert_eq!(result.provenance.segments.len(), 6);
     assert_eq!(result.provenance.facets.len(), 4);
     assert!(result.facet_recovery_insertions.is_empty());
-    assert!(result.mutations.is_empty());
+    assert!(result.refinement_insertions.is_empty());
+    assert!(result.sliver_mutations.is_empty());
     validate_delaunay_volume_mesh(
         &topology,
         &surface,

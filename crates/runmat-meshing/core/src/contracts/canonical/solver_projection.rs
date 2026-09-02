@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CanonicalMeshingContract, GeometryRevisionRef, MeshingContractError, MeshingRequest,
-    SolverMeshArtifact, SolverMeshTopology, StableDigest, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
+    NeverCancelled, SolverMeshArtifact, SolverMeshTopology, StableDigest,
+    SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
 pub const SOLVER_MESH_PROJECTION_SCHEMA_VERSION: u16 = 1;
@@ -31,7 +32,8 @@ impl SolverMeshProjection {
         }
         self.geometry.validate()?;
         self.resolved_request.validate()?;
-        self.topology.validate(&self.resolved_request)
+        self.topology
+            .validate(&self.resolved_request, &NeverCancelled)
     }
 
     pub fn into_artifact(
@@ -88,7 +90,6 @@ impl SolverMeshValidation {
         projection: &SolverMeshProjection,
     ) -> Result<(), MeshingContractError> {
         self.validate()?;
-        projection.validate()?;
         if *self != Self::from_validated_projection(projection)? {
             return Err(MeshingContractError::invalid(
                 "solver mesh validation",

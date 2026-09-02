@@ -316,12 +316,17 @@ fn mixed_exact_definition_projects_distinct_solid_and_sheet_bodies() {
         .iter_mut()
         .find(|record| record.id == sheet.mass_properties_evaluator_id)
         .unwrap();
-    let runmat_geometry_core::ExactMassPropertiesImplementation::Kernel { reference } =
-        &mut sheet_record.implementation
-    else {
-        panic!("mixed bodies require body-specific kernel evaluators");
-    };
-    reference.entity_token = "body:solid".into();
+    match &mut sheet_record.implementation {
+        runmat_geometry_core::ExactMassPropertiesImplementation::Kernel { reference } => {
+            reference.entity_token = "body:solid".into();
+        }
+        runmat_geometry_core::ExactMassPropertiesImplementation::KernelValidated {
+            validation_digest,
+            ..
+        } => {
+            validation_digest[0] ^= 1;
+        }
+    }
     assert!(matches!(
         OcctExactEvaluator::new(&mislabeled),
         Err(GeometryEvaluationError {

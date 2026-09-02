@@ -68,10 +68,42 @@ fn resolved_request_bounds_every_general_volume_phase() {
     assert_eq!(options.quality.minimum_metric_scaled_jacobian, 0.025);
     assert_eq!(options.quality.provenance, options.provenance);
     assert_eq!(options.refinement.step.insertion, insertion);
-    assert_eq!(options.refinement.sliver.insertion, insertion);
+    assert_eq!(options.sliver.insertion, insertion);
     assert!(options.refinement.maximum_insertions <= 8);
-    assert!(options.refinement.sliver.maximum_passes <= 8);
-    assert_eq!(options.point_set_validation_check_interval, 5);
+    assert!(options.sliver.maximum_passes <= 8);
+    assert!(options.sliver.maximum_candidate_evaluations_per_pass <= 12);
+    assert!(options.sliver.maximum_compound_reconnections_per_insertion <= 12);
+}
+
+#[test]
+fn native_volume_checkpoint_batches_preserve_tighter_kernel_cadences() {
+    let mut request = crate::serial_tests::request();
+    request.resources.maximum_search_work = 1_000_000;
+    request.cancellation.maximum_work_units_between_checks = 100_000;
+
+    let options = volume_options(&request);
+    assert_eq!(options.constraints.cancellation_check_interval, 32);
+    assert_eq!(
+        options
+            .carving
+            .facet_recovery
+            .segment_recovery
+            .insertion
+            .topology
+            .cancellation_check_interval,
+        1
+    );
+    assert_eq!(options.provenance.cancellation_check_interval, 32);
+    assert_eq!(options.quality.cancellation_check_interval, 32);
+    assert_eq!(
+        options
+            .refinement
+            .step
+            .candidate
+            .cancellation_check_interval,
+        1
+    );
+    assert_eq!(options.sliver.cancellation_check_interval, 32);
 }
 
 #[test]

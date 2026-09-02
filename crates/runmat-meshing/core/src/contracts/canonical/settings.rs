@@ -63,13 +63,13 @@ pub fn resolve_meshing_request(
         element_order: settings.element_order,
         deterministic_seed: settings.deterministic_seed,
         algorithms: AlgorithmVersionSet {
-            geometry: "geometry/v2".into(),
-            curve: "curve/v2".into(),
-            surface: "surface/v2".into(),
-            plc: "plc/v2".into(),
-            tetrahedron: "tetrahedron/v2".into(),
-            optimization: "optimization/v2".into(),
-            validation: "validation/v2".into(),
+            geometry: "geometry/exact-brep".into(),
+            curve: "curve/exact-metric".into(),
+            surface: "surface/exact-cdt".into(),
+            plc: "plc/canonical".into(),
+            tetrahedron: "tetrahedron/constrained-delaunay".into(),
+            optimization: "optimization/quality-convergence".into(),
+            validation: "validation/independent".into(),
         },
         tolerance,
         metric: MetricFieldRequest {
@@ -83,9 +83,10 @@ pub fn resolve_meshing_request(
                 maximum_chordal_deviation_m: settings.maximum_chordal_deviation_m,
                 maximum_tangent_change_degrees: 180.0,
                 minimum_metric_edge_length: 0.01,
-                maximum_metric_edge_length: 10.0,
+                maximum_metric_edge_length: 1.0,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.01,
                 minimum_metric_angle_degrees: 0.1,
                 maximum_physical_aspect_ratio: 1_000.0,
                 maximum_chordal_deviation_m: settings.maximum_chordal_deviation_m,
@@ -94,7 +95,7 @@ pub fn resolve_meshing_request(
             volume: VolumeQualityTargets {
                 maximum_radius_edge_ratio: 10.0,
                 minimum_scaled_jacobian: 0.001,
-                maximum_metric_edge_length: 10.0,
+                maximum_metric_edge_length: 1.0,
             },
         },
         resources: settings.resources,
@@ -123,8 +124,19 @@ mod tests {
         let request = resolve_meshing_request(tolerance(), MeshingRequestSettings::default())
             .expect("default product settings should resolve");
         assert_eq!(request.element_order, ElementOrder::Tet4);
-        assert_eq!(request.algorithms.tetrahedron, "tetrahedron/v2");
+        assert_eq!(
+            request.algorithms.tetrahedron,
+            "tetrahedron/constrained-delaunay"
+        );
         assert_eq!(request.metric.contributions, Vec::new());
+        assert_eq!(request.quality.curve.maximum_metric_edge_length, 1.0);
+        assert_eq!(request.quality.surface.minimum_metric_angle_degrees, 0.1);
+        assert_eq!(request.quality.surface.minimum_metric_edge_length, 0.01);
+        assert_eq!(
+            request.quality.surface.maximum_physical_aspect_ratio,
+            1_000.0
+        );
+        assert_eq!(request.quality.volume.maximum_metric_edge_length, 1.0);
     }
 
     #[test]

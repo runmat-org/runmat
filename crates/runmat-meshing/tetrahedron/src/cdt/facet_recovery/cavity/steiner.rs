@@ -10,9 +10,12 @@ use runmat_meshing_core::StableDigest;
 
 mod candidate;
 
+pub(in crate::cdt::facet_recovery) use candidate::{
+    candidate_node, try_insert_candidate, try_insert_candidate_with_conflicts, CandidateInsertion,
+    CandidateInsertionResult,
+};
 use candidate::{
-    candidate_refills_cavity, insert_first_candidate, steiner_candidate_groups,
-    try_insert_candidate, CandidateInsertion,
+    candidate_refills_cavity, facet_edges_exist, steiner_candidate_groups, SteinerCandidateGroup,
 };
 
 const FACET_STEINER_IDENTITY_DOMAIN: &[u8] = b"runmat:cdt-facet-steiner-node:v1";
@@ -37,7 +40,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
     let mut current = recovery.clone();
     let mut insertion_round = 0_u64;
     let mut steiner_insertions = Vec::new();
-    loop {
+    'recovery: loop {
         match try_recover_facet_cavity_once(
             &current,
             facet,
@@ -65,9 +68,11 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                     .collect::<Vec<_>>();
                 if candidate_groups.len() == 2 {
                     let original = current.clone();
-                    let mut second_refillable = vec![None; candidate_groups[1].len()];
+                    let first_candidates = candidate_groups[0].ordered();
+                    let second_candidates = candidate_groups[1].ordered();
+                    let mut second_refillable = vec![None; second_candidates.len()];
                     for (first_rank, first_coordinates) in
-                        candidate_groups[0].iter().copied().enumerate()
+                        first_candidates.iter().copied().enumerate()
                     {
                         if !candidate_refills_cavity(
                             &cavities[0],
@@ -78,14 +83,14 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                         )? {
                             continue;
                         }
-                        let Some((first, first_identity)) = try_insert_candidate(
+                        let Some(first_node) = candidate_node(
                             &original,
                             CandidateInsertion {
                                 coordinates_m: first_coordinates,
+                                construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
                                 facet,
                                 insertion_round,
                                 candidate_rank: first_rank as u64,
-                                protected: &protected,
                             },
                             constraint_index,
                             work,
@@ -94,7 +99,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                             continue;
                         };
                         for (second_rank, second_coordinates) in
-                            candidate_groups[1].iter().copied().enumerate()
+                            second_candidates.iter().copied().enumerate()
                         {
                             let refillable = match second_refillable[second_rank] {
                                 Some(refillable) => refillable,
@@ -113,14 +118,14 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                             if !refillable {
                                 continue;
                             }
-                            let Some((inserted, second_identity)) = try_insert_candidate(
-                                &first,
+                            let Some(second_node) = candidate_node(
+                                &original,
                                 CandidateInsertion {
                                     coordinates_m: second_coordinates,
+                                    construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
                                     facet,
                                     insertion_round: insertion_round + 1,
                                     candidate_rank: second_rank as u64,
-                                    protected: &protected,
                                 },
                                 constraint_index,
                                 work,
@@ -128,38 +133,44 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                             else {
                                 continue;
                             };
-                            let Some(topology) = super::refill_simultaneous_sides(
+                            let Some(topology) = super::refill_cavity_sides(
                                 &original,
-                                &inserted,
-                                facet,
-                                protected_facets,
-                                &cavities,
-                                constraint_index,
+                                super::CavityRefillRequest {
+                                    inserted_nodes: &[first_node, second_node],
+                                    facet,
+                                    protected_facets,
+                                    cavities: &cavities,
+                                    refill_options:
+                                        super::progressive_facet_recovery_refill_options(),
+                                    constraint_index,
+                                },
                                 work,
                             )?
                             else {
                                 continue;
                             };
-                            work.cavity_steiner_node(constraint_index)?;
-                            work.cavity_steiner_node(constraint_index)?;
-                            let mut support_node_identities = facet;
-                            support_node_identities.sort_unstable();
-                            steiner_insertions.extend([
-                                DelaunayFacetSteinerInsertion {
+                            for (node, round, rank) in [
+                                (first_node, insertion_round, first_rank as u64),
+                                (second_node, insertion_round + 1, second_rank as u64),
+                            ] {
+                                if topology
+                                    .nodes
+                                    .binary_search_by_key(&node.identity, |candidate| {
+                                        candidate.identity
+                                    })
+                                    .is_err()
+                                {
+                                    continue;
+                                }
+                                work.cavity_steiner_node(constraint_index)?;
+                                steiner_insertions.push(steiner_lineage(
+                                    facet,
                                     constraint_index,
-                                    support_node_identities,
-                                    insertion_round,
-                                    candidate_rank: first_rank as u64,
-                                    node_identity: first_identity,
-                                },
-                                DelaunayFacetSteinerInsertion {
-                                    constraint_index,
-                                    support_node_identities,
-                                    insertion_round: insertion_round + 1,
-                                    candidate_rank: second_rank as u64,
-                                    node_identity: second_identity,
-                                },
-                            ]);
+                                    round,
+                                    rank,
+                                    node.identity,
+                                ));
+                            }
                             return Ok(Some(FacetCavityRecovery {
                                 topology,
                                 steiner_insertions,
@@ -169,33 +180,192 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                     work.reject("no jointly valid Steiner pair refilled both cavity halves");
                     return Ok(None);
                 }
-                let Some((next, node_identity, candidate_rank)) = insert_first_candidate(
-                    &current,
-                    candidate_groups.into_iter().flatten().collect(),
-                    facet,
-                    insertion_round,
-                    &protected,
-                    constraint_index,
-                    work,
-                )?
-                else {
-                    work.reject("no valid Steiner candidate refilled the cavity");
-                    return Ok(None);
-                };
-                work.cavity_steiner_node(constraint_index)?;
-                let mut support_node_identities = facet;
-                support_node_identities.sort_unstable();
-                steiner_insertions.push(DelaunayFacetSteinerInsertion {
-                    constraint_index,
-                    support_node_identities,
-                    insertion_round,
-                    candidate_rank,
-                    node_identity,
-                });
-                insertion_round += 1;
-                current = next;
+                let SteinerCandidateGroup { progressive, exact } =
+                    candidate_groups.into_iter().next().unwrap_or_default();
+                let exact_rank_offset = progressive.len() as u64;
+                for (candidate_rank, coordinates_m) in progressive.into_iter().enumerate() {
+                    let candidate_rank = candidate_rank as u64;
+                    let Some(node) = candidate_node(
+                        &current,
+                        CandidateInsertion {
+                            coordinates_m,
+                            construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
+                            facet,
+                            insertion_round,
+                            candidate_rank,
+                        },
+                        constraint_index,
+                        work,
+                    )?
+                    else {
+                        continue;
+                    };
+                    let node_identity = node.identity;
+                    if let Some(topology) = super::refill_cavity_sides(
+                        &current,
+                        super::CavityRefillRequest {
+                            inserted_nodes: &[node],
+                            facet,
+                            protected_facets,
+                            cavities: &cavities,
+                            refill_options: super::facet_recovery_refill_options(),
+                            constraint_index,
+                        },
+                        work,
+                    )? {
+                        work.cavity_steiner_node(constraint_index)?;
+                        steiner_insertions.push(steiner_lineage(
+                            facet,
+                            constraint_index,
+                            insertion_round,
+                            candidate_rank,
+                            node_identity,
+                        ));
+                        return Ok(Some(FacetCavityRecovery {
+                            topology,
+                            steiner_insertions,
+                        }));
+                    }
+                    let Some(next) =
+                        try_insert_candidate(&current, node, &protected, constraint_index, work)?
+                    else {
+                        continue;
+                    };
+                    if facet_edges_exist(&next.topology, facet) {
+                        work.cavity_steiner_node(constraint_index)?;
+                        steiner_insertions.push(steiner_lineage(
+                            facet,
+                            constraint_index,
+                            insertion_round,
+                            candidate_rank,
+                            node.identity,
+                        ));
+                        insertion_round += 1;
+                        current = next;
+                        continue 'recovery;
+                    }
+                }
+                let progressive_rejection = work
+                    .last_rejection()
+                    .unwrap_or("progressive insertion returned no topology")
+                    .to_owned();
+                let mut admitted = Vec::new();
+                for (candidate_rank, coordinates_m) in exact.into_iter().enumerate() {
+                    let candidate_rank = exact_rank_offset + candidate_rank as u64;
+                    let Some(node) = candidate_node(
+                        &current,
+                        CandidateInsertion {
+                            coordinates_m,
+                            construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
+                            facet,
+                            insertion_round,
+                            candidate_rank,
+                        },
+                        constraint_index,
+                        work,
+                    )?
+                    else {
+                        continue;
+                    };
+                    if let Some(topology) = super::refill_cavity_sides(
+                        &current,
+                        super::CavityRefillRequest {
+                            inserted_nodes: &[node],
+                            facet,
+                            protected_facets,
+                            cavities: &cavities,
+                            refill_options: super::facet_recovery_refill_options(),
+                            constraint_index,
+                        },
+                        work,
+                    )? {
+                        work.cavity_steiner_node(constraint_index)?;
+                        steiner_insertions.push(steiner_lineage(
+                            facet,
+                            constraint_index,
+                            insertion_round,
+                            candidate_rank,
+                            node.identity,
+                        ));
+                        return Ok(Some(FacetCavityRecovery {
+                            topology,
+                            steiner_insertions,
+                        }));
+                    }
+                    admitted.push((node, candidate_rank));
+                }
+                if !admitted.is_empty() {
+                    let nodes = admitted.iter().map(|(node, _)| *node).collect::<Vec<_>>();
+                    if let Some(topology) = super::refill_cavity_sides(
+                        &current,
+                        super::CavityRefillRequest {
+                            inserted_nodes: &nodes,
+                            facet,
+                            protected_facets,
+                            cavities: &cavities,
+                            refill_options: super::facet_recovery_refill_options(),
+                            constraint_index,
+                        },
+                        work,
+                    )? {
+                        for (node, candidate_rank) in
+                            admitted.iter().copied().filter(|(node, _)| {
+                                topology
+                                    .nodes
+                                    .binary_search_by_key(&node.identity, |candidate| {
+                                        candidate.identity
+                                    })
+                                    .is_ok()
+                            })
+                        {
+                            work.cavity_steiner_node(constraint_index)?;
+                            steiner_insertions.push(steiner_lineage(
+                                facet,
+                                constraint_index,
+                                insertion_round,
+                                candidate_rank,
+                                node.identity,
+                            ));
+                        }
+                        return Ok(Some(FacetCavityRecovery {
+                            topology,
+                            steiner_insertions,
+                        }));
+                    }
+                }
+                let batch_rejection = work
+                    .last_rejection()
+                    .unwrap_or("atomic Steiner-inventory refill returned no topology");
+                let admitted_coordinates = admitted
+                    .iter()
+                    .take(8)
+                    .map(|(node, _)| node.coordinates_m)
+                    .collect::<Vec<_>>();
+                work.reject(format!(
+                    "no valid Steiner candidate refilled the cavity: admitted_candidates={}, admitted_coordinates={admitted_coordinates:?}, atomic inventory rejected: {batch_rejection}; progressive candidates rejected: {progressive_rejection}",
+                    admitted.len(),
+                ));
+                return Ok(None);
             }
         }
+    }
+}
+
+pub(in crate::cdt::facet_recovery) fn steiner_lineage(
+    facet: [StableDigest; 3],
+    constraint_index: u32,
+    insertion_round: u64,
+    candidate_rank: u64,
+    node_identity: StableDigest,
+) -> DelaunayFacetSteinerInsertion {
+    let mut support_node_identities = facet;
+    support_node_identities.sort_unstable();
+    DelaunayFacetSteinerInsertion {
+        constraint_index,
+        support_node_identities,
+        insertion_round,
+        candidate_rank,
+        node_identity,
     }
 }
 
@@ -204,8 +374,6 @@ pub(in crate::cdt::facet_recovery) fn steiner_identity(
     insertion_round: u64,
     candidate_index: u64,
 ) -> StableDigest {
-    // The candidate construction algorithm and canonical rank define identity. Floating-point
-    // coordinates are derived evidence and deliberately excluded from the stable hash.
     let mut facet = facet;
     facet.sort_unstable();
     let mut hasher = Sha256::new();

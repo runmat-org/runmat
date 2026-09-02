@@ -571,6 +571,7 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,

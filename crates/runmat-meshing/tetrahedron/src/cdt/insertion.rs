@@ -1,28 +1,42 @@
 use std::collections::BTreeSet;
 
+use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{
-    quality::predicate::{orient3d, PredicateSign, SpatialPredicateError},
+    quality::predicate::{PredicateSign, SpatialPredicateError},
     MeshingCancellationSignal,
 };
 
 use super::{
     mutation::{TopologyMutation, TopologyMutationError, TopologyMutationErrorKind},
+    topology::orient_materialized_volume_nodes as orient_volume_nodes,
     DelaunayTopologyError, DelaunayTopologyOptions, DelaunayVolumeNode, DelaunayVolumeTopology,
 };
 
 mod cavity;
 mod legalization;
 mod location;
+mod materialization;
+mod mutable;
 pub(super) mod topology_access;
 mod validation;
 mod work;
 
-use cavity::{connected_cavity, node_coplanar_with_face, stable_face};
+use cavity::{
+    cavity_is_star_shaped, connected_cavity, node_lies_on_face, restrict_cavity_to_protected_side,
+};
 use legalization::{legalize_delaunay_volume_topology, legalize_delaunay_volume_topology_complete};
 use location::TetrahedronPointLocator;
+use materialization::representable_nodes;
+pub(in crate::cdt) use mutable::{
+    apply_prepared_delaunay_volume_node_insertion, insert_delaunay_volume_node_into_mutation,
+    insert_delaunay_volume_node_into_mutation_with_barriers,
+};
 use topology_access::TetrahedralTopology;
-pub(super) use validation::validate_constrained_delaunay_volume_topology;
 pub use validation::validate_delaunay_volume_topology;
+pub(super) use validation::{
+    validate_conforming_volume_topology, validate_constrained_delaunay_volume_topology,
+    validate_locally_delaunay_volume_topology,
+};
 use work::InsertionWork;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,12 +76,6 @@ pub struct DelaunayInsertionError {
     pub reason: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum MutableInsertionOutcome {
-    Inserted,
-    RequiresCanonicalFallback,
-}
-
 impl std::fmt::Display for DelaunayInsertionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -90,35 +98,35 @@ pub fn insert_delaunay_volume_node(
 ) -> Result<DelaunayVolumeTopology, DelaunayInsertionError> {
     validate_options(options)?;
     validate_delaunay_volume_topology(&topology, options, cancellation)?;
-    let rebuilt = insert_delaunay_volume_node_mutation(topology, node, options, cancellation)?;
+    let rebuilt =
+        insert_delaunay_volume_node_internal(topology, node, &[], false, options, cancellation)?;
     validate_delaunay_volume_topology(&rebuilt, options, cancellation)?;
     Ok(rebuilt)
 }
 
-pub(super) fn insert_delaunay_volume_node_mutation(
-    topology: DelaunayVolumeTopology,
-    node: DelaunayVolumeNode,
-    options: DelaunayInsertionOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DelaunayVolumeTopology, DelaunayInsertionError> {
-    insert_delaunay_volume_node_internal(topology, node, &[], false, options, cancellation)
-}
-
-pub(super) fn insert_delaunay_volume_node_with_barriers(
+/// Inserts into an already constrained, locally Delaunay topology and limits
+/// legalization to the star changed by the Bowyer-Watson cavity. This is the
+/// insertion path for candidate evaluation: callers independently validate the
+/// resulting constrained topology before admitting it as an artifact.
+pub(super) fn insert_delaunay_volume_node_locally_with_barriers(
     topology: DelaunayVolumeTopology,
     node: DelaunayVolumeNode,
     protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
     options: DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeTopology, DelaunayInsertionError> {
-    insert_delaunay_volume_node_internal(
-        topology,
+    let mut mutation = TopologyMutation::from_canonical(topology);
+    insert_delaunay_volume_node_into_mutation_with_barriers(
+        &mut mutation,
         node,
         protected_faces,
         true,
         options,
         cancellation,
-    )
+    )?;
+    mutation
+        .snapshot(options.topology, cancellation)
+        .map_err(mutation_topology_error)
 }
 
 pub(super) fn legalize_delaunay_volume_topology_with_barriers(
@@ -133,7 +141,7 @@ pub(super) fn legalize_delaunay_volume_topology_with_barriers(
     }
     let protected_faces = protected_faces.iter().copied().collect::<BTreeSet<_>>();
     let mut work = InsertionWork::new(options, cancellation);
-    legalize_delaunay_volume_topology(topology, &protected_faces, true, &mut work)
+    legalize_delaunay_volume_topology(topology, &protected_faces, true, None, &mut work)
 }
 
 pub(super) fn legalize_delaunay_volume_topology_completely_with_barriers(
@@ -164,208 +172,195 @@ fn insert_delaunay_volume_node_internal(
     let protected_faces = protected_faces.iter().copied().collect::<BTreeSet<_>>();
 
     let mut work = InsertionWork::new(options, cancellation);
-    let locator = TetrahedronPointLocator::walking(&topology);
-    let seed = locator
-        .first_containing_from(node, None, &mut work)?
-        .ok_or_else(|| {
-        let bounds = topology_bounds(&topology);
-        error(
-            DelaunayInsertionErrorKind::PointOutsideTopology,
-            format!(
-                "node {:?} is not contained by the admitted tetrahedron complex (nodes={}, tetrahedra={}, bounds={bounds:?})",
-                node.coordinates_m,
-                topology.nodes.len(),
-                topology.tetrahedra.len()
-            ),
-        )
-        })?;
-
-    let mut cavity = connected_cavity(
+    let prepared = prepare_insertion(
         &topology,
         node,
-        seed,
         &protected_faces,
         protect_region_boundaries,
         &mut work,
     )?;
-    let used_containing_star = match regularize_cavity_boundary(
-        &topology,
-        &mut cavity,
-        node,
-        &protected_faces,
-        protect_region_boundaries,
-        &mut work,
-    ) {
-        Ok(()) => false,
-        Err(failure) if failure.kind == DelaunayInsertionErrorKind::InvalidTopology => {
-            cavity = locator.all_containing(node, &mut work)?;
-            if cavity.is_empty() {
-                return Err(error(
-                    DelaunayInsertionErrorKind::PointOutsideTopology,
-                    "fallback insertion could not recover the node's containing star",
-                ));
-            }
-            true
-        }
-        Err(failure) => return Err(failure),
-    };
-    let boundary = cavity_boundary(&topology, &cavity, node, &mut work)?;
-    let cavity_regions = cavity
-        .iter()
-        .map(|index| topology.tetrahedra[*index as usize].region_id.clone())
-        .collect::<BTreeSet<_>>();
-    if cavity_regions.len() != 1 {
-        return Err(error(
-            DelaunayInsertionErrorKind::InvalidTopology,
-            "insertion cavity crosses assigned region incidence",
-        ));
-    }
-    let cavity_region = cavity_regions.into_iter().next().flatten();
-    let removed = cavity;
     let mut mutation = TopologyMutation::from_canonical(topology);
     let inserted_index = mutation
-        .append_node(node)
+        .append_node(prepared.node)
         .map_err(mutation_topology_error)?;
-    let created = boundary
+    let created = prepared
+        .boundary
         .into_iter()
         .map(|face| {
             (
                 [face[0], face[1], face[2], inserted_index],
-                cavity_region.clone(),
+                prepared.region_id.clone(),
             )
         })
         .collect();
     mutation
-        .replace_cavity(&removed, created)
+        .replace_cavity(&prepared.removed, created)
         .map_err(mutation_topology_error)?;
     let rebuilt = mutation
         .freeze(options.topology, cancellation)
         .map_err(mutation_topology_error)?;
-    if used_containing_star {
-        legalize_delaunay_volume_topology_complete(
-            rebuilt,
-            &protected_faces,
-            protect_region_boundaries,
-            &mut work,
-        )
-    } else {
-        legalize_delaunay_volume_topology(
-            rebuilt,
-            &protected_faces,
-            protect_region_boundaries,
-            &mut work,
-        )
-    }
-}
-
-/// Inserts directly into the mutable working complex without canonicalizing
-/// or globally rescanning the topology. A non-regular cavity is reported
-/// before mutation so the caller can take the slower canonical fallback.
-pub(super) fn insert_delaunay_volume_node_into_mutation(
-    topology: &mut TopologyMutation,
-    node: DelaunayVolumeNode,
-    options: DelaunayInsertionOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<MutableInsertionOutcome, DelaunayInsertionError> {
-    insert_delaunay_volume_node_into_mutation_with_barriers(
-        topology,
-        node,
-        &[],
-        false,
-        options,
-        cancellation,
+    legalize_delaunay_volume_topology_complete(
+        rebuilt,
+        &protected_faces,
+        protect_region_boundaries,
+        &mut work,
     )
 }
 
-pub(super) fn insert_delaunay_volume_node_into_mutation_with_barriers(
-    topology: &mut TopologyMutation,
+pub(in crate::cdt) struct PreparedInsertion {
+    pub(in crate::cdt) node: DelaunayVolumeNode,
+    pub(in crate::cdt) removed: BTreeSet<u32>,
+    pub(in crate::cdt) boundary: Vec<[u32; 3]>,
+    pub(in crate::cdt) region_id: Option<PersistentEntityId>,
+}
+
+pub(in crate::cdt) fn prepare_delaunay_volume_node_insertion_with_prepared_barriers_from_hint(
+    topology: &DelaunayVolumeTopology,
     node: DelaunayVolumeNode,
-    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+    protected_faces: &BTreeSet<[runmat_meshing_core::StableDigest; 3]>,
     protect_region_boundaries: bool,
+    hint: Option<u32>,
     options: DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<MutableInsertionOutcome, DelaunayInsertionError> {
+) -> Result<PreparedInsertion, DelaunayInsertionError> {
     validate_options(options)?;
     validate_new_node(topology, node)?;
     if protected_faces.len() as u64 > options.maximum_protected_faces {
         return Err(resource("protected-face inventory limit exceeded"));
     }
-    let protected_faces = protected_faces.iter().copied().collect::<BTreeSet<_>>();
     let mut work = InsertionWork::new(options, cancellation);
-    let locator = TetrahedronPointLocator::walking(&*topology);
+    prepare_insertion_from_hint(
+        topology,
+        node,
+        protected_faces,
+        protect_region_boundaries,
+        hint,
+        &mut work,
+    )
+}
+
+pub(in crate::cdt::insertion) fn prepare_insertion(
+    topology: &impl TetrahedralTopology,
+    node: DelaunayVolumeNode,
+    protected_faces: &BTreeSet<[runmat_meshing_core::StableDigest; 3]>,
+    protect_region_boundaries: bool,
+    work: &mut InsertionWork<'_>,
+) -> Result<PreparedInsertion, DelaunayInsertionError> {
+    prepare_insertion_from_hint(
+        topology,
+        node,
+        protected_faces,
+        protect_region_boundaries,
+        None,
+        work,
+    )
+}
+
+pub(in crate::cdt::insertion) fn prepare_insertion_from_hint(
+    topology: &impl TetrahedralTopology,
+    node: DelaunayVolumeNode,
+    protected_faces: &BTreeSet<[runmat_meshing_core::StableDigest; 3]>,
+    protect_region_boundaries: bool,
+    hint: Option<u32>,
+    work: &mut InsertionWork<'_>,
+) -> Result<PreparedInsertion, DelaunayInsertionError> {
+    let mut first_geometry_failure = None;
+    for candidate in representable_nodes(node) {
+        match prepare_insertion_at_coordinates(
+            topology,
+            candidate,
+            protected_faces,
+            protect_region_boundaries,
+            hint,
+            work,
+        ) {
+            Ok(prepared) => return Ok(prepared),
+            Err(failure)
+                if matches!(
+                    failure.kind,
+                    DelaunayInsertionErrorKind::InvalidNode
+                        | DelaunayInsertionErrorKind::InvalidTopology
+                        | DelaunayInsertionErrorKind::PointOutsideTopology
+                ) =>
+            {
+                first_geometry_failure.get_or_insert(failure);
+            }
+            Err(failure) => return Err(failure),
+        }
+    }
+    Err(first_geometry_failure.unwrap_or_else(|| {
+        error(
+            DelaunayInsertionErrorKind::InvalidNode,
+            "constructed node has no admissible solver-coordinate materialization",
+        )
+    }))
+}
+
+fn prepare_insertion_at_coordinates(
+    topology: &impl TetrahedralTopology,
+    node: DelaunayVolumeNode,
+    protected_faces: &BTreeSet<[runmat_meshing_core::StableDigest; 3]>,
+    protect_region_boundaries: bool,
+    hint: Option<u32>,
+    work: &mut InsertionWork<'_>,
+) -> Result<PreparedInsertion, DelaunayInsertionError> {
+    let locator = TetrahedronPointLocator::walking(topology);
     let seed = locator
-        .first_containing_from(node, None, &mut work)?
+        .first_containing_from(node, hint.map(|index| index as usize), work)?
         .ok_or_else(|| {
             error(
                 DelaunayInsertionErrorKind::PointOutsideTopology,
                 format!(
-                    "node {:?} is not contained by the mutable tetrahedron complex (nodes={}, slots={}, bounds={:?})",
+                    "node {:?} is not contained by the admitted tetrahedron complex (nodes={}, slots={}, bounds={:?})",
                     node.coordinates_m,
                     topology.nodes().len(),
                     topology.tetrahedron_slot_count(),
-                    topology_bounds(&*topology),
+                    topology_bounds(topology),
                 ),
             )
         })?;
     let mut cavity = connected_cavity(
-        &*topology,
+        topology,
         node,
         seed,
-        &protected_faces,
+        protected_faces,
         protect_region_boundaries,
-        &mut work,
+        work,
     )?;
-    match regularize_cavity_boundary(
-        &*topology,
-        &mut cavity,
-        node,
-        &protected_faces,
-        protect_region_boundaries,
-        &mut work,
-    ) {
-        Ok(()) => {}
-        Err(failure) if failure.kind == DelaunayInsertionErrorKind::InvalidTopology => {
-            return Ok(MutableInsertionOutcome::RequiresCanonicalFallback);
-        }
-        Err(failure) => return Err(failure),
+    restrict_cavity_to_protected_side(topology, &mut cavity, seed, node, protected_faces, work)?;
+    regularize_cavity_boundary(topology, &mut cavity, node, work)?;
+    if !cavity_is_star_shaped(topology, &cavity, node, work)? {
+        return Err(error(
+            DelaunayInsertionErrorKind::InvalidTopology,
+            "validated insertion cavity is not star-shaped",
+        ));
     }
-    let boundary = cavity_boundary(&*topology, &cavity, node, &mut work)?;
-    let cavity_regions = cavity
+    let boundary = cavity_boundary(topology, &cavity, node, work)?;
+    let regions = cavity
         .iter()
         .map(|index| {
             topology
                 .tetrahedron(*index)
-                .expect("cavity was read from the active mutable topology")
+                .expect("prepared cavity tetrahedron remains active")
                 .region_id
                 .clone()
         })
         .collect::<BTreeSet<_>>();
-    if cavity_regions.len() != 1 {
+    if regions.len() != 1 {
         return Err(error(
             DelaunayInsertionErrorKind::InvalidTopology,
             "insertion cavity crosses assigned region incidence",
         ));
     }
-    let cavity_region = cavity_regions.into_iter().next().flatten();
-    let inserted_index = topology
-        .append_node(node)
-        .map_err(mutation_topology_error)?;
-    let created = boundary
-        .into_iter()
-        .map(|face| {
-            (
-                [face[0], face[1], face[2], inserted_index],
-                cavity_region.clone(),
-            )
-        })
-        .collect();
-    topology
-        .replace_cavity(&cavity, created)
-        .map_err(mutation_topology_error)?;
-    Ok(MutableInsertionOutcome::Inserted)
+    Ok(PreparedInsertion {
+        node,
+        removed: cavity,
+        boundary,
+        region_id: regions.into_iter().next().flatten(),
+    })
 }
 
-fn topology_bounds(topology: &impl TetrahedralTopology) -> [[f64; 3]; 2] {
+pub(super) fn topology_bounds(topology: &impl TetrahedralTopology) -> [[f64; 3]; 2] {
     let mut minimum = [f64::INFINITY; 3];
     let mut maximum = [f64::NEG_INFINITY; 3];
     for node in topology.nodes() {
@@ -392,14 +387,18 @@ fn cavity_boundary(
             )
         })?;
         for opposite in 0..4 {
-            if tetrahedron.neighbors[opposite].is_some_and(|neighbor| cavity.contains(&neighbor)) {
+            let neighbor = tetrahedron.neighbors[opposite];
+            if neighbor.is_some_and(|neighbor| cavity.contains(&neighbor)) {
                 continue;
             }
             // A point admitted on the convex hull replaces a coplanar boundary
             // face with the triangles induced by the adjacent non-coplanar
             // cavity faces. Coning the old face to the point would create an
-            // exactly zero-volume tetrahedron.
-            if node_coplanar_with_face(topology, tetrahedron.vertex_indices, opposite, node, work)?
+            // exactly zero-volume tetrahedron. A merely coplanar face inside
+            // the complex is still part of the cavity boundary and must not be
+            // discarded: doing so would open a hole in the tetrahedralization.
+            if neighbor.is_none()
+                && node_lies_on_face(topology, tetrahedron.vertex_indices, opposite, node, work)?
             {
                 continue;
             }
@@ -425,91 +424,84 @@ fn regularize_cavity_boundary(
     topology: &impl TetrahedralTopology,
     cavity: &mut BTreeSet<u32>,
     node: DelaunayVolumeNode,
-    protected_faces: &BTreeSet<[runmat_meshing_core::StableDigest; 3]>,
-    protect_region_boundaries: bool,
     work: &mut InsertionWork<'_>,
 ) -> Result<(), DelaunayInsertionError> {
     loop {
-        let boundary = cavity_boundary(topology, cavity, node, work)?;
-        let mut edge_uses = std::collections::BTreeMap::<[u32; 2], usize>::new();
-        for face in &boundary {
-            for mut edge in [[face[0], face[1]], [face[1], face[2]], [face[2], face[0]]] {
-                edge.sort_unstable();
-                *edge_uses.entry(edge).or_default() += 1;
-            }
-        }
-        let Some((edge, _)) = edge_uses.into_iter().find(|(_, uses)| *uses > 2) else {
-            return Ok(());
-        };
-        let boundary = boundary.into_iter().collect::<BTreeSet<_>>();
-        let first = *cavity.iter().next().ok_or_else(|| {
-            error(
-                DelaunayInsertionErrorKind::InvalidTopology,
-                "insertion cavity is empty",
-            )
-        })?;
-        let cavity_region = topology
-            .tetrahedron(first)
-            .ok_or_else(|| {
+        let mut cut = None;
+        for index in cavity.iter().copied() {
+            let tetrahedron = topology.tetrahedron(index).ok_or_else(|| {
                 error(
                     DelaunayInsertionErrorKind::InvalidTopology,
                     "insertion cavity references an inactive tetrahedron",
                 )
-            })?
-            .region_id
-            .clone();
-        let candidate = topology
-            .vertex_star(edge[0])
-            .into_iter()
-            .filter(|index| !cavity.contains(index))
-            .filter(|index| {
-                topology.tetrahedron(*index).is_some_and(|tetrahedron| {
-                    tetrahedron.vertex_indices.contains(&edge[1])
-                        && *tetrahedron.region_id == cavity_region
-                })
-            })
-            .find(|index| {
-                let tetrahedron = topology
-                    .tetrahedron(*index)
-                    .expect("candidate belongs to the active vertex star");
-                let shared = (0..4)
-                    .filter_map(|opposite| {
-                        let mut face = [0; 3];
-                        let mut cursor = 0;
-                        for (slot, vertex) in tetrahedron.vertex_indices.iter().enumerate() {
-                            if slot != opposite {
-                                face[cursor] = *vertex;
-                                cursor += 1;
-                            }
-                        }
-                        face.sort_unstable();
-                        boundary.contains(&face).then_some(opposite)
-                    })
-                    .collect::<Vec<_>>();
-                shared.len() >= 2
-                    && shared.iter().all(|opposite| {
-                        !protected_faces.contains(&stable_face(
-                            topology,
-                            tetrahedron.vertex_indices,
-                            *opposite,
-                        ))
-                    })
-                    && (!protect_region_boundaries || *tetrahedron.region_id == cavity_region)
-            })
-            .ok_or_else(|| {
-                error(
-                    DelaunayInsertionErrorKind::InvalidTopology,
-                    format!(
-                        "insertion cavity boundary is non-manifold at edge {edge:?} and cannot \
-                         be regularized without crossing a protected face"
-                    ),
-                )
             })?;
-        cavity.insert(candidate);
-        if cavity.len() as u64 > work.options.maximum_cavity_tetrahedra {
-            return Err(resource("regularized cavity tetrahedron limit exceeded"));
+            for opposite in 0..4 {
+                if tetrahedron.neighbors[opposite]
+                    .is_some_and(|neighbor| cavity.contains(&neighbor))
+                {
+                    continue;
+                }
+                if tetrahedron.neighbors[opposite].is_none()
+                    && node_lies_on_face(
+                        topology,
+                        tetrahedron.vertex_indices,
+                        opposite,
+                        node,
+                        work,
+                    )?
+                {
+                    continue;
+                }
+                let mut face = [topology.nodes()[tetrahedron.vertex_indices[0] as usize]; 3];
+                let mut cursor = 0;
+                for (slot, vertex) in tetrahedron.vertex_indices.iter().enumerate() {
+                    if slot != opposite {
+                        face[cursor] = topology.nodes()[*vertex as usize];
+                        cursor += 1;
+                    }
+                }
+                let interior = topology.nodes()[tetrahedron.vertex_indices[opposite] as usize];
+                work.predicate()?;
+                let interior_sign = orient_volume_nodes([face[0], face[1], face[2], interior])
+                    .map_err(predicate_error)?;
+                work.predicate()?;
+                let node_sign = orient_volume_nodes([face[0], face[1], face[2], node])
+                    .map_err(predicate_error)?;
+                if node_sign == PredicateSign::Zero || node_sign != interior_sign {
+                    cut = Some(index);
+                    break;
+                }
+            }
+            if cut.is_some() {
+                break;
+            }
+        }
+        let Some(index) = cut else {
+            break;
+        };
+        cavity.remove(&index);
+        if cavity.is_empty() {
+            return Err(error(
+                DelaunayInsertionErrorKind::InvalidTopology,
+                "star-shaped cavity validation removed every conflict tetrahedron",
+            ));
         }
     }
+    let boundary = cavity_boundary(topology, cavity, node, work)?;
+    let mut edge_uses = std::collections::BTreeMap::<[u32; 2], usize>::new();
+    for face in boundary {
+        for mut edge in [[face[0], face[1]], [face[1], face[2]], [face[2], face[0]]] {
+            edge.sort_unstable();
+            *edge_uses.entry(edge).or_default() += 1;
+        }
+    }
+    if let Some((edge, _)) = edge_uses.into_iter().find(|(_, uses)| *uses > 2) {
+        return Err(error(
+            DelaunayInsertionErrorKind::InvalidTopology,
+            format!("insertion conflict cavity is non-manifold at edge {edge:?}"),
+        ));
+    }
+    Ok(())
 }
 
 fn point_in_tetrahedron(
@@ -520,9 +512,9 @@ fn point_in_tetrahedron(
 ) -> Result<bool, DelaunayInsertionError> {
     for replace in 0..4 {
         work.predicate()?;
-        let mut points = vertices.map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
-        points[replace] = node.coordinates_m;
-        let sign = orient3d(points).map_err(predicate_error)?;
+        let mut points = vertices.map(|vertex| topology.nodes()[vertex as usize]);
+        points[replace] = node;
+        let sign = orient_volume_nodes(points).map_err(predicate_error)?;
         if !matches!(sign, PredicateSign::Positive | PredicateSign::Zero) {
             return Ok(false);
         }
@@ -530,23 +522,22 @@ fn point_in_tetrahedron(
     Ok(true)
 }
 
-fn two_to_three_topology_is_admissible(
-    topology: &DelaunayVolumeTopology,
-    left_tetrahedron: usize,
-    right_tetrahedron: usize,
+pub(super) fn two_to_three_topology_is_admissible(
+    topology: &impl TetrahedralTopology,
+    left_tetrahedron: u32,
+    right_tetrahedron: u32,
     left_apex: u32,
     right_apex: u32,
 ) -> bool {
-    !topology.incidence.vertex_stars[left_apex as usize]
-        .iter()
-        .copied()
+    !topology
+        .vertex_star(left_apex)
+        .into_iter()
         .any(|tetrahedron| {
-            let tetrahedron = tetrahedron as usize;
             tetrahedron != left_tetrahedron
                 && tetrahedron != right_tetrahedron
-                && topology.tetrahedra[tetrahedron]
-                    .vertex_indices
-                    .contains(&right_apex)
+                && topology
+                    .tetrahedron(tetrahedron)
+                    .is_some_and(|tetrahedron| tetrahedron.vertex_indices.contains(&right_apex))
         })
 }
 
@@ -618,7 +609,9 @@ pub(super) fn topology_error(error_value: DelaunayTopologyError) -> DelaunayInse
     error(kind, error_value.to_string())
 }
 
-fn mutation_topology_error(error_value: TopologyMutationError) -> DelaunayInsertionError {
+pub(in crate::cdt) fn mutation_topology_error(
+    error_value: TopologyMutationError,
+) -> DelaunayInsertionError {
     let kind = match error_value.kind {
         TopologyMutationErrorKind::InvalidTopology => DelaunayInsertionErrorKind::InvalidTopology,
         TopologyMutationErrorKind::ResourceLimit => DelaunayInsertionErrorKind::ResourceLimit,

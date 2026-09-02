@@ -19,6 +19,7 @@ pub struct MeshingGeometryEvaluationControl<'a> {
     cancellation: &'a dyn MeshingCancellationSignal,
     started: Instant,
     last_checkpoint_at: Arc<Mutex<Instant>>,
+    maximum_observed_checkpoint_latency_ms: Arc<AtomicU64>,
     last_checkpoint_search_work: Arc<AtomicU64>,
     maximum_wall_time_ms: u64,
     maximum_checkpoint_latency_ms: u64,
@@ -35,6 +36,7 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
         cancellation: &'a dyn MeshingCancellationSignal,
         started: Instant,
         last_checkpoint_at: Arc<Mutex<Instant>>,
+        maximum_observed_checkpoint_latency_ms: Arc<AtomicU64>,
         last_checkpoint_search_work: Arc<AtomicU64>,
         resources: &MeshingResourceBudget,
         policy: &CancellationPolicy,
@@ -43,6 +45,7 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
             cancellation,
             started,
             last_checkpoint_at,
+            maximum_observed_checkpoint_latency_ms,
             last_checkpoint_search_work,
             maximum_wall_time_ms: resources.maximum_wall_time_ms,
             maximum_checkpoint_latency_ms: policy.maximum_checkpoint_latency_ms,
@@ -99,15 +102,18 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
                 "geometry checkpoint state is unavailable",
             )
         })?;
+        let checkpoint_latency_ms = elapsed_millis(*previous, now);
+        self.maximum_observed_checkpoint_latency_ms
+            .fetch_max(checkpoint_latency_ms, Ordering::Relaxed);
+        *previous = now;
         if elapsed_millis(self.started, now) > self.maximum_wall_time_ms
-            || elapsed_millis(*previous, now) > self.maximum_checkpoint_latency_ms
+            || checkpoint_latency_ms > self.maximum_checkpoint_latency_ms
         {
             return Err(GeometryEvaluationError::new(
                 GeometryEvaluationErrorKind::TimeBudgetExceeded,
                 "exact geometry evaluation exceeded its execution time envelope",
             ));
         }
-        *previous = now;
         self.last_checkpoint_search_work
             .store(self.search_work.load(Ordering::Relaxed), Ordering::Relaxed);
         Ok(())
@@ -151,15 +157,15 @@ impl MeshingCancellationSignal for MeshingGeometryEvaluationControl<'_> {
         }
         let now = Instant::now();
         if let Ok(mut previous) = self.last_checkpoint_at.lock() {
-            // Algorithmic cancellation probes are mandatory checkpoints too.
-            // Renew the enclosing stage deadline only when the probe itself
-            // arrived within policy; a late probe leaves the old timestamp in
-            // place so the next fallible checkpoint reports the violation.
-            if elapsed_millis(*previous, now) <= self.maximum_checkpoint_latency_ms {
-                *previous = now;
-                self.last_checkpoint_search_work
-                    .store(self.search_work.load(Ordering::Relaxed), Ordering::Relaxed);
-            }
+            let checkpoint_latency_ms = elapsed_millis(*previous, now);
+            self.maximum_observed_checkpoint_latency_ms
+                .fetch_max(checkpoint_latency_ms, Ordering::Relaxed);
+            // Continue measuring every interval after a late probe. The enclosing fallible stage
+            // checkpoint rejects the recorded maximum without turning one miss into the elapsed
+            // duration of the entire remaining stage.
+            *previous = now;
+            self.last_checkpoint_search_work
+                .store(self.search_work.load(Ordering::Relaxed), Ordering::Relaxed);
         }
         false
     }

@@ -20,7 +20,9 @@ mod solver_projection;
 mod transfer;
 mod workload;
 
-pub use artifact::validate_solver_mesh_topology;
+pub use artifact::{
+    validate_solver_mesh_topology, validate_solver_mesh_topology_with_cancellation,
+};
 pub use artifact_identity::{
     solver_boundary_edge_identity, solver_boundary_face_identity, solver_midside_node_identity,
     solver_volume_element_identity,
@@ -36,8 +38,8 @@ pub use artifact_types::{
 pub use cancellation::{CancellationPolicy, MeshingCancellationSignal, NeverCancelled};
 pub use chunk::{
     build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,
-    verify_stage_manifest_closure, EncodedMeshingChunk, MeshingChunkPolicy, MeshingChunkStream,
-    MeshingChunkedPayload,
+    decode_stage_manifest_streams_with_cancellation, verify_stage_manifest_closure,
+    EncodedMeshingChunk, MeshingChunkPolicy, MeshingChunkStream, MeshingChunkedPayload,
 };
 pub use codec::{CanonicalMeshingContract, MeshingCanonicalLimits};
 pub use error::MeshingContractError;
