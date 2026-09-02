@@ -6,6 +6,8 @@ mod isscalar;
 mod isvector;
 mod length;
 mod ndims;
+mod numel;
+mod size;
 mod support;
 
 pub use iscolumn::*;
@@ -16,6 +18,8 @@ pub use isscalar::*;
 pub use isvector::*;
 pub use length::*;
 pub use ndims::*;
+pub use numel::*;
+pub use size::*;
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     iscolumn::ENTRIES,
@@ -26,4 +30,6 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     isvector::ENTRIES,
     length::ENTRIES,
     ndims::ENTRIES,
+    numel::ENTRIES,
+    size::ENTRIES,
 ];

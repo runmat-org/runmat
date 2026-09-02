@@ -1,4 +1,4 @@
-use super::{argument_error, finish_fixed};
+use super::super::super::{argument_error, finish_fixed};
 use crate::{BuiltinCatalogEntry, ShapeScalarQuery};
 use runmat_types::{
     CallInference, CallRequest, DynamicReason, NumericClass, NumericDomain, NumericFact, ValueFact,

@@ -1,9 +1,10 @@
 use crate::{
-    ArrayInferenceRule, BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration,
-    BuiltinCatalogEntry, BuiltinCatalogIdentity, BuiltinCompatibility, BuiltinCompletionPolicy,
-    BuiltinContractDeclaration, BuiltinContractMaturity, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    ArrayCreationInferenceRule, ArrayInferenceRule, BuiltinAcceleratorPolicy, BuiltinAsyncBehavior,
+    BuiltinBindingDeclaration, BuiltinCatalogEntry, BuiltinCatalogIdentity, BuiltinCompatibility,
+    BuiltinCompletionPolicy, BuiltinContractDeclaration, BuiltinContractMaturity,
+    BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
+    BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
@@ -197,7 +198,9 @@ pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &FULL_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Array(ArrayInferenceRule::Full),
+        inference_rule: BuiltinInferenceRule::Array(ArrayInferenceRule::Creation(
+            ArrayCreationInferenceRule::Full,
+        )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Pure,
@@ -386,7 +389,9 @@ pub const ZEROS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &ZEROS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Array(ArrayInferenceRule::Zeros),
+        inference_rule: BuiltinInferenceRule::Array(ArrayInferenceRule::Creation(
+            ArrayCreationInferenceRule::Zeros,
+        )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Pure,

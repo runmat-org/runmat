@@ -156,14 +156,35 @@ if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/definition
 
 const inferenceRootPath = "crates/runmat-builtins/src/catalog/inference.rs";
 const inferenceRootLines = read(inferenceRootPath).split("\n").length;
-if (inferenceRootLines > 256) {
-  fail(`${inferenceRootPath} must remain a domain router and shared boundary (found ${inferenceRootLines} lines; maximum 256)`);
+if (inferenceRootLines > 128) {
+  fail(`${inferenceRootPath} must remain a domain router (found ${inferenceRootLines} lines; maximum 128)`);
 }
 for (const { path: sourcePath, text } of rustSources("crates/runmat-builtins/src/catalog/inference")) {
   const lines = text.split("\n").length;
-  if (lines > 768) {
-    fail(`${sourcePath} exceeds the bounded inference-family size (found ${lines} lines; maximum 768)`);
+  if (lines > 600) {
+    fail(`${sourcePath} exceeds the bounded inference-family size (found ${lines} lines; maximum 600)`);
   }
+  if (/entry\.identity\.name\s*(?:==|!=)|match\s+entry\.identity\.name|matches!\s*\(\s*entry\.identity\.name/.test(text)) {
+    fail(`${sourcePath} dispatches inference semantics from a builtin name; add a closed typed rule and route it to its domain module`);
+  }
+  if (
+    sourcePath.includes("/inference/routing/") &&
+    lines > 128
+  ) {
+    fail(`${sourcePath} must remain a thin typed router (found ${lines} lines; maximum 128)`);
+  }
+  if (
+    sourcePath.endsWith("/mod.rs") &&
+    lines > 256
+  ) {
+    fail(`${sourcePath} must remain a bounded module router (found ${lines} lines; maximum 256)`);
+  }
+}
+
+const legacyCatalogTestsPath = "crates/runmat-builtins/src/catalog/tests.rs";
+const legacyCatalogTestLines = read(legacyCatalogTestsPath).split("\n").length;
+if (legacyCatalogTestLines > 4561) {
+  fail(`${legacyCatalogTestsPath} is a legacy centralized test boundary and must only shrink (found ${legacyCatalogTestLines} lines; ceiling 4561); put new tests beside their owning catalog, inference, or validation module`);
 }
 
 if (failed) process.exit(1);

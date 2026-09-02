@@ -67,10 +67,27 @@ pub enum AggregateInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ArrayInferenceRule {
+    Creation(ArrayCreationInferenceRule),
+    Introspection(ArrayIntrospectionInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ArrayCreationInferenceRule {
     Full,
-    ShapePredicate(ShapePredicate),
-    ShapeScalarQuery(ShapeScalarQuery),
     Zeros,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ArrayIntrospectionInferenceRule {
+    ShapePredicate(ShapePredicate),
+    ShapeQuery(ShapeQuery),
+    ShapeScalarQuery(ShapeScalarQuery),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ShapeQuery {
+    Size,
+    ElementCount,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

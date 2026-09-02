@@ -1,4 +1,6 @@
-use super::{argument_error, default_double_scalar, finish_fixed, literal_text, numeric_kind};
+use super::super::{
+    argument_error, default_double_scalar, finish_fixed, literal_text, numeric_kind,
+};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     CallInference, CallRequest, DynamicReason, LiteralValue, NumericClass, NumericDomain,

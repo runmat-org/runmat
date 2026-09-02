@@ -11,5 +11,6 @@ pub(crate) mod length;
 pub(crate) mod ndims;
 pub(crate) mod numel;
 mod shape_predicate;
+mod shape_query;
 mod shape_scalar_query;
 pub(crate) mod size;

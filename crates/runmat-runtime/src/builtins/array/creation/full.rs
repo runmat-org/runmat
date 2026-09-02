@@ -319,7 +319,11 @@ pub(crate) mod tests {
             .expect("canonical full catalog entry");
         assert_eq!(
             entry.contract.inference_rule,
-            runmat_builtins::BuiltinInferenceRule::Array(runmat_builtins::ArrayInferenceRule::Full)
+            runmat_builtins::BuiltinInferenceRule::Array(
+                runmat_builtins::ArrayInferenceRule::Creation(
+                    runmat_builtins::ArrayCreationInferenceRule::Full,
+                ),
+            )
         );
         assert!(runmat_builtins::builtin_function_by_name("full").is_none());
     }

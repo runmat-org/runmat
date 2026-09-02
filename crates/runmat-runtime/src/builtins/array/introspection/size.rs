@@ -1,24 +1,16 @@
-//! MATLAB-compatible `size` builtin with GPU-aware semantics for RunMat.
+//! MATLAB-compatible `size` execution binding.
 
-use crate::builtins::common::shape::{dims_to_row_tensor, value_dimensions};
+use super::shape_query::{
+    exact_double, parse_dimension_arguments, row_vector, DimensionSelectorError,
+    EmptySelectorPolicy, StructuralOutputError, VisibleDimensions,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
-use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
-use runmat_macros::runtime_builtin;
-use runmat_value::{Tensor, Value};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::{BuiltinErrorDescriptor, SIZE_CATALOG_ENTRY};
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::size")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -33,8 +25,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Reads dimension metadata from tensor handles; no kernels or provider hooks are required.",
+    notes: "Reads validated host, resident, or distributed shape metadata without provider dispatch or payload transfer; returns host double values.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::introspection::size")]
@@ -45,538 +36,235 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Metadata query; fusion planner bypasses this builtin.",
+    notes: "Host metadata query that forms a fusion boundary.",
 };
 
-fn size_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("size").build()
-}
-
-fn vector_len_from_type(ty: &Type) -> Option<usize> {
-    let shape = match ty {
-        Type::Tensor { shape: Some(shape) } => Some(shape.as_slice()),
-        Type::Logical { shape: Some(shape) } => Some(shape.as_slice()),
-        _ => None,
-    }?;
-    match shape {
-        [Some(len)] => Some(*len),
-        [Some(rows), Some(cols)] if *rows == 1 => Some(*cols),
-        [Some(rows), Some(cols)] if *cols == 1 => Some(*rows),
-        _ => None,
-    }
-}
-
-fn normalized_rank(shape: &[Option<usize>]) -> usize {
-    shape.len().max(2)
-}
-
-fn size_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    if args.len() == 1 {
-        let rank = match input {
-            Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-                normalized_rank(shape)
-            }
-            Type::Num | Type::Int | Type::Bool => 2,
-            _ => return Type::tensor(),
-        };
-        return Type::Tensor {
-            shape: Some(vec![Some(1), Some(rank)]),
-        };
-    }
-
-    if let Some(len) = vector_len_from_type(&args[1]) {
-        return Type::Tensor {
-            shape: Some(vec![Some(1), Some(len)]),
-        };
-    }
-
-    if matches!(args[1], Type::Num | Type::Int | Type::Bool) {
-        return Type::Int;
-    }
-
-    Type::tensor()
-}
-
-const SIZE_OUTPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sz",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Row vector of dimension extents.",
-}];
-
-const SIZE_OUTPUT_SCALAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "d",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Extent for selected dimension.",
-}];
-
-const SIZE_OUTPUT_MULTI: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "d",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Per-dimension outputs when multiple outputs are requested.",
-}];
-
-const SIZE_SIG_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to inspect.",
-}];
-
-const SIZE_SIG_DIM_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input value to inspect.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector (scalar or vector).",
-    },
-];
-
-const SIZE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "sz = size(A)",
-        inputs: &SIZE_SIG_INPUTS,
-        outputs: &SIZE_OUTPUT_SINGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[d1,d2,...] = size(A)",
-        inputs: &SIZE_SIG_INPUTS,
-        outputs: &SIZE_OUTPUT_MULTI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = size(A, dim)",
-        inputs: &SIZE_SIG_DIM_INPUTS,
-        outputs: &SIZE_OUTPUT_SCALAR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "sz = size(A, [dim1 dim2 ...])",
-        inputs: &SIZE_SIG_DIM_INPUTS,
-        outputs: &SIZE_OUTPUT_SINGLE,
-    },
-];
-
-const SIZE_INTEGER_ARRAY_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer array classes are inspected through shape metadata; no element payload or floating conversion is required.",
-    }];
-const SIZE_INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim or dimensions",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Scalar and vector selectors are decoded exactly from authoritative integer storage, including documented empty dimension vectors.",
-    }];
-pub const SIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "sz = size(integer_A)",
-        inputs: &SIZE_INTEGER_ARRAY_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The result uses MATLAB's conventional double dimension values and preserves the requested output-count rules.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "sz = size(A, integer_dimensions)",
-        inputs: &SIZE_INTEGER_DIM_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Dimension values are range checked before conversion to platform indices; size(A,[]) returns a 1-by-0 double result.",
-    },
-];
-
-const SIZE_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    BuiltinErrorDescriptor {
-        code: "RM.SIZE.ARG_COUNT",
-        identifier: None,
-        when: "More than two input arguments are provided.",
-        message: "size: too many input arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SIZE.DIM_ARG_TYPE",
-        identifier: None,
-        when: "Dimension selector is not a numeric scalar/vector.",
-        message: "size: dimension argument must be a numeric scalar or vector",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SIZE.DIM_VECTOR_SHAPE",
-        identifier: None,
-        when: "Dimension vector argument is not vector-shaped.",
-        message: "size: dimension vector must be a vector of positive integers",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SIZE.DIM_NON_FINITE",
-        identifier: None,
-        when: "A dimension selector is non-finite.",
-        message: "size: dimension must be finite",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SIZE.DIM_NON_INTEGER",
-        identifier: None,
-        when: "A dimension selector is non-integer.",
-        message: "size: dimension must be an integer",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SIZE.DIM_LT_ONE",
-        identifier: None,
-        when: "A dimension selector is less than one.",
-        message: "size: dimension must be >= 1",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SIZE.OUTPUT_TENSOR_BUILD",
-        identifier: None,
-        when: "Output row vector tensor construction fails.",
-        message: "size: failed to build output",
-    },
-];
-
-pub const SIZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIZE_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SIZE_ERRORS,
-};
-
-#[runtime_builtin(
+#[runmat_macros::runtime_builtin(
     name = "size",
-    category = "array/introspection",
-    summary = "Return array dimension sizes using MATLAB-compatible output forms.",
-    keywords = "size,dimensions,shape,gpu,introspection",
-    type_resolver(size_type),
-    descriptor(crate::builtins::array::introspection::size::SIZE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::introspection::size::SIZE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::introspection::size"
 )]
-async fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let dims = value_dimensions(&value).await?;
-    match rest.len() {
-        0 => {
-            if let Some(out_count) = crate::output_count::current_output_count() {
-                if out_count <= 1 {
-                    return dimensions_to_value(&dims);
-                }
-                return Ok(Value::OutputList(size_outputs(&dims, out_count)));
-            }
-            dimensions_to_value(&dims)
+async fn size_builtin(value: Value, selectors: Vec<Value>) -> BuiltinResult<Value> {
+    let dimensions = VisibleDimensions::from_value(&value)
+        .await
+        .map_err(|detail| descriptor_error(&runmat_builtins::SIZE_ERROR_INTERNAL, detail))?;
+    if selectors.is_empty() {
+        return unselected_size(&dimensions);
+    }
+    let selectors = parse_dimension_arguments(&selectors, EmptySelectorPolicy::Allow)
+        .map_err(selector_error)?;
+    let values = selectors
+        .values()
+        .iter()
+        .map(|dimension| dimensions.extent(*dimension))
+        .collect::<Vec<_>>();
+    selected_size(&values)
+}
+
+fn unselected_size(dimensions: &VisibleDimensions) -> BuiltinResult<Value> {
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(count) if count > 1 => {
+            let values = dimensions.collapsed_outputs(count).ok_or_else(|| {
+                descriptor_error(
+                    &runmat_builtins::SIZE_ERROR_RESULT_NOT_EXACT,
+                    "collapsed dimension product exceeds the structural range",
+                )
+            })?;
+            scalar_outputs(&values)
         }
-        1 => match parse_dim_selection(&rest[0])? {
-            DimSelection::Single(dim) => {
-                let extent = dimension_extent(&dims, dim);
-                Ok(Value::Num(extent as f64))
+        _ => structural_row(dimensions.reported_size()),
+    }
+}
+
+fn selected_size(values: &[u64]) -> BuiltinResult<Value> {
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(count) if count > 1 => {
+            if count != values.len() {
+                return Err(descriptor_error(
+                    &runmat_builtins::SIZE_ERROR_OUTPUT_COUNT,
+                    format!(
+                        "requested {count} outputs for {} queried dimensions",
+                        values.len()
+                    ),
+                ));
             }
-            DimSelection::Multiple(dimensions) => {
-                let extents: Vec<usize> = dimensions
-                    .into_iter()
-                    .map(|dim| dimension_extent(&dims, dim))
-                    .collect();
-                dimensions_to_value(&extents)
-            }
-        },
-        _ => Err(size_error("size: too many input arguments")),
-    }
-}
-
-fn size_outputs(dimensions: &[usize], out_count: usize) -> Vec<Value> {
-    (0..out_count)
-        .map(|idx| Value::Num(dimensions.get(idx).copied().unwrap_or(1) as f64))
-        .collect()
-}
-
-fn dimensions_to_value(dimensions: &[usize]) -> crate::BuiltinResult<Value> {
-    let tensor = dims_to_row_tensor(dimensions)
-        .map_err(|e| size_error(format!("size: failed to build output: {e}")))?;
-    Ok(tensor::tensor_into_value(tensor))
-}
-
-enum DimSelection {
-    Single(usize),
-    Multiple(Vec<usize>),
-}
-
-fn parse_dim_selection(arg: &Value) -> crate::BuiltinResult<DimSelection> {
-    match arg {
-        Value::Int(_) | Value::Num(_) => {
-            let dim = tensor::parse_dimension(arg, "size").map_err(|e| size_error(e))?;
-            Ok(DimSelection::Single(dim))
+            scalar_outputs(values)
         }
-        Value::Tensor(t) => {
-            ensure_dim_vector(t)?;
-            let dims = match tensor::integer_tensor_dimension_vector(t, "size", false) {
-                Some(parsed) => parsed.map_err(size_error)?,
-                None => (0..t.len())
-                    .map(|index| parse_dim_scalar(tensor::tensor_value_f64(t, index)))
-                    .collect::<crate::BuiltinResult<Vec<_>>>()?,
-            };
-            Ok(DimSelection::Multiple(dims))
+        _ if values.len() == 1 => scalar_value(values[0]),
+        _ => structural_row(values),
+    }
+}
+
+fn scalar_outputs(values: &[u64]) -> BuiltinResult<Value> {
+    values
+        .iter()
+        .copied()
+        .map(scalar_value)
+        .collect::<BuiltinResult<Vec<_>>>()
+        .map(Value::OutputList)
+}
+
+fn scalar_value(value: u64) -> BuiltinResult<Value> {
+    exact_double(value).map(Value::Num).ok_or_else(|| {
+        descriptor_error(
+            &runmat_builtins::SIZE_ERROR_RESULT_NOT_EXACT,
+            format!("dimension extent {value} cannot be represented exactly as double"),
+        )
+    })
+}
+
+fn structural_row(values: &[u64]) -> BuiltinResult<Value> {
+    row_vector(values).map_err(|error| match error {
+        StructuralOutputError::NotExactlyRepresentable(value) => descriptor_error(
+            &runmat_builtins::SIZE_ERROR_RESULT_NOT_EXACT,
+            format!("dimension extent {value} cannot be represented exactly as double"),
+        ),
+        StructuralOutputError::Tensor(detail) => {
+            descriptor_error(&runmat_builtins::SIZE_ERROR_INTERNAL, detail)
         }
-        _ => Err(size_error(
-            "size: dimension argument must be a numeric scalar or vector",
-        )),
-    }
+    })
 }
 
-fn ensure_dim_vector(t: &Tensor) -> crate::BuiltinResult<()> {
-    let non_unit_dims = t.shape.iter().filter(|&&dim| dim > 1).count();
-    if non_unit_dims <= 1 {
-        Ok(())
-    } else {
-        Err(size_error(
-            "size: dimension vector must be a vector of positive integers",
-        ))
-    }
+fn selector_error(error: DimensionSelectorError) -> RuntimeError {
+    let descriptor = match error {
+        DimensionSelectorError::ArgumentType | DimensionSelectorError::Empty => {
+            &runmat_builtins::SIZE_ERROR_DIM_ARG_TYPE
+        }
+        DimensionSelectorError::VectorShape => &runmat_builtins::SIZE_ERROR_DIM_VECTOR_SHAPE,
+        DimensionSelectorError::NonFinite => &runmat_builtins::SIZE_ERROR_DIM_NON_FINITE,
+        DimensionSelectorError::NonInteger => &runmat_builtins::SIZE_ERROR_DIM_NON_INTEGER,
+        DimensionSelectorError::LessThanOne => &runmat_builtins::SIZE_ERROR_DIM_LT_ONE,
+        DimensionSelectorError::OutOfRange => &runmat_builtins::SIZE_ERROR_DIM_RANGE,
+        DimensionSelectorError::VectorInScalarList => &runmat_builtins::SIZE_ERROR_DIM_SCALAR_LIST,
+    };
+    descriptor_error(descriptor, descriptor.when)
 }
 
-fn parse_dim_scalar(raw: f64) -> crate::BuiltinResult<usize> {
-    if !raw.is_finite() {
-        return Err(size_error("size: dimension must be finite"));
+fn descriptor_error(
+    descriptor: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {detail}", descriptor.message))
+        .with_builtin(SIZE_CATALOG_ENTRY.identity.name);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
     }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > f64::EPSILON {
-        return Err(size_error("size: dimension must be an integer"));
-    }
-    if rounded < 1.0 {
-        return Err(size_error("size: dimension must be >= 1"));
-    }
-    Ok(rounded as usize)
-}
-
-fn dimension_extent(dimensions: &[usize], dim: usize) -> usize {
-    dimensions.get(dim.saturating_sub(1)).copied().unwrap_or(1)
+    builder.build()
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-    use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_value::IntegerStorage;
+    use runmat_value::{CellArray, IntegerStorage, Tensor};
 
-    fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::size_builtin(value, rest))
+    fn call(value: Value, selectors: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(size_builtin(value, selectors))
     }
-    use runmat_value::Tensor;
+
+    fn assert_row(value: Value, expected: &[f64]) {
+        let Value::Tensor(value) = value else {
+            panic!("expected tensor")
+        };
+        assert_eq!(value.shape, vec![1, expected.len()]);
+        assert_eq!(value.materialize_f64(), expected);
+    }
 
     #[test]
-    fn size_type_infers_row_vector_rank() {
-        let out = size_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
+    fn full_scalar_vector_and_variadic_queries_are_distinct() {
+        let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
+        assert_row(
+            call(Value::Tensor(tensor.clone()), vec![]).unwrap(),
+            &[2.0, 3.0, 4.0],
         );
         assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(3)])
-            }
+            call(Value::Tensor(tensor.clone()), vec![Value::Num(2.0)]).unwrap(),
+            Value::Num(3.0)
+        );
+        let dims = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
+        assert_row(
+            call(Value::Tensor(tensor.clone()), vec![Value::Tensor(dims)]).unwrap(),
+            &[2.0, 4.0],
+        );
+        assert_row(
+            call(
+                Value::Tensor(tensor),
+                vec![Value::Num(1.0), Value::Num(3.0)],
+            )
+            .unwrap(),
+            &[2.0, 4.0],
         );
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn size_matrix_returns_row_vector() {
-        let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-        let result = size_builtin(Value::Tensor(tensor), Vec::new()).expect("size");
-        match result {
-            Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.materialize_f64(), vec![2.0, 3.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+    fn multiple_outputs_collapse_remaining_dimensions() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let tensor = Tensor::new(vec![0.0; 60], vec![3, 4, 5]).unwrap();
+        assert_eq!(
+            call(Value::Tensor(tensor), vec![]).unwrap(),
+            Value::OutputList(vec![Value::Num(3.0), Value::Num(20.0)])
+        );
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn size_with_dimension_scalar_returns_extent() {
-        let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
-        let result = size_builtin(Value::Tensor(tensor), vec![Value::from(1.0)]).expect("size dim");
-        match result {
-            Value::Num(v) => assert_eq!(v, 2.0),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
+    fn one_output_omits_trailing_singleton_dimensions() {
+        let tensor = Tensor::new(vec![0.0; 6], vec![2, 3, 1, 1]).unwrap();
+        assert_row(call(Value::Tensor(tensor), vec![]).unwrap(), &[2.0, 3.0]);
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn size_with_dimension_vector_returns_row_vector() {
+    fn selected_multiple_outputs_must_match_query_count() {
+        let _guard = crate::output_count::push_output_count(Some(2));
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
-        let dims_arg = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
-        let result = size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims_arg)])
-            .expect("size dims vector");
-        match result {
-            Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.materialize_f64(), vec![2.0, 4.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn size_gpu_tensor_uses_handle_shape() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let result = size_builtin(Value::GpuTensor(handle), Vec::new()).expect("size gpu");
-            match result {
-                Value::Tensor(out) => {
-                    assert_eq!(out.shape, vec![1, 2]);
-                    assert_eq!(out.materialize_f64(), vec![2.0, 4.0]);
-                }
-                other => panic!("expected tensor result, got {other:?}"),
-            }
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn size_wgpu_preserves_shape_metadata() {
-        struct EnvGuard(Option<String>);
-        impl Drop for EnvGuard {
-            fn drop(&mut self) {
-                match &self.0 {
-                    Some(prev) => std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", prev.as_str()),
-                    None => std::env::remove_var("RUNMAT_WGPU_FORCE_PRECISION"),
-                }
-            }
-        }
-        let previous = std::env::var("RUNMAT_WGPU_FORCE_PRECISION").ok();
-        std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
-        let _guard = EnvGuard(previous);
-
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        let dims = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
+        assert_eq!(
+            call(Value::Tensor(tensor.clone()), vec![Value::Tensor(dims)]).unwrap(),
+            Value::OutputList(vec![Value::Num(2.0), Value::Num(4.0)])
         );
-
-        let tensor = Tensor::new(vec![0.0; 12], vec![3, 4]).unwrap();
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
-        };
-
-        let handle = runmat_accelerate_api::provider()
-            .expect("wgpu provider")
-            .upload(&view)
-            .expect("upload to device");
-
-        let result = size_builtin(Value::GpuTensor(handle), Vec::new()).expect("size");
-        match result {
-            Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.materialize_f64(), vec![3.0, 4.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        assert!(call(Value::Tensor(tensor), vec![Value::Num(1.0)]).is_err());
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn size_rejects_non_numeric_dimension() {
-        let err = size_builtin(Value::Num(1.0), vec![Value::from("dim")]).unwrap_err();
-        assert!(
-            err.to_string().contains("dimension argument"),
-            "unexpected error: {err}"
+    fn empty_and_wide_integer_selectors_preserve_structural_semantics() {
+        let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
+        let empty = Tensor::new(vec![], vec![1, 0]).unwrap();
+        assert_row(
+            call(Value::Tensor(tensor.clone()), vec![Value::Tensor(empty)]).unwrap(),
+            &[],
+        );
+        let wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap();
+        assert_eq!(
+            call(Value::Tensor(tensor), vec![Value::Tensor(wide)]).unwrap(),
+            Value::Num(1.0)
         );
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn size_dimension_beyond_rank_returns_one() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result = size_builtin(Value::Tensor(tensor), vec![Value::from(5.0)]).expect("size dim");
-        match result {
-            Value::Num(v) => assert_eq!(v, 1.0),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
-    }
+    fn cell_table_and_resident_values_use_outer_metadata() {
+        let cell = CellArray::new(vec![Value::Num(0.0); 6], 2, 3).unwrap();
+        assert_row(call(Value::Cell(cell), vec![]).unwrap(), &[2.0, 3.0]);
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn size_dimension_vector_reads_integer_tensor_exactly() {
-        let large = 9_007_199_254_740_993_u64;
-        let dims = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("dims");
-        match parse_dim_selection(&Value::Tensor(dims)).expect("parse dims") {
-            DimSelection::Multiple(parsed) => assert_eq!(parsed, vec![large as usize]),
-            DimSelection::Single(_) => panic!("expected vector dimension selection"),
-        }
-    }
+        crate::builtins::table::ensure_table_class_registered();
+        let table = crate::builtins::table::table_from_columns(
+            vec!["A".into(), "B".into()],
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
+                Value::Tensor(Tensor::new(vec![4.0, 5.0, 6.0], vec![3, 1]).unwrap()),
+            ],
+        )
+        .unwrap();
+        assert_row(call(table, vec![]).unwrap(), &[3.0, 2.0]);
 
-    #[test]
-    fn size_dimension_vector_reads_native_single_storage() {
-        let dims = Tensor::from_f32(vec![1.0, 3.0], vec![1, 2]).unwrap();
-        match parse_dim_selection(&Value::Tensor(dims)).expect("parse dims") {
-            DimSelection::Multiple(parsed) => assert_eq!(parsed, vec![1, 3]),
-            DimSelection::Single(_) => panic!("expected vector dimension selection"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn size_dimension_vector_requires_positive_integers() {
-        let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
-        let dims = Tensor::new(vec![1.0, 2.5], vec![1, 2]).unwrap();
-        let err = size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)])
-            .expect_err("non-int dim");
-        assert!(err.to_string().contains("dimension must be an integer"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn size_dimension_vector_must_not_be_matrix() {
-        let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
-        let dims = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)])
-            .expect_err("matrix dims");
-        assert!(err
-            .to_string()
-            .contains("dimension vector must be a vector"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn size_empty_dimension_vector_returns_empty_row() {
-        let tensor = Tensor::new(vec![0.0; 8], vec![2, 4]).unwrap();
-        let dims = Tensor::new(vec![], vec![1, 0]).unwrap();
-        let result =
-            size_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("empty dims");
-        let Value::Tensor(output) = result else {
-            panic!("expected empty tensor result");
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![7, 9],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
         };
-        assert_eq!(output.shape, vec![1, 0]);
-        assert!(output.is_empty());
+        assert_row(call(Value::GpuTensor(handle), vec![]).unwrap(), &[7.0, 9.0]);
     }
 }
