@@ -20,7 +20,7 @@ use runmat_value::{
 };
 
 use super::log::{log_complex_parts, log_complex_parts_f32};
-use super::logarithm_common::{probe_gpu_complex_requirement, GpuComplexRequirement};
+use super::logarithm_common::{probe_gpu_lower_bound, GpuLowerBoundResult};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -206,11 +206,11 @@ async fn log10_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         };
         return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
     }
-    match probe_gpu_complex_requirement(provider, &handle, 0.0)
+    match probe_gpu_lower_bound(provider, &handle, 0.0)
         .await
         .map_err(|error| log10_error_with_detail(&LOG10_ERROR_INTERNAL, error.to_string()))?
     {
-        GpuComplexRequirement::Required => {
+        GpuLowerBoundResult::Below => {
             if runmat_accelerate_api::handle_is_explicit(&handle) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LOG10_EXPLICIT_GPU_COMPLEX_EXTENSION,
@@ -224,7 +224,7 @@ async fn log10_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             let result = log10_tensor(gathered)?;
             return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
         }
-        GpuComplexRequirement::NotRequired => {
+        GpuLowerBoundResult::AtOrAbove => {
             let provider_result = provider.unary_log10(&handle).await;
             gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
             match provider_result {
@@ -238,7 +238,7 @@ async fn log10_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             }
         }
-        GpuComplexRequirement::Unknown => {}
+        GpuLowerBoundResult::Unknown => {}
     }
     let gathered = gpu_helpers::gather_tensor_async(&handle).await;
     gpu_helpers::restore_handle_metadata(&handle, &input_metadata);

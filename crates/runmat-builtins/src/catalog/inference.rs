@@ -55,6 +55,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Math(MathInferenceRule::Gamma) => {
             math_special::infer_gamma(request, entry)
         }
+        BuiltinInferenceRule::Math(MathInferenceRule::GammaLn) => {
+            math_special::infer_gammaln(request, entry)
+        }
         BuiltinInferenceRule::Math(MathInferenceRule::PhaseAngle) => {
             math_unary::infer_phase_angle(request, entry)
         }

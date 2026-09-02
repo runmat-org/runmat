@@ -19,7 +19,7 @@ use runmat_value::{
 };
 
 use super::log::{log_complex_parts, log_complex_parts_f32};
-use super::logarithm_common::{probe_gpu_complex_requirement, GpuComplexRequirement};
+use super::logarithm_common::{probe_gpu_lower_bound, GpuLowerBoundResult};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -337,11 +337,11 @@ async fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             .build()
     })?;
     let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
-    match probe_gpu_complex_requirement(owner, &handle, 0.0)
+    match probe_gpu_lower_bound(owner, &handle, 0.0)
         .await
         .map_err(|error| log2_error_with_detail(&LOG2_ERROR_INTERNAL, error.to_string()))?
     {
-        GpuComplexRequirement::NotRequired => {
+        GpuLowerBoundResult::AtOrAbove => {
             let provider_result = owner.unary_log2(&handle).await;
             gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
             match provider_result {
@@ -369,7 +369,7 @@ async fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             }
         }
-        GpuComplexRequirement::Required => {
+        GpuLowerBoundResult::Below => {
             gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
             if runmat_accelerate_api::handle_is_explicit(&handle) {
                 return Err(build_runtime_error(LOG2_ERROR_GPU_COMPLEX_INPUT.message)
@@ -387,7 +387,7 @@ async fn log2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             return log2_tensor(tensor);
         }
-        GpuComplexRequirement::Unknown => {
+        GpuLowerBoundResult::Unknown => {
             gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
         }
     }
