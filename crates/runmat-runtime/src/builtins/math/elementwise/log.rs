@@ -26,7 +26,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::elementwise::logarithm_common::{
-    probe_gpu_complex_requirement, GpuComplexRequirement,
+    probe_gpu_lower_bound, GpuLowerBoundResult,
 };
 use crate::builtins::math::symbolic::symbolic_function;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -211,11 +211,11 @@ async fn log_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         };
         return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
     }
-    match probe_gpu_complex_requirement(provider, &handle, 0.0)
+    match probe_gpu_lower_bound(provider, &handle, 0.0)
         .await
         .map_err(|error| log_error_with_detail(&LOG_ERROR_INTERNAL, error.to_string()))?
     {
-        GpuComplexRequirement::Required => {
+        GpuLowerBoundResult::Below => {
             if runmat_accelerate_api::handle_is_explicit(&handle) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LOG_EXPLICIT_GPU_COMPLEX_EXTENSION,
@@ -229,7 +229,7 @@ async fn log_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             let result = log_tensor_real(gathered)?;
             return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
         }
-        GpuComplexRequirement::NotRequired => {
+        GpuLowerBoundResult::AtOrAbove => {
             let provider_result = provider.unary_log(&handle).await;
             gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
             match provider_result {
@@ -243,7 +243,7 @@ async fn log_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             }
         }
-        GpuComplexRequirement::Unknown => {}
+        GpuLowerBoundResult::Unknown => {}
     }
     let gathered = gpu_helpers::gather_tensor_async(&handle).await;
     gpu_helpers::restore_handle_metadata(&handle, &input_metadata);

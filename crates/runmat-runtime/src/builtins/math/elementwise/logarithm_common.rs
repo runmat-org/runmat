@@ -3,9 +3,9 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use crate::builtins::common::gpu_helpers;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum GpuComplexRequirement {
-    Required,
-    NotRequired,
+pub(super) enum GpuLowerBoundResult {
+    Below,
+    AtOrAbove,
     Unknown,
 }
 
@@ -32,19 +32,18 @@ impl std::fmt::Display for GpuDomainProbeError {
     }
 }
 
-/// Determine whether any real input value falls below the boundary at which
-/// a logarithm must produce a complex result.
+/// Determine whether any real input value falls below a caller-defined bound.
 ///
 /// A provider that does not implement `reduce_min` leaves the requirement
 /// unknown so the caller can gather safely. Any other provider failure is
 /// returned and must remain visible to the user.
-pub(super) async fn probe_gpu_complex_requirement(
+pub(super) async fn probe_gpu_lower_bound(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
     complex_below: f64,
-) -> Result<GpuComplexRequirement, GpuDomainProbeError> {
+) -> Result<GpuLowerBoundResult, GpuDomainProbeError> {
     if handle.shape.iter().product::<usize>() == 0 {
-        return Ok(GpuComplexRequirement::NotRequired);
+        return Ok(GpuLowerBoundResult::AtOrAbove);
     }
 
     let input_metadata = gpu_helpers::snapshot_handle_metadata(handle);
@@ -53,7 +52,7 @@ pub(super) async fn probe_gpu_complex_requirement(
     let minimum = match reduction {
         Ok(handle) => handle,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-            return Ok(GpuComplexRequirement::Unknown)
+            return Ok(GpuLowerBoundResult::Unknown)
         }
         Err(error) => return Err(GpuDomainProbeError::ProviderReduce(error)),
     };
@@ -79,11 +78,11 @@ pub(super) async fn probe_gpu_complex_requirement(
     gpu_helpers::free_unprotected_exact_owner(&minimum, &[handle]);
     let host = host.map_err(|error| GpuDomainProbeError::ProviderDownload(Box::new(error)))?;
     if host.data.iter().any(|value| value.is_nan()) {
-        return Ok(GpuComplexRequirement::Unknown);
+        return Ok(GpuLowerBoundResult::Unknown);
     }
     if host.data.iter().any(|value| *value < complex_below) {
-        Ok(GpuComplexRequirement::Required)
+        Ok(GpuLowerBoundResult::Below)
     } else {
-        Ok(GpuComplexRequirement::NotRequired)
+        Ok(GpuLowerBoundResult::AtOrAbove)
     }
 }

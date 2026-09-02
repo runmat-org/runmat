@@ -27,7 +27,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::elementwise::logarithm_common::{
-    probe_gpu_complex_requirement, GpuComplexRequirement,
+    probe_gpu_lower_bound, GpuLowerBoundResult,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -171,7 +171,7 @@ async fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
     }
     match detect_gpu_complex_requirement(provider, &handle).await? {
-        GpuComplexRequirement::Required => {
+        GpuLowerBoundResult::Below => {
             if runmat_accelerate_api::handle_is_explicit(&handle) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LOG1P_EXPLICIT_GPU_COMPLEX_EXTENSION,
@@ -185,7 +185,7 @@ async fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             let result = log1p_real(Value::Tensor(gathered))?;
             return gpu_helpers::restore_class_preserving_value(&handle, result, BUILTIN_NAME);
         }
-        GpuComplexRequirement::NotRequired => {
+        GpuLowerBoundResult::AtOrAbove => {
             let provider_result = provider.unary_log1p(&handle).await;
             gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
             match provider_result {
@@ -199,7 +199,7 @@ async fn log1p_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             }
         }
-        GpuComplexRequirement::Unknown => {}
+        GpuLowerBoundResult::Unknown => {}
     }
     let gathered = gpu_helpers::gather_tensor_async(&handle).await;
     gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
@@ -252,8 +252,8 @@ fn validate_log1p_gpu_output(
 async fn detect_gpu_complex_requirement(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> BuiltinResult<GpuComplexRequirement> {
-    probe_gpu_complex_requirement(provider, handle, -1.0)
+) -> BuiltinResult<GpuLowerBoundResult> {
+    probe_gpu_lower_bound(provider, handle, -1.0)
         .await
         .map_err(|error| log1p_error_with_detail(&LOG1P_ERROR_INTERNAL, error.to_string()))
 }
