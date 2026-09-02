@@ -143,6 +143,99 @@ pub(super) fn infer_atan2(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
     finish_fixed(entry, request, output, diagnostics)
 }
 
+pub(super) fn infer_hypot(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let mut diagnostics = Vec::new();
+    if request.arguments.len() != 2 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-HYPOT-ARITY",
+            "hypot requires exactly two inputs",
+            request.arguments.len().min(1),
+        ));
+    }
+    let Some(left) = request.arguments.first() else {
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+    let Some(right) = request.arguments.get(1) else {
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+
+    if matches!(left.storage, StorageFact::Sparse) || matches!(right.storage, StorageFact::Sparse) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-HYPOT-SPARSE",
+            "hypot does not currently accept sparse input",
+            usize::from(!matches!(left.storage, StorageFact::Sparse)),
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    }
+    let left_numeric = numeric_input(&left.kind);
+    let right_numeric = numeric_input(&right.kind);
+    let Some(left_numeric) = left_numeric else {
+        if !matches!(left.kind, ValueKindFact::Unknown) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-HYPOT-INPUT",
+                "hypot requires single, double, or complex-floating input; RunMat mode also accepts integer, logical, and character input",
+                0,
+            ));
+        }
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    };
+    let Some(right_numeric) = right_numeric else {
+        if !matches!(right.kind, ValueKindFact::Unknown) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-HYPOT-INPUT",
+                "hypot requires single, double, or complex-floating input; RunMat mode also accepts integer, logical, and character input",
+                1,
+            ));
+        }
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    };
+
+    let class = if left_numeric.class == NumericClass::Single
+        && right_numeric.class == NumericClass::Single
+    {
+        NumericClass::Single
+    } else {
+        NumericClass::Double
+    };
+    let mut output = ValueFact::unknown(DynamicReason::RuntimeValue);
+    output.kind = numeric_kind(class, NumericDomain::Real);
+    output.shape = match broadcast_shape(&left.shape, &right.shape) {
+        Ok(shape) => shape,
+        Err(diagnostic) => {
+            diagnostics.push(diagnostic);
+            ShapeFact::Unknown
+        }
+    };
+    materialize(&mut output);
+    output.residency = preserved_binary_residency(&left.residency, &right.residency);
+    finish_fixed(entry, request, output, diagnostics)
+}
+
 fn infer_object_remainder(
     left: &ValueFact,
     right: &ValueFact,

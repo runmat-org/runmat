@@ -50,6 +50,7 @@ pub enum IntrospectionInferenceRule {
 pub enum MathInferenceRule {
     Abs,
     Atan2,
+    Hypot,
     PhaseAngle,
     Exp,
     Expm1,

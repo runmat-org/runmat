@@ -1,13 +1,10 @@
 //! MATLAB-compatible `hypot` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, HYPOT_CHARACTER_INPUT_EXTENSION, HYPOT_ERROR_INTERNAL,
+    HYPOT_ERROR_INVALID_INPUT, HYPOT_ERROR_SIZE_MISMATCH, HYPOT_ERROR_TOO_MANY_OUTPUTS,
+    HYPOT_INTEGER_INPUT_EXTENSION, HYPOT_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, NumericStorage, Tensor, Value};
@@ -18,9 +15,8 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{
-    broadcast::BroadcastPlan, gpu_helpers, map_control_flow_with_builtin, tensor,
+    binary as common_binary, broadcast::BroadcastPlan, gpu_helpers, tensor,
 };
-use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::hypot")]
@@ -62,123 +58,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "hypot";
 
-const HYPOT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "R",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Elementwise Euclidean norm result.",
-}];
-
-const HYPOT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right operand.",
-    },
-];
-
-const HYPOT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "R = hypot(X, Y)",
-    inputs: &HYPOT_INPUTS,
-    outputs: &HYPOT_OUTPUT,
-}];
-
-const HYPOT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HYPOT.INVALID_INPUT",
-    identifier: Some("RunMat:hypot:InvalidInput"),
-    when: "Input value cannot be converted to supported numeric form.",
-    message: "hypot: invalid input",
-};
-
-const HYPOT_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HYPOT.SIZE_MISMATCH",
-    identifier: Some("RunMat:hypot:SizeMismatch"),
-    when: "Operands are not broadcast-compatible.",
-    message: "hypot: size mismatch",
-};
-
-const HYPOT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HYPOT.INTERNAL",
-    identifier: Some("RunMat:hypot:Internal"),
-    when: "Internal gather/provider/tensor construction failed.",
-    message: "hypot: internal error",
-};
-
-const HYPOT_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    HYPOT_ERROR_INVALID_INPUT,
-    HYPOT_ERROR_SIZE_MISMATCH,
-    HYPOT_ERROR_INTERNAL,
-];
-
-const HYPOT_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "hypot-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "hypot with integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:HypotIntegerInputExtension"),
-};
-const HYPOT_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "hypot-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "hypot with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:HypotLogicalInputExtension"),
-};
-const HYPOT_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "hypot-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "hypot with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:HypotCharacterInputExtension"),
-};
-const HYPOT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    HYPOT_INTEGER_INPUT_EXTENSION,
-    HYPOT_LOGICAL_INPUT_EXTENSION,
-    HYPOT_CHARACTER_INPUT_EXTENSION,
-];
-
-const HYPOT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are accepted only in RunMat extension mode after exact binary64 validation.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are accepted only in RunMat extension mode after exact binary64 validation.",
-    },
-];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "R = hypot(integer_X, Y) or hypot(X, integer_Y)",
-        inputs: &HYPOT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
-        notes: "Each admitted integer operand crosses an exact binary64 boundary before stable hypot evaluation. Resident integers gather exactly through their owners and never reach floating provider hooks.",
-    }];
-
-pub const HYPOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HYPOT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HYPOT_ERRORS,
-};
-
 fn hypot_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl std::fmt::Display,
@@ -206,17 +85,11 @@ fn hypot_terminal_error(
 
 #[runtime_builtin(
     name = "hypot",
-    category = "math/elementwise",
-    summary = "Compute element-wise Euclidean norms with hypot.",
-    keywords = "hypot,euclidean norm,distance,gpu",
-    accel = "binary",
-    type_resolver(numeric_binary_type),
-    descriptor(crate::builtins::math::elementwise::hypot::HYPOT_DESCRIPTOR),
-    extensions(HYPOT_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::elementwise::hypot::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::hypot"
 )]
 async fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    reject_excess_outputs()?;
     ensure_hypot_extensions(&lhs, &rhs)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&lhs, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
@@ -236,40 +109,43 @@ async fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     }
 }
 
+fn reject_excess_outputs() -> BuiltinResult<()> {
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        return Err(hypot_error_with_detail(
+            &HYPOT_ERROR_TOO_MANY_OUTPUTS,
+            "only one output is defined",
+        ));
+    }
+    Ok(())
+}
+
 async fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
     let has_integer_input = runmat_accelerate_api::handle_integer_type(&a).is_some()
         || runmat_accelerate_api::handle_integer_type(&b).is_some();
-    let provider = runmat_accelerate_api::provider_for_handle(&a).ok_or_else(|| {
-        hypot_terminal_error(
-            &HYPOT_ERROR_INTERNAL,
-            "GPU provider unavailable for left input",
-        )
-    })?;
-    let right_provider = runmat_accelerate_api::provider_for_handle(&b).ok_or_else(|| {
-        hypot_terminal_error(
-            &HYPOT_ERROR_INTERNAL,
-            "GPU provider unavailable for right input",
-        )
-    })?;
-    let same_owner = std::ptr::eq(provider, right_provider);
+    let provider = gpu_helpers::exact_provider_for_binary_inputs(&a, &b)
+        .map_err(|error| hypot_terminal_error(&HYPOT_ERROR_INVALID_INPUT, error))?;
     let real_floating = !has_integer_input
         && !runmat_accelerate_api::handle_is_logical(&a)
         && !runmat_accelerate_api::handle_is_logical(&b)
         && runmat_accelerate_api::handle_storage(&a) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_storage(&b) == GpuTensorStorage::Real;
-    if same_owner && real_floating && a.shape == b.shape {
+    if real_floating && common_binary::matching_physical_inputs(&a, &b) {
         match provider.elem_hypot(&a, &b).await {
-            Ok(handle) if valid_hypot_gpu_output(&handle, &a, &b, provider) => {
-                return Ok(gpu_helpers::resident_gpu_value(handle));
-            }
             Ok(handle) => {
-                free_rejected_hypot_output(&handle, &[&a, &b]);
-                return Err(hypot_terminal_error(
-                    &HYPOT_ERROR_INTERNAL,
-                    "provider elem_hypot returned malformed output",
-                ));
+                let contract = gpu_helpers::BinaryGpuOutputContract {
+                    shape: a.shape.clone(),
+                    storage: GpuTensorStorage::Real,
+                    precision: runmat_accelerate_api::handle_precision(&a),
+                    integer: None,
+                    logical: false,
+                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+                };
+                return common_binary::validate_resident_output(
+                    provider, &a, &b, handle, &contract,
+                )
+                .map_err(|error| hypot_terminal_error(&HYPOT_ERROR_INTERNAL, error));
             }
-            Err(err) if hypot_provider_operation_unsupported(&err, "elem_hypot") => {}
+            Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => {}
             Err(err) => {
                 return Err(hypot_terminal_error(
                     &HYPOT_ERROR_INTERNAL,
@@ -278,12 +154,8 @@ async fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult
             }
         }
     }
-    let left = gpu_helpers::download_value_preserving_residency_async(provider, &a)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    let right = gpu_helpers::download_value_preserving_residency_async(right_provider, &b)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    let left = Value::Tensor(gpu_helpers::gather_tensor_async(&a).await?);
+    let right = Value::Tensor(gpu_helpers::gather_tensor_async(&b).await?);
     crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
         &left,
         BUILTIN_NAME,
@@ -293,7 +165,20 @@ async fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult
         BUILTIN_NAME,
     )?;
     let output = hypot_host(left, right)?;
-    restore_hypot_gpu_output(provider, &a, output)
+    let prototype = if runmat_accelerate_api::handle_is_explicit(&b)
+        && !runmat_accelerate_api::handle_is_explicit(&a)
+    {
+        &b
+    } else {
+        &a
+    };
+    crate::builtins::math::trigonometry::inverse_helpers::upload_value_like_protected(
+        provider,
+        output,
+        BUILTIN_NAME,
+        prototype,
+        &[a.clone(), b.clone()],
+    )
 }
 
 async fn hypot_gpu_host(
@@ -301,12 +186,10 @@ async fn hypot_gpu_host(
     host: Value,
     gpu_is_left: bool,
 ) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
         hypot_terminal_error(&HYPOT_ERROR_INTERNAL, "GPU provider unavailable for input")
     })?;
-    let gathered = gpu_helpers::download_value_preserving_residency_async(provider, &handle)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    let gathered = Value::Tensor(gpu_helpers::gather_tensor_async(&handle).await?);
     crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
         &gathered,
         BUILTIN_NAME,
@@ -316,7 +199,13 @@ async fn hypot_gpu_host(
     } else {
         hypot_host(host, gathered)?
     };
-    restore_hypot_gpu_output(provider, &handle, output)
+    crate::builtins::math::trigonometry::inverse_helpers::upload_value_like_protected(
+        provider,
+        output,
+        BUILTIN_NAME,
+        &handle,
+        std::slice::from_ref(&handle),
+    )
 }
 
 fn ensure_hypot_extensions(lhs: &Value, rhs: &Value) -> BuiltinResult<()> {
@@ -347,112 +236,6 @@ fn ensure_hypot_extensions(lhs: &Value, rhs: &Value) -> BuiltinResult<()> {
         }
     }
     Ok(())
-}
-
-fn hypot_provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {
-    error
-        .chain()
-        .any(|cause| cause.to_string() == format!("{operation} not supported by provider"))
-}
-
-fn restore_hypot_gpu_output(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    input: &GpuTensorHandle,
-    value: Value,
-) -> BuiltinResult<Value> {
-    let tensor = match value {
-        Value::Tensor(tensor) => tensor,
-        Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
-            .map_err(|source| hypot_terminal_error(&HYPOT_ERROR_INTERNAL, source))?,
-        other => {
-            return Err(hypot_terminal_error(
-                &HYPOT_ERROR_INTERNAL,
-                format!("unexpected host fallback result {other:?}"),
-            ));
-        }
-    };
-    let expected_precision = match tensor.numeric_dtype() {
-        runmat_value::NumericDType::F32 => ProviderPrecision::F32,
-        _ => ProviderPrecision::F64,
-    };
-    if provider.precision() != expected_precision {
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-    let expected_shape = tensor.shape.clone();
-    let output = gpu_helpers::upload_tensor(provider, &tensor).map_err(|source| {
-        hypot_terminal_error(
-            &HYPOT_ERROR_INTERNAL,
-            format!("failed to restore fallback result to input provider: {source}"),
-        )
-    })?;
-    if !valid_restored_hypot_output(
-        &output,
-        input,
-        provider,
-        &expected_shape,
-        expected_precision,
-    ) {
-        free_rejected_hypot_output(&output, &[input]);
-        return Err(hypot_terminal_error(
-            &HYPOT_ERROR_INTERNAL,
-            "provider upload returned malformed fallback output",
-        ));
-    }
-    Ok(gpu_helpers::resident_gpu_value(output))
-}
-
-fn valid_hypot_gpu_output(
-    output: &GpuTensorHandle,
-    lhs: &GpuTensorHandle,
-    rhs: &GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) -> bool {
-    let expected_precision = if runmat_accelerate_api::handle_precision(lhs)
-        == Some(ProviderPrecision::F32)
-        && runmat_accelerate_api::handle_precision(rhs) == Some(ProviderPrecision::F32)
-    {
-        ProviderPrecision::F32
-    } else {
-        ProviderPrecision::F64
-    };
-    valid_restored_hypot_output(output, lhs, provider, &lhs.shape, expected_precision)
-        && !hypot_gpu_handles_alias(output, rhs)
-}
-
-fn valid_restored_hypot_output(
-    output: &GpuTensorHandle,
-    input: &GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    expected_shape: &[usize],
-    expected_precision: ProviderPrecision,
-) -> bool {
-    output.shape == expected_shape
-        && output.device_id == input.device_id
-        && !hypot_gpu_handles_alias(output, input)
-        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-        && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
-        && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn hypot_gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
-}
-
-fn free_rejected_hypot_output(output: &GpuTensorHandle, inputs: &[&GpuTensorHandle]) {
-    if inputs
-        .iter()
-        .any(|input| hypot_gpu_handles_alias(output, input))
-    {
-        return;
-    }
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(output) {
-        if owner.free(output).is_ok() {
-            runmat_accelerate_api::clear_residency(output);
-        }
-    }
 }
 
 fn hypot_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -601,7 +384,6 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
         Tensor, Value,
@@ -628,43 +410,6 @@ pub(crate) mod tests {
         let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
         assert_eq!(scalar_hypot_value(&Value::ComplexTensor(tensor)), None);
-    }
-
-    #[test]
-    fn hypot_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = HYPOT_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"R = hypot(X, Y)"));
-    }
-
-    #[test]
-    fn hypot_type_preserves_tensor_shape() {
-        let out = numeric_binary_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn hypot_type_scalar_returns_num() {
-        let out = numeric_binary_type(&[Type::Num, Type::Int], &ResolveContext::new(Vec::new()));
-        assert_eq!(out, Type::Num);
     }
 
     #[test]
@@ -698,6 +443,14 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 5.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn hypot_rejects_excess_outputs() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error = hypot_builtin(Value::Num(3.0), Value::Num(4.0))
+            .expect_err("second output must be rejected");
+        assert_eq!(error.identifier(), HYPOT_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
