@@ -2041,7 +2041,9 @@ mod tests {
     fn signature_help_uses_introspection_descriptors() {
         let cases = [
             ("isempty([]);", "tf = isempty(A)"),
+            ("iscolumn([1; 2]);", "tf = iscolumn(A)"),
             ("ismatrix([1 2; 3 4]);", "tf = ismatrix(A)"),
+            ("isrow([1 2]);", "tf = isrow(A)"),
             ("isscalar(1);", "tf = isscalar(A)"),
             ("isvector([1 2 3]);", "tf = isvector(A)"),
             ("length([1 2 3]);", "n = length(A)"),

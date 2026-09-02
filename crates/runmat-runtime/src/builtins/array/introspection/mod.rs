@@ -9,4 +9,5 @@ pub(crate) mod isvector;
 pub(crate) mod length;
 pub(crate) mod ndims;
 pub(crate) mod numel;
+mod shape_predicate;
 pub(crate) mod size;
