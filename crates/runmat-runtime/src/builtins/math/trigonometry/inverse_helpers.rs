@@ -154,14 +154,6 @@ pub(crate) fn upload_value_like_protected(
     Ok(Value::GpuTensor(handle))
 }
 
-pub(crate) fn upload_value(
-    provider: &dyn AccelProvider,
-    value: Value,
-    builtin: &str,
-) -> BuiltinResult<Value> {
-    upload_value_protected(provider, value, builtin, &[])
-}
-
 pub(crate) fn upload_value_protected(
     provider: &dyn AccelProvider,
     value: Value,
@@ -257,8 +249,11 @@ pub(crate) fn upload_value_protected(
         && !runmat_accelerate_api::handle_is_logical(&handle)
         && (expected_integer_type.is_some()
             || runmat_accelerate_api::handle_precision(&handle) == expected_precision)
-        && runmat_accelerate_api::provider_for_handle(&handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider));
+        && gpu_helpers::exact_provider_for_handle(&handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && protected
+            .iter()
+            .all(|input| !gpu_helpers::same_gpu_handle(&handle, input));
     if !valid {
         free_unless_protected(provider, &handle, protected);
         return Err(build_runtime_error(format!(
@@ -662,8 +657,8 @@ mod tests {
     fn restore_preserves_non_f32_exact_double_without_metadata_relabeling() {
         test_support::with_test_provider(|provider| {
             let value = 1.0000000000000002_f64;
-            let output =
-                upload_value(provider, Value::Num(value), "restore-test").expect("double restore");
+            let output = upload_value_protected(provider, Value::Num(value), "restore-test", &[])
+                .expect("double restore");
             let Value::GpuTensor(handle) = output else {
                 panic!("expected resident output")
             };
@@ -681,8 +676,13 @@ mod tests {
         let provider = F32OnlyProvider {
             upload_calls: AtomicUsize::new(0),
         };
-        let error = upload_value(&provider, Value::Num(1.0000000000000002), "restore-test")
-            .expect_err("f32-only provider cannot supply a double result");
+        let error = upload_value_protected(
+            &provider,
+            Value::Num(1.0000000000000002),
+            "restore-test",
+            &[],
+        )
+        .expect_err("f32-only provider cannot supply a double result");
         assert!(error.message().contains("failed to restore result"));
         assert_eq!(provider.upload_calls.load(Ordering::SeqCst), 1);
     }
@@ -691,8 +691,9 @@ mod tests {
     fn restore_accepts_single_when_provider_supports_typed_upload() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::from_f32(vec![1.0000001], vec![1, 1]).expect("single");
-            let output = upload_value(provider, Value::Tensor(tensor), "restore-test")
-                .expect("typed single result");
+            let output =
+                upload_value_protected(provider, Value::Tensor(tensor), "restore-test", &[])
+                    .expect("typed single result");
             let Value::GpuTensor(handle) = output else {
                 panic!("expected resident single output");
             };

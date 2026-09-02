@@ -34,6 +34,25 @@ pub fn exact_provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dy
         .filter(|provider| provider.device_id() == handle.device_id)
 }
 
+/// Resolve one exact owner for two resident operands.
+///
+/// Device identifiers are provider-local, so matching identifiers alone do not
+/// establish shared ownership. Both handles must resolve to the same registered
+/// provider instance and the same device before a binary hook may consume them.
+pub fn exact_provider_for_binary_inputs(
+    left: &GpuTensorHandle,
+    right: &GpuTensorHandle,
+) -> Result<&'static dyn AccelProvider, String> {
+    let left_owner = exact_provider_for_handle(left)
+        .ok_or_else(|| "no provider owns the left resident operand".to_string())?;
+    let right_owner = exact_provider_for_handle(right)
+        .ok_or_else(|| "no provider owns the right resident operand".to_string())?;
+    if !std::ptr::eq(left_owner, right_owner) || left.device_id != right.device_id {
+        return Err("resident operands must share one owning provider and device".to_string());
+    }
+    Ok(left_owner)
+}
+
 /// Select one owning provider for a set of resident inputs, with explicit
 /// gpuArray provenance taking precedence over automatic residency.
 pub fn select_resident_output_source(

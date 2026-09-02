@@ -67,7 +67,79 @@ pub(super) fn infer_remainder(
         }
     };
     materialize(&mut output);
-    output.residency = compatible_residency(&left.residency, &right.residency);
+    output.residency = preserved_binary_residency(&left.residency, &right.residency);
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+pub(super) fn infer_atan2(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let mut diagnostics = Vec::new();
+    if request.arguments.len() != 2 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-ATAN2-ARITY",
+            "atan2 requires exactly two inputs",
+            request.arguments.len().min(1),
+        ));
+    }
+    let Some(left) = request.arguments.first() else {
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+    let Some(right) = request.arguments.get(1) else {
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            diagnostics,
+        );
+    };
+
+    if matches!(left.storage, StorageFact::Sparse) || matches!(right.storage, StorageFact::Sparse) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-ATAN2-SPARSE",
+            "atan2 does not accept sparse input",
+            usize::from(!matches!(left.storage, StorageFact::Sparse)),
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    }
+
+    if let Some(output) = infer_tabular_binary(left, right, "atan2", &mut diagnostics) {
+        return finish_fixed(entry, request, output, diagnostics);
+    }
+    if matches!(left.kind, ValueKindFact::Object(_))
+        || matches!(right.kind, ValueKindFact::Object(_))
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-ATAN2-OBJECT",
+            "atan2 accepts only table and timetable objects",
+            usize::from(matches!(left.kind, ValueKindFact::Object(_))),
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    }
+
+    let mut output = infer_numeric_atan2(left, right, &mut diagnostics);
+    output.shape = match broadcast_shape(&left.shape, &right.shape) {
+        Ok(shape) => shape,
+        Err(diagnostic) => {
+            diagnostics.push(diagnostic);
+            ShapeFact::Unknown
+        }
+    };
+    materialize(&mut output);
+    output.residency = preserved_binary_residency(&left.residency, &right.residency);
     finish_fixed(entry, request, output, diagnostics)
 }
 
@@ -77,38 +149,26 @@ fn infer_object_remainder(
     name: &str,
     diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
 ) -> Option<ValueFact> {
+    if let Some(output) = infer_tabular_binary(left, right, name, diagnostics) {
+        return Some(output);
+    }
     let left_class = object_class(left);
     let right_class = object_class(right);
-    let left_supported = left_class.is_some_and(is_supported_object);
-    let right_supported = right_class.is_some_and(is_supported_object);
-    if !left_supported && !right_supported {
-        if matches!(left.kind, ValueKindFact::Object(_))
-            || matches!(right.kind, ValueKindFact::Object(_))
-        {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-REMAINDER-OBJECT",
-                format!("{name} accepts only table, timetable, and duration objects"),
-                usize::from(matches!(left.kind, ValueKindFact::Object(_))),
-            ));
-            return Some(ValueFact::unknown(DynamicReason::UnsupportedRepresentation));
-        }
-        return None;
+    let left_supported = left_class == Some(standard::DURATION);
+    let right_supported = right_class == Some(standard::DURATION);
+    let left_unsupported_object = matches!(left.kind, ValueKindFact::Object(_)) && !left_supported;
+    let right_unsupported_object =
+        matches!(right.kind, ValueKindFact::Object(_)) && !right_supported;
+    if left_unsupported_object || right_unsupported_object {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-REMAINDER-OBJECT",
+            format!("{name} accepts only table, timetable, and duration objects"),
+            usize::from(!left_unsupported_object),
+        ));
+        return Some(ValueFact::unknown(DynamicReason::UnsupportedRepresentation));
     }
-
-    if left_supported && right_supported {
-        let compatible = match (left_class, right_class) {
-            (Some(a), Some(b)) if a == standard::DURATION && b == standard::DURATION => true,
-            (Some(a), Some(b)) if is_tabular(a) && is_tabular(b) => a == b,
-            _ => false,
-        };
-        if !compatible {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-REMAINDER-OBJECT-PAIR",
-                format!("{name} requires compatible table, timetable, or duration operands"),
-                1,
-            ));
-            return Some(ValueFact::unknown(DynamicReason::UnsupportedRepresentation));
-        }
+    if !left_supported && !right_supported {
+        return None;
     }
 
     let source = if left_supported { left } else { right };
@@ -138,8 +198,92 @@ fn is_tabular(class: runmat_types::StaticClassIdentity) -> bool {
     class == standard::TABLE || class == standard::TIMETABLE
 }
 
-fn is_supported_object(class: runmat_types::StaticClassIdentity) -> bool {
-    is_tabular(class) || class == standard::DURATION
+fn infer_tabular_binary(
+    left: &ValueFact,
+    right: &ValueFact,
+    name: &str,
+    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+) -> Option<ValueFact> {
+    let left_class = object_class(left).filter(|class| is_tabular(*class));
+    let right_class = object_class(right).filter(|class| is_tabular(*class));
+    if left_class.is_none() && right_class.is_none() {
+        return None;
+    }
+    let left_other_object = matches!(left.kind, ValueKindFact::Object(_)) && left_class.is_none();
+    let right_other_object =
+        matches!(right.kind, ValueKindFact::Object(_)) && right_class.is_none();
+    let incompatible_pair =
+        left_class.is_some() && right_class.is_some() && left_class != right_class;
+    if left_other_object || right_other_object || incompatible_pair {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-TABULAR-BINARY-PAIR",
+            format!(
+                "{name} requires table and timetable operands to have the same container identity"
+            ),
+            usize::from(left_class.is_some()),
+        ));
+        return Some(ValueFact::unknown(DynamicReason::UnsupportedRepresentation));
+    }
+
+    let source = if left_class.is_some() { left } else { right };
+    let mut output = source.clone();
+    output.residency = ResidencyFact::Host;
+    output.alias = AliasFact::Unique;
+    output.view = ViewFact::Materialized;
+    output.mutation = MutationFact::ValueSemantics;
+    if let ValueKindFact::Object(object) = &mut output.kind {
+        object.properties.clear();
+        object.properties_complete = false;
+    }
+    Some(output)
+}
+
+fn infer_numeric_atan2(
+    left: &ValueFact,
+    right: &ValueFact,
+    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+) -> ValueFact {
+    let Some(left_numeric) = numeric_input(&left.kind) else {
+        if !matches!(left.kind, ValueKindFact::Unknown) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-ATAN2-INPUT",
+                "atan2 requires real single, double, table, or timetable input; RunMat mode also accepts integer, logical, and character input",
+                0,
+            ));
+        }
+        return ValueFact::unknown(DynamicReason::RuntimeValue);
+    };
+    let Some(right_numeric) = numeric_input(&right.kind) else {
+        if !matches!(right.kind, ValueKindFact::Unknown) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-ATAN2-INPUT",
+                "atan2 requires real single, double, table, or timetable input; RunMat mode also accepts integer, logical, and character input",
+                1,
+            ));
+        }
+        return ValueFact::unknown(DynamicReason::RuntimeValue);
+    };
+    if left_numeric.domain == NumericDomain::Complex
+        || right_numeric.domain == NumericDomain::Complex
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-ATAN2-COMPLEX",
+            "atan2 requires real operands",
+            usize::from(right_numeric.domain == NumericDomain::Complex),
+        ));
+        return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+    }
+
+    let class = if left_numeric.class == NumericClass::Single
+        || right_numeric.class == NumericClass::Single
+    {
+        NumericClass::Single
+    } else {
+        NumericClass::Double
+    };
+    let mut output = ValueFact::unknown(DynamicReason::RuntimeValue);
+    output.kind = numeric_kind(class, NumericDomain::Real);
+    output
 }
 
 fn infer_numeric_remainder(
@@ -228,7 +372,7 @@ fn numeric_input(kind: &ValueKindFact) -> Option<NumericFact> {
     }
 }
 
-fn compatible_residency(left: &ResidencyFact, right: &ResidencyFact) -> ResidencyFact {
+fn preserved_binary_residency(left: &ResidencyFact, right: &ResidencyFact) -> ResidencyFact {
     match (left, right) {
         (ResidencyFact::Host, ResidencyFact::Host) => ResidencyFact::Host,
         (
@@ -239,6 +383,8 @@ fn compatible_residency(left: &ResidencyFact, right: &ResidencyFact) -> Residenc
                 provider: right_owner,
             },
         ) if left_owner == right_owner => left.clone(),
+        (ResidencyFact::Device { .. }, ResidencyFact::Host) => left.clone(),
+        (ResidencyFact::Host, ResidencyFact::Device { .. }) => right.clone(),
         _ => ResidencyFact::Unknown,
     }
 }

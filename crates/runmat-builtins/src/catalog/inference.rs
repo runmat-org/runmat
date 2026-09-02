@@ -45,6 +45,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         BuiltinInferenceRule::Array(ArrayInferenceRule::Full) => infer_full(request, entry),
         BuiltinInferenceRule::Array(ArrayInferenceRule::Zeros) => infer_zeros(request, entry),
         BuiltinInferenceRule::Math(MathInferenceRule::Abs) => infer_abs(request, entry),
+        BuiltinInferenceRule::Math(MathInferenceRule::Atan2) => {
+            math_binary::infer_atan2(request, entry)
+        }
         BuiltinInferenceRule::Math(MathInferenceRule::PhaseAngle) => {
             math_unary::infer_phase_angle(request, entry)
         }

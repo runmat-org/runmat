@@ -4,6 +4,7 @@
 //! can depend on.
 
 pub mod arg_tokens;
+pub(crate) mod binary;
 pub mod broadcast;
 pub mod concatenation;
 pub mod deal;

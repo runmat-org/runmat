@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{binary as common_binary, gpu_helpers, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{
     reject_integer_logical_operands, try_integer_remainder, IntegerRemainderOp,
 };
@@ -88,20 +88,20 @@ fn rem_error_with_message(
 )]
 async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     super::unary::reject_excess_outputs(BUILTIN_NAME, &REM_ERROR_TOO_MANY_OUTPUTS)?;
-    match super::binary::plan_tabular(lhs, rhs)
+    match common_binary::plan_tabular(lhs, rhs)
         .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?
     {
-        super::binary::BinaryInputPlan::Values(values) => {
+        common_binary::BinaryInputPlan::Values(values) => {
             let (left, right) = *values;
             rem_non_tabular(left, right).await
         }
-        super::binary::BinaryInputPlan::Structured(plan) => {
+        common_binary::BinaryInputPlan::Structured(plan) => {
             let (source, variables) = plan.variables();
             let mut output = Vec::with_capacity(variables.len());
             for (name, left, right) in variables {
                 output.push((name, rem_non_tabular(left, right).await?));
             }
-            super::binary::finish_tabular(&source, output)
+            common_binary::finish_tabular(&source, output)
                 .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error.to_string()))
         }
     }
@@ -116,11 +116,11 @@ async fn rem_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         return match super::binary::plan_duration(lhs, rhs, BUILTIN_NAME)
             .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?
         {
-            super::binary::BinaryInputPlan::Values(values) => {
+            common_binary::BinaryInputPlan::Values(values) => {
                 let (left, right) = *values;
                 rem_host(left, right)
             }
-            super::binary::BinaryInputPlan::Structured(plan) => {
+            common_binary::BinaryInputPlan::Structured(plan) => {
                 let result = compute_rem_real(&plan.left, &plan.right)?;
                 super::binary::finish_duration(plan, result, BUILTIN_NAME)
                     .map_err(|error| rem_error_with_detail(&REM_ERROR_INTERNAL, error.to_string()))
@@ -163,16 +163,26 @@ async fn gather_value(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = super::binary::common_resident_owner(&a, &b)
+    let provider = gpu_helpers::exact_provider_for_binary_inputs(&a, &b)
         .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?;
     if runmat_accelerate_api::handle_integer_type(&a).is_some()
         && runmat_accelerate_api::handle_integer_type(&b).is_some()
-        && super::binary::matching_physical_inputs(&a, &b)
+        && common_binary::matching_physical_inputs(&a, &b)
     {
         match provider.elem_rem(&a, &b).await {
             Ok(output) => {
-                return super::binary::validate_resident_output(provider, &a, &b, output)
-                    .map_err(|error| rem_error_with_detail(&REM_ERROR_INTERNAL, error));
+                let contract = gpu_helpers::BinaryGpuOutputContract {
+                    shape: a.shape.clone(),
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    precision: runmat_accelerate_api::handle_precision(&a),
+                    integer: runmat_accelerate_api::handle_integer_type(&a),
+                    logical: false,
+                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+                };
+                return common_binary::validate_resident_output(
+                    provider, &a, &b, output, &contract,
+                )
+                .map_err(|error| rem_error_with_detail(&REM_ERROR_INTERNAL, error));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {
