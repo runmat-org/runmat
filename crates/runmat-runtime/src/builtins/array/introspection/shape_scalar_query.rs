@@ -2,7 +2,8 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{BuiltinCatalogEntry, BuiltinErrorDescriptor, ShapeScalarQuery};
 use runmat_value::Value;
 
-use super::dimension_metadata::{effective_rank, visible_dimensions};
+use super::dimension_metadata::VisibleDimensions;
+use super::structural_output::exact_double;
 
 pub(super) struct ShapeScalarQueryBoundary {
     entry: &'static BuiltinCatalogEntry,
@@ -47,27 +48,29 @@ impl ShapeScalarQueryBoundary {
             }
         }
 
-        let dimensions = visible_dimensions(&value)
+        let dimensions = VisibleDimensions::from_value(&value)
             .await
             .map_err(|error| self.internal(error))?;
         let result = match self.query {
-            ShapeScalarQuery::Length => dimensions.into_iter().max().unwrap_or(0),
+            ShapeScalarQuery::Length => dimensions.largest_extent(),
             ShapeScalarQuery::Rank => {
-                u64::try_from(effective_rank(&dimensions)).map_err(|error| self.internal(error))?
+                u64::try_from(dimensions.rank()).map_err(|error| self.internal(error))?
             }
+            ShapeScalarQuery::Height => dimensions.extent(1),
+            ShapeScalarQuery::Width => dimensions.extent(2),
         };
         self.result(result)
     }
 
     fn result(&self, value: u64) -> BuiltinResult<Value> {
-        if !is_exact_binary64_integer(value) {
+        let Some(value) = exact_double(value) else {
             let descriptor = self.result_not_exact.unwrap_or(self.internal);
             return Err(self.error(
                 descriptor,
                 format!("structural result {value} cannot be represented exactly as double"),
             ));
-        }
-        Ok(Value::Num(value as f64))
+        };
+        Ok(Value::Num(value))
     }
 
     fn reject_excess_outputs(&self) -> BuiltinResult<()> {
@@ -93,15 +96,6 @@ impl ShapeScalarQueryBoundary {
         }
         builder.build()
     }
-}
-
-fn is_exact_binary64_integer(value: u64) -> bool {
-    if value == 0 {
-        return true;
-    }
-    let significant_bits = u64::BITS - value.leading_zeros();
-    let discarded_bits = significant_bits.saturating_sub(f64::MANTISSA_DIGITS);
-    value.trailing_zeros() >= discarded_bits
 }
 
 macro_rules! define_shape_scalar_query_runtime {
@@ -170,105 +164,5 @@ macro_rules! define_shape_scalar_query_runtime {
 pub(super) use define_shape_scalar_query_runtime;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_execution::{
-        DistributedObjectId, DistributedValueHandle, ExecutionScopeId, PoolHandle, PoolId,
-    };
-    use runmat_types::{
-        DistributedOwner, DistributedValueId, DistributionScheme, LabCount, NumericClass,
-        NumericDomain, NumericFact, ParallelRegionId, ProgramFunctionId, RegionId, ValueFact,
-        ValueKindFact,
-    };
-
-    fn distributed_value(global_shape: Vec<u64>) -> Value {
-        let scope_id = ExecutionScopeId::derive(&[b"shape-scalar-query"]);
-        let function = ProgramFunctionId(9);
-        let owner = ParallelRegionId(RegionId {
-            function,
-            ordinal: 1,
-        });
-        Value::Distributed(Box::new(DistributedValueHandle {
-            id: DistributedObjectId::derive(&[b"shape-scalar-value"]),
-            contract: DistributedValueId {
-                function,
-                ordinal: 2,
-            },
-            owner: DistributedOwner::Region(owner),
-            scope_id,
-            generation: 1,
-            pool: PoolHandle {
-                id: PoolId::derive(&[b"shape-scalar-pool"]),
-                scope_id,
-                generation: 1,
-            },
-            partition_count: LabCount(2),
-            value: ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
-                domain: NumericDomain::Real,
-            })),
-            global_shape,
-            scheme: DistributionScheme::Replicated,
-            materializable: true,
-        }))
-    }
-
-    fn boundary(query: ShapeScalarQuery) -> ShapeScalarQueryBoundary {
-        match query {
-            ShapeScalarQuery::Length => ShapeScalarQueryBoundary::new(
-                &runmat_builtins::LENGTH_CATALOG_ENTRY,
-                &runmat_builtins::LENGTH_ERROR_INTERNAL,
-                &runmat_builtins::LENGTH_ERROR_TOO_MANY_OUTPUTS,
-                Some(&runmat_builtins::LENGTH_ERROR_RESULT_NOT_EXACT),
-                Some(&runmat_builtins::LENGTH_ERROR_UNSUPPORTED_TABLE),
-                query,
-            ),
-            ShapeScalarQuery::Rank => ShapeScalarQueryBoundary::new(
-                &runmat_builtins::NDIMS_CATALOG_ENTRY,
-                &runmat_builtins::NDIMS_ERROR_INTERNAL,
-                &runmat_builtins::NDIMS_ERROR_TOO_MANY_OUTPUTS,
-                None,
-                None,
-                query,
-            ),
-        }
-    }
-
-    #[test]
-    fn exact_binary64_integer_check_accepts_only_representable_values() {
-        assert!(is_exact_binary64_integer(1_u64 << 53));
-        assert!(!is_exact_binary64_integer((1_u64 << 53) + 1));
-        assert!(is_exact_binary64_integer((1_u64 << 53) + 2));
-        assert!(!is_exact_binary64_integer(u64::MAX));
-    }
-
-    #[test]
-    fn distributed_queries_use_validated_global_shape() {
-        assert_eq!(
-            block_on(boundary(ShapeScalarQuery::Length).execute(distributed_value(vec![8, 13])))
-                .unwrap(),
-            Value::Num(13.0)
-        );
-        assert_eq!(
-            block_on(
-                boundary(ShapeScalarQuery::Rank).execute(distributed_value(vec![8, 13, 4, 1]))
-            )
-            .unwrap(),
-            Value::Num(3.0)
-        );
-    }
-
-    #[test]
-    fn length_rejects_an_inexact_distributed_extent() {
-        let error = block_on(
-            boundary(ShapeScalarQuery::Length)
-                .execute(distributed_value(vec![(1_u64 << 53) + 1, 2])),
-        )
-        .expect_err("inexact double");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:length:ResultNotExactDouble")
-        );
-    }
-}
+#[path = "shape_scalar_query/tests.rs"]
+mod tests;

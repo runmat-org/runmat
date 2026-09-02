@@ -159,10 +159,21 @@ const inferenceRootLines = read(inferenceRootPath).split("\n").length;
 if (inferenceRootLines > 128) {
   fail(`${inferenceRootPath} must remain a domain router (found ${inferenceRootLines} lines; maximum 128)`);
 }
+const legacyInferenceLeafCeilings = new Map([
+  ["crates/runmat-builtins/src/catalog/inference/math_binary.rs", 483],
+  ["crates/runmat-builtins/src/catalog/inference/math_inverse.rs", 510],
+  ["crates/runmat-builtins/src/catalog/inference/math_logarithms.rs", 481],
+]);
 for (const { path: sourcePath, text } of rustSources("crates/runmat-builtins/src/catalog/inference")) {
   const lines = text.split("\n").length;
-  if (lines > 600) {
-    fail(`${sourcePath} exceeds the bounded inference-family size (found ${lines} lines; maximum 600)`);
+  const isTestModule = sourcePath.endsWith("/tests.rs");
+  const legacyCeiling = legacyInferenceLeafCeilings.get(sourcePath);
+  const leafCeiling = legacyCeiling ?? (isTestModule ? 600 : 400);
+  if (lines > leafCeiling) {
+    const policy = legacyCeiling === undefined
+      ? "bounded inference-family size"
+      : "shrink-only legacy inference-family ceiling";
+    fail(`${sourcePath} exceeds its ${policy} (found ${lines} lines; maximum ${leafCeiling})`);
   }
   if (/entry\.identity\.name\s*(?:==|!=)|match\s+entry\.identity\.name|matches!\s*\(\s*entry\.identity\.name/.test(text)) {
     fail(`${sourcePath} dispatches inference semantics from a builtin name; add a closed typed rule and route it to its domain module`);

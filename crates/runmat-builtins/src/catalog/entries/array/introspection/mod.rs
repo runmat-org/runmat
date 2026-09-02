@@ -1,3 +1,4 @@
+mod height;
 mod iscolumn;
 mod isempty;
 mod ismatrix;
@@ -9,7 +10,9 @@ mod ndims;
 mod numel;
 mod size;
 mod support;
+mod width;
 
+pub use height::*;
 pub use iscolumn::*;
 pub use isempty::*;
 pub use ismatrix::*;
@@ -20,8 +23,10 @@ pub use length::*;
 pub use ndims::*;
 pub use numel::*;
 pub use size::*;
+pub use width::*;
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
+    height::ENTRIES,
     iscolumn::ENTRIES,
     isempty::ENTRIES,
     ismatrix::ENTRIES,
@@ -32,4 +37,5 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     ndims::ENTRIES,
     numel::ENTRIES,
     size::ENTRIES,
+    width::ENTRIES,
 ];

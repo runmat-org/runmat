@@ -2048,8 +2048,10 @@ mod tests {
             ("isvector([1 2 3]);", "tf = isvector(A)"),
             ("length([1 2 3]);", "n = length(A)"),
             ("ndims(ones(2,2,2));", "n = ndims(A)"),
-            ("numel([1 2; 3 4], 1, 2);", "n = numel(A, dim, ...)"),
-            ("size([1 2; 3 4], 1);", "d = size(A, dim)"),
+            ("height([1 2; 3 4]);", "n = height(A)"),
+            ("width([1 2; 3 4]);", "n = width(A)"),
+            ("numel([1 2; 3 4], 1, 2);", "n = numel(A, dim1, dim2, ...)"),
+            ("size([1 2; 3 4], 1);", "sz = size(A, dim)"),
         ];
 
         for (text, expected_label) in cases {

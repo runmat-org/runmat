@@ -3004,21 +3004,6 @@ fn head_wgpu_preserves_every_integer_class_exactly() {
 }
 
 #[test]
-fn height_reads_resident_shape_without_provider_or_data_access() {
-    assert_eq!(HEIGHT_INTEGER_CAPABILITIES.len(), 1);
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![13, 4],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    };
-    assert!(matches!(
-        block_on(height_builtin(Value::GpuTensor(handle))).unwrap(),
-        Value::Num(13.0)
-    ));
-}
-
-#[test]
 fn categorical_dictionary_and_selector_objects_materialize() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let categorical = block_on(categorical_builtin(vec![Value::StringArray(

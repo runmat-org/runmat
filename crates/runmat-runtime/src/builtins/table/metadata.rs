@@ -18,27 +18,6 @@ const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Result value.",
 }];
-const NUM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Count.",
-}];
-const TABLE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "T",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Table input.",
-}];
-const HEIGHT_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Table, timetable, or array input.",
-}];
 const HEAD_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
     ty: BuiltinParamType::Any,
@@ -800,11 +779,6 @@ const GRPSTATS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         outputs: &ANY_OUTPUT,
     },
 ];
-const HEIGHT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "n = height(A)",
-    inputs: &HEIGHT_INPUT,
-    outputs: &NUM_OUTPUT,
-}];
 const HEAD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "B = head(A)",
@@ -817,11 +791,6 @@ const HEAD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &ANY_OUTPUT,
     },
 ];
-const WIDTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "n = width(T)",
-    inputs: &TABLE_INPUT,
-    outputs: &NUM_OUTPUT,
-}];
 const COMPAT_VALUE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "B = tabularBuiltin(A, ...)",
     inputs: &VALUE_AND_ARGS_INPUTS,
@@ -963,20 +932,8 @@ pub const GRPSTATS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
 };
-pub const HEIGHT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HEIGHT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
 pub const HEAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &HEAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const WIDTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WIDTH_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
