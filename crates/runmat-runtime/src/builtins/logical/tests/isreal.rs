@@ -1,28 +1,16 @@
-//! MATLAB-compatible `isreal` builtin with GPU-aware semantics for RunMat.
-//!
-//! This predicate reports whether a value is stored without an imaginary
-//! component. Unlike `isfinite`/`isnan`, it returns a single logical scalar.
+//! Real-storage metadata predicate.
 
-use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+use super::metadata::MetadataBoundary;
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::BuiltinResult;
 use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    MetadataPredicate, ISREAL_CATALOG_ENTRY, ISREAL_ERROR_INTERNAL, ISREAL_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-
-use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::tests::isreal")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -30,16 +18,16 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("storage-check"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("logical_isreal")],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Inspects exact-owner storage and class metadata without reading or gathering the resident payload.",
+    notes:
+        "Validates exact-owner storage and class metadata without reading resident payload data.",
 };
-
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::tests::isreal")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "isreal",
@@ -48,439 +36,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Scalar metadata predicate that remains outside fusion graphs.",
+    notes: "Scalar metadata query that forms a fusion boundary.",
 };
-
-const BUILTIN_NAME: &str = "isreal";
-
-const ISREAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when input uses real storage without imaginary components.",
-}];
-
-const ISREAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to test.",
-}];
-
-const ISREAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isreal(A)",
-    inputs: &ISREAL_INPUTS,
-    outputs: &ISREAL_OUTPUT,
-}];
-
-const ISREAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISREAL.INTERNAL",
-    identifier: Some("RunMat:isreal:InternalError"),
-    when: "Internal gather/dispatch path fails.",
-    message: "isreal: internal error",
-};
-
-const ISREAL_ERRORS: [BuiltinErrorDescriptor; 1] = [ISREAL_ERROR_INTERNAL];
-
-pub const ISREAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISREAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISREAL_ERRORS,
-};
-const ISREAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes participate in the storage-complexity predicate, including complex integer storage introduced by current MATLAB conversion semantics.",
-    }];
-pub const ISREAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "tf = isreal(integer_A)",
-        inputs: &ISREAL_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Returns one logical scalar from storage kind, not element values: real integer storage is true and complex integer storage is false even when every imaginary component is zero. Resident metadata is validated against the exact owner without gathering.",
-    }];
-
-fn isreal_error_with_message(
-    message: impl Into<String>,
-    error: &'static BuiltinErrorDescriptor,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
+const BOUNDARY: MetadataBoundary = MetadataBoundary::new(
+    &ISREAL_CATALOG_ENTRY,
+    &ISREAL_ERROR_INTERNAL,
+    &ISREAL_ERROR_TOO_MANY_OUTPUTS,
+    MetadataPredicate::Real,
+);
 #[runtime_builtin(
     name = "isreal",
-    category = "logical/tests",
-    summary = "Return true when a value uses real storage without an imaginary component.",
-    keywords = "isreal,real,complex,gpu,logical",
-    accel = "metadata",
-    type_resolver(bool_scalar_type),
-    descriptor(crate::builtins::logical::tests::isreal::ISREAL_DESCRIPTOR),
-    integer_capabilities(crate::builtins::logical::tests::isreal::ISREAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::logical::tests::isreal"
 )]
 async fn isreal_builtin(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::GpuTensor(handle) => isreal_gpu(handle).await,
-        other => isreal_host(other),
-    }
+    BOUNDARY.execute(value)
 }
-
-fn bool_scalar_type(_: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
-
-async fn isreal_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
-        internal_error("isreal: no acceleration provider owns the resident input")
-    })?;
-    let storage = runmat_accelerate_api::handle_storage(&handle);
-    let precision = runmat_accelerate_api::handle_precision(&handle);
-    let integer = runmat_accelerate_api::handle_integer_type(&handle);
-    let logical = runmat_accelerate_api::handle_is_logical(&handle);
-    let coherent = if let Some(integer) = integer {
-        storage == runmat_accelerate_api::GpuTensorStorage::Real
-            && precision.is_none()
-            && !logical
-            && gpu_helpers::gpu_class_metadata_matches(&handle, None, Some(integer), false)
-    } else if logical {
-        storage == runmat_accelerate_api::GpuTensorStorage::Real
-            && precision == Some(owner.precision())
-            && gpu_helpers::gpu_class_metadata_matches(&handle, precision, None, true)
-    } else {
-        precision == Some(owner.precision())
-            && gpu_helpers::gpu_class_metadata_matches(&handle, precision, None, false)
-    };
-    if !coherent {
-        return Err(internal_error(
-            "isreal: resident numeric metadata is contradictory",
-        ));
-    }
-    Ok(Value::Bool(
-        storage == runmat_accelerate_api::GpuTensorStorage::Real,
-    ))
-}
-
-fn isreal_host(value: Value) -> BuiltinResult<Value> {
-    let flag = match value {
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(_) => true,
-        Value::SparseTensor(sparse) => !sparse.is_complex(),
-        Value::LogicalArray(_) => true,
-        Value::CharArray(_) => true,
-        // FIXME: Symbolic expressions should be inspected for complex markers (e.g., 'i', 'j')
-        // to accurately detect complex-valued symbolic expressions. Currently, we conservatively
-        // assume all symbolic values are real, which may misclassify expressions like sym('1+2i').
-        Value::Symbolic(_) | Value::SymbolicArray(_) => true,
-        Value::Complex(_, _) => false,
-        Value::ComplexTensor(_) => false,
-        Value::String(_) => false,
-        Value::StringArray(_) => false,
-        Value::Struct(_) => false,
-        Value::Cell(_) => false,
-        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => true,
-        Value::ObjectArray(_) | Value::Object(_) => false,
-        Value::HandleObject(_) => false,
-        Value::Listener(_) => false,
-        Value::FunctionHandle(_)
-        | Value::ExternalFunctionHandle(_)
-        | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. } => false,
-        Value::Closure(_) => false,
-        Value::ClassRef(_) => false,
-        Value::MException(_) => false,
-        Value::OutputList(_) => false,
-        Value::Future(_) | Value::Task(_) | Value::Pool(_) | Value::Job(_) => false,
-        Value::Distributed(handle) => matches!(
-            handle.value.kind,
-            runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
-                domain: runmat_types::NumericDomain::Real,
-                ..
-            }) | runmat_types::ValueKindFact::Logical
-                | runmat_types::ValueKindFact::Character
-        ),
-        Value::Composite(_) => false,
-        Value::Foreign(_) => false,
-        Value::GpuTensor(_) => {
-            return Err(internal_error(
-                "isreal: internal error, GPU value reached host path",
-            ));
-        }
-    };
-    Ok(Value::Bool(flag))
-}
-
-fn internal_error(message: impl Into<String>) -> RuntimeError {
-    isreal_error_with_message(message, &ISREAL_ERROR_INTERNAL)
-}
-
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use crate::builtins::common::test_support;
-    use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::{
-        CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntegerComplexStorage,
-        IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, SparseTensor,
-        StructValue, SymbolicExpr, Tensor,
-    };
-
-    fn run_isreal(value: Value) -> BuiltinResult<Value> {
-        block_on(super::isreal_builtin(value))
-    }
-
-    fn test_handle_target() -> runmat_gc::GcHandle {
-        runmat_gc::gc_allocate(Value::Num(0.0)).expect("gc allocation")
-    }
-
-    #[test]
-    fn isreal_type_returns_bool() {
-        assert_eq!(
-            bool_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Bool
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isreal_reports_true_for_real_scalars() {
-        let real = run_isreal(Value::Num(42.0)).expect("isreal");
-        let integer = run_isreal(Value::from(5_i32)).expect("isreal");
-        let boolean = run_isreal(Value::Bool(false)).expect("isreal");
-        let symbolic = run_isreal(Value::Symbolic(SymbolicExpr::variable("x"))).expect("isreal");
-        assert_eq!(real, Value::Bool(true));
-        assert_eq!(integer, Value::Bool(true));
-        assert_eq!(boolean, Value::Bool(true));
-        assert_eq!(symbolic, Value::Bool(true));
-    }
-
-    #[test]
-    fn isreal_reports_true_for_all_real_integer_classes() {
-        let storages = [
-            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
-            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
-            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
-            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
-            IntegerStorage::U8(vec![u8::MIN, u8::MAX]),
-            IntegerStorage::U16(vec![u16::MIN, u16::MAX]),
-            IntegerStorage::U32(vec![u32::MIN, u32::MAX]),
-            IntegerStorage::U64(vec![u64::MIN, u64::MAX]),
-        ];
-        for storage in storages {
-            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
-            assert_eq!(
-                run_isreal(Value::Tensor(tensor)).expect("isreal"),
-                Value::Bool(true)
-            );
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isreal_rejects_complex_storage_even_with_zero_imaginary_part() {
-        let complex = run_isreal(Value::Complex(3.0, 4.0)).expect("isreal");
-        let complex_zero_imag = run_isreal(Value::Complex(12.0, 0.0)).expect("isreal");
-        let complex_tensor = ComplexTensor::new(vec![(1.0, 0.0), (2.0, -1.0)], vec![2, 1]).unwrap();
-        let tensor_flag = run_isreal(Value::ComplexTensor(complex_tensor)).expect("isreal");
-        assert_eq!(complex, Value::Bool(false));
-        assert_eq!(complex_zero_imag, Value::Bool(false));
-        assert_eq!(tensor_flag, Value::Bool(false));
-    }
-
-    #[test]
-    fn isreal_reports_sparse_complex_storage_independently_of_values() {
-        let complex_single = SparseTensor::new_complex_f32(
-            1,
-            1,
-            vec![0, 1],
-            vec![0],
-            vec![(f32::MIN_POSITIVE, 0.0)],
-        )
-        .expect("complex sparse single");
-        assert_eq!(
-            run_isreal(Value::SparseTensor(complex_single)).expect("isreal"),
-            Value::Bool(false)
-        );
-    }
-
-    #[test]
-    fn isreal_rejects_typed_complex_integer_storage_with_zero_imaginary_part() {
-        let storage = IntegerComplexStorage::new(
-            IntegerStorage::U64(vec![u64::MAX]),
-            IntegerStorage::U64(vec![0]),
-        )
-        .expect("matching components");
-        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
-
-        assert_eq!(
-            run_isreal(Value::ComplexTensor(tensor)).expect("isreal"),
-            Value::Bool(false)
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isreal_handles_array_and_container_types() {
-        let tensor = Tensor::new(vec![1.0, -2.0, 3.5], vec![3, 1]).unwrap();
-        let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap();
-        let chars = CharArray::new_row("RunMat");
-        let string_flag = run_isreal(Value::from("RunMat")).expect("isreal");
-        let string_array =
-            runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![2]).unwrap();
-        let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
-        let mut fields = StructValue::new();
-        fields.fields.insert("name".into(), Value::from("Ada"));
-        let object = ObjectInstance::new("RunMat.Object");
-
-        let tensor_flag = run_isreal(Value::Tensor(tensor)).expect("isreal");
-        let logical_flag = run_isreal(Value::LogicalArray(logical)).expect("isreal");
-        let char_flag = run_isreal(Value::CharArray(chars)).expect("isreal");
-        let string_array_flag =
-            run_isreal(Value::StringArray(string_array)).expect("isreal string array");
-        let cell_flag = run_isreal(Value::Cell(cell)).expect("isreal cell");
-        let struct_flag = run_isreal(Value::Struct(fields)).expect("isreal struct");
-        let object_flag = run_isreal(Value::Object(object)).expect("isreal object");
-
-        assert_eq!(tensor_flag, Value::Bool(true));
-        assert_eq!(logical_flag, Value::Bool(true));
-        assert_eq!(char_flag, Value::Bool(true));
-        assert_eq!(string_flag, Value::Bool(false));
-        assert_eq!(string_array_flag, Value::Bool(false));
-        assert_eq!(cell_flag, Value::Bool(false));
-        assert_eq!(struct_flag, Value::Bool(false));
-        assert_eq!(object_flag, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isreal_reports_true_for_duration_objects() {
-        let value = crate::call_builtin(
-            "duration",
-            &[Value::Num(1.0), Value::Num(30.0), Value::Num(0.0)],
-        )
-        .expect("duration");
-        let flag = run_isreal(value).expect("isreal duration");
-        assert_eq!(flag, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isreal_handles_function_and_handle_like_types() {
-        let function_flag =
-            run_isreal(Value::FunctionHandle("runmat_builtin".into())).expect("isreal fn");
-        let closure_flag = run_isreal(Value::Closure(Closure {
-            function_name: "anon".into(),
-            bound_function: None,
-            captures: vec![Value::Num(1.0)],
-        }))
-        .expect("isreal closure");
-        let handle_flag = run_isreal(Value::HandleObject(HandleRef {
-            class_name: "MockHandle".into(),
-            target: test_handle_target(),
-            valid: true,
-        }))
-        .expect("isreal handle");
-        let listener_flag = run_isreal(Value::Listener(Listener {
-            id: 42,
-            target: test_handle_target(),
-            target_class_name: "EventTarget".into(),
-            event_name: "changed".into(),
-            callback: test_handle_target(),
-            enabled: true,
-            valid: true,
-        }))
-        .expect("isreal listener");
-        let class_ref_flag =
-            run_isreal(Value::ClassRef("pkg.Class".into())).expect("isreal classref");
-        let mex_flag = run_isreal(Value::MException(MException::new(
-            "RunMat:mock".into(),
-            "message".into(),
-        )))
-        .expect("isreal mexception");
-
-        assert_eq!(function_flag, Value::Bool(false));
-        assert_eq!(closure_flag, Value::Bool(false));
-        assert_eq!(handle_flag, Value::Bool(false));
-        assert_eq!(listener_flag, Value::Bool(false));
-        assert_eq!(class_ref_flag, Value::Bool(false));
-        assert_eq!(mex_flag, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isreal_gpu_roundtrip() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let result = run_isreal(Value::GpuTensor(handle)).expect("isreal gpu");
-            assert_eq!(result, Value::Bool(true));
-        });
-    }
-
-    #[test]
-    fn isreal_resident_integer_uses_exact_owner_metadata_without_gather() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
-                .expect("integer tensor");
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
-            assert_eq!(
-                run_isreal(Value::GpuTensor(handle.clone())).expect("resident isreal"),
-                Value::Bool(true)
-            );
-            assert!(gpu_helpers::exact_provider_for_handle(&handle).is_some());
-            provider.free(&handle).ok();
-        });
-    }
-
-    #[test]
-    fn isreal_rejects_contradictory_resident_integer_metadata() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1])
-                .expect("integer tensor");
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
-            let error = run_isreal(Value::GpuTensor(handle.clone()))
-                .expect_err("integer/logical metadata contradiction must reject");
-            assert!(error.message().contains("metadata is contradictory"));
-            provider.free(&handle).ok();
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn isreal_wgpu_provider_reports_true() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
-        };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .expect("upload");
-        let result = run_isreal(Value::GpuTensor(handle)).expect("isreal gpu");
-        assert_eq!(result, Value::Bool(true));
-    }
-}
+#[path = "isreal/tests.rs"]
+mod tests;

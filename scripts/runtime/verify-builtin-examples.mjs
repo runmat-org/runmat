@@ -72,6 +72,10 @@ if (process.argv.includes("--check-inventory")) {
 
 const cases = collectCases(documents);
 if (cases.length === 0) {
+    if (process.env.RUNMAT_EXAMPLE_BUILTIN || process.env.RUNMAT_EXAMPLE_FILTER) {
+        console.error("No examples matched the requested builtin or text filter.");
+        process.exit(1);
+    }
     console.log("No examples found to run.");
     process.exit(0);
 }
@@ -328,7 +332,18 @@ function matchesVerification(testCase, result, normalizedExpected, normalizedAct
  * @param {ExampleCase[]} cases
  */
 function applyCaseFilter(cases) {
+    const builtin = process.env.RUNMAT_EXAMPLE_BUILTIN;
     const raw = process.env.RUNMAT_EXAMPLE_FILTER;
+    if (builtin && raw) {
+        throw new Error("RUNMAT_EXAMPLE_BUILTIN and RUNMAT_EXAMPLE_FILTER cannot be combined");
+    }
+    if (builtin) {
+        const identity = builtin.trim().toLowerCase();
+        if (identity.length === 0) {
+            throw new Error("RUNMAT_EXAMPLE_BUILTIN must name one builtin identity");
+        }
+        return cases.filter((testCase) => testCase.builtin.toLowerCase() === identity);
+    }
     if (!raw || raw.trim().length === 0) {
         return cases;
     }

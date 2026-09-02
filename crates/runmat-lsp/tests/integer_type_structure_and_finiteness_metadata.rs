@@ -66,28 +66,32 @@ const FOLLOWUP_INAPPLICABLE_NAMES: [&str; 19] = [
 #[test]
 fn type_structure_and_finiteness_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert_eq!(builtin.integer_capabilities.len(), 1, "{name}");
-        assert!(builtin.integer_audit.is_none(), "{name}");
+        let metadata = runmat_builtins::builtin_integer_metadata_by_name(name)
+            .unwrap_or_else(|| panic!("integer metadata for {name}"));
+        assert_eq!(metadata.capabilities.len(), 1, "{name}");
+        assert!(metadata.audit.is_none(), "{name}");
     }
     for name in INAPPLICABLE_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert!(builtin.integer_capabilities.is_empty(), "{name}");
-        assert!(builtin.integer_audit.is_some(), "{name}");
+        let metadata = runmat_builtins::builtin_integer_metadata_by_name(name)
+            .unwrap_or_else(|| panic!("integer metadata for {name}"));
+        assert!(metadata.capabilities.is_empty(), "{name}");
+        assert!(metadata.audit.is_some(), "{name}");
     }
 }
 
 #[test]
 fn followup_integer_predicate_metadata_is_explicit() {
     for name in FOLLOWUP_CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert!(!builtin.integer_capabilities.is_empty(), "{name}");
-        assert!(builtin.integer_audit.is_none(), "{name}");
+        let metadata = runmat_builtins::builtin_integer_metadata_by_name(name)
+            .unwrap_or_else(|| panic!("integer metadata for {name}"));
+        assert!(!metadata.capabilities.is_empty(), "{name}");
+        assert!(metadata.audit.is_none(), "{name}");
     }
     for name in FOLLOWUP_INAPPLICABLE_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert!(builtin.integer_capabilities.is_empty(), "{name}");
-        assert!(builtin.integer_audit.is_some(), "{name}");
+        let metadata = runmat_builtins::builtin_integer_metadata_by_name(name)
+            .unwrap_or_else(|| panic!("integer metadata for {name}"));
+        assert!(metadata.capabilities.is_empty(), "{name}");
+        assert!(metadata.audit.is_some(), "{name}");
     }
 }
 

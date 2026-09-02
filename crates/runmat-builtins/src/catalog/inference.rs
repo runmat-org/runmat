@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 mod math_binary;
 mod math_special;
 mod math_unary;
+mod metadata_predicate;
 mod numeric_classification;
 mod stats_random;
 
@@ -141,6 +142,9 @@ fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) 
         }
         BuiltinInferenceRule::Logical(LogicalInferenceRule::NumericClassification(predicate)) => {
             numeric_classification::infer(request, entry, predicate)
+        }
+        BuiltinInferenceRule::Logical(LogicalInferenceRule::MetadataPredicate(predicate)) => {
+            metadata_predicate::infer(request, entry, predicate)
         }
         BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parpool) => {
             infer_parallel_pool(request, entry, false)
