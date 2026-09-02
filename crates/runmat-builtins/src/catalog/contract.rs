@@ -49,6 +49,7 @@ pub enum IntrospectionInferenceRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum MathInferenceRule {
     Abs,
+    Atan2,
     PhaseAngle,
     Exp,
     Expm1,
