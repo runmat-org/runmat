@@ -12,6 +12,9 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::Bitwise(rule) => {
             super::super::math::bitwise::infer(rule, request, entry)
         }
+        MathInferenceRule::ErrorFunction(rule) => {
+            super::super::math::error_functions::infer(rule, request, entry)
+        }
         MathInferenceRule::IntegerDivide => {
             super::super::math::integer_division::infer(request, entry)
         }
