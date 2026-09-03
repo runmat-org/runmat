@@ -10,6 +10,7 @@ use crate::{
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
 const MAY_THROW: [EffectKind; 1] = [EffectKind::MayThrow];
+const MAY_SUSPEND_AND_THROW: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 
 /// Identity-specific data for a pure, unary, elementwise numeric builtin.
 ///
@@ -69,4 +70,16 @@ pub(super) const fn unary_numeric_catalog_entry(
         integer_audit: spec.integer_audit,
         suppress_auto_output: false,
     }
+}
+
+/// Catalog entry for a unary numeric operation that can execute through an
+/// asynchronous provider and preserves the input's physical residency.
+pub(super) const fn provider_unary_numeric_catalog_entry(
+    spec: UnaryNumericCatalogSpec,
+) -> BuiltinCatalogEntry {
+    let mut entry = unary_numeric_catalog_entry(spec);
+    entry.contract.async_behavior = BuiltinAsyncBehavior::MaySuspend;
+    entry.contract.effects = &MAY_SUSPEND_AND_THROW;
+    entry.placement.residency = BuiltinResidencyPolicy::PreserveInputs;
+    entry
 }

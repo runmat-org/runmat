@@ -1,6 +1,6 @@
 //! Shared numerical helpers for probability distribution builtins.
 
-use crate::builtins::math::elementwise::erfcinv::erfcinv_scalar;
+use crate::builtins::math::elementwise::error_functions::erfcinv::erfcinv_scalar;
 use crate::builtins::math::elementwise::gammaln::gammaln_nonnegative_scalar;
 
 const INV_SQRT_2PI: f64 = 0.398_942_280_401_432_7;

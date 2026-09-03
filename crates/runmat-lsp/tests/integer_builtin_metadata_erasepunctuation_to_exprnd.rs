@@ -78,17 +78,24 @@ fn integer_builtins_are_public_completions_with_settled_metadata() {
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
     for name in ERASEPUNCTUATION_TO_EXPRND_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        let descriptor = builtin
-            .descriptor
+        let catalog = runmat_builtins::builtin_catalog_entry_by_name(name);
+        let runtime = runmat_builtins::builtin_function_by_name(name);
+        let descriptor = catalog
+            .map(|entry| entry.descriptor)
+            .or_else(|| runtime.and_then(|builtin| builtin.descriptor))
             .unwrap_or_else(|| panic!("{name} must expose a descriptor"));
         assert_eq!(
             descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
             "{name} completion policy"
         );
+        let integer_is_settled = catalog.is_some_and(|entry| {
+            !entry.integer_capabilities.is_empty() || entry.integer_audit.is_some()
+        }) || runtime.is_some_and(|builtin| {
+            !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some()
+        });
         assert!(
-            !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some(),
+            integer_is_settled,
             "{name} must expose a settled integer disposition"
         );
         assert!(
@@ -113,9 +120,14 @@ fn matlab_mode_keeps_integer_extension_metadata_visible() {
         ("expm1", "expm1-integer-input"),
         ("exprnd", "exprnd-integer-mean"),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let catalog = runmat_builtins::builtin_catalog_entry_by_name(name);
+        let runtime = runmat_builtins::builtin_function_by_name(name);
+        let extensions = catalog
+            .map(|entry| entry.extensions)
+            .or_else(|| runtime.map(|builtin| builtin.extensions))
+            .unwrap_or_else(|| panic!("registered builtin {name}"));
         assert!(
-            builtin.extensions.iter().any(|extension| {
+            extensions.iter().any(|extension| {
                 extension.id == extension_id
                     && extension.mode == runmat_builtins::BuiltinExtensionMode::RunMatOnly
             }),
@@ -124,10 +136,12 @@ fn matlab_mode_keeps_integer_extension_metadata_visible() {
     }
 
     for name in ["erf", "erfcinv", "errorbar"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert!(
-            builtin.extensions.is_empty(),
-            "{name} has no extension forms"
-        );
+        let catalog = runmat_builtins::builtin_catalog_entry_by_name(name);
+        let runtime = runmat_builtins::builtin_function_by_name(name);
+        let extensions = catalog
+            .map(|entry| entry.extensions)
+            .or_else(|| runtime.map(|builtin| builtin.extensions))
+            .unwrap_or_else(|| panic!("registered builtin {name}"));
+        assert!(extensions.is_empty(), "{name} has no extension forms");
     }
 }

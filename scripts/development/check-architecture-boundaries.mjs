@@ -485,6 +485,53 @@ for (const { path: sourcePath, text } of bitwiseRuntimeSources) {
   }
 }
 
+const errorFunctionBoundaries = new Map([
+  ["crates/runmat-builtins/src/catalog/inference/math/error_functions/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/inference/math/error_functions/real_unary.rs", 224],
+  ["crates/runmat-builtins/src/catalog/entries/math/elementwise/error_functions/mod.rs", 32],
+  ["crates/runmat-runtime/src/builtins/math/elementwise/error_functions/mod.rs", 32],
+  ["crates/runmat-runtime/src/builtins/math/elementwise/error_functions/real_unary.rs", 160],
+]);
+for (const identity of ["erf", "erfcinv"]) {
+  errorFunctionBoundaries.set(
+    `crates/runmat-builtins/src/catalog/entries/math/elementwise/error_functions/${identity}/mod.rs`,
+    128
+  );
+  errorFunctionBoundaries.set(
+    `crates/runmat-builtins/src/catalog/entries/math/elementwise/error_functions/${identity}/documentation.rs`,
+    128
+  );
+  errorFunctionBoundaries.set(
+    `crates/runmat-runtime/src/builtins/math/elementwise/error_functions/${identity}.rs`,
+    512
+  );
+}
+for (const [sourcePath, ceiling] of errorFunctionBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its error-function family boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+for (const sourcePath of [
+  "crates/runmat-runtime/src/builtins/math/elementwise/erf.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/erfcinv.rs",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is an obsolete flat error-function identity and must not return`);
+  }
+}
+for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/builtins/math/elementwise/error_functions")) {
+  if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)) {
+    fail(`${sourcePath} duplicates catalog-owned error-function metadata`);
+  }
+  if (/\.to_string\(\)\.contains\(\s*"unary_(?:erf|erfcinv) not supported"/.test(text)) {
+    fail(`${sourcePath} interprets provider capability from error text; use the typed provider result`);
+  }
+}
+
 const legacyCatalogTestsPath = "crates/runmat-builtins/src/catalog/tests.rs";
 const legacyCatalogTestLines = read(legacyCatalogTestsPath).split("\n").length;
 if (legacyCatalogTestLines > 4561) {
