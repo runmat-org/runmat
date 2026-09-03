@@ -1,5 +1,5 @@
-use super::{BuiltinCatalogEntry, BuiltinInferenceRule};
-use runmat_types::{CallInference, CallRequest, ValueKindFact};
+use super::BuiltinCatalogEntry;
+use runmat_types::{CallInference, CallRequest};
 
 mod acceleration_semantics;
 mod aggregate_semantics;
@@ -40,47 +40,5 @@ pub(super) use support::{
 };
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
-    let distributed = request.arguments.iter().find_map(|argument| {
-        let ValueKindFact::Distributed(distributed) = &argument.kind else {
-            return None;
-        };
-        Some(distributed.clone())
-    });
-    if let Some(distributed) = distributed {
-        match entry.placement.distributed {
-            crate::BuiltinDistributedPolicy::MapUnary => {
-                return distributed_semantics::infer_distributed_map(entry, request, distributed);
-            }
-            crate::BuiltinDistributedPolicy::ScalarLikePrototype => {
-                return distributed_semantics::infer_distributed_scalar_like(
-                    entry,
-                    request,
-                    distributed,
-                );
-            }
-            crate::BuiltinDistributedPolicy::MaterializeArguments => {
-                return infer_partition_local_call(entry, request);
-            }
-            crate::BuiltinDistributedPolicy::Unsupported
-            | crate::BuiltinDistributedPolicy::InspectHandles => {}
-        }
-    }
-    infer_catalog_call_local(entry, request)
-}
-
-fn infer_catalog_call_local(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
-    match entry.contract.inference_rule {
-        BuiltinInferenceRule::Array(rule) => routing::array::infer(rule, request, entry),
-        BuiltinInferenceRule::Math(rule) => routing::math::infer(rule, request, entry),
-        BuiltinInferenceRule::Stats(rule) => routing::stats::infer(rule, request, entry),
-        BuiltinInferenceRule::Acceleration(rule) => {
-            routing::acceleration::infer(rule, request, entry)
-        }
-        BuiltinInferenceRule::Aggregate(rule) => routing::aggregate::infer(rule, request, entry),
-        BuiltinInferenceRule::Introspection(rule) => {
-            routing::introspection::infer(rule, request, entry)
-        }
-        BuiltinInferenceRule::Logical(rule) => logical::infer(rule, request, entry),
-        BuiltinInferenceRule::Parallel(rule) => routing::parallel::infer(rule, request, entry),
-    }
+    routing::infer(entry, request)
 }

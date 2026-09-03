@@ -28,10 +28,47 @@ pub enum BuiltinInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum LogicalInferenceRule {
+    Elementwise(LogicalElementwiseRule),
     MetadataPredicate(MetadataPredicate),
     NumericClassification(NumericClassificationPredicate),
     Relational(RelationalOperator),
     ScalarReduction(ScalarLogicalReduction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LogicalElementwiseRule {
+    Binary(LogicalBinaryOperator),
+    Unary(LogicalUnaryOperator),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LogicalBinaryOperator {
+    And,
+    Or,
+    Xor,
+}
+
+impl LogicalBinaryOperator {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::And => "and",
+            Self::Or => "or",
+            Self::Xor => "xor",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LogicalUnaryOperator {
+    Not,
+}
+
+impl LogicalUnaryOperator {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Not => "not",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

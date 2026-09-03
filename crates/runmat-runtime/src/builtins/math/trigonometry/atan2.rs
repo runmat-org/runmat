@@ -94,7 +94,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
     reject_excess_outputs()?;
-    match common_binary::plan_tabular(y, x)
+    match crate::builtins::table::plan_binary(y, x)
         .map_err(|error| atan2_error_with_detail(&ATAN2_ERROR_INVALID_INPUT, error))?
     {
         common_binary::BinaryInputPlan::Values(values) => {
@@ -107,7 +107,7 @@ async fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
             for (name, y, x) in variables {
                 output.push((name, atan2_non_tabular(y, x).await?));
             }
-            common_binary::finish_tabular(&source, output).map_err(|error| {
+            crate::builtins::table::finish_binary(&source, output).map_err(|error| {
                 atan2_error_with_detail(&ATAN2_ERROR_INVALID_INPUT, error.to_string())
             })
         }

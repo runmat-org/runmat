@@ -62,7 +62,7 @@ fn ne_dense_integer_arrays_read_exact_storage_without_mirror() {
 
 #[cfg(feature = "wgpu")]
 fn run_ne_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    block_on(ne_host(lhs, rhs))
+    comparison::evaluate_host(lhs, rhs, runmat_builtins::RelationalOperator::NotEqual)
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

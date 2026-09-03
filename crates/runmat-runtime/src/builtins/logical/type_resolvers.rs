@@ -1,5 +1,4 @@
-use runmat_builtins::shape_rules::{broadcast_shapes, element_count_if_known};
-use runmat_builtins::{ResolveContext, Type};
+use runmat_builtins::Type;
 
 pub fn logical_like(input: &Type) -> Type {
     match input {
@@ -15,72 +14,6 @@ pub fn logical_like(input: &Type) -> Type {
     }
 }
 
-pub fn logical_result_for_binary(lhs: &Type, rhs: &Type) -> Type {
-    let lhs_shape = match lhs {
-        Type::Tensor { shape: Some(shape) } => Some(shape.clone()),
-        Type::Logical { shape: Some(shape) } => Some(shape.clone()),
-        _ => None,
-    };
-    let rhs_shape = match rhs {
-        Type::Tensor { shape: Some(shape) } => Some(shape.clone()),
-        Type::Logical { shape: Some(shape) } => Some(shape.clone()),
-        _ => None,
-    };
-    if let (Some(a), Some(b)) = (&lhs_shape, &rhs_shape) {
-        return Type::Logical {
-            shape: Some(broadcast_shapes(a, b)),
-        };
-    }
-    if let Some(shape) = lhs_shape {
-        return Type::Logical { shape: Some(shape) };
-    }
-    if let Some(shape) = rhs_shape {
-        return Type::Logical { shape: Some(shape) };
-    }
-    if matches!(lhs, Type::Tensor { .. } | Type::Logical { .. })
-        || matches!(rhs, Type::Tensor { .. } | Type::Logical { .. })
-    {
-        Type::logical()
-    } else if matches!(lhs, Type::Unknown) || matches!(rhs, Type::Unknown) {
-        Type::Unknown
-    } else {
-        Type::Bool
-    }
-}
-
-pub fn logical_binary_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.len() >= 2 {
-        logical_result_for_binary(&args[0], &args[1])
-    } else if let Some(first) = args.first() {
-        logical_like(first)
-    } else {
-        Type::Unknown
-    }
-}
-
-pub fn symbolic_logical_binary_type(args: &[Type], context: &ResolveContext) -> Type {
-    if args.len() >= 2
-        && args.iter().take(2).any(|arg| matches!(arg, Type::Symbolic))
-        && args.iter().take(2).all(is_symbolic_scalar_compatible)
-    {
-        Type::Symbolic
-    } else {
-        logical_binary_type(args, context)
-    }
-}
-
-fn is_symbolic_scalar_compatible(ty: &Type) -> bool {
-    match ty {
-        Type::Symbolic | Type::Num | Type::Int | Type::Bool => true,
-        Type::Tensor { shape: Some(shape) } => element_count_if_known(shape) == Some(1),
-        _ => false,
-    }
-}
-
-pub fn logical_unary_type(args: &[Type], _context: &ResolveContext) -> Type {
-    args.first().map(logical_like).unwrap_or(Type::logical())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,74 +27,6 @@ mod tests {
             logical_like(&ty),
             Type::Logical {
                 shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn logical_binary_prefers_matching_shape() {
-        let lhs = Type::Tensor {
-            shape: Some(vec![Some(2), Some(2)]),
-        };
-        let rhs = Type::Logical {
-            shape: Some(vec![Some(2), Some(2)]),
-        };
-        let out = logical_binary_type(&[lhs, rhs], &ResolveContext::new(Vec::new()));
-        assert_eq!(
-            out,
-            Type::Logical {
-                shape: Some(vec![Some(2), Some(2)])
-            }
-        );
-    }
-
-    #[test]
-    fn logical_binary_scalar_defaults_bool() {
-        let out = logical_binary_type(&[Type::Num, Type::Bool], &ResolveContext::new(Vec::new()));
-        assert_eq!(out, Type::Bool);
-    }
-
-    #[test]
-    fn symbolic_logical_binary_returns_symbolic() {
-        let out = symbolic_logical_binary_type(
-            &[Type::Symbolic, Type::Num],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Symbolic);
-    }
-
-    #[test]
-    fn symbolic_logical_binary_delegates_for_nonscalar_inputs() {
-        let out = symbolic_logical_binary_type(
-            &[
-                Type::Symbolic,
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(2)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Logical {
-                shape: Some(vec![Some(2), Some(2)])
-            }
-        );
-    }
-
-    #[test]
-    fn logical_binary_broadcasts_shapes() {
-        let lhs = Type::Tensor {
-            shape: Some(vec![Some(1), Some(4)]),
-        };
-        let rhs = Type::Logical {
-            shape: Some(vec![Some(3), Some(1)]),
-        };
-        let out = logical_binary_type(&[lhs, rhs], &ResolveContext::new(Vec::new()));
-        assert_eq!(
-            out,
-            Type::Logical {
-                shape: Some(vec![Some(3), Some(4)])
             }
         );
     }

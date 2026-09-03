@@ -156,19 +156,22 @@ if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/definition
 
 const inferenceRootPath = "crates/runmat-builtins/src/catalog/inference.rs";
 const inferenceRootLines = read(inferenceRootPath).split("\n").length;
-if (inferenceRootLines > 128) {
-  fail(`${inferenceRootPath} must remain a domain router (found ${inferenceRootLines} lines; maximum 128)`);
+if (inferenceRootLines > 48) {
+  fail(`${inferenceRootPath} must remain a composition root (found ${inferenceRootLines} lines; maximum 48)`);
 }
 const legacyInferenceLeafCeilings = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math_binary.rs", 483],
   ["crates/runmat-builtins/src/catalog/inference/math_inverse.rs", 510],
   ["crates/runmat-builtins/src/catalog/inference/math_logarithms.rs", 481],
+  ["crates/runmat-builtins/src/catalog/inference/math_rounding.rs", 269],
+  ["crates/runmat-builtins/src/catalog/inference/math_special.rs", 285],
+  ["crates/runmat-builtins/src/catalog/inference/stats_random/two_parameter.rs", 366],
 ]);
 for (const { path: sourcePath, text } of rustSources("crates/runmat-builtins/src/catalog/inference")) {
   const lines = text.split("\n").length;
   const isTestModule = sourcePath.endsWith("/tests.rs");
   const legacyCeiling = legacyInferenceLeafCeilings.get(sourcePath);
-  const leafCeiling = legacyCeiling ?? (isTestModule ? 600 : 400);
+  const leafCeiling = legacyCeiling ?? (isTestModule ? 600 : 256);
   if (lines > leafCeiling) {
     const policy = legacyCeiling === undefined
       ? "bounded inference-family size"
@@ -189,6 +192,17 @@ for (const { path: sourcePath, text } of rustSources("crates/runmat-builtins/src
     lines > 256
   ) {
     fail(`${sourcePath} must remain a bounded module router (found ${lines} lines; maximum 256)`);
+  }
+}
+
+const inferenceCompositionRoot = read(inferenceRootPath);
+for (const forbidden of [
+  "BuiltinInferenceRule::",
+  "BuiltinDistributedPolicy::",
+  "ValueKindFact::Distributed",
+]) {
+  if (inferenceCompositionRoot.includes(forbidden)) {
+    fail(`${inferenceRootPath} owns domain policy (${forbidden}); route it through a typed inference module`);
   }
 }
 
@@ -255,6 +269,85 @@ const relationalRuntimeSources = [
 for (const { path: sourcePath, text } of relationalRuntimeSources) {
   if (/match\s+[^\n{]*\.name\s*\(\s*\)|\.name\s*\(\s*\)\s*(?:==|!=)/.test(text)) {
     fail(`${sourcePath} selects relational semantics from a builtin name; dispatch through RelationalOperator`);
+  }
+}
+
+const logicalElementwiseBoundaries = new Map([
+  ["crates/runmat-builtins/src/catalog/inference/logical/mod.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/logical/elementwise/mod.rs", 64],
+  ["crates/runmat-builtins/src/catalog/inference/logical/elementwise/binary.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/logical/elementwise/unary.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/logical/elementwise/output.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/logical/elementwise/tests.rs", 192],
+  ["crates/runmat-builtins/src/catalog/entries/logical/operators/mod.rs", 64],
+  ["crates/runmat-builtins/src/catalog/entries/logical/operators/support.rs", 160],
+  ["crates/runmat-builtins/src/catalog/entries/logical/operators/tests/mod.rs", 192],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/mod.rs", 64],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/binary.rs", 160],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/unary.rs", 128],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/contract.rs", 128],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/evaluate.rs", 128],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/operand.rs", 192],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/provider.rs", 160],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/provider/errors.rs", 64],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/provider/output.rs", 96],
+  ["crates/runmat-runtime/src/builtins/logical/bit/truth/provider/tests.rs", 224],
+]);
+for (const [sourcePath, ceiling] of logicalElementwiseBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its logical-elementwise domain boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+for (const identity of ["and", "or", "xor", "not"]) {
+  const catalogPath = `crates/runmat-builtins/src/catalog/entries/logical/operators/${identity}/mod.rs`;
+  const catalogLines = read(catalogPath).split("\n").length;
+  if (catalogLines > 128) {
+    fail(`${catalogPath} exceeds its identity-owned catalog boundary (found ${catalogLines} lines; maximum 128)`);
+  }
+  const documentationPath = `crates/runmat-builtins/src/catalog/entries/logical/operators/${identity}/documentation.rs`;
+  const documentationLines = read(documentationPath).split("\n").length;
+  if (documentationLines > 128) {
+    fail(`${documentationPath} exceeds its identity-owned documentation boundary (found ${documentationLines} lines; maximum 128)`);
+  }
+  const runtimePath = `crates/runmat-runtime/src/builtins/logical/bit/${identity}.rs`;
+  const runtimeLines = read(runtimePath).split("\n").length;
+  if (runtimeLines > 128) {
+    fail(`${runtimePath} must remain a thin registration and specification leaf (found ${runtimeLines} lines; maximum 128)`);
+  }
+  const runtimeTestsPath = `crates/runmat-runtime/src/builtins/logical/bit/${identity}/tests.rs`;
+  const runtimeTestLines = read(runtimeTestsPath).split("\n").length;
+  if (runtimeTestLines > 480) {
+    fail(`${runtimeTestsPath} exceeds its identity-owned test boundary (found ${runtimeTestLines} lines; maximum 480)`);
+  }
+}
+const logicalElementwiseRuntimeSources = rustSources(
+  "crates/runmat-runtime/src/builtins/logical/bit/truth"
+);
+for (const { path: sourcePath, text } of logicalElementwiseRuntimeSources) {
+  if (/match\s+[^\n{]*\.name\s*\(\s*\)|\.name\s*\(\s*\)\s*(?:==|!=)/.test(text)) {
+    fail(`${sourcePath} selects logical semantics from a builtin name; dispatch through the typed logical operator`);
+  }
+}
+
+const tabularBinaryBoundaries = new Map([
+  ["crates/runmat-runtime/src/builtins/common/binary.rs", 160],
+  ["crates/runmat-runtime/src/builtins/table/binary/mod.rs", 64],
+  ["crates/runmat-runtime/src/builtins/table/binary/plan.rs", 160],
+  ["crates/runmat-runtime/src/builtins/table/binary/rows.rs", 192],
+  ["crates/runmat-runtime/src/builtins/table/binary/output.rs", 64],
+  ["crates/runmat-runtime/src/builtins/table/binary/tests.rs", 160],
+]);
+for (const [sourcePath, ceiling] of tabularBinaryBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its tabular-binary domain boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
   }
 }
 

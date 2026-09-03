@@ -88,7 +88,7 @@ fn rem_error_with_message(
 )]
 async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     super::unary::reject_excess_outputs(BUILTIN_NAME, &REM_ERROR_TOO_MANY_OUTPUTS)?;
-    match common_binary::plan_tabular(lhs, rhs)
+    match crate::builtins::table::plan_binary(lhs, rhs)
         .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?
     {
         common_binary::BinaryInputPlan::Values(values) => {
@@ -101,7 +101,7 @@ async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
             for (name, left, right) in variables {
                 output.push((name, rem_non_tabular(left, right).await?));
             }
-            common_binary::finish_tabular(&source, output)
+            crate::builtins::table::finish_binary(&source, output)
                 .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error.to_string()))
         }
     }

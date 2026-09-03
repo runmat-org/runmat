@@ -36,7 +36,7 @@ fn lt_dense_integer_arrays_read_exact_storage_without_mirror() {
 
 #[cfg(feature = "wgpu")]
 fn run_lt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    block_on(lt_host(lhs, rhs))
+    comparison::evaluate_host(lhs, rhs, runmat_builtins::RelationalOperator::LessThan)
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

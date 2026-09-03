@@ -35,7 +35,7 @@ pub(super) async fn evaluate(
 
     let lhs = gather(lhs, operator).await?;
     let rhs = gather(rhs, operator).await?;
-    let result = compare_host(lhs, rhs, operator)?;
+    let result = evaluate_host(lhs, rhs, operator)?;
     restore_explicit_comparison_result(result, output_source.as_ref(), operator.name())
 }
 
@@ -62,7 +62,7 @@ async fn gather(value: Value, operator: RelationalOperator) -> crate::BuiltinRes
     }
 }
 
-fn compare_host(
+pub(super) fn evaluate_host(
     lhs: Value,
     rhs: Value,
     operator: RelationalOperator,
