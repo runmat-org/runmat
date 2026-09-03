@@ -1,28 +1,27 @@
 use runmat_analysis_core::{
-    AnalysisFieldValues, AnalysisModel, AnalysisModelId, BoundaryCondition, BoundaryConditionKind,
-    ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
-    MaterialElectricalModel, ReferenceFrame,
+    AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure, BoundaryCondition,
+    BoundaryConditionKind, ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind,
+    MaterialAssignment, MaterialElectricalModel, ReferenceFrame,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
+use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
     fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
     fea_cht_interface_temperature_jump_field_id, fea_cht_solid_temperature_field_id,
     fea_fsi_interface_displacement_field_id, fea_fsi_interface_pressure_field_id,
     fea_fsi_interface_traction_field_id, fea_modal_mode_shape_field_id,
     fea_nonlinear_load_factor_field_id, fea_nonlinear_residual_norm_field_id,
-    fea_transient_residual_norm_field_id, ComputeBackend, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_VELOCITY,
-    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
-    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    fea_transient_residual_norm_field_id, ComputeBackend, ExecutionBackend, SolverMethod,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
+    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN,
-    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
-    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use runmat_runtime::analysis::{
@@ -38,8 +37,9 @@ use runmat_runtime::analysis::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisModalRunOptions,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
     AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec, AnalysisStudySweepSpec,
-    AnalysisTransientRunOptions, AnalysisTrendsQuery, ModalFrequencyBasis, ModalFrequencyUnits,
-    PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReasonCode, RunStatus,
+    AnalysisTransientRunOptions, AnalysisTrendsQuery, FallbackEvent, FallbackReason, FallbackStage,
+    ModalFrequencyBasis, ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityGate,
+    QualityPolicy, QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -88,49 +88,28 @@ fn sorted_object_keys(value: &Value) -> Vec<String> {
     keys
 }
 
-fn assert_fallback_event_schema(event: &str) {
-    let parts: Vec<&str> = event.splitn(3, ':').collect();
-    assert_eq!(parts.len(), 3, "fallback event must have 3 parts");
-
-    assert!(
-        matches!(
-            parts[0],
-            "BACKEND_NO_PROVIDER" | "BACKEND_UPLOAD_FAILED" | "SOLVER_BACKEND_FALLBACK"
-        ),
-        "unexpected fallback category: {}",
-        parts[0]
-    );
-    if parts[0] == "SOLVER_BACKEND_FALLBACK" {
-        assert!(
-            parts[1].starts_with("requested="),
-            "unexpected solver backend fallback stage: {}",
-            parts[1]
-        );
-    } else {
-        assert!(
-            parts[1] == FEA_FIELD_STRUCTURAL_DISPLACEMENT
-                || parts[1] == FEA_FIELD_STRUCTURAL_VON_MISES
-                || parts[1] == FEA_FIELD_STRUCTURAL_STRAIN
-                || parts[1] == FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY
-                || parts[1] == FEA_FIELD_STRUCTURAL_STRESS
-                || parts[1] == FEA_FIELD_STRUCTURAL_REACTION_FORCE
-                || parts[1] == FEA_FIELD_STRUCTURAL_ROTATION
-                || parts[1] == FEA_FIELD_STRUCTURAL_REACTION_MOMENT
-                || parts[1] == FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY
-                || parts[1] == FEA_FIELD_STRUCTURAL_RESIDUAL_NORM
-                || parts[1] == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_NODAL_VON_MISES
-                || parts[1] == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE
-                || parts[1] == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE
-                || parts[1] == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT
-                || parts[1] == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT
-                || parts[1] == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS
-                || parts[1] == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS
-                || parts[1] == FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-            "unexpected fallback stage: {}",
-            parts[1]
-        );
+fn assert_fallback_event_schema(event: &FallbackEvent) {
+    match event.stage {
+        FallbackStage::Solver => {
+            assert_eq!(event.reason, FallbackReason::RequestedBackendUnavailable);
+            assert!(event.subject.is_none());
+        }
+        FallbackStage::Preconditioner => {
+            assert_eq!(
+                event.reason,
+                FallbackReason::RequestedPreconditionerUnavailable
+            );
+            assert!(event.actual_preconditioner.is_some());
+            assert!(event.detail.is_none());
+        }
+        FallbackStage::FieldPublication => {
+            assert!(matches!(
+                event.reason,
+                FallbackReason::AcceleratorProviderUnavailable | FallbackReason::FieldUploadFailed
+            ));
+            assert!(event.subject.is_some());
+        }
     }
-    assert!(!parts[2].is_empty(), "fallback reason must be non-empty");
 }
 
 fn contract_study_spec(
@@ -527,7 +506,7 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
     assert_eq!(run.data.solver_convergence, QualityGate::Pass);
     assert_eq!(run.data.result_quality, QualityGate::Pass);
     assert_eq!(run.data.quality_reasons.len(), 0);
-    assert_eq!(run.data.provenance.backend, ComputeBackend::Cpu);
+    assert_eq!(run.data.provenance.requested_backend, ComputeBackend::Cpu);
     assert!(PathBuf::from(&run.data.evidence_artifact_path).exists());
 
     drop(env_guard);
@@ -981,16 +960,16 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     assert_eq!(modal_envelope.op_version, "fea.run_modal/v1");
     assert_eq!(
         modal_envelope.data.run.solver_method,
-        "matrix_free_subspace_iteration"
+        SolverMethod::MatrixFreeSubspaceIteration
     );
     let modal_results = modal_envelope
         .data
         .modal_results
         .as_ref()
         .expect("modal results payload should exist");
-    assert!(!modal_results.eigenvalues_hz.is_empty());
+    assert!(!modal_results.frequencies_hz.is_empty());
     assert_eq!(
-        modal_results.eigenvalues_hz.len(),
+        modal_results.frequencies_hz.len(),
         modal_results.mode_shapes.len()
     );
     assert_eq!(
@@ -1001,7 +980,7 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     assert_eq!(modal_results.mode_shapes[0].shape[1], 3);
     assert_eq!(modal_results.modal_payload_version, "modal_results/v1");
     assert_eq!(
-        modal_results.eigenvalues_hz.len(),
+        modal_results.frequencies_hz.len(),
         modal_results.residual_norms.len()
     );
     assert_eq!(modal_results.mode_units, ModalFrequencyUnits::Hz);
@@ -1109,8 +1088,8 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(!modal.eigenvalues_hz.is_empty());
-    assert!(modal.eigenvalues_hz.len() <= 2);
+    assert!(!modal.frequencies_hz.is_empty());
+    assert!(modal.frequencies_hz.len() <= 2);
     assert!(envelope.data.provenance.deterministic_mode);
 
     let invalid = analysis_run_modal_with_options_op(
@@ -1246,7 +1225,7 @@ fn analysis_run_cfd_contract_shapes_cell_and_boundary_fields() {
     assert_eq!(envelope.op_version, "fea.run_cfd/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "cfd_velocity_pressure_finite_volume"
+        SolverMethod::CfdVelocityPressureFiniteVolume
     );
 
     let velocity = envelope
@@ -1303,7 +1282,10 @@ fn analysis_run_cht_contract_shapes_coupled_interface_fields() {
     .expect("cht run should return envelope");
     assert_eq!(envelope.operation, "fea.run_cht");
     assert_eq!(envelope.op_version, "fea.run_cht/v1");
-    assert_eq!(envelope.data.run.solver_method, "cht_conjugate_projection");
+    assert_eq!(
+        envelope.data.run.solver_method,
+        SolverMethod::ChtConjugateProjection
+    );
     assert!(envelope.data.transient_results.is_none());
 
     let fluid_velocity = envelope
@@ -1372,7 +1354,10 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
     .expect("transient run should return envelope");
     assert_eq!(envelope.operation, "fea.run_transient");
     assert_eq!(envelope.op_version, "fea.run_transient/v1");
-    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
+    assert_eq!(
+        envelope.data.run.solver_method,
+        SolverMethod::ImplicitEulerPcg
+    );
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
     assert!(envelope.data.publishable);
     let transient = envelope
@@ -1450,7 +1435,7 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
     assert_eq!(envelope.op_version, "fea.run_fsi/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "fsi_partitioned_projection"
+        SolverMethod::FsiPartitionedProjection
     );
     assert!(envelope.data.transient_results.is_none());
     assert!(envelope
@@ -2107,7 +2092,7 @@ fn analysis_trends_contract_is_v1_and_typed() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Nonlinear)
+        .find(|summary| summary.identity.procedure == AnalysisProcedure::Nonlinear)
         .expect("nonlinear trend summary should be present");
     assert_eq!(nonlinear.sample_count, 2);
     assert!(nonlinear.median_solve_ms.is_some());
@@ -2716,8 +2701,13 @@ fn analysis_run_backend_selection_is_recorded_in_provenance() {
     )
     .expect("gpu run should succeed");
 
-    assert_eq!(cpu.data.provenance.backend, ComputeBackend::Cpu);
-    assert_eq!(gpu.data.provenance.backend, ComputeBackend::Gpu);
+    assert_eq!(cpu.data.provenance.requested_backend, ComputeBackend::Cpu);
+    assert_eq!(gpu.data.provenance.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(cpu.data.provenance.execution_backend, ExecutionBackend::Cpu);
+    assert_eq!(
+        gpu.data.provenance.execution_backend,
+        gpu.data.run.execution_backend
+    );
     assert_eq!(cpu.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(cpu.data.provenance.solver_host_sync_count, 0);
     assert!(
@@ -2745,16 +2735,23 @@ fn analysis_run_gpu_without_provider_records_fallback_contract() {
     )
     .expect("gpu run should succeed with host fallback");
 
-    if envelope.data.provenance.solver_backend == "cpu_reference" {
+    if envelope.data.provenance.solver_backend == LinearAlgebraBackendKind::CpuReference {
+        assert_eq!(
+            envelope.data.provenance.execution_backend,
+            ExecutionBackend::Cpu
+        );
         assert!(envelope
             .data
             .provenance
             .fallback_events
             .iter()
-            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+            .any(FallbackEvent::is_solver_backend_fallback));
         assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
     } else {
-        assert_eq!(envelope.data.provenance.solver_backend, "runtime_tensor");
+        assert_eq!(
+            envelope.data.provenance.solver_backend,
+            LinearAlgebraBackendKind::RuntimeTensor
+        );
     }
     for event in &envelope.data.provenance.fallback_events {
         assert_fallback_event_schema(event);
@@ -2841,15 +2838,14 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
         .provenance
         .fallback_events
         .iter()
-        .any(|event| event.starts_with("BACKEND_NO_PROVIDER")
-            || event.starts_with("BACKEND_UPLOAD_FAILED")));
-    if envelope.data.provenance.solver_backend == "cpu_reference" {
+        .any(FallbackEvent::is_field_publication_fallback));
+    if envelope.data.provenance.solver_backend == LinearAlgebraBackendKind::CpuReference {
         assert!(envelope
             .data
             .provenance
             .fallback_events
             .iter()
-            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+            .any(FallbackEvent::is_solver_backend_fallback));
     }
     assert!(matches!(
         envelope
@@ -2922,7 +2918,10 @@ fn analysis_run_gpu_upload_failure_records_fallback_contract() {
         .provenance
         .fallback_events
         .iter()
-        .any(|event| event.starts_with("BACKEND_UPLOAD_FAILED:structural.displacement")));
+        .any(|event| {
+            event.reason == FallbackReason::FieldUploadFailed
+                && event.subject.as_deref() == Some(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        }));
     for event in &envelope.data.provenance.fallback_events {
         assert_fallback_event_schema(event);
     }

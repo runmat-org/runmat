@@ -122,7 +122,7 @@ pub fn run_modal_with_options(
         * 1.0e11;
     let modal_fields = recover_modal_result_fields(
         &summary,
-        &modal.eigenvalues_hz,
+        &modal.frequencies_hz,
         &modal.mode_shapes,
         &modal.residual_norms,
     );
@@ -137,7 +137,10 @@ pub fn run_modal_with_options(
     run_fields.extend(modal_fields);
 
     let run = FeaRunResult {
-        backend,
+        requested_backend: backend,
+        execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
+            modal.solver_backend,
+        ),
         solver_backend: modal.solver_backend,
         solver_device_apply_k_ratio: if modal.device_apply_k_attempt_count == 0 {
             0.0
@@ -146,9 +149,9 @@ pub fn run_modal_with_options(
         },
         solver_method: modal.solver_method,
         preconditioner: if backend == ComputeBackend::Gpu {
-            "jacobi".to_string()
+            crate::contracts::SolverPreconditioner::Jacobi
         } else {
-            "none".to_string()
+            crate::contracts::SolverPreconditioner::None
         },
         solver_host_sync_count: modal.solver_host_sync_count,
         diagnostics,
@@ -192,7 +195,7 @@ pub fn run_modal_with_options(
 
     Ok(FeaModalRunResult {
         run,
-        eigenvalues_hz: modal.eigenvalues_hz,
+        frequencies_hz: modal.frequencies_hz,
         mode_shapes,
         residual_norms: modal.residual_norms,
     })

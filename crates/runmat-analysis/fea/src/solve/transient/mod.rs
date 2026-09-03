@@ -5,13 +5,17 @@ use std::time::Instant;
 
 use crate::{
     assembly::AssemblySummary,
+    contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     physics::{
         coupling::{electro_thermal, thermo_mechanical},
         structural,
     },
     progress::{emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
-    solve::runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
+    solve::{
+        backend::kind::LinearAlgebraBackendKind,
+        runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
+    },
     ComputeBackend, FeaElectroThermalContext, FeaThermoMechanicalContext,
 };
 
@@ -88,12 +92,12 @@ pub struct TransientSolveResult {
     pub residual_norms: Vec<f64>,
     pub accepted_time_steps_s: Vec<f64>,
     pub diagnostics: Vec<FeaDiagnostic>,
-    pub solver_method: String,
-    pub solver_backend: String,
+    pub solver_method: SolverMethod,
+    pub solver_backend: LinearAlgebraBackendKind,
     pub solver_host_sync_count: u32,
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
-    pub preconditioner: String,
+    pub preconditioner: SolverPreconditioner,
 }
 
 pub fn solve_transient_system(
@@ -115,12 +119,12 @@ pub fn solve_transient_system(
                 message: "transient solve skipped because assembled system has zero DOFs or step_count is zero"
                     .to_string(),
             }],
-            solver_method: "implicit_euler_pcg".to_string(),
-            solver_backend: "cpu_reference".to_string(),
+            solver_method: SolverMethod::ImplicitEulerPcg,
+            solver_backend: LinearAlgebraBackendKind::CpuReference,
             solver_host_sync_count: 0,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
-            preconditioner: "none".to_string(),
+            preconditioner: SolverPreconditioner::None,
         };
     }
 
@@ -154,11 +158,11 @@ pub fn solve_transient_system(
     let mut retry_budget_hits = 0usize;
     let mut energies = Vec::with_capacity(options.step_count + 1);
     energies.push(strain_energy(summary, &x));
-    let mut solver_backend = "cpu_reference".to_string();
+    let mut solver_backend = LinearAlgebraBackendKind::CpuReference;
     let mut solver_host_sync_count = 0u32;
     let mut device_apply_k_count = 0u32;
     let mut device_apply_k_attempt_count = 0u32;
-    let mut selected_preconditioner = "none".to_string();
+    let mut selected_preconditioner = SolverPreconditioner::None;
     let mut prepared_runtime_systems_by_dt: HashMap<u64, RuntimeTensorPreparedLinearSystem> =
         HashMap::new();
     let mut prepared_runtime_system_lru = VecDeque::new();
@@ -464,7 +468,7 @@ pub fn solve_transient_system(
         residual_norms,
         accepted_time_steps_s,
         diagnostics,
-        solver_method: "implicit_euler_pcg".to_string(),
+        solver_method: SolverMethod::ImplicitEulerPcg,
         solver_backend,
         solver_host_sync_count,
         device_apply_k_count,

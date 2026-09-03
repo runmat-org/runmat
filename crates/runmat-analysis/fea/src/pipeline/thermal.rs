@@ -5,10 +5,10 @@ use runmat_analysis_core::{
 use crate::{
     assembly::{try_assemble_linear_system, AssemblySummary},
     contracts::{
-        fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
-        fea_thermal_heat_source_field_id, fea_thermal_temperature_field_id,
-        fea_thermal_temperature_gradient_field_id, ComputeBackend, FeaRunError, FeaRunResult,
-        FeaThermalRunResult, ThermalSolveOptions,
+        fea_thermal_axis_boundary_heat_flux_summary_field_id,
+        fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
+        fea_thermal_temperature_field_id, fea_thermal_temperature_gradient_field_id,
+        ComputeBackend, FeaRunError, FeaRunResult, FeaThermalRunResult, ThermalSolveOptions,
     },
     diagnostics::{
         builders::{material_assignment_diagnostics, thermo_mechanical_diagnostic},
@@ -238,18 +238,17 @@ pub fn run_thermal_with_options(
         recover_temperature_gradients(&temperature_snapshots_raw, &recovery_topology);
     let heat_flux_raw =
         recover_heat_flux_snapshots(&temperature_gradient_raw, constitutive.conductivity_mean);
-    let heat_source_raw = recover_heat_source_snapshots(
+    let energy_storage_rate_raw = recover_energy_storage_rate_snapshots(
         &temperature_snapshots_raw,
         options.time_step_s.max(1.0e-9),
         constitutive.density_mean,
         constitutive.heat_capacity_mean,
     );
-    let boundary_heat_flux_raw =
-        recover_boundary_heat_flux_snapshots(&heat_flux_raw, &recovery_topology);
-    let heat_balance = thermal_heat_balance(
+    let axis_boundary_heat_flux_summary_raw =
+        recover_axis_boundary_heat_flux_summary_snapshots(&heat_flux_raw, &recovery_topology);
+    let energy_storage_consistency = thermal_energy_storage_consistency(
         &temperature_snapshots_raw,
-        &heat_source_raw,
-        &boundary_heat_flux_raw,
+        &energy_storage_rate_raw,
         options.time_step_s.max(1.0e-9),
         constitutive.density_mean,
         constitutive.heat_capacity_mean,
@@ -283,24 +282,26 @@ pub fn run_thermal_with_options(
                 )
             })
             .collect::<Vec<_>>();
-    let heat_source_snapshots =
-        project_nodal_scalar_snapshots_to_thermal_elements(&heat_source_raw, &thermal_elements)
-            .into_iter()
-            .enumerate()
-            .map(|(step, values)| {
-                AnalysisField::host_f64(
-                    fea_thermal_heat_source_field_id(step),
-                    vec![element_count],
-                    values,
-                )
-            })
-            .collect::<Vec<_>>();
-    let boundary_heat_flux_snapshots = boundary_heat_flux_raw
+    let energy_storage_rate_snapshots = project_nodal_scalar_snapshots_to_thermal_elements(
+        &energy_storage_rate_raw,
+        &thermal_elements,
+    )
+    .into_iter()
+    .enumerate()
+    .map(|(step, values)| {
+        AnalysisField::host_f64(
+            fea_thermal_energy_storage_rate_field_id(step),
+            vec![element_count],
+            values,
+        )
+    })
+    .collect::<Vec<_>>();
+    let axis_boundary_heat_flux_summary_snapshots = axis_boundary_heat_flux_summary_raw
         .into_iter()
         .enumerate()
         .map(|(step, values)| {
             AnalysisField::host_f64(
-                fea_thermal_boundary_heat_flux_field_id(step),
+                fea_thermal_axis_boundary_heat_flux_summary_field_id(step),
                 vec![BOUNDARY_HEAT_FLUX_COMPONENT_COUNT],
                 values,
             )
@@ -455,19 +456,18 @@ pub fn run_thermal_with_options(
         ),
     });
     diagnostics.push(FeaDiagnostic {
-        code: "FEA_THERMAL_HEAT_BALANCE".to_string(),
-        severity: if heat_balance.residual_ratio <= 0.15 {
+        code: "FEA_THERMAL_ENERGY_STORAGE_CONSISTENCY".to_string(),
+        severity: if energy_storage_consistency.residual_ratio <= 0.15 {
             FeaDiagnosticSeverity::Info
         } else {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "input_heat={} boundary_heat={} stored_energy={} numerical_loss={} heat_balance_residual_ratio={}",
-            heat_balance.input_heat,
-            heat_balance.boundary_heat,
-            heat_balance.stored_energy,
-            heat_balance.numerical_loss,
-            heat_balance.residual_ratio,
+            "integrated_storage_energy_density={} endpoint_storage_energy_density={} storage_energy_density_discrepancy={} storage_consistency_residual_ratio={}",
+            energy_storage_consistency.integrated_energy_density,
+            energy_storage_consistency.endpoint_energy_density,
+            energy_storage_consistency.discrepancy,
+            energy_storage_consistency.residual_ratio,
         ),
     });
     diagnostics.push(FeaDiagnostic {
@@ -522,15 +522,12 @@ pub fn run_thermal_with_options(
     }
 
     let run = FeaRunResult {
-        backend,
-        solver_backend: if backend == ComputeBackend::Gpu {
-            "runtime_tensor".to_string()
-        } else {
-            "cpu_reference".to_string()
-        },
+        requested_backend: backend,
+        execution_backend: crate::contracts::ExecutionBackend::Cpu,
+        solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         solver_device_apply_k_ratio: 0.0,
-        solver_method: "thermal_profile_integrator".to_string(),
-        preconditioner: "none".to_string(),
+        solver_method: crate::contracts::SolverMethod::ThermalProfileIntegrator,
+        preconditioner: crate::contracts::SolverPreconditioner::None,
         solver_host_sync_count: 0,
         diagnostics,
         fields: Vec::new(),
@@ -551,8 +548,8 @@ pub fn run_thermal_with_options(
         temperature_snapshots,
         temperature_gradient_snapshots,
         heat_flux_snapshots,
-        heat_source_snapshots,
-        boundary_heat_flux_snapshots,
+        energy_storage_rate_snapshots,
+        axis_boundary_heat_flux_summary_snapshots,
         residual_norms,
         reference_temperature_k: thermo_context.reference_temperature_k,
     })
@@ -788,7 +785,7 @@ fn recover_heat_flux_snapshots(
         .collect()
 }
 
-fn recover_heat_source_snapshots(
+fn recover_energy_storage_rate_snapshots(
     temperature_snapshots: &[Vec<f64>],
     dt: f64,
     density_mean: f64,
@@ -926,7 +923,7 @@ fn thermal_axis_offsets(dim: usize) -> std::ops::RangeInclusive<usize> {
     0..=usize::from(dim > 1)
 }
 
-fn recover_boundary_heat_flux_snapshots(
+fn recover_axis_boundary_heat_flux_summary_snapshots(
     heat_flux_snapshots: &[Vec<f64>],
     topology: &ThermalRecoveryTopology,
 ) -> Vec<Vec<f64>> {
@@ -986,11 +983,10 @@ fn thermal_face_average(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ThermalHeatBalance {
-    input_heat: f64,
-    boundary_heat: f64,
-    stored_energy: f64,
-    numerical_loss: f64,
+struct ThermalEnergyStorageConsistency {
+    integrated_energy_density: f64,
+    endpoint_energy_density: f64,
+    discrepancy: f64,
     residual_ratio: f64,
 }
 
@@ -1269,25 +1265,22 @@ fn thermal_slab_monotonic_edge_fraction(
     }
 }
 
-fn thermal_heat_balance(
+fn thermal_energy_storage_consistency(
     temperature_snapshots: &[Vec<f64>],
-    heat_source_snapshots: &[Vec<f64>],
-    boundary_heat_flux_snapshots: &[Vec<f64>],
+    energy_storage_rate_snapshots: &[Vec<f64>],
     dt: f64,
     density_mean: f64,
     heat_capacity_mean: f64,
     reference_temperature_k: f64,
-) -> ThermalHeatBalance {
-    let input_heat = heat_source_snapshots
+) -> ThermalEnergyStorageConsistency {
+    let integrated_energy_density = energy_storage_rate_snapshots
         .iter()
-        .map(|snapshot| snapshot.iter().sum::<f64>() * dt.max(1.0e-12))
-        .sum::<f64>();
-    let boundary_heat = boundary_heat_flux_snapshots
-        .iter()
-        .map(|snapshot| snapshot.iter().sum::<f64>() * dt.max(1.0e-12))
+        .map(|snapshot| {
+            snapshot.iter().sum::<f64>() / snapshot.len().max(1) as f64 * dt.max(1.0e-12)
+        })
         .sum::<f64>();
     let volumetric_capacity = density_mean.max(0.0) * heat_capacity_mean.max(0.0);
-    let stored_energy = if let Some(final_snapshot) = temperature_snapshots.last() {
+    let endpoint_energy_density = if let Some(final_snapshot) = temperature_snapshots.last() {
         let initial_snapshot = temperature_snapshots.first();
         final_snapshot
             .iter()
@@ -1300,18 +1293,18 @@ fn thermal_heat_balance(
                 volumetric_capacity * (final_value - initial_value)
             })
             .sum::<f64>()
+            / final_snapshot.len().max(1) as f64
     } else {
         0.0
     };
-    let numerical_loss = input_heat - boundary_heat - stored_energy;
-    let denominator = input_heat.abs() + boundary_heat.abs() + stored_energy.abs() + 1.0e-12_f64;
-    let residual_ratio = (numerical_loss.abs() / denominator).clamp(0.0, 1.0e6);
+    let discrepancy = integrated_energy_density - endpoint_energy_density;
+    let denominator = integrated_energy_density.abs() + endpoint_energy_density.abs() + 1.0e-12;
+    let residual_ratio = (discrepancy.abs() / denominator).clamp(0.0, 1.0e6);
 
-    ThermalHeatBalance {
-        input_heat,
-        boundary_heat,
-        stored_energy,
-        numerical_loss,
+    ThermalEnergyStorageConsistency {
+        integrated_energy_density,
+        endpoint_energy_density,
+        discrepancy,
         residual_ratio,
     }
 }

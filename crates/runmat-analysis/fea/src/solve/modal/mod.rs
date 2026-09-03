@@ -4,9 +4,13 @@ use std::time::Instant;
 
 use crate::{
     assembly::AssemblySummary,
+    contracts::SolverMethod,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::{apply_k, apply_m},
-    solve::runtime_tensor_solver::prepare_runtime_tensor_linear_system,
+    solve::{
+        backend::kind::LinearAlgebraBackendKind,
+        runtime_tensor_solver::prepare_runtime_tensor_linear_system,
+    },
     ComputeBackend,
 };
 
@@ -21,12 +25,12 @@ use math::{dot, normalize_mass, orthonormalize_mass, relative_l2_update};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModalSolveResult {
     pub converged: bool,
-    pub eigenvalues_hz: Vec<f64>,
+    pub frequencies_hz: Vec<f64>,
     pub mode_shapes: Vec<Vec<f64>>,
     pub residual_norms: Vec<f64>,
     pub diagnostics: Vec<FeaDiagnostic>,
-    pub solver_method: String,
-    pub solver_backend: String,
+    pub solver_method: SolverMethod,
+    pub solver_backend: LinearAlgebraBackendKind,
     pub solver_host_sync_count: u32,
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
@@ -40,7 +44,7 @@ pub fn solve_modal_system(
     if summary.dof_count == 0 || mode_count == 0 {
         return ModalSolveResult {
             converged: false,
-            eigenvalues_hz: Vec::new(),
+            frequencies_hz: Vec::new(),
             mode_shapes: Vec::new(),
             residual_norms: Vec::new(),
             diagnostics: vec![FeaDiagnostic {
@@ -50,8 +54,8 @@ pub fn solve_modal_system(
                     "modal solve skipped because assembled system has zero DOFs or requested mode_count is zero"
                         .to_string(),
             }],
-            solver_method: "matrix_free_subspace_iteration".to_string(),
-            solver_backend: "cpu_reference".to_string(),
+            solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+            solver_backend: LinearAlgebraBackendKind::CpuReference,
             solver_host_sync_count: 0,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
@@ -59,7 +63,7 @@ pub fn solve_modal_system(
     }
 
     let use_runtime_tensor = backend == ComputeBackend::Gpu;
-    let mut solver_backend = "cpu_reference".to_string();
+    let mut solver_backend = LinearAlgebraBackendKind::CpuReference;
     let mut solver_host_sync_count = 0u32;
     let mut device_apply_k_count = 0u32;
     let mut device_apply_k_attempt_count = 0u32;
@@ -170,16 +174,16 @@ pub fn solve_modal_system(
     }
 
     modes.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let mut eigenvalues_hz = Vec::with_capacity(modes.len());
+    let mut frequencies_hz = Vec::with_capacity(modes.len());
     let mut mode_shapes = Vec::with_capacity(modes.len());
     let mut residual_norms = Vec::with_capacity(modes.len());
     for (freq_hz, shape, residual) in modes {
-        eigenvalues_hz.push(freq_hz);
+        frequencies_hz.push(freq_hz);
         mode_shapes.push(shape);
         residual_norms.push(residual);
     }
 
-    let converged = !eigenvalues_hz.is_empty();
+    let converged = !frequencies_hz.is_empty();
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_MODAL_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,
@@ -195,7 +199,7 @@ pub fn solve_modal_system(
         message: format!(
             "mode_count_requested={} mode_count_solved={} converged={}",
             mode_count,
-            eigenvalues_hz.len(),
+            frequencies_hz.len(),
             converged
         ),
     });
@@ -203,7 +207,7 @@ pub fn solve_modal_system(
     push_modal_quality_diagnostics(
         &mut diagnostics,
         &summary.operator,
-        &eigenvalues_hz,
+        &frequencies_hz,
         &mode_shapes,
         &residual_norms,
     );
@@ -218,11 +222,11 @@ pub fn solve_modal_system(
 
     ModalSolveResult {
         converged,
-        eigenvalues_hz,
+        frequencies_hz,
         mode_shapes,
         residual_norms,
         diagnostics,
-        solver_method: "matrix_free_subspace_iteration".to_string(),
+        solver_method: SolverMethod::MatrixFreeSubspaceIteration,
         solver_backend,
         solver_host_sync_count,
         device_apply_k_count,

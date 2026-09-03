@@ -133,7 +133,10 @@ pub fn run_transient_with_options(
         * 1.0e11;
 
     let mut run = FeaRunResult {
-        backend,
+        requested_backend: backend,
+        execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
+            transient.solver_backend,
+        ),
         solver_backend: transient.solver_backend,
         solver_device_apply_k_ratio: if transient.device_apply_k_attempt_count == 0 {
             0.0

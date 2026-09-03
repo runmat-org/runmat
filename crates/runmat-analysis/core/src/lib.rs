@@ -12,6 +12,7 @@ pub mod problem {
     pub mod structure;
 }
 pub mod field;
+pub mod study;
 pub mod validate;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
@@ -37,6 +38,10 @@ pub use problem::steps::{AnalysisStep, AnalysisStepKind};
 pub use problem::structure::{
     BeamElementModel, BeamSectionModel, ShellElementModel, ShellSectionModel, StructuralElement,
     StructuralElementKind, StructuralModel, StructuralNode,
+};
+pub use study::{
+    AnalysisProcedure, AnalysisRunIdentity, CoupledPhysicsFamily, ExecutionFallbackPolicy,
+    FormulationImplementation, FormulationMaturity, PhysicsFamily, SolutionSpace,
 };
 pub use validate::{validate_model, validate_model_against_geometry, AnalysisValidationError};
 

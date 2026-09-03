@@ -1071,14 +1071,14 @@ mod tests {
             residual_norm: 0.0,
             converged: true,
             host_sync_count: 0,
-            solver_backend: "test".to_string(),
+            solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
             solution: vec![
                 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
             ],
-            solver_method: "test".to_string(),
-            preconditioner: "none".to_string(),
+            solver_method: crate::contracts::SolverMethod::MatrixFreePcg,
+            preconditioner: crate::contracts::SolverPreconditioner::None,
             diagnostics: Vec::new(),
         };
 
@@ -1118,14 +1118,14 @@ mod tests {
             residual_norm: 1.0e-4,
             converged: false,
             host_sync_count: 0,
-            solver_backend: "test".to_string(),
+            solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
             solution: vec![
                 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
             ],
-            solver_method: "test".to_string(),
-            preconditioner: "none".to_string(),
+            solver_method: crate::contracts::SolverMethod::MatrixFreePcg,
+            preconditioner: crate::contracts::SolverPreconditioner::None,
             diagnostics: Vec::new(),
         };
 

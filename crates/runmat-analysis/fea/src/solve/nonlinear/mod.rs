@@ -4,12 +4,16 @@ use std::time::Instant;
 
 use crate::{
     assembly::{AssemblySummary, StructuralMaterialSummary},
+    contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     physics::{
         coupling::{electro_thermal, nonlinear as coupling_nonlinear, thermo_mechanical},
         structural,
     },
-    solve::transient::{solve_transient_system, TransientSolveOptions},
+    solve::{
+        backend::kind::LinearAlgebraBackendKind,
+        transient::{solve_transient_system, TransientSolveOptions},
+    },
     ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext,
     FeaPlasticityConstitutiveContext, FeaThermoMechanicalContext,
 };
@@ -79,12 +83,12 @@ pub struct NonlinearSolveResult {
     pub convergence_stall_count: usize,
     pub backtrack_burst_count: usize,
     pub diagnostics: Vec<FeaDiagnostic>,
-    pub solver_method: String,
-    pub solver_backend: String,
+    pub solver_method: SolverMethod,
+    pub solver_backend: LinearAlgebraBackendKind,
     pub solver_host_sync_count: u32,
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
-    pub preconditioner: String,
+    pub preconditioner: SolverPreconditioner,
 }
 
 pub fn solve_nonlinear_system(
@@ -119,12 +123,12 @@ pub fn solve_nonlinear_system(
                 message: "nonlinear solve skipped because assembled system has zero DOFs or increment_count is zero"
                     .to_string(),
             }],
-            solver_method: "incremental_newton_raphson".to_string(),
-            solver_backend: "cpu_reference".to_string(),
+            solver_method: SolverMethod::IncrementalNewtonRaphson,
+            solver_backend: LinearAlgebraBackendKind::CpuReference,
             solver_host_sync_count: 0,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
-            preconditioner: "none".to_string(),
+            preconditioner: SolverPreconditioner::None,
         };
     }
 
@@ -661,7 +665,7 @@ pub fn solve_nonlinear_system(
         convergence_stall_count,
         backtrack_burst_count,
         diagnostics,
-        solver_method: "incremental_newton_raphson".to_string(),
+        solver_method: SolverMethod::IncrementalNewtonRaphson,
         solver_backend: transient.solver_backend,
         solver_host_sync_count: transient.solver_host_sync_count,
         device_apply_k_count: transient.device_apply_k_count,

@@ -306,7 +306,10 @@ pub fn run_linear_static_with_options(
     );
 
     Ok(FeaRunResult {
-        backend,
+        requested_backend: backend,
+        execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
+            solve_result.solver_backend,
+        ),
         solver_backend: solve_result.solver_backend,
         solver_device_apply_k_ratio,
         solver_method: solve_result.solver_method,

@@ -1,6 +1,8 @@
-use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, AnalysisModel};
+use runmat_analysis_core::{
+    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisRunIdentity,
+};
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
-use runmat_analysis_fea::{ComputeBackend, FeaProgressEvent, FeaRunResult};
+use runmat_analysis_fea::{ComputeBackend, ExecutionBackend, FeaProgressEvent, FeaRunResult};
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::MeshingRequestSettings;
 use serde::{Deserialize, Serialize};
@@ -994,18 +996,100 @@ pub enum RunStatus {
     Rejected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FallbackStage {
+    Solver,
+    Preconditioner,
+    FieldPublication,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FallbackReason {
+    RequestedBackendUnavailable,
+    RequestedPreconditionerUnavailable,
+    AcceleratorProviderUnavailable,
+    FieldUploadFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FallbackEvent {
+    pub stage: FallbackStage,
+    pub reason: FallbackReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_preconditioner: Option<runmat_analysis_fea::SolverPreconditioner>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl FallbackEvent {
+    pub fn solver_backend() -> Self {
+        Self {
+            stage: FallbackStage::Solver,
+            reason: FallbackReason::RequestedBackendUnavailable,
+            actual_preconditioner: None,
+            subject: None,
+            detail: None,
+        }
+    }
+
+    pub fn preconditioner(actual: runmat_analysis_fea::SolverPreconditioner) -> Self {
+        Self {
+            stage: FallbackStage::Preconditioner,
+            reason: FallbackReason::RequestedPreconditionerUnavailable,
+            actual_preconditioner: Some(actual),
+            subject: None,
+            detail: None,
+        }
+    }
+
+    pub fn field_provider_unavailable(field_id: impl Into<String>) -> Self {
+        Self {
+            stage: FallbackStage::FieldPublication,
+            reason: FallbackReason::AcceleratorProviderUnavailable,
+            actual_preconditioner: None,
+            subject: Some(field_id.into()),
+            detail: None,
+        }
+    }
+
+    pub fn field_upload_failed(field_id: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            stage: FallbackStage::FieldPublication,
+            reason: FallbackReason::FieldUploadFailed,
+            actual_preconditioner: None,
+            subject: Some(field_id.into()),
+            detail: Some(detail.into()),
+        }
+    }
+
+    pub fn is_solver_backend_fallback(&self) -> bool {
+        self.stage == FallbackStage::Solver
+            && self.reason == FallbackReason::RequestedBackendUnavailable
+    }
+
+    pub fn is_field_publication_fallback(&self) -> bool {
+        self.stage == FallbackStage::FieldPublication
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunProvenance {
-    pub backend: ComputeBackend,
-    pub solver_backend: String,
+    pub requested_backend: ComputeBackend,
+    pub execution_backend: ExecutionBackend,
+    pub solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind,
     pub solver_device_apply_k_ratio: f64,
     pub solver_host_sync_count: u32,
     pub precision_mode: String,
     pub deterministic_mode: bool,
-    pub solver_method: String,
-    pub preconditioner: String,
+    pub solver_method: runmat_analysis_fea::SolverMethod,
+    pub preconditioner: runmat_analysis_fea::SolverPreconditioner,
     pub quality_policy: String,
-    pub fallback_events: Vec<String>,
+    pub fallback_events: Vec<FallbackEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1053,8 +1137,10 @@ pub struct AnalysisRenderTriangleRange {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisRunResult {
     pub run_id: String,
+    pub identity: AnalysisRunIdentity,
     pub run: FeaRunResult,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_topology: Option<AnalysisRenderTopology>,
@@ -1078,6 +1164,7 @@ pub struct AnalysisRunResult {
 pub struct AnalysisArtifactRecord {
     pub run_id: String,
     pub created_at: String,
+    pub identity: AnalysisRunIdentity,
     pub op_version: String,
     pub field_ids: Vec<String>,
 }
@@ -1531,6 +1618,7 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     }
     if normalized.contains("poynting_vector")
         || normalized.contains("boundary_heat_flux")
+        || normalized.contains("axis_boundary_heat_flux_summary")
         || normalized.contains("interface_heat_flux")
         || normalized.ends_with(".heat_flux")
         || normalized.contains(".heat_flux.")
@@ -1540,6 +1628,7 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     if normalized.contains("power_loss_density")
         || normalized.contains("joule_heat")
         || normalized.contains("heat_source")
+        || normalized.contains("energy_storage_rate")
     {
         return Some("W/m^3");
     }
@@ -1617,6 +1706,9 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
 
 fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
     let normalized = field_id.to_ascii_lowercase();
+    if normalized.contains("axis_boundary_heat_flux_summary") {
+        return AnalysisFieldLocation::Global;
+    }
     if normalized.contains("nodal_von_mises") {
         return AnalysisFieldLocation::Node;
     }
@@ -2016,6 +2108,7 @@ pub struct AnalysisResultsSummary {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisResultsData {
+    pub identity: AnalysisRunIdentity,
     #[serde(default)]
     pub field_descriptors: Vec<AnalysisFieldDescriptor>,
     pub fields: Vec<AnalysisField>,
@@ -2442,7 +2535,7 @@ impl AnalysisRunKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisTrendKindSummary {
-    pub run_kind: AnalysisRunKind,
+    pub identity: AnalysisRunIdentity,
     pub sample_count: usize,
     pub median_solve_ms: Option<f64>,
     pub p95_solve_ms: Option<f64>,
@@ -2498,7 +2591,7 @@ pub struct AnalysisTrendsData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModalResultsData {
     pub modal_payload_version: String,
-    pub eigenvalues_hz: Vec<f64>,
+    pub frequencies_hz: Vec<f64>,
     pub mode_shapes: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub mode_units: ModalFrequencyUnits,
@@ -2515,9 +2608,9 @@ pub struct ThermalResultsData {
     #[serde(default)]
     pub heat_flux_snapshots: Vec<AnalysisField>,
     #[serde(default)]
-    pub heat_source_snapshots: Vec<AnalysisField>,
+    pub energy_storage_rate_snapshots: Vec<AnalysisField>,
     #[serde(default)]
-    pub boundary_heat_flux_snapshots: Vec<AnalysisField>,
+    pub axis_boundary_heat_flux_summary_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub reference_temperature_k: f64,
 }

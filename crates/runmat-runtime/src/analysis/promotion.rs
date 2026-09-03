@@ -1,11 +1,13 @@
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
 
+use super::contracts::FallbackEvent;
+
 pub(crate) fn promote_run_fields_to_device_refs(
     run: &mut FeaRunResult,
-    fallback_events: &mut Vec<String>,
+    fallback_events: &mut Vec<FallbackEvent>,
 ) {
-    if run.backend != ComputeBackend::Gpu {
+    if run.requested_backend != ComputeBackend::Gpu {
         return;
     }
 
@@ -18,7 +20,7 @@ pub(crate) fn promote_run_fields_to_device_refs(
 fn promote_field_to_device_ref(
     field_label: &str,
     field: &mut AnalysisField,
-    fallback_events: &mut Vec<String>,
+    fallback_events: &mut Vec<FallbackEvent>,
 ) {
     let host_values = match &field.values {
         AnalysisFieldValues::HostF64(values) => values.clone(),
@@ -26,9 +28,7 @@ fn promote_field_to_device_ref(
     };
 
     let Some(provider) = runmat_accelerate_api::provider() else {
-        fallback_events.push(format!(
-            "BACKEND_NO_PROVIDER:{field_label}:retained_host_field"
-        ));
+        fallback_events.push(FallbackEvent::field_provider_unavailable(field_label));
         return;
     };
 
@@ -49,8 +49,9 @@ fn promote_field_to_device_ref(
                 element_count: host_values.len(),
             });
         }
-        Err(error) => {
-            fallback_events.push(format!("BACKEND_UPLOAD_FAILED:{field_label}:{}", error))
-        }
+        Err(error) => fallback_events.push(FallbackEvent::field_upload_failed(
+            field_label,
+            error.to_string(),
+        )),
     }
 }

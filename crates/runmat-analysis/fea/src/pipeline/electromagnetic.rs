@@ -1303,15 +1303,17 @@ pub fn run_electromagnetic_with_options(
     );
 
     let run = FeaRunResult {
-        backend,
-        solver_backend: backend_kind.as_str().to_string(),
+        requested_backend: backend,
+        execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(backend_kind),
+        solver_backend: backend_kind,
         solver_device_apply_k_ratio: if backend == ComputeBackend::Gpu {
             1.0
         } else {
             0.0
         },
-        solver_method: "electromagnetic_edge_curl_curl_harmonic_block_bicgstab".to_string(),
-        preconditioner: "block_jacobi".to_string(),
+        solver_method:
+            crate::contracts::SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
+        preconditioner: crate::contracts::SolverPreconditioner::BlockJacobi,
         solver_host_sync_count: if backend == ComputeBackend::Gpu { 0 } else { 1 },
         diagnostics,
         fields: vec![

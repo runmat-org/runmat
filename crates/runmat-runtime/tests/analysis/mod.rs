@@ -29,7 +29,8 @@ use runmat_runtime::analysis::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions,
     AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
     AnalysisResultsQuery, AnalysisRunOptions, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
+    AnalysisTransientRunOptions, FallbackEvent, FallbackReason, FallbackStage, PrecisionMode,
+    PreconditionerMode, QualityPolicy,
 };
 use runmat_runtime::geometry::geometry_load_op;
 use runmat_runtime::operations::OperationContext;
@@ -150,7 +151,7 @@ struct FixtureRunRecord {
     run_error_code: Option<String>,
     cpu_run_ms: Option<f64>,
     gpu_run_ms: Option<f64>,
-    gpu_fallback_events: Vec<String>,
+    gpu_fallback_events: Vec<FallbackEvent>,
     gpu_displacement_residency: Option<String>,
     gpu_solver_host_sync_count: Option<u32>,
     gpu_solver_device_apply_k_ratio: Option<f64>,

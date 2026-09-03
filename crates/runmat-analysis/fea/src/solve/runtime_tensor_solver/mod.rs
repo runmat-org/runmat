@@ -3,9 +3,13 @@ use runmat_accelerate_api::{provider, GpuTensorHandle, HostTensorView};
 
 use crate::{
     assembly::AssemblySummary,
+    contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::{csr_stiffness, dense_stiffness, CsrMatrix},
-    solve::{linear::LinearSolveResult, preconditioner::SpdPreconditionerKind},
+    solve::{
+        backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult,
+        preconditioner::SpdPreconditionerKind,
+    },
 };
 
 mod operator_impl;
@@ -534,12 +538,12 @@ fn solve_runtime_tensor_linear_system_internal(
         residual_norm,
         converged,
         host_sync_count,
-        solver_backend: "runtime_tensor".to_string(),
+        solver_backend: LinearAlgebraBackendKind::RuntimeTensor,
         device_apply_k_count,
         device_apply_k_attempt_count,
         solution: x_host.data,
-        solver_method: "matrix_free_pcg".to_string(),
-        preconditioner: preconditioner_kind.as_str().to_string(),
+        solver_method: SolverMethod::MatrixFreePcg,
+        preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
         diagnostics,
     })
 }

@@ -11,13 +11,15 @@ use runmat_accelerate_api::{
     HostTensorView,
 };
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep,
-    AnalysisStepKind, BeamElementModel, BeamSectionModel, BoundaryCondition, BoundaryConditionKind,
-    CfdSolveFamily, ConductivityFrequencyPoint, ElectromagneticDomain, EvidenceConfidence,
-    LoadCase, LoadKind, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
-    MaterialModel, MaterialThermalModel, ReferenceFrame, StructuralElement, StructuralElementKind,
-    StructuralModel, StructuralNode,
+    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure,
+    AnalysisStep, AnalysisStepKind, BeamElementModel, BeamSectionModel, BoundaryCondition,
+    BoundaryConditionKind, CfdSolveFamily, ConductivityFrequencyPoint, CoupledPhysicsFamily,
+    ElectromagneticDomain, EvidenceConfidence, FormulationImplementation, LoadCase, LoadKind,
+    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialThermalModel, PhysicsFamily, ReferenceFrame, SolutionSpace, StructuralElement,
+    StructuralElementKind, StructuralModel, StructuralNode,
 };
+use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
     fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
     fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
@@ -31,8 +33,8 @@ use runmat_analysis_fea::{
     fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
     fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
     fea_nonlinear_residual_norm_field_id, fea_nonlinear_rotation_field_id,
-    fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
-    fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
+    fea_nonlinear_von_mises_field_id, fea_thermal_axis_boundary_heat_flux_summary_field_id,
+    fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
     fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
     fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
     fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
@@ -41,20 +43,21 @@ use runmat_analysis_fea::{
     fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
     fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
     fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
-    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
-    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
-    FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
-    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
-    FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-    FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_ENERGY_DENSITY,
-    FEA_FIELD_EM_MAGNETIC_FIELD_REAL, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_POYNTING_VECTOR_REAL,
-    FEA_FIELD_EM_RESIDUAL_REAL, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FeaProgressPhase, FeaProgressStatus, SolverMethod, SolverPreconditioner,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
+    FEA_FIELD_CFD_RESIDUAL_MOMENTUM, FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY,
+    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
+    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
+    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
+    FEA_FIELD_EM_ELECTRIC_FIELD_REAL, FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
+    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
+    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
+    FEA_FIELD_EM_POYNTING_VECTOR_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
@@ -2747,7 +2750,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
 
     assert_eq!(envelope.operation, "fea.run_linear_static");
     assert_eq!(envelope.op_version, "fea.run_linear_static/v1");
-    assert_eq!(envelope.data.run.backend, ComputeBackend::Cpu);
+    assert_eq!(envelope.data.run.requested_backend, ComputeBackend::Cpu);
     assert!(!envelope
         .data
         .run
@@ -2762,8 +2765,14 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
     assert!(envelope.data.provenance.deterministic_mode);
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
-    assert_eq!(envelope.data.provenance.solver_method, "dense_direct");
-    assert_eq!(envelope.data.provenance.preconditioner, "none");
+    assert_eq!(
+        envelope.data.provenance.solver_method,
+        SolverMethod::DenseDirect
+    );
+    assert_eq!(
+        envelope.data.provenance.preconditioner,
+        SolverPreconditioner::None
+    );
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
     assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(envelope.data.provenance.solver_host_sync_count, 0);
@@ -2992,13 +3001,13 @@ fn gpu_run_without_provider_records_fallback_event() {
     )
     .expect("run should pass");
 
-    if envelope.data.provenance.solver_backend == "cpu_reference" {
+    if envelope.data.provenance.solver_backend == LinearAlgebraBackendKind::CpuReference {
         assert!(envelope
             .data
             .provenance
             .fallback_events
             .iter()
-            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+            .any(FallbackEvent::is_solver_backend_fallback));
         assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
         assert!(matches!(
             envelope
@@ -3010,7 +3019,10 @@ fn gpu_run_without_provider_records_fallback_event() {
             AnalysisFieldValues::HostF64(_)
         ));
     } else {
-        assert_eq!(envelope.data.provenance.solver_backend, "runtime_tensor");
+        assert_eq!(
+            envelope.data.provenance.solver_backend,
+            LinearAlgebraBackendKind::RuntimeTensor
+        );
     }
 }
 
@@ -3080,19 +3092,18 @@ fn gpu_run_with_provider_emits_device_refs() {
         .provenance
         .fallback_events
         .iter()
-        .any(|event| event.starts_with("BACKEND_NO_PROVIDER")
-            || event.starts_with("BACKEND_UPLOAD_FAILED")));
+        .any(FallbackEvent::is_field_publication_fallback));
     assert!(matches!(
         envelope.data.provenance.solver_backend.as_str(),
         "runtime_tensor" | "cpu_reference"
     ));
-    if envelope.data.provenance.solver_backend == "cpu_reference" {
+    if envelope.data.provenance.solver_backend == LinearAlgebraBackendKind::CpuReference {
         assert!(envelope
             .data
             .provenance
             .fallback_events
             .iter()
-            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+            .any(FallbackEvent::is_solver_backend_fallback));
     }
     assert!(
         (0.0..=1.0).contains(&envelope.data.provenance.solver_device_apply_k_ratio),
@@ -3230,11 +3241,11 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             AnalysisFieldLocation::Element,
         ),
         (
-            fea_thermal_boundary_heat_flux_field_id(0),
+            fea_thermal_axis_boundary_heat_flux_summary_field_id(0),
             "thermal",
-            "boundary_heat_flux",
+            "axis_boundary_heat_flux_summary",
             Some("W/m^2"),
-            AnalysisFieldLocation::BoundaryFace,
+            AnalysisFieldLocation::Global,
         ),
         (
             FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string(),
@@ -3807,7 +3818,7 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Nonlinear)
+        .find(|summary| summary.identity.procedure == AnalysisProcedure::Nonlinear)
         .expect("nonlinear trend summary should exist");
     assert_eq!(nonlinear.sample_count, 3);
     assert!(nonlinear.median_solve_ms.is_some());
@@ -3861,7 +3872,7 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Acoustic)
+        .find(|summary| summary.identity.family == PhysicsFamily::Acoustic)
         .expect("acoustic trend summary should exist");
     assert_eq!(acoustic.sample_count, 2);
     assert!(acoustic.median_solve_ms.is_some());
@@ -3871,7 +3882,7 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Modal);
+        .find(|summary| summary.identity.procedure == AnalysisProcedure::ModalExtraction);
     assert!(
         modal.is_none(),
         "acoustic runs should not classify as modal"
@@ -3910,7 +3921,7 @@ fn analysis_trends_classifies_cfd_runs_separately() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Cfd)
+        .find(|summary| summary.identity.family == PhysicsFamily::Fluid)
         .expect("cfd trend summary should exist");
     assert_eq!(cfd.sample_count, 2);
     assert!(cfd.median_solve_ms.is_some());
@@ -3945,7 +3956,10 @@ fn analysis_trends_classifies_cht_runs_separately() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Cht)
+        .find(|summary| {
+            summary.identity.family
+                == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+        })
         .expect("cht trend summary should exist");
     assert_eq!(cht.sample_count, 2);
     assert!(cht.median_solve_ms.is_some());
@@ -3956,7 +3970,7 @@ fn analysis_trends_classifies_cht_runs_separately() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Cfd);
+        .find(|summary| summary.identity.family == PhysicsFamily::Fluid);
     assert!(cfd.is_none(), "cht runs should not classify as cfd");
 
     storage::reset_artifact_store_for_tests();
@@ -3987,18 +4001,20 @@ fn analysis_trends_classifies_fsi_runs_separately() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Fsi)
+        .find(|summary| {
+            summary.identity.family
+                == PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
+        })
         .expect("fsi trend summary should exist");
     assert_eq!(fsi.sample_count, 2);
     assert!(fsi.median_solve_ms.is_some());
     assert!(fsi.p95_solve_ms.is_some());
     assert!(fsi.failed_increment_rate.is_none());
 
-    let transient = trends
-        .data
-        .summaries
-        .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Transient);
+    let transient = trends.data.summaries.iter().find(|summary| {
+        summary.identity.family == PhysicsFamily::Structural
+            && summary.identity.procedure == AnalysisProcedure::TransientResponse
+    });
     assert!(
         transient.is_none(),
         "fsi runs should not classify as transient"
@@ -4358,7 +4374,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
 }
 
 #[test]
-fn analysis_trends_handles_mixed_schema_and_noisy_samples() {
+fn analysis_trends_ignore_noncanonical_artifacts() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("trends-mixed-schema");
@@ -4399,14 +4415,14 @@ fn analysis_trends_handles_mixed_schema_and_noisy_samples() {
         AnalysisTrendsQuery { window_size: 8 },
         OperationContext::new(None, None),
     )
-    .expect("trends should succeed on mixed schema artifacts");
+    .expect("trends should ignore noncanonical artifacts");
     let nonlinear = trends
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Nonlinear)
+        .find(|summary| summary.identity.procedure == AnalysisProcedure::Nonlinear)
         .expect("nonlinear summary should be present");
-    assert!(nonlinear.sample_count >= 2);
+    assert_eq!(nonlinear.sample_count, 1);
     assert!(nonlinear.p95_solve_ms.unwrap_or(0.0) >= nonlinear.median_solve_ms.unwrap_or(0.0));
 
     storage::reset_artifact_store_for_tests();
@@ -4543,7 +4559,7 @@ fn multiple_analysis_materials_require_mesh_region_coverage() {
 }
 
 #[test]
-fn analysis_results_by_run_id_legacy_nonlinear_artifacts_remain_loadable() {
+fn analysis_results_by_run_id_rejects_unwrapped_artifacts() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("legacy-loadable");
@@ -4587,24 +4603,20 @@ fn analysis_results_by_run_id_legacy_nonlinear_artifacts_remain_loadable() {
     )
     .expect("write legacy artifact");
 
-    let fetched = analysis_results_by_run_id_op(
+    let error = analysis_results_by_run_id_op(
         &run_id,
         AnalysisResultsQuery::default(),
         OperationContext::new(None, None),
     )
-    .expect("legacy nonlinear artifact should still load");
-    assert_eq!(fetched.data.summary.failed_increment_count, Some(0));
-    assert_eq!(
-        fetched.data.summary.nonlinear_iteration_spike_count,
-        Some(0)
-    );
+    .expect_err("unwrapped analysis artifacts must not enter the live schema");
+    assert_eq!(error.error_type, OperationErrorType::Internal);
 
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
-fn analysis_results_by_run_id_future_artifact_extra_fields_are_ignored() {
+fn analysis_results_by_run_id_rejects_unknown_artifact_schema() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("future-extra-fields");
@@ -4628,32 +4640,25 @@ fn analysis_results_by_run_id_future_artifact_extra_fields_are_ignored() {
     let run_id = run.data.run_id.clone();
     let run_path = root.join("runs").join(format!("{run_id}.json"));
 
-    let mut wrapped = serde_json::json!({
-        "schema_version": "analysis_run_artifact/v1",
+    let wrapped = serde_json::json!({
+        "schema_version": "analysis_run_artifact/unknown",
         "created_at": Utc::now().to_rfc3339(),
         "op_version": "fea.run_nonlinear/v1",
         "run": run.data,
-        "future_metadata": {
-            "schema_hint": "analysis_run_artifact/v2",
-            "opaque": [1, 2, 3]
-        }
     });
-    wrapped["run"]["nonlinear_results"]["future_spatial_difficulty"] =
-        serde_json::json!([0.1, 0.2, 0.3]);
     fs::write(
         &run_path,
         serde_json::to_vec_pretty(&wrapped).expect("encode future artifact"),
     )
     .expect("write future artifact");
 
-    let fetched = analysis_results_by_run_id_op(
+    let error = analysis_results_by_run_id_op(
         &run_id,
         AnalysisResultsQuery::default(),
         OperationContext::new(None, None),
     )
-    .expect("future nonlinear artifact should still load");
-    assert!(fetched.data.summary.increment_count > 0);
-    assert!(fetched.data.summary.max_nonlinear_iteration_count.is_some());
+    .expect_err("unknown analysis artifact schemas must be rejected");
+    assert_eq!(error.error_type, OperationErrorType::Internal);
 
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
@@ -4708,6 +4713,39 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         OperationContext::new(None, None),
     )
     .expect("acoustic run should succeed");
+    let mut thermal_model = sample_model();
+    thermal_model.steps = vec![AnalysisStep {
+        step_id: "thermal_op_version".to_string(),
+        kind: AnalysisStepKind::Thermal,
+    }];
+    set_model_thermo_coupling(
+        &mut thermal_model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 20.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.0,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 1.0,
+                },
+            ],
+        },
+    );
+    let thermal = analysis_run_thermal_op(
+        &thermal_model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("thermal run should succeed");
 
     let read_op_version = |run_id: &str| -> String {
         let path = root.join("runs").join(format!("{run_id}.json"));
@@ -4724,6 +4762,7 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
     assert_eq!(read_op_version(&cfd.data.run_id), "fea.run_cfd/v1");
     assert_eq!(read_op_version(&cht.data.run_id), "fea.run_cht/v1");
     assert_eq!(read_op_version(&fsi.data.run_id), "fea.run_fsi/v1");
+    assert_eq!(read_op_version(&thermal.data.run_id), "fea.run_thermal/v1");
     assert_eq!(
         read_op_version(&acoustic.data.run_id),
         "fea.run_acoustic/v1"
@@ -4848,13 +4887,52 @@ fn requested_preconditioner_fallback_is_recorded() {
     )
     .expect("run should succeed");
 
-    assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
+    assert_eq!(
+        envelope.data.provenance.preconditioner,
+        SolverPreconditioner::Jacobi
+    );
     assert!(envelope
         .data
         .provenance
         .fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+        .any(|event| event.reason == FallbackReason::RequestedPreconditionerUnavailable));
+    let _ = fs::remove_dir_all(&mesh_root);
+}
+
+#[test]
+fn production_identity_cannot_persist_an_execution_fallback() {
+    let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("production-fallback-rejection");
+    let model = sample_solid_model();
+    let mut run = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Amg,
+            quality_policy: QualityPolicy::Balanced,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("experimental run with an explicit fallback should complete")
+    .data;
+    assert!(!run.provenance.fallback_events.is_empty());
+
+    run.identity = runmat_analysis_core::AnalysisRunIdentity::production(
+        PhysicsFamily::Structural,
+        AnalysisProcedure::Static,
+        SolutionSpace::Direct,
+        [FormulationImplementation::LinearElasticStructural],
+    );
+    storage::reset_artifact_store_for_tests();
+    let error = storage::persist_run_result(&run)
+        .expect_err("production persistence must reject fallback provenance");
+    assert!(error.contains("forbids the execution fallbacks"));
+
     let _ = fs::remove_dir_all(&mesh_root);
 }
 
@@ -4924,13 +5002,16 @@ fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
     )
     .expect("run should succeed");
 
-    assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
+    assert_eq!(
+        envelope.data.provenance.preconditioner,
+        SolverPreconditioner::Jacobi
+    );
     assert!(envelope
         .data
         .provenance
         .fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+        .any(|event| event.reason == FallbackReason::RequestedPreconditionerUnavailable));
     let _ = fs::remove_dir_all(&mesh_root);
 }
 
@@ -5969,7 +6050,7 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     assert_ne!(envelope.data.run_status, RunStatus::Rejected);
     assert_eq!(
         envelope.data.run.solver_method,
-        "electromagnetic_edge_curl_curl_harmonic_block_bicgstab"
+        SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab
     );
     assert!(envelope.data.electromagnetic_results.is_some());
     assert!(envelope
@@ -6346,12 +6427,11 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert!(run.data.thermal_results.is_some());
     assert!(run.data.transient_results.is_none());
     assert!(run.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_THERMAL_HEAT_BALANCE"
-            && diag.message.contains("input_heat=")
-            && diag.message.contains("boundary_heat=")
-            && diag.message.contains("stored_energy=")
-            && diag.message.contains("numerical_loss=")
-            && diag.message.contains("heat_balance_residual_ratio=")
+        diag.code == "FEA_THERMAL_ENERGY_STORAGE_CONSISTENCY"
+            && diag.message.contains("integrated_storage_energy_density=")
+            && diag.message.contains("endpoint_storage_energy_density=")
+            && diag.message.contains("storage_energy_density_discrepancy=")
+            && diag.message.contains("storage_consistency_residual_ratio=")
     }));
     assert!(run.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_THERMAL_FIELD_RECOVERY"
@@ -6380,8 +6460,8 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert_eq!(thermal.temperature_snapshots.len(), 6);
     assert_eq!(thermal.temperature_gradient_snapshots.len(), 6);
     assert_eq!(thermal.heat_flux_snapshots.len(), 6);
-    assert_eq!(thermal.heat_source_snapshots.len(), 6);
-    assert_eq!(thermal.boundary_heat_flux_snapshots.len(), 6);
+    assert_eq!(thermal.energy_storage_rate_snapshots.len(), 6);
+    assert_eq!(thermal.axis_boundary_heat_flux_summary_snapshots.len(), 6);
     assert_eq!(thermal.temperature_gradient_snapshots[0].shape.len(), 2);
     assert_eq!(thermal.temperature_gradient_snapshots[0].shape[1], 3);
     assert_eq!(
@@ -6389,10 +6469,13 @@ fn analysis_run_thermal_returns_temperature_payload() {
         thermal.temperature_gradient_snapshots[0].shape
     );
     assert_eq!(
-        thermal.heat_source_snapshots[0].shape,
+        thermal.energy_storage_rate_snapshots[0].shape,
         vec![thermal.temperature_gradient_snapshots[0].shape[0]]
     );
-    assert_eq!(thermal.boundary_heat_flux_snapshots[0].shape, vec![6]);
+    assert_eq!(
+        thermal.axis_boundary_heat_flux_summary_snapshots[0].shape,
+        vec![6]
+    );
     let field_ids = results
         .data
         .field_descriptors
@@ -6401,8 +6484,8 @@ fn analysis_run_thermal_returns_temperature_payload() {
         .collect::<Vec<_>>();
     assert!(field_ids.contains(&fea_thermal_temperature_gradient_field_id(0).as_str()));
     assert!(field_ids.contains(&fea_thermal_heat_flux_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_thermal_heat_source_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_thermal_boundary_heat_flux_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_thermal_energy_storage_rate_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_thermal_axis_boundary_heat_flux_summary_field_id(0).as_str()));
     let descriptor = |field_id: &str| {
         results
             .data
@@ -6420,14 +6503,54 @@ fn analysis_run_thermal_returns_temperature_payload() {
         Some(3)
     );
     assert_eq!(
-        descriptor(&fea_thermal_boundary_heat_flux_field_id(0)).kind,
+        descriptor(&fea_thermal_axis_boundary_heat_flux_summary_field_id(0)).kind,
         AnalysisFieldKind::Scalar
     );
     assert_eq!(
-        descriptor(&fea_thermal_boundary_heat_flux_field_id(0)).component_count,
+        descriptor(&fea_thermal_axis_boundary_heat_flux_summary_field_id(0)).component_count,
         None
     );
+    assert_eq!(
+        descriptor(&fea_thermal_axis_boundary_heat_flux_summary_field_id(0)).location,
+        AnalysisFieldLocation::Global
+    );
     assert_eq!(results.data.summary.snapshot_count, 6);
+}
+
+#[test]
+fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
+    let _guard = analysis_test_guard();
+    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
+    let model = analysis_create_model_op(
+        &sample_geometry_asset(),
+        AnalysisCreateModelIntentSpec {
+            model_id: "thermal_execution_provenance".to_string(),
+            profile: AnalysisCreateModelProfile::ThermalStandalone,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("thermal model should be created");
+
+    let run = analysis_run_thermal_op(
+        &model.data,
+        ComputeBackend::Gpu,
+        OperationContext::new(None, None),
+    )
+    .expect("experimental thermal run should complete");
+
+    assert_eq!(run.data.provenance.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(run.data.provenance.execution_backend, ExecutionBackend::Cpu);
+    assert_eq!(run.data.run.execution_backend, ExecutionBackend::Cpu);
+    assert_eq!(
+        run.data.provenance.solver_backend,
+        LinearAlgebraBackendKind::CpuReference
+    );
+    assert!(run
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(FallbackEvent::is_solver_backend_fallback));
 }
 
 #[test]
@@ -7046,8 +7169,14 @@ fn analysis_run_transient_returns_native_transient_result() {
 
     assert_eq!(envelope.operation, "fea.run_transient");
     assert_eq!(envelope.op_version, "fea.run_transient/v1");
-    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
-    assert_eq!(envelope.data.provenance.solver_method, "implicit_euler_pcg");
+    assert_eq!(
+        envelope.data.run.solver_method,
+        SolverMethod::ImplicitEulerPcg
+    );
+    assert_eq!(
+        envelope.data.provenance.solver_method,
+        SolverMethod::ImplicitEulerPcg
+    );
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
     assert!(envelope.data.publishable);
     assert!(envelope
@@ -7262,11 +7391,11 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     assert_eq!(envelope.op_version, "fea.run_cfd/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "cfd_velocity_pressure_finite_volume"
+        SolverMethod::CfdVelocityPressureFiniteVolume
     );
     assert_eq!(
         envelope.data.provenance.solver_method,
-        "cfd_velocity_pressure_finite_volume"
+        SolverMethod::CfdVelocityPressureFiniteVolume
     );
     assert!(envelope.data.transient_results.is_none());
     let velocity = envelope
@@ -7506,7 +7635,10 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
 
     assert_eq!(envelope.operation, "fea.run_cht");
     assert_eq!(envelope.op_version, "fea.run_cht/v1");
-    assert_eq!(envelope.data.run.solver_method, "cht_conjugate_projection");
+    assert_eq!(
+        envelope.data.run.solver_method,
+        SolverMethod::ChtConjugateProjection
+    );
     assert!(envelope.data.transient_results.is_none());
     assert!(envelope.data.thermal_results.is_some());
     assert!(envelope
@@ -7688,7 +7820,7 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
     assert_eq!(envelope.op_version, "fea.run_fsi/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "fsi_partitioned_projection"
+        SolverMethod::FsiPartitionedProjection
     );
     assert!(envelope.data.transient_results.is_none());
     assert!(envelope.data.thermal_results.is_none());
@@ -8548,11 +8680,11 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert_eq!(envelope.op_version, "fea.run_modal/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "matrix_free_subspace_iteration"
+        SolverMethod::MatrixFreeSubspaceIteration
     );
     assert_eq!(
         envelope.data.provenance.solver_method,
-        "matrix_free_subspace_iteration"
+        SolverMethod::MatrixFreeSubspaceIteration
     );
     assert_eq!(envelope.data.run_status, RunStatus::Degraded);
     assert!(!envelope.data.publishable);
@@ -8561,15 +8693,15 @@ fn analysis_run_modal_returns_native_modal_result() {
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(!modal.eigenvalues_hz.is_empty());
-    assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
+    assert!(!modal.frequencies_hz.is_empty());
+    assert_eq!(modal.frequencies_hz.len(), modal.mode_shapes.len());
     assert_eq!(
         modal.mode_shapes[0].field_id,
         fea_modal_mode_shape_field_id(1)
     );
     assert_eq!(modal.mode_shapes[0].shape.len(), 2);
     assert_eq!(modal.mode_shapes[0].shape[1], 3);
-    assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
+    assert_eq!(modal.frequencies_hz.len(), modal.residual_norms.len());
     assert!(modal.residual_norms.iter().all(|value| value.is_finite()));
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
@@ -8602,7 +8734,7 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert_eq!(orthogonality_descriptor.kind, AnalysisFieldKind::Tensor);
     assert_eq!(
         orthogonality_descriptor.shape,
-        vec![modal.eigenvalues_hz.len(), modal.eigenvalues_hz.len()]
+        vec![modal.frequencies_hz.len(), modal.frequencies_hz.len()]
     );
     assert_eq!(orthogonality_descriptor.component_count, None);
     assert!(envelope
@@ -8643,7 +8775,7 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     assert_eq!(envelope.op_version, "fea.run_acoustic/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "acoustic_domain_graph_helmholtz_harmonic"
+        SolverMethod::AcousticDomainGraphHelmholtzHarmonic
     );
     assert!(envelope.data.modal_results.is_none());
     assert!(envelope
@@ -8776,8 +8908,8 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(!modal.eigenvalues_hz.is_empty());
-    assert!(modal.eigenvalues_hz.len() <= 2);
+    assert!(!modal.frequencies_hz.is_empty());
+    assert!(modal.frequencies_hz.len() <= 2);
     assert!(envelope.data.provenance.deterministic_mode);
 }
 
@@ -8814,11 +8946,11 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         .modal_results
         .as_ref()
         .expect("modal payload should propagate to results");
-    assert!(!modal.eigenvalues_hz.is_empty());
-    assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
+    assert!(!modal.frequencies_hz.is_empty());
+    assert_eq!(modal.frequencies_hz.len(), modal.mode_shapes.len());
     assert_eq!(modal.mode_shapes[0].shape.len(), 2);
     assert_eq!(modal.mode_shapes[0].shape[1], 3);
-    assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
+    assert_eq!(modal.frequencies_hz.len(), modal.residual_norms.len());
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(modal.frequency_basis, ModalFrequencyBasis::NativeEigenSolve);

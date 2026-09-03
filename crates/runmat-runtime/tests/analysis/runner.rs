@@ -4139,22 +4139,25 @@ fn push_structural_shell_moment_threshold_assertions(
     }
 }
 
-fn validate_fallback_event_schema(event: &str) -> bool {
-    let parts: Vec<&str> = event.splitn(3, ':').collect();
-    if parts.len() != 3 {
-        return false;
+fn validate_fallback_event_schema(event: &FallbackEvent) -> bool {
+    match (event.stage, event.reason) {
+        (FallbackStage::Solver, FallbackReason::RequestedBackendUnavailable) => {
+            event.subject.is_none() && event.actual_preconditioner.is_none()
+        }
+        (FallbackStage::Preconditioner, FallbackReason::RequestedPreconditionerUnavailable) => {
+            event.actual_preconditioner.is_some()
+                && event.subject.is_none()
+                && event.detail.is_none()
+        }
+        (
+            FallbackStage::FieldPublication,
+            FallbackReason::AcceleratorProviderUnavailable | FallbackReason::FieldUploadFailed,
+        ) => {
+            event.actual_preconditioner.is_none()
+                && event.subject.as_deref().is_some_and(is_namespace_field_id)
+        }
+        _ => false,
     }
-    let category_ok = matches!(
-        parts[0],
-        "BACKEND_NO_PROVIDER" | "BACKEND_UPLOAD_FAILED" | "SOLVER_BACKEND_FALLBACK"
-    );
-    let stage_ok = if parts[0] == "SOLVER_BACKEND_FALLBACK" {
-        parts[1].starts_with("requested=")
-    } else {
-        is_namespace_field_id(parts[1])
-    };
-    let reason_ok = !parts[2].is_empty();
-    category_ok && stage_ok && reason_ok
 }
 
 fn is_namespace_field_id(value: &str) -> bool {
@@ -6678,7 +6681,14 @@ pub(super) fn run_fixture(
                         Some(gpu_envelope.data.provenance.solver_host_sync_count);
                     gpu_solver_device_apply_k_ratio =
                         Some(gpu_envelope.data.provenance.solver_device_apply_k_ratio);
-                    gpu_solver_backend = Some(gpu_envelope.data.provenance.solver_backend.clone());
+                    gpu_solver_backend = Some(
+                        gpu_envelope
+                            .data
+                            .provenance
+                            .solver_backend
+                            .as_str()
+                            .to_string(),
+                    );
                     gpu_speedup_ratio = match (cpu_run_ms, gpu_run_ms) {
                         (Some(cpu_ms), Some(gpu_ms)) if gpu_ms > 0.0 => Some(cpu_ms / gpu_ms),
                         _ => None,
@@ -6863,7 +6873,7 @@ pub(super) fn run_fixture(
 
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
-                            failures.push(format!("invalid fallback event schema: {event}"));
+                            failures.push(format!("invalid fallback event schema: {event:?}"));
                         }
                     }
 
@@ -6897,7 +6907,9 @@ pub(super) fn run_fixture(
                     }
 
                     if let Some(expected_solver_backend) = spec.expected_solver_backend {
-                        if gpu_envelope.data.provenance.solver_backend != expected_solver_backend {
+                        if gpu_envelope.data.provenance.solver_backend.as_str()
+                            != expected_solver_backend
+                        {
                             failures.push(format!(
                                 "solver_backend mismatch for fixture {}: expected={} got={}",
                                 spec.id,

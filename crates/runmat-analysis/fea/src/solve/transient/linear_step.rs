@@ -3,8 +3,10 @@ use std::time::Instant;
 
 use crate::{
     assembly::AssemblySummary,
+    contracts::SolverPreconditioner,
     operator::apply_k,
     solve::{
+        backend::kind::LinearAlgebraBackendKind,
         preconditioner::SpdPreconditionerKind,
         runtime_tensor_solver::{
             prepare_runtime_tensor_linear_system,
@@ -18,11 +20,11 @@ use super::TransientSolveOptions;
 
 #[derive(Debug, Clone)]
 pub(super) struct LinearStepStats {
-    pub(super) solver_backend: String,
+    pub(super) solver_backend: LinearAlgebraBackendKind,
     pub(super) host_sync_count: u32,
     pub(super) device_apply_k_count: u32,
     pub(super) device_apply_k_attempt_count: u32,
-    pub(super) preconditioner: String,
+    pub(super) preconditioner: SolverPreconditioner,
 }
 
 pub(super) struct RuntimeTensorStepCache<'a> {
@@ -102,7 +104,7 @@ pub(super) fn solve_implicit_step_system(
                         host_sync_count: result.host_sync_count,
                         device_apply_k_count: result.device_apply_k_count,
                         device_apply_k_attempt_count: result.device_apply_k_attempt_count,
-                        preconditioner: tuned_preconditioner_kind.as_str().to_string(),
+                        preconditioner: SolverPreconditioner::from_spd(tuned_preconditioner_kind),
                     }),
                 );
             }
@@ -126,7 +128,7 @@ pub(super) fn solve_implicit_step_system(
                     host_sync_count: result.host_sync_count,
                     device_apply_k_count: result.device_apply_k_count,
                     device_apply_k_attempt_count: result.device_apply_k_attempt_count,
-                    preconditioner: tuned_preconditioner_kind.as_str().to_string(),
+                    preconditioner: SolverPreconditioner::from_spd(tuned_preconditioner_kind),
                 }),
             );
         }

@@ -9,6 +9,8 @@ RunMat records those signals in the result payload, saved artifacts, diagnostics
 Every run returns common result data:
 
 - `run_id`,
+- a required run identity separating physics family, procedure, solution space, formulations,
+  maturity, and fallback policy,
 - fields from the underlying FEA run payload,
 - optional domain payloads,
 - `model_validity`,
@@ -19,7 +21,9 @@ Every run returns common result data:
 - `quality_reasons`,
 - provenance.
 
-Domain payloads can include modal frequencies, thermal summaries, transient snapshots, nonlinear convergence data, electromagnetic metrics, or coupled-family diagnostics.
+Domain payloads can include modal frequencies, thermal temperature, gradient, heat-flux,
+energy-storage-rate, and axis-boundary summary data, transient snapshots, nonlinear convergence
+data, electromagnetic metrics, or coupled-family diagnostics.
 
 ## Quality Gates
 
@@ -48,12 +52,18 @@ Read diagnostics with quality reasons:
 Provenance records how the run executed:
 
 - requested backend,
-- selected solver backend,
+- actual execution backend,
+- selected numerical backend,
 - precision mode,
 - deterministic mode,
-- solver method,
-- preconditioner,
-- fallback events.
+- typed solver method,
+- typed preconditioner,
+- typed fallback stage and reason.
+
+Requested placement and actual execution are distinct. Uploading result fields to an accelerator
+does not turn a CPU solve into an accelerator solve. Experimental formulations may allow an
+explicitly recorded fallback; production identities forbid it, and artifacts that violate their
+identity are rejected.
 
 This matters for comparisons. Two runs can use the same model and operation but differ in backend, precision, fallback behavior, or solver policy.
 

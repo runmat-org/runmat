@@ -150,12 +150,12 @@ pub fn fea_thermal_heat_flux_field_id(snapshot_index: usize) -> String {
     format!("thermal.heat_flux.{snapshot_index}")
 }
 
-pub fn fea_thermal_heat_source_field_id(snapshot_index: usize) -> String {
-    format!("thermal.heat_source.{snapshot_index}")
+pub fn fea_thermal_energy_storage_rate_field_id(snapshot_index: usize) -> String {
+    format!("thermal.energy_storage_rate.{snapshot_index}")
 }
 
-pub fn fea_thermal_boundary_heat_flux_field_id(snapshot_index: usize) -> String {
-    format!("thermal.boundary_heat_flux.{snapshot_index}")
+pub fn fea_thermal_axis_boundary_heat_flux_summary_field_id(snapshot_index: usize) -> String {
+    format!("thermal.axis_boundary_heat_flux_summary.{snapshot_index}")
 }
 
 pub fn fea_transient_displacement_field_id(snapshot_index: usize) -> String {
@@ -278,13 +278,113 @@ pub enum ComputeBackend {
     Gpu,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionBackend {
+    Cpu,
+    Accelerator,
+}
+
+impl ExecutionBackend {
+    pub(crate) fn from_solver_backend(solver_backend: LinearAlgebraBackendKind) -> Self {
+        match solver_backend {
+            LinearAlgebraBackendKind::CpuReference => Self::Cpu,
+            LinearAlgebraBackendKind::RuntimeTensor => Self::Accelerator,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SolverMethod {
+    DenseDirect,
+    MatrixFreePcg,
+    MatrixFreeSubspaceIteration,
+    ImplicitEulerPcg,
+    IncrementalNewtonRaphson,
+    ThermalProfileIntegrator,
+    ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
+    AcousticDomainGraphHelmholtzHarmonic,
+    CfdVelocityPressureFiniteVolume,
+    ChtConjugateProjection,
+    FsiPartitionedProjection,
+}
+
+impl SolverMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DenseDirect => "dense_direct",
+            Self::MatrixFreePcg => "matrix_free_pcg",
+            Self::MatrixFreeSubspaceIteration => "matrix_free_subspace_iteration",
+            Self::ImplicitEulerPcg => "implicit_euler_pcg",
+            Self::IncrementalNewtonRaphson => "incremental_newton_raphson",
+            Self::ThermalProfileIntegrator => "thermal_profile_integrator",
+            Self::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab => {
+                "electromagnetic_edge_curl_curl_harmonic_block_bicgstab"
+            }
+            Self::AcousticDomainGraphHelmholtzHarmonic => {
+                "acoustic_domain_graph_helmholtz_harmonic"
+            }
+            Self::CfdVelocityPressureFiniteVolume => "cfd_velocity_pressure_finite_volume",
+            Self::ChtConjugateProjection => "cht_conjugate_projection",
+            Self::FsiPartitionedProjection => "fsi_partitioned_projection",
+        }
+    }
+}
+
+impl std::fmt::Display for SolverMethod {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SolverPreconditioner {
+    None,
+    Jacobi,
+    Ilu0,
+    BlockJacobi,
+    FiniteVolumePressureBalance,
+    ThermalCfdProjection,
+    InterfaceRelaxation,
+}
+
+impl SolverPreconditioner {
+    pub const fn from_spd(kind: SpdPreconditionerKind) -> Self {
+        match kind {
+            SpdPreconditionerKind::Jacobi => Self::Jacobi,
+            SpdPreconditionerKind::Ilu0 => Self::Ilu0,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Jacobi => "jacobi",
+            Self::Ilu0 => "ilu0",
+            Self::BlockJacobi => "block_jacobi",
+            Self::FiniteVolumePressureBalance => "finite_volume_pressure_balance",
+            Self::ThermalCfdProjection => "thermal_cfd_projection",
+            Self::InterfaceRelaxation => "interface_relaxation",
+        }
+    }
+}
+
+impl std::fmt::Display for SolverPreconditioner {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaRunResult {
-    pub backend: ComputeBackend,
-    pub solver_backend: String,
+    pub requested_backend: ComputeBackend,
+    pub execution_backend: ExecutionBackend,
+    pub solver_backend: LinearAlgebraBackendKind,
     pub solver_device_apply_k_ratio: f64,
-    pub solver_method: String,
-    pub preconditioner: String,
+    pub solver_method: SolverMethod,
+    pub preconditioner: SolverPreconditioner,
     pub solver_host_sync_count: u32,
     pub diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
     pub fields: Vec<AnalysisField>,
@@ -431,7 +531,7 @@ impl Default for ModalSolveOptions {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaModalRunResult {
     pub run: FeaRunResult,
-    pub eigenvalues_hz: Vec<f64>,
+    pub frequencies_hz: Vec<f64>,
     pub mode_shapes: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
 }
@@ -468,8 +568,8 @@ pub struct FeaThermalRunResult {
     pub temperature_snapshots: Vec<AnalysisField>,
     pub temperature_gradient_snapshots: Vec<AnalysisField>,
     pub heat_flux_snapshots: Vec<AnalysisField>,
-    pub heat_source_snapshots: Vec<AnalysisField>,
-    pub boundary_heat_flux_snapshots: Vec<AnalysisField>,
+    pub energy_storage_rate_snapshots: Vec<AnalysisField>,
+    pub axis_boundary_heat_flux_summary_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub reference_temperature_k: f64,
 }

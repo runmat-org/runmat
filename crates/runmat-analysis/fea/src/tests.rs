@@ -4,8 +4,8 @@ use crate::{
     fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
     fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
     fea_nonlinear_rotation_field_id, fea_nonlinear_von_mises_field_id,
-    fea_thermal_boundary_heat_flux_field_id, fea_thermal_heat_flux_field_id,
-    fea_thermal_heat_source_field_id, fea_thermal_temperature_gradient_field_id,
+    fea_thermal_axis_boundary_heat_flux_summary_field_id, fea_thermal_energy_storage_rate_field_id,
+    fea_thermal_heat_flux_field_id, fea_thermal_temperature_gradient_field_id,
     fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
     fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
     fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
@@ -924,8 +924,8 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
     }];
     let result = crate::run_modal(&model, ComputeBackend::Cpu).expect("modal solve should succeed");
 
-    assert!(!result.eigenvalues_hz.is_empty());
-    assert_eq!(result.eigenvalues_hz.len(), result.mode_shapes.len());
+    assert!(!result.frequencies_hz.is_empty());
+    assert_eq!(result.frequencies_hz.len(), result.mode_shapes.len());
     assert_eq!(result.mode_shapes[0].shape.len(), 2);
     assert_eq!(result.mode_shapes[0].shape[1], 3);
     assert_eq!(
@@ -938,40 +938,40 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_FREQUENCY_HZ).element_count(),
-        result.eigenvalues_hz.len()
+        result.frequencies_hz.len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_EIGENVALUE).element_count(),
-        result.eigenvalues_hz.len()
+        result.frequencies_hz.len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_MODAL_MASS).element_count(),
-        result.eigenvalues_hz.len()
+        result.frequencies_hz.len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_MODAL_STIFFNESS).element_count(),
-        result.eigenvalues_hz.len()
+        result.frequencies_hz.len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_PARTICIPATION_FACTOR).element_count(),
-        result.eigenvalues_hz.len()
+        result.frequencies_hz.len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_RESIDUAL_NORM).element_count(),
-        result.eigenvalues_hz.len()
+        result.frequencies_hz.len()
     );
     assert_eq!(
         field(&result.run, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION).element_count(),
-        result.eigenvalues_hz.len()
+        result.frequencies_hz.len()
     );
     let orthogonality = field(&result.run, FEA_FIELD_MODAL_M_ORTHOGONALITY);
     assert_eq!(
         orthogonality.element_count(),
-        result.eigenvalues_hz.len() * result.eigenvalues_hz.len()
+        result.frequencies_hz.len() * result.frequencies_hz.len()
     );
     assert_eq!(
         orthogonality.shape,
-        vec![result.eigenvalues_hz.len(), result.eigenvalues_hz.len()]
+        vec![result.frequencies_hz.len(), result.frequencies_hz.len()]
     );
     let residual_norms = host_field(&result.run, FEA_FIELD_MODAL_RESIDUAL_NORM);
     assert_eq!(residual_norms, result.residual_norms.as_slice());
@@ -1151,11 +1151,11 @@ fn thermal_solver_emits_heat_transfer_fields() {
     assert_eq!(result.time_points_s.len(), result.heat_flux_snapshots.len());
     assert_eq!(
         result.time_points_s.len(),
-        result.heat_source_snapshots.len()
+        result.energy_storage_rate_snapshots.len()
     );
     assert_eq!(
         result.time_points_s.len(),
-        result.boundary_heat_flux_snapshots.len()
+        result.axis_boundary_heat_flux_summary_snapshots.len()
     );
     assert_eq!(
         result.temperature_gradient_snapshots[1].field_id,
@@ -1166,8 +1166,8 @@ fn thermal_solver_emits_heat_transfer_fields() {
         fea_thermal_heat_flux_field_id(1)
     );
     assert_eq!(
-        result.heat_source_snapshots[1].field_id,
-        fea_thermal_heat_source_field_id(1)
+        result.energy_storage_rate_snapshots[1].field_id,
+        fea_thermal_energy_storage_rate_field_id(1)
     );
     assert_eq!(result.temperature_gradient_snapshots[1].shape.len(), 2);
     assert_eq!(result.temperature_gradient_snapshots[1].shape[1], 3);
@@ -1176,18 +1176,18 @@ fn thermal_solver_emits_heat_transfer_fields() {
         "thermal heat flux should share the element-vector shape"
     );
     assert_eq!(
-        result.heat_source_snapshots[1].shape,
+        result.energy_storage_rate_snapshots[1].shape,
         vec![result.temperature_gradient_snapshots[1].shape[0]],
-        "thermal heat source should be an element scalar field"
+        "thermal energy storage rate should be an element scalar field"
     );
     assert_eq!(
-        result.boundary_heat_flux_snapshots[1].field_id,
-        fea_thermal_boundary_heat_flux_field_id(1)
+        result.axis_boundary_heat_flux_summary_snapshots[1].field_id,
+        fea_thermal_axis_boundary_heat_flux_summary_field_id(1)
     );
     assert_eq!(
-        result.boundary_heat_flux_snapshots[1].shape,
+        result.axis_boundary_heat_flux_summary_snapshots[1].shape,
         vec![6],
-        "thermal boundary heat flux should report six domain faces"
+        "thermal axis-boundary heat-flux summary should report six signed axis-face averages"
     );
     assert!(result
         .run
@@ -1213,8 +1213,8 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
     )
     .expect("modal large fixture should solve");
 
-    assert!(!result.eigenvalues_hz.is_empty());
-    assert_eq!(result.eigenvalues_hz.len(), result.mode_shapes.len());
+    assert!(!result.frequencies_hz.is_empty());
+    assert_eq!(result.frequencies_hz.len(), result.mode_shapes.len());
     assert!(result
         .run
         .diagnostics

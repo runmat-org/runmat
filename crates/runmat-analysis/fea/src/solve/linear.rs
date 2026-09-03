@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assembly::AssemblySummary,
+    contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::{apply_k, csr_stiffness, dense_stiffness},
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
@@ -17,12 +18,12 @@ pub struct LinearSolveResult {
     pub residual_norm: f64,
     pub converged: bool,
     pub host_sync_count: u32,
-    pub solver_backend: String,
+    pub solver_backend: LinearAlgebraBackendKind,
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
     pub solution: Vec<f64>,
-    pub solver_method: String,
-    pub preconditioner: String,
+    pub solver_method: SolverMethod,
+    pub preconditioner: SolverPreconditioner,
     pub diagnostics: Vec<FeaDiagnostic>,
 }
 
@@ -49,12 +50,12 @@ pub fn solve_linear_system(
             residual_norm: 0.0,
             converged: false,
             host_sync_count: 0,
-            solver_backend: effective_backend_kind.as_str().to_string(),
+            solver_backend: effective_backend_kind,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
             solution: Vec::new(),
-            solver_method: "matrix_free_pcg".to_string(),
-            preconditioner: preconditioner_kind.as_str().to_string(),
+            solver_method: SolverMethod::MatrixFreePcg,
+            preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
@@ -104,12 +105,12 @@ pub fn solve_linear_system(
                     residual_norm,
                     converged,
                     host_sync_count: 0,
-                    solver_backend: effective_backend_kind.as_str().to_string(),
+                    solver_backend: effective_backend_kind,
                     device_apply_k_count: 0,
                     device_apply_k_attempt_count: 0,
                     solution,
-                    solver_method: "dense_direct".to_string(),
-                    preconditioner: "none".to_string(),
+                    solver_method: SolverMethod::DenseDirect,
+                    preconditioner: SolverPreconditioner::None,
                     diagnostics,
                 };
             }
@@ -163,12 +164,12 @@ pub fn solve_linear_system(
             residual_norm: algebra_backend.dot(&r, &r).sqrt(),
             converged: true,
             host_sync_count: 0,
-            solver_backend: effective_backend_kind.as_str().to_string(),
+            solver_backend: effective_backend_kind,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
             solution: x,
-            solver_method: "matrix_free_pcg".to_string(),
-            preconditioner: preconditioner.kind().as_str().to_string(),
+            solver_method: SolverMethod::MatrixFreePcg,
+            preconditioner: SolverPreconditioner::from_spd(preconditioner.kind()),
             diagnostics,
         };
     }
@@ -219,12 +220,12 @@ pub fn solve_linear_system(
         residual_norm,
         converged,
         host_sync_count: 0,
-        solver_backend: effective_backend_kind.as_str().to_string(),
+        solver_backend: effective_backend_kind,
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
         solution: x,
-        solver_method: "matrix_free_pcg".to_string(),
-        preconditioner: preconditioner.kind().as_str().to_string(),
+        solver_method: SolverMethod::MatrixFreePcg,
+        preconditioner: SolverPreconditioner::from_spd(preconditioner.kind()),
         diagnostics,
     }
 }
@@ -481,8 +482,8 @@ mod tests {
         );
 
         assert!(result.converged);
-        assert_eq!(result.solver_method, "dense_direct");
-        assert_eq!(result.preconditioner, "none");
+        assert_eq!(result.solver_method, SolverMethod::DenseDirect);
+        assert_eq!(result.preconditioner, SolverPreconditioner::None);
         assert!((result.solution[0] - 1.0 / 11.0).abs() <= 1.0e-12);
         assert!((result.solution[1] - 7.0 / 11.0).abs() <= 1.0e-12);
         assert!(result

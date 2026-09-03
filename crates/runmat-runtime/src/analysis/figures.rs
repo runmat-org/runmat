@@ -1,6 +1,7 @@
 use glam::{Vec3, Vec4};
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, AnalysisModel, BoundaryConditionKind, LoadKind,
+    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, AnalysisRunIdentity,
+    BoundaryConditionKind, CoupledPhysicsFamily, LoadKind, PhysicsFamily,
 };
 use runmat_analysis_fea::contracts::{
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
@@ -14,11 +15,11 @@ use runmat_plot::plots::{
 
 use super::contracts::{
     AnalysisFieldDescriptor, AnalysisFieldKind, AnalysisFieldLocation, AnalysisRenderTopology,
-    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisRunKind, AnalysisRunResult,
-    AnalysisStudySpec, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisRunResult, AnalysisStudySpec,
+    AnalysisTrendsData, AnalysisTrendsQuery,
 };
+use super::storage;
 use super::{analysis_results_compare_op, analysis_trends_op, collect_analysis_result_fields};
-use super::{run_kind, storage};
 use crate::geometry::{geometry_preview_figure, GeometryPreviewFigureOptions};
 use crate::operations::OperationContext;
 
@@ -693,11 +694,11 @@ fn structural_result_summary_figure(fields: &[AnalysisField]) -> Option<Analysis
 fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> {
     let mut figures = Vec::new();
     if let Some(modal) = run.modal_results.as_ref() {
-        if !modal.eigenvalues_hz.is_empty() {
-            let labels = (1..=modal.eigenvalues_hz.len())
+        if !modal.frequencies_hz.is_empty() {
+            let labels = (1..=modal.frequencies_hz.len())
                 .map(|idx| format!("Mode {idx}"))
                 .collect::<Vec<_>>();
-            if let Ok(mut chart) = BarChart::new(labels, modal.eigenvalues_hz.clone()) {
+            if let Ok(mut chart) = BarChart::new(labels, modal.frequencies_hz.clone()) {
                 chart.label = Some("Frequency".to_string());
                 chart.color = Vec4::new(0.33, 0.66, 0.96, 1.0);
                 let mut figure = Figure::new()
@@ -950,7 +951,7 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
     let labels = data
         .summaries
         .iter()
-        .map(|summary| run_kind_label(summary.run_kind).to_string())
+        .map(|summary| run_identity_label(&summary.identity))
         .collect::<Vec<_>>();
     if labels.is_empty() {
         return figures;
@@ -1944,10 +1945,9 @@ fn topology_ids_for_field_ids<'a>(field_ids: impl IntoIterator<Item = &'a str>) 
 }
 
 fn previous_run_of_kind(current: &AnalysisRunResult) -> Result<Option<AnalysisRunResult>, String> {
-    let current_kind = run_kind(current);
     let mut candidates = storage::list_run_results()?
         .into_iter()
-        .filter(|run| run.run_id != current.run_id && run_kind(run) == current_kind)
+        .filter(|run| run.run_id != current.run_id && run.identity == current.identity)
         .collect::<Vec<_>>();
     candidates.sort_by(|a, b| b.run_id.cmp(&a.run_id));
     Ok(candidates.into_iter().next())
@@ -2198,19 +2198,32 @@ fn render_topology_mesh_bytes(topology: &AnalysisRenderTopology) -> usize {
         .sum()
 }
 
-fn run_kind_label(kind: AnalysisRunKind) -> &'static str {
-    match kind {
-        AnalysisRunKind::LinearStatic => "Linear static",
-        AnalysisRunKind::Modal => "Modal",
-        AnalysisRunKind::Acoustic => "Acoustic",
-        AnalysisRunKind::Thermal => "Thermal",
-        AnalysisRunKind::Transient => "Transient",
-        AnalysisRunKind::Cfd => "CFD",
-        AnalysisRunKind::Cht => "CHT",
-        AnalysisRunKind::Fsi => "FSI",
-        AnalysisRunKind::Nonlinear => "Nonlinear",
-        AnalysisRunKind::Electromagnetic => "Electromagnetic",
-    }
+fn run_identity_label(identity: &AnalysisRunIdentity) -> String {
+    let family = match identity.family {
+        PhysicsFamily::Structural => "Structural",
+        PhysicsFamily::Thermal => "Thermal",
+        PhysicsFamily::Electromagnetic => "Electromagnetic",
+        PhysicsFamily::Acoustic => "Acoustic",
+        PhysicsFamily::Fluid => "Fluid",
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical) => "Thermomechanical",
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal) => "Electrothermal",
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => "CHT",
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) => "FSI",
+    };
+    let procedure = match identity.procedure {
+        AnalysisProcedure::Static => "static",
+        AnalysisProcedure::ModalExtraction => "modal extraction",
+        AnalysisProcedure::PrestressedModalExtraction => "prestressed modal extraction",
+        AnalysisProcedure::EigenvalueBuckling => "eigenvalue buckling",
+        AnalysisProcedure::TransientResponse => "transient response",
+        AnalysisProcedure::HarmonicResponse => "harmonic response",
+        AnalysisProcedure::PrestressedHarmonicResponse => "prestressed harmonic response",
+        AnalysisProcedure::ModalResponseSpectrum => "modal response spectrum",
+        AnalysisProcedure::RandomResponse => "random response",
+        AnalysisProcedure::Nonlinear => "nonlinear",
+        AnalysisProcedure::Adaptive => "adaptive",
+    };
+    format!("{family} {procedure}")
 }
 
 #[cfg(test)]
@@ -2227,12 +2240,19 @@ mod tests {
     ) -> AnalysisRunResult {
         AnalysisRunResult {
             run_id: "run_test".to_string(),
+            identity: runmat_analysis_core::AnalysisRunIdentity::experimental(
+                runmat_analysis_core::PhysicsFamily::Structural,
+                runmat_analysis_core::AnalysisProcedure::Static,
+                runmat_analysis_core::SolutionSpace::Direct,
+                [runmat_analysis_core::FormulationImplementation::LinearElasticStructural],
+            ),
             run: runmat_analysis_fea::FeaRunResult {
-                backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                solver_backend: "cpu".to_string(),
+                requested_backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
+                solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
-                solver_method: "test_solver".to_string(),
-                preconditioner: "none".to_string(),
+                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 fields,
@@ -2250,14 +2270,15 @@ mod tests {
             publishable: true,
             quality_reasons: Vec::new(),
             provenance: crate::analysis::contracts::RunProvenance {
-                backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                solver_backend: "cpu".to_string(),
+                requested_backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
+                solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
                 solver_host_sync_count: 0,
                 precision_mode: "double".to_string(),
                 deterministic_mode: true,
-                solver_method: "test_solver".to_string(),
-                preconditioner: "none".to_string(),
+                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 quality_policy: "strict".to_string(),
                 fallback_events: Vec::new(),
             },

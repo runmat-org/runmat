@@ -8,11 +8,14 @@ use chrono::Utc;
 use runmat_filesystem::{DirEntry, FsFileType};
 use serde::{Deserialize, Serialize};
 
+use runmat_analysis_core::AnalysisRunIdentity;
+
 use super::contracts::{AnalysisArtifactRecord, AnalysisRunResult};
 
-const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/v1";
+const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PersistedRunArtifact {
     schema_version: String,
     created_at: String,
@@ -58,6 +61,7 @@ impl Default for InMemoryAnalysisArtifactStore {
 
 impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
+        validate_run_identity(run)?;
         let mut guard = self
             .runs
             .write()
@@ -66,6 +70,7 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         Ok(AnalysisArtifactRecord {
             run_id: run.run_id.clone(),
             created_at: Utc::now().to_rfc3339(),
+            identity: run.identity.clone(),
             op_version: run_operation_version(run),
             field_ids: super::analysis_run_field_ids(run),
         })
@@ -104,6 +109,7 @@ impl FilesystemAnalysisArtifactStore {
 
 impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
+        validate_run_identity(run)?;
         let path = self.run_path(&run.run_id);
         if let Some(parent) = path.parent() {
             fs_create_dir_all(parent)
@@ -124,6 +130,7 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         Ok(AnalysisArtifactRecord {
             run_id: run.run_id.clone(),
             created_at: Utc::now().to_rfc3339(),
+            identity: run.identity.clone(),
             op_version,
             field_ids: super::analysis_run_field_ids(run),
         })
@@ -135,11 +142,16 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             return Ok(None);
         }
         let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
-        let run = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
-            Ok(persisted) => persisted.run,
-            Err(_) => serde_json::from_slice::<AnalysisRunResult>(&bytes)
-                .map_err(|err| format!("failed to parse run artifact: {err}"))?,
-        };
+        let persisted = serde_json::from_slice::<PersistedRunArtifact>(&bytes)
+            .map_err(|err| format!("failed to parse run artifact: {err}"))?;
+        if persisted.schema_version != ARTIFACT_SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported analysis run artifact schema `{}`",
+                persisted.schema_version
+            ));
+        }
+        let run = persisted.run;
+        validate_run_identity(&run)?;
         Ok(Some(run))
     }
 
@@ -158,12 +170,12 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             }
             let bytes =
                 fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
-            let parsed = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
-                Ok(persisted) => Some(persisted.run),
-                Err(_) => serde_json::from_slice::<AnalysisRunResult>(&bytes).ok(),
-            };
-            if let Some(run) = parsed {
-                runs.push(run);
+            if let Ok(persisted) = serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
+                if persisted.schema_version == ARTIFACT_SCHEMA_VERSION
+                    && validate_run_identity(&persisted.run).is_ok()
+                {
+                    runs.push(persisted.run);
+                }
             }
         }
         Ok(runs)
@@ -171,51 +183,20 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
 }
 
 fn run_operation_version(run: &AnalysisRunResult) -> String {
-    if run
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE")
-    {
-        "fea.run_acoustic/v1".to_string()
-    } else if run.electromagnetic_results.is_some()
-        || run
-            .run
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "FEA_EM_STATIC")
-    {
-        "fea.run_electromagnetic/v1".to_string()
-    } else if run
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CHT_COUPLING")
-    {
-        "fea.run_cht/v1".to_string()
-    } else if run
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_COUPLING")
-    {
-        "fea.run_fsi/v1".to_string()
-    } else if run
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW")
-    {
-        "fea.run_cfd/v1".to_string()
-    } else if run.nonlinear_results.is_some() {
-        "fea.run_nonlinear/v1".to_string()
-    } else if run.transient_results.is_some() {
-        "fea.run_transient/v1".to_string()
-    } else if run.modal_results.is_some() {
-        "fea.run_modal/v1".to_string()
-    } else {
-        "fea.run_linear_static/v1".to_string()
+    run.identity.operation_version()
+}
+
+fn validate_run_identity(run: &AnalysisRunResult) -> Result<(), String> {
+    run.identity
+        .validate()
+        .map_err(|message| format!("invalid analysis run identity: {message}"))?;
+    if !run.provenance.fallback_events.is_empty() && !run.identity.permits_fallback() {
+        return Err(
+            "analysis run identity forbids the execution fallbacks recorded by provenance"
+                .to_string(),
+        );
     }
+    Ok(())
 }
 
 fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
@@ -249,23 +230,22 @@ fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
             continue;
         }
         let bytes = fs_read(&path).map_err(|err| format!("failed to read artifact file: {err}"))?;
-        let (op_version, run_id) = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
-            Ok(persisted) => (persisted.op_version, persisted.run.run_id),
-            Err(_) => match serde_json::from_slice::<AnalysisRunResult>(&bytes) {
-                Ok(run) => (run_operation_version(&run), run.run_id),
-                Err(_) => continue,
-            },
+        let identity = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
+            Ok(persisted) if persisted.schema_version == ARTIFACT_SCHEMA_VERSION => {
+                persisted.run.identity
+            }
+            _ => continue,
         };
         let modified = fs_modified(&path).ok().flatten();
-        artifacts.push((path, op_version, run_id, modified));
+        artifacts.push((path, identity, modified));
     }
-    artifacts.sort_by(|a, b| b.3.cmp(&a.3));
+    artifacts.sort_by(|a, b| b.2.cmp(&a.2));
 
     let mut to_remove = Vec::new();
     if max_runs_per_kind > 0 {
-        let mut per_kind_counts: HashMap<String, usize> = HashMap::new();
-        for (path, op_version, _run_id, _modified) in &artifacts {
-            let count = per_kind_counts.entry(op_version.clone()).or_default();
+        let mut per_kind_counts: HashMap<AnalysisRunIdentity, usize> = HashMap::new();
+        for (path, identity, _modified) in &artifacts {
+            let count = per_kind_counts.entry(identity.clone()).or_default();
             *count += 1;
             if *count > max_runs_per_kind {
                 to_remove.push(path.clone());
@@ -273,7 +253,7 @@ fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
         }
     }
     if max_runs > 0 {
-        for (index, (path, _op_version, _run_id, _modified)) in artifacts.iter().enumerate() {
+        for (index, (path, _identity, _modified)) in artifacts.iter().enumerate() {
             if index >= max_runs {
                 to_remove.push(path.clone());
             }

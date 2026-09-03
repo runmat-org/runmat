@@ -8,9 +8,11 @@ use std::time::Instant;
 use chrono::Utc;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisField, AnalysisInterfaceKind, AnalysisModel,
-    AnalysisModelId, AnalysisStep, AnalysisStepKind, AnalysisValidationError, BoundaryCondition,
-    BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
-    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, ReferenceFrame,
+    AnalysisModelId, AnalysisProcedure, AnalysisRunIdentity, AnalysisStep, AnalysisStepKind,
+    AnalysisValidationError, BoundaryCondition, BoundaryConditionKind, CoupledPhysicsFamily,
+    EvidenceConfidence, FormulationImplementation, LoadCase, LoadKind, MaterialAssignment,
+    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicsFamily, ReferenceFrame,
+    SolutionSpace,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -24,9 +26,9 @@ use runmat_analysis_fea::{
     fea_fsi_interface_traction_field_id, fea_fsi_structural_displacement_field_id,
     run_electromagnetic_with_options, run_linear_static_with_options, run_modal_with_options,
     run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
-    ComputeBackend, ElectromagneticSolveOptions, FeaProgressHandler, FeaRunError, FeaRunResult,
-    LinearStaticSolveOptions, ModalSolveOptions, ThermalSolveOptions,
-    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PHASE,
+    ComputeBackend, ElectromagneticSolveOptions, ExecutionBackend, FeaProgressHandler, FeaRunError,
+    FeaRunResult, LinearStaticSolveOptions, ModalSolveOptions, SolverMethod, SolverPreconditioner,
+    ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PHASE,
     FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
     FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
     FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
@@ -181,17 +183,18 @@ pub use contracts::{
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
     AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
     ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ElectromagneticResultsData,
-    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
-    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
-    QualityGate, QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
-    ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
-    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
-    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
-    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
-    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND,
-    ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
-    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
+    FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits,
+    ModalResultsData, NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions,
+    PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReason,
+    QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode,
+    ThermoFieldSource, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
+    ThermoTimeProfilePoint, TransientIntegrationMethod, TransientResultsData,
+    ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
+    ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
+    ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND, ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+    ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
+    ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 pub use fea_document::{
     is_fea_file_path, load_fea_document_from_path_async, parse_and_resolve_fea_document,
@@ -850,6 +853,46 @@ pub fn analysis_create_model_op(
         _ => None,
     };
     let thermo_mechanical = match intent.profile {
+        AnalysisCreateModelProfile::ThermoMechanicalCoupled => {
+            Some(runmat_analysis_core::ThermoMechanicalDomain {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 60.0,
+                field_artifact_id: None,
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: vec![
+                    runmat_analysis_core::ThermoTimeProfilePoint {
+                        normalized_time: 0.0,
+                        scale: 0.0,
+                    },
+                    runmat_analysis_core::ThermoTimeProfilePoint {
+                        normalized_time: 1.0,
+                        scale: 1.0,
+                    },
+                ],
+            })
+        }
+        AnalysisCreateModelProfile::ThermalStandalone => {
+            Some(runmat_analysis_core::ThermoMechanicalDomain {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 20.0,
+                field_artifact_id: None,
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: vec![
+                    runmat_analysis_core::ThermoTimeProfilePoint {
+                        normalized_time: 0.0,
+                        scale: 0.0,
+                    },
+                    runmat_analysis_core::ThermoTimeProfilePoint {
+                        normalized_time: 1.0,
+                        scale: 1.0,
+                    },
+                ],
+            })
+        }
         AnalysisCreateModelProfile::ChtCoupled => {
             Some(runmat_analysis_core::ThermoMechanicalDomain {
                 enabled: true,
@@ -1976,10 +2019,8 @@ pub fn analysis_run_modal_with_options_op(
     let mut run = modal_run.run;
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
-    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
-        fallback_events.push(
-            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
-        );
+    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
+        fallback_events.push(FallbackEvent::solver_backend());
     }
     let solver_convergence = if run.diagnostics.iter().any(|item| {
         item.code == "FEA_MODAL_CONVERGENCE"
@@ -1989,7 +2030,7 @@ pub fn analysis_run_modal_with_options_op(
     } else {
         QualityGate::Warn
     };
-    let result_quality = if modal_run.eigenvalues_hz.is_empty() || modal_run.mode_shapes.is_empty()
+    let result_quality = if modal_run.frequencies_hz.is_empty() || modal_run.mode_shapes.is_empty()
     {
         QualityGate::Fail
     } else if modal_run
@@ -2042,16 +2083,17 @@ pub fn analysis_run_modal_with_options_op(
     }
     if fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+        .any(FallbackEvent::is_solver_backend_fallback)
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
         });
     }
-    if fallback_events.iter().any(|event| {
-        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
-    }) {
+    if fallback_events
+        .iter()
+        .any(FallbackEvent::is_field_publication_fallback)
+    {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::FieldPromotionFallback,
             detail: "field promotion fell back to host-backed values".to_string(),
@@ -2088,19 +2130,25 @@ pub fn analysis_run_modal_with_options_op(
     } else {
         RunStatus::Degraded
     };
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let selected_preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: structural_run_identity(
+            model,
+            AnalysisProcedure::ModalExtraction,
+            FormulationImplementation::LinearizedStructuralModes,
+        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: Some(ModalResultsData {
             modal_payload_version: "modal_results/v1".to_string(),
-            eigenvalues_hz: modal_run.eigenvalues_hz,
+            frequencies_hz: modal_run.frequencies_hz,
             mode_shapes: modal_run.mode_shapes,
             residual_norms: modal_run.residual_norms,
             mode_units: ModalFrequencyUnits::Hz,
@@ -2117,7 +2165,8 @@ pub fn analysis_run_modal_with_options_op(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -2385,10 +2434,8 @@ pub fn analysis_run_acoustic_with_options_op(
     .unwrap_or(f64::INFINITY);
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
-    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
-        fallback_events.push(
-            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
-        );
+    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
+        fallback_events.push(FallbackEvent::solver_backend());
     }
     let solver_convergence = if acoustic_residual_norm <= options.residual_warn_threshold {
         QualityGate::Pass
@@ -2421,16 +2468,17 @@ pub fn analysis_run_acoustic_with_options_op(
     }
     if fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+        .any(FallbackEvent::is_solver_backend_fallback)
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
         });
     }
-    if fallback_events.iter().any(|event| {
-        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
-    }) {
+    if fallback_events
+        .iter()
+        .any(FallbackEvent::is_field_publication_fallback)
+    {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::FieldPromotionFallback,
             detail: "field promotion fell back to host-backed values".to_string(),
@@ -2459,14 +2507,21 @@ pub fn analysis_run_acoustic_with_options_op(
     } else {
         RunStatus::Degraded
     };
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let selected_preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: AnalysisRunIdentity::experimental(
+            PhysicsFamily::Acoustic,
+            AnalysisProcedure::HarmonicResponse,
+            SolutionSpace::Direct,
+            [FormulationImplementation::ReducedAcousticHelmholtz],
+        ),
         run,
         render_topology,
         modal_results: None,
@@ -2481,7 +2536,8 @@ pub fn analysis_run_acoustic_with_options_op(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -2654,11 +2710,12 @@ fn solve_acoustic_harmonic(
         runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     };
     FeaRunResult {
-        backend,
-        solver_backend: "cpu_reference".to_string(),
+        requested_backend: backend,
+        execution_backend: ExecutionBackend::Cpu,
+        solver_backend: LinearAlgebraBackendKind::CpuReference,
         solver_device_apply_k_ratio: 0.0,
-        solver_method: "acoustic_domain_graph_helmholtz_harmonic".to_string(),
-        preconditioner: "none".to_string(),
+        solver_method: SolverMethod::AcousticDomainGraphHelmholtzHarmonic,
+        preconditioner: SolverPreconditioner::None,
         solver_host_sync_count: 0,
         diagnostics: vec![
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -4452,11 +4509,12 @@ fn solve_cfd_finite_volume_run(
         runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     };
     FeaRunResult {
-        backend,
-        solver_backend: "cpu_reference".to_string(),
+        requested_backend: backend,
+        execution_backend: ExecutionBackend::Cpu,
+        solver_backend: LinearAlgebraBackendKind::CpuReference,
         solver_device_apply_k_ratio: 0.0,
-        solver_method: "cfd_velocity_pressure_finite_volume".to_string(),
-        preconditioner: "finite_volume_pressure_balance".to_string(),
+        solver_method: SolverMethod::CfdVelocityPressureFiniteVolume,
+        preconditioner: SolverPreconditioner::FiniteVolumePressureBalance,
         solver_host_sync_count: 0,
         diagnostics: vec![
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -6071,10 +6129,8 @@ pub fn analysis_run_cfd_with_options_op(
         });
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
-    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
-        fallback_events.push(
-            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
-        );
+    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
+        fallback_events.push(FallbackEvent::solver_backend());
     }
 
     let flow_topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
@@ -6158,16 +6214,17 @@ pub fn analysis_run_cfd_with_options_op(
     }
     if fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+        .any(FallbackEvent::is_solver_backend_fallback)
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
         });
     }
-    if fallback_events.iter().any(|event| {
-        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
-    }) {
+    if fallback_events
+        .iter()
+        .any(FallbackEvent::is_field_publication_fallback)
+    {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::FieldPromotionFallback,
             detail: "field promotion fell back to host-backed values".to_string(),
@@ -6194,14 +6251,26 @@ pub fn analysis_run_cfd_with_options_op(
     } else {
         RunStatus::Degraded
     };
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let selected_preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: AnalysisRunIdentity::experimental(
+            PhysicsFamily::Fluid,
+            match cfd_domain.solve_family {
+                runmat_analysis_core::CfdSolveFamily::SteadyState => AnalysisProcedure::Static,
+                runmat_analysis_core::CfdSolveFamily::Transient => {
+                    AnalysisProcedure::TransientResponse
+                }
+            },
+            SolutionSpace::Direct,
+            [FormulationImplementation::ReducedIncompressibleFlow],
+        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -6216,7 +6285,8 @@ pub fn analysis_run_cfd_with_options_op(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -6616,8 +6686,8 @@ pub fn analysis_run_cht_with_options_op(
         options.tolerance,
     );
     let mut run = thermal_run.run.clone();
-    run.solver_method = "cht_conjugate_projection".to_string();
-    run.preconditioner = "thermal_cfd_projection".to_string();
+    run.solver_method = SolverMethod::ChtConjugateProjection;
+    run.preconditioner = SolverPreconditioner::ThermalCfdProjection;
     run.fields.extend(cht_fields);
     let reynolds_number = cfd_reynolds_number(cfd_domain);
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -6747,10 +6817,8 @@ pub fn analysis_run_cht_with_options_op(
 
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
-    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
-        fallback_events.push(
-            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
-        );
+    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
+        fallback_events.push(FallbackEvent::solver_backend());
     }
 
     let max_cht_transport_residual = cht_interface_closure
@@ -6815,16 +6883,17 @@ pub fn analysis_run_cht_with_options_op(
     }
     if fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+        .any(FallbackEvent::is_solver_backend_fallback)
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
         });
     }
-    if fallback_events.iter().any(|event| {
-        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
-    }) {
+    if fallback_events
+        .iter()
+        .any(FallbackEvent::is_field_publication_fallback)
+    {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::FieldPromotionFallback,
             detail: "field promotion fell back to host-backed values".to_string(),
@@ -6851,14 +6920,26 @@ pub fn analysis_run_cht_with_options_op(
     } else {
         RunStatus::Degraded
     };
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let selected_preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: AnalysisRunIdentity::experimental(
+            PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
+            match cfd_domain.solve_family {
+                runmat_analysis_core::CfdSolveFamily::SteadyState => AnalysisProcedure::Static,
+                runmat_analysis_core::CfdSolveFamily::Transient => {
+                    AnalysisProcedure::TransientResponse
+                }
+            },
+            SolutionSpace::Direct,
+            [FormulationImplementation::ReducedConjugateHeatTransfer],
+        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -6868,8 +6949,9 @@ pub fn analysis_run_cht_with_options_op(
             temperature_snapshots: thermal_run.temperature_snapshots,
             temperature_gradient_snapshots: thermal_run.temperature_gradient_snapshots,
             heat_flux_snapshots: thermal_run.heat_flux_snapshots,
-            heat_source_snapshots: thermal_run.heat_source_snapshots,
-            boundary_heat_flux_snapshots: thermal_run.boundary_heat_flux_snapshots,
+            energy_storage_rate_snapshots: thermal_run.energy_storage_rate_snapshots,
+            axis_boundary_heat_flux_summary_snapshots: thermal_run
+                .axis_boundary_heat_flux_summary_snapshots,
             residual_norms: thermal_run.residual_norms,
             reference_temperature_k: thermal_run.reference_temperature_k,
         }),
@@ -6883,7 +6965,8 @@ pub fn analysis_run_cht_with_options_op(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -7210,11 +7293,12 @@ pub fn analysis_run_fsi_with_options_op(
     );
     let max_interface_residual = fsi_interface_closure.max_interface_residual;
     let mut run = FeaRunResult {
-        backend,
-        solver_backend: "cpu_reference".to_string(),
+        requested_backend: backend,
+        execution_backend: ExecutionBackend::Cpu,
+        solver_backend: LinearAlgebraBackendKind::CpuReference,
         solver_device_apply_k_ratio: 0.0,
-        solver_method: "fsi_partitioned_projection".to_string(),
-        preconditioner: "interface_relaxation".to_string(),
+        solver_method: SolverMethod::FsiPartitionedProjection,
+        preconditioner: SolverPreconditioner::InterfaceRelaxation,
         solver_host_sync_count: 0,
         diagnostics: Vec::new(),
         fields: fsi_fields,
@@ -7367,10 +7451,8 @@ pub fn analysis_run_fsi_with_options_op(
 
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
-    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
-        fallback_events.push(
-            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
-        );
+    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
+        fallback_events.push(FallbackEvent::solver_backend());
     }
 
     let solver_convergence = if max_interface_residual <= options.residual_warn_threshold {
@@ -7408,16 +7490,17 @@ pub fn analysis_run_fsi_with_options_op(
     }
     if fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+        .any(FallbackEvent::is_solver_backend_fallback)
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
         });
     }
-    if fallback_events.iter().any(|event| {
-        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
-    }) {
+    if fallback_events
+        .iter()
+        .any(FallbackEvent::is_field_publication_fallback)
+    {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::FieldPromotionFallback,
             detail: "field promotion fell back to host-backed values".to_string(),
@@ -7444,14 +7527,21 @@ pub fn analysis_run_fsi_with_options_op(
     } else {
         RunStatus::Degraded
     };
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let selected_preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: AnalysisRunIdentity::experimental(
+            PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+            AnalysisProcedure::TransientResponse,
+            SolutionSpace::Direct,
+            [FormulationImplementation::ReducedFluidStructureInteraction],
+        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -7466,7 +7556,8 @@ pub fn analysis_run_fsi_with_options_op(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -7598,6 +7689,9 @@ pub fn analysis_run_thermal_with_options_op(
     let mut run = thermal_run.run;
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
+    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
+        fallback_events.push(FallbackEvent::solver_backend());
+    }
     let solver_convergence = if diagnostic_metric(
         &run.diagnostics,
         "FEA_THERMAL_STABILITY",
@@ -7670,14 +7764,21 @@ pub fn analysis_run_thermal_with_options_op(
         RunStatus::Degraded
     };
 
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let selected_preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: AnalysisRunIdentity::experimental(
+            PhysicsFamily::Thermal,
+            AnalysisProcedure::TransientResponse,
+            SolutionSpace::Direct,
+            [FormulationImplementation::ReducedThermalDiffusion],
+        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -7687,8 +7788,9 @@ pub fn analysis_run_thermal_with_options_op(
             temperature_snapshots: thermal_run.temperature_snapshots,
             temperature_gradient_snapshots: thermal_run.temperature_gradient_snapshots,
             heat_flux_snapshots: thermal_run.heat_flux_snapshots,
-            heat_source_snapshots: thermal_run.heat_source_snapshots,
-            boundary_heat_flux_snapshots: thermal_run.boundary_heat_flux_snapshots,
+            energy_storage_rate_snapshots: thermal_run.energy_storage_rate_snapshots,
+            axis_boundary_heat_flux_summary_snapshots: thermal_run
+                .axis_boundary_heat_flux_summary_snapshots,
             residual_norms: thermal_run.residual_norms,
             reference_temperature_k: thermal_run.reference_temperature_k,
         }),
@@ -7702,7 +7804,8 @@ pub fn analysis_run_thermal_with_options_op(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -7964,10 +8067,8 @@ pub fn analysis_run_transient_with_options_op(
     let mut run = transient_run.run;
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
-    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
-        fallback_events.push(
-            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
-        );
+    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
+        fallback_events.push(FallbackEvent::solver_backend());
     }
     let solver_convergence = if run.diagnostics.iter().any(|item| {
         item.code == "FEA_TRANSIENT_CONVERGENCE"
@@ -8163,16 +8264,17 @@ pub fn analysis_run_transient_with_options_op(
     }
     if fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+        .any(FallbackEvent::is_solver_backend_fallback)
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
         });
     }
-    if fallback_events.iter().any(|event| {
-        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
-    }) {
+    if fallback_events
+        .iter()
+        .any(FallbackEvent::is_field_publication_fallback)
+    {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::FieldPromotionFallback,
             detail: "field promotion fell back to host-backed values".to_string(),
@@ -8211,14 +8313,20 @@ pub fn analysis_run_transient_with_options_op(
         RunStatus::Degraded
     };
 
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let selected_preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: structural_run_identity(
+            model,
+            AnalysisProcedure::TransientResponse,
+            FormulationImplementation::ReducedStructuralTransient,
+        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -8264,7 +8372,8 @@ pub fn analysis_run_transient_with_options_op(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -8590,10 +8699,8 @@ pub fn analysis_run_nonlinear_with_options_op(
     let mut run = nonlinear_run.run;
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
-    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
-        fallback_events.push(
-            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
-        );
+    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
+        fallback_events.push(FallbackEvent::solver_backend());
     }
 
     let solver_convergence = if run.diagnostics.iter().any(|item| {
@@ -8822,16 +8929,17 @@ pub fn analysis_run_nonlinear_with_options_op(
     }
     if fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+        .any(FallbackEvent::is_solver_backend_fallback)
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
         });
     }
-    if fallback_events.iter().any(|event| {
-        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
-    }) {
+    if fallback_events
+        .iter()
+        .any(FallbackEvent::is_field_publication_fallback)
+    {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::FieldPromotionFallback,
             detail: "field promotion fell back to host-backed values".to_string(),
@@ -8875,14 +8983,20 @@ pub fn analysis_run_nonlinear_with_options_op(
         RunStatus::Degraded
     };
 
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let selected_preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: structural_run_identity(
+            model,
+            AnalysisProcedure::Nonlinear,
+            FormulationImplementation::ReducedStructuralNonlinear,
+        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -8937,7 +9051,8 @@ pub fn analysis_run_nonlinear_with_options_op(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -9072,23 +9187,17 @@ pub fn analysis_run_linear_static_with_options(
     match options.preconditioner_mode {
         PreconditionerMode::Auto | PreconditionerMode::Jacobi => {}
         PreconditionerMode::Ilu => {
-            if run.preconditioner != "ilu0" {
-                fallback_events.push(format!(
-                    "SOLVER_PRECONDITIONER_FALLBACK:requested=ilu0:using={}",
-                    run.preconditioner
-                ));
+            if run.preconditioner != SolverPreconditioner::Ilu0 {
+                fallback_events.push(FallbackEvent::preconditioner(run.preconditioner));
             }
         }
         PreconditionerMode::Amg => {
-            fallback_events
-                .push("SOLVER_PRECONDITIONER_FALLBACK:requested=amg:using=jacobi".to_string());
+            fallback_events.push(FallbackEvent::preconditioner(SolverPreconditioner::Jacobi));
         }
     }
 
-    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
-        fallback_events.push(
-            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
-        );
+    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
+        fallback_events.push(FallbackEvent::solver_backend());
     }
 
     let solver_convergence = if run.diagnostics.iter().any(|item| {
@@ -9151,16 +9260,17 @@ pub fn analysis_run_linear_static_with_options(
     }
     if fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+        .any(FallbackEvent::is_solver_backend_fallback)
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
         });
     }
-    if fallback_events.iter().any(|event| {
-        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
-    }) {
+    if fallback_events
+        .iter()
+        .any(FallbackEvent::is_field_publication_fallback)
+    {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::FieldPromotionFallback,
             detail: "field promotion fell back to host-backed values".to_string(),
@@ -9186,14 +9296,20 @@ pub fn analysis_run_linear_static_with_options(
     } else {
         RunStatus::Degraded
     };
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: structural_run_identity(
+            model,
+            AnalysisProcedure::Static,
+            FormulationImplementation::LinearElasticStructural,
+        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -9208,7 +9324,8 @@ pub fn analysis_run_linear_static_with_options(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -10278,14 +10395,29 @@ pub fn analysis_run_electromagnetic_with_options_op(
     } else {
         RunStatus::Degraded
     };
-    let solver_backend = run.solver_backend.clone();
+    let solver_backend = run.solver_backend;
+    let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let preconditioner = run.preconditioner.clone();
+    let solver_method = run.solver_method;
+    let preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
+        identity: AnalysisRunIdentity::experimental(
+            PhysicsFamily::Electromagnetic,
+            if model
+                .electromagnetic
+                .as_ref()
+                .is_some_and(|domain| domain.reference_frequency_hz > 0.0)
+            {
+                AnalysisProcedure::HarmonicResponse
+            } else {
+                AnalysisProcedure::Static
+            },
+            SolutionSpace::Direct,
+            [FormulationImplementation::ReducedElectromagneticPotential],
+        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -10331,7 +10463,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
         publishable,
         quality_reasons,
         provenance: RunProvenance {
-            backend,
+            requested_backend: backend,
+            execution_backend,
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
@@ -10580,10 +10713,10 @@ fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<Analysi
         for field in &thermal.heat_flux_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
-        for field in &thermal.heat_source_snapshots {
+        for field in &thermal.energy_storage_rate_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
-        for field in &thermal.boundary_heat_flux_snapshots {
+        for field in &thermal.axis_boundary_heat_flux_summary_snapshots {
             push_analysis_result_field(&mut fields, &mut seen, field);
         }
     }
@@ -10814,7 +10947,7 @@ pub fn analysis_results_op(
         max_modal_residual_norm,
         first_mode_converged,
     ) = if let Some(modal) = run_result.modal_results.as_ref() {
-        let count = modal.eigenvalues_hz.len().min(modal.mode_shapes.len());
+        let count = modal.frequencies_hz.len().min(modal.mode_shapes.len());
         let max_modal_residual_norm = modal.residual_norms.iter().copied().reduce(f64::max);
         let first_mode_converged = modal.residual_norms.first().copied().map(|v| v <= 1.0e-6);
         let (min_frequency_hz, max_frequency_hz) = if count == 0 {
@@ -10822,7 +10955,7 @@ pub fn analysis_results_op(
         } else {
             let mut min_value = f64::INFINITY;
             let mut max_value = f64::NEG_INFINITY;
-            for value in modal.eigenvalues_hz.iter().copied().take(count) {
+            for value in modal.frequencies_hz.iter().copied().take(count) {
                 min_value = min_value.min(value);
                 max_value = max_value.max(value);
             }
@@ -11445,11 +11578,11 @@ pub fn analysis_results_op(
             if query.mode_indices.is_empty() {
                 Some(modal.clone())
             } else {
-                let mut eigenvalues_hz = Vec::with_capacity(query.mode_indices.len());
+                let mut frequencies_hz = Vec::with_capacity(query.mode_indices.len());
                 let mut mode_shapes = Vec::with_capacity(query.mode_indices.len());
                 let mut residual_norms = Vec::with_capacity(query.mode_indices.len());
                 for &index in &query.mode_indices {
-                    let eigenvalue = modal.eigenvalues_hz.get(index).copied().ok_or_else(|| {
+                    let eigenvalue = modal.frequencies_hz.get(index).copied().ok_or_else(|| {
                         operation_error(
                             ANALYSIS_RESULTS_OPERATION,
                             ANALYSIS_RESULTS_OP_VERSION,
@@ -11465,7 +11598,7 @@ pub fn analysis_results_op(
                                 ("requested_mode_index".to_string(), index.to_string()),
                                 (
                                     "available_mode_count".to_string(),
-                                    modal.eigenvalues_hz.len().to_string(),
+                                    modal.frequencies_hz.len().to_string(),
                                 ),
                             ]),
                         )
@@ -11517,13 +11650,13 @@ pub fn analysis_results_op(
                                 ]),
                             )
                         })?;
-                    eigenvalues_hz.push(eigenvalue);
+                    frequencies_hz.push(eigenvalue);
                     mode_shapes.push(mode_shape);
                     residual_norms.push(residual_norm);
                 }
                 Some(ModalResultsData {
                     modal_payload_version: modal.modal_payload_version.clone(),
-                    eigenvalues_hz,
+                    frequencies_hz,
                     mode_shapes,
                     residual_norms,
                     mode_units: modal.mode_units,
@@ -11915,6 +12048,7 @@ pub fn analysis_results_op(
     };
 
     let data = AnalysisResultsData {
+        identity: run_result.identity.clone(),
         field_descriptors,
         fields,
         modal_results,
@@ -12147,28 +12281,17 @@ pub fn analysis_trends_op(
         )
     })?;
 
-    let mut grouped: HashMap<AnalysisRunKind, Vec<AnalysisRunResult>> = HashMap::new();
+    let mut grouped: HashMap<AnalysisRunIdentity, Vec<AnalysisRunResult>> = HashMap::new();
     for run in runs {
-        grouped.entry(run_kind(&run)).or_default().push(run);
+        grouped.entry(run.identity.clone()).or_default().push(run);
     }
 
     let window = query.window_size.max(1);
     let mut summaries = Vec::new();
-    for kind in [
-        AnalysisRunKind::LinearStatic,
-        AnalysisRunKind::Modal,
-        AnalysisRunKind::Acoustic,
-        AnalysisRunKind::Thermal,
-        AnalysisRunKind::Transient,
-        AnalysisRunKind::Cfd,
-        AnalysisRunKind::Cht,
-        AnalysisRunKind::Fsi,
-        AnalysisRunKind::Nonlinear,
-        AnalysisRunKind::Electromagnetic,
-    ] {
-        let Some(mut entries) = grouped.remove(&kind) else {
-            continue;
-        };
+    let mut grouped = grouped.into_iter().collect::<Vec<_>>();
+    grouped.sort_by_key(|(identity, _)| format!("{identity:?}"));
+    for (identity, mut entries) in grouped {
+        let kind = run_kind(&entries[0]);
         entries.sort_by(|a, b| b.run_id.cmp(&a.run_id));
         if entries.len() > window {
             entries.truncate(window);
@@ -12189,7 +12312,7 @@ pub fn analysis_trends_op(
         let publishable_rate =
             entries.iter().filter(|run| run.publishable).count() as f64 / sample_count as f64;
 
-        let failed_increment_rate = if kind == AnalysisRunKind::Nonlinear {
+        let failed_increment_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
             let failed = entries
                 .iter()
                 .filter_map(|run| run.nonlinear_results.as_ref())
@@ -12199,7 +12322,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let mean_spike_count = if kind == AnalysisRunKind::Nonlinear {
+        let mean_spike_count = if identity.procedure == AnalysisProcedure::Nonlinear {
             let values = entries
                 .iter()
                 .filter_map(|run| run.nonlinear_results.as_ref())
@@ -12209,7 +12332,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let mean_stall_count = if kind == AnalysisRunKind::Nonlinear {
+        let mean_stall_count = if identity.procedure == AnalysisProcedure::Nonlinear {
             let values = entries
                 .iter()
                 .filter_map(|run| run.nonlinear_results.as_ref())
@@ -12232,12 +12355,13 @@ pub fn analysis_trends_op(
                 Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
             }
         };
-        let thermo_transient_warn_rate = if kind == AnalysisRunKind::Transient {
-            diagnostic_warning_rate(&entries, "FEA_TM_TRANSIENT")
-        } else {
-            None
-        };
-        let thermo_nonlinear_warn_rate = if kind == AnalysisRunKind::Nonlinear {
+        let thermo_transient_warn_rate =
+            if identity.procedure == AnalysisProcedure::TransientResponse {
+                diagnostic_warning_rate(&entries, "FEA_TM_TRANSIENT")
+            } else {
+                None
+            };
+        let thermo_nonlinear_warn_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_TM_NONLINEAR")
         } else {
             None
@@ -12281,37 +12405,38 @@ pub fn analysis_trends_op(
                 Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
             }
         };
-        let electro_transient_warn_rate = if kind == AnalysisRunKind::Transient {
-            diagnostic_warning_rate(&entries, "FEA_ET_TRANSIENT")
-        } else {
-            None
-        };
-        let electro_nonlinear_warn_rate = if kind == AnalysisRunKind::Nonlinear {
+        let electro_transient_warn_rate =
+            if identity.procedure == AnalysisProcedure::TransientResponse {
+                diagnostic_warning_rate(&entries, "FEA_ET_TRANSIENT")
+            } else {
+                None
+            };
+        let electro_nonlinear_warn_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_ET_NONLINEAR")
         } else {
             None
         };
-        let plastic_nonlinear_warn_rate = if kind == AnalysisRunKind::Nonlinear {
+        let plastic_nonlinear_warn_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_PLASTIC_NONLINEAR")
         } else {
             None
         };
-        let contact_nonlinear_warn_rate = if kind == AnalysisRunKind::Nonlinear {
+        let contact_nonlinear_warn_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_CONTACT_NONLINEAR")
         } else {
             None
         };
-        let thermal_stability_warn_rate = if kind == AnalysisRunKind::Thermal {
+        let thermal_stability_warn_rate = if identity.family == PhysicsFamily::Thermal {
             diagnostic_warning_rate(&entries, "FEA_THERMAL_STABILITY")
         } else {
             None
         };
-        let thermal_constitutive_warn_rate = if kind == AnalysisRunKind::Thermal {
+        let thermal_constitutive_warn_rate = if identity.family == PhysicsFamily::Thermal {
             diagnostic_warning_rate(&entries, "FEA_THERMAL_CONSTITUTIVE")
         } else {
             None
         };
-        let thermal_spread_breach_rate = if kind == AnalysisRunKind::Thermal {
+        let thermal_spread_breach_rate = if identity.family == PhysicsFamily::Thermal {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12684,7 +12809,7 @@ pub fn analysis_trends_op(
             };
 
         summaries.push(AnalysisTrendKindSummary {
-            run_kind: kind,
+            identity,
             sample_count,
             median_solve_ms,
             p95_solve_ms,
@@ -12743,53 +12868,86 @@ pub fn analysis_trends_op(
     ))
 }
 
-fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
-    if run
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_ACOUSTIC_HARMONIC_RESPONSE")
+fn structural_run_identity(
+    model: &AnalysisModel,
+    procedure: AnalysisProcedure,
+    structural_formulation: FormulationImplementation,
+) -> AnalysisRunIdentity {
+    if model
+        .thermo_mechanical
+        .as_ref()
+        .is_some_and(|domain| domain.enabled)
     {
-        AnalysisRunKind::Acoustic
-    } else if run.electromagnetic_results.is_some()
-        || run
-            .run
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "FEA_EM_STATIC")
+        AnalysisRunIdentity::experimental(
+            PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
+            procedure,
+            SolutionSpace::Direct,
+            [
+                structural_formulation,
+                FormulationImplementation::ReducedThermomechanical,
+            ],
+        )
+    } else if model
+        .electro_thermal
+        .as_ref()
+        .is_some_and(|domain| domain.enabled)
     {
-        AnalysisRunKind::Electromagnetic
-    } else if run
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CHT_COUPLING")
-    {
-        AnalysisRunKind::Cht
-    } else if run
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_COUPLING")
-    {
-        AnalysisRunKind::Fsi
-    } else if run
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW")
-    {
-        AnalysisRunKind::Cfd
-    } else if run.nonlinear_results.is_some() {
-        AnalysisRunKind::Nonlinear
-    } else if run.thermal_results.is_some() {
-        AnalysisRunKind::Thermal
-    } else if run.transient_results.is_some() {
-        AnalysisRunKind::Transient
-    } else if run.modal_results.is_some() {
-        AnalysisRunKind::Modal
+        AnalysisRunIdentity::experimental(
+            PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal),
+            procedure,
+            SolutionSpace::Direct,
+            [
+                structural_formulation,
+                FormulationImplementation::ReducedElectrothermal,
+            ],
+        )
     } else {
-        AnalysisRunKind::LinearStatic
+        AnalysisRunIdentity::experimental(
+            PhysicsFamily::Structural,
+            procedure,
+            SolutionSpace::Direct,
+            [structural_formulation],
+        )
+    }
+}
+
+fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
+    match (run.identity.family, run.identity.procedure) {
+        (PhysicsFamily::Structural, AnalysisProcedure::Static) => AnalysisRunKind::LinearStatic,
+        (PhysicsFamily::Structural, AnalysisProcedure::ModalExtraction) => AnalysisRunKind::Modal,
+        (PhysicsFamily::Structural, AnalysisProcedure::TransientResponse) => {
+            AnalysisRunKind::Transient
+        }
+        (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear) => AnalysisRunKind::Nonlinear,
+        (PhysicsFamily::Thermal, _) => AnalysisRunKind::Thermal,
+        (PhysicsFamily::Electromagnetic, _) => AnalysisRunKind::Electromagnetic,
+        (PhysicsFamily::Acoustic, _) => AnalysisRunKind::Acoustic,
+        (PhysicsFamily::Fluid, _) => AnalysisRunKind::Cfd,
+        (PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer), _) => {
+            AnalysisRunKind::Cht
+        }
+        (PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction), _) => {
+            AnalysisRunKind::Fsi
+        }
+        (
+            PhysicsFamily::Coupled(
+                CoupledPhysicsFamily::Thermomechanical | CoupledPhysicsFamily::Electrothermal,
+            ),
+            AnalysisProcedure::Nonlinear,
+        ) => AnalysisRunKind::Nonlinear,
+        (
+            PhysicsFamily::Coupled(
+                CoupledPhysicsFamily::Thermomechanical | CoupledPhysicsFamily::Electrothermal,
+            ),
+            AnalysisProcedure::TransientResponse,
+        ) => AnalysisRunKind::Transient,
+        (
+            PhysicsFamily::Coupled(
+                CoupledPhysicsFamily::Thermomechanical | CoupledPhysicsFamily::Electrothermal,
+            ),
+            AnalysisProcedure::ModalExtraction,
+        ) => AnalysisRunKind::Modal,
+        _ => AnalysisRunKind::LinearStatic,
     }
 }
 

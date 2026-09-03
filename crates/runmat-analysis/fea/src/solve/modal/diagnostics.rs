@@ -8,7 +8,7 @@ use super::math::dot;
 pub(super) fn push_modal_quality_diagnostics(
     diagnostics: &mut Vec<FeaDiagnostic>,
     system: &OperatorSystem,
-    eigenvalues_hz: &[f64],
+    frequencies_hz: &[f64],
     mode_shapes: &[Vec<f64>],
     residual_norms: &[f64],
 ) {
@@ -37,7 +37,7 @@ pub(super) fn push_modal_quality_diagnostics(
             message: format!("max_m_orthogonality_offdiag={max_offdiag}"),
         });
 
-        let min_separation = modal_min_frequency_separation(eigenvalues_hz);
+        let min_separation = modal_min_frequency_separation(frequencies_hz);
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MODAL_SEPARATION".to_string(),
             severity: if min_separation >= 1.0e-3 {
@@ -47,7 +47,7 @@ pub(super) fn push_modal_quality_diagnostics(
             },
             message: format!("min_relative_frequency_separation={min_separation}"),
         });
-        diagnostics.push(modal_cluster_diagnostic(eigenvalues_hz));
+        diagnostics.push(modal_cluster_diagnostic(frequencies_hz));
     }
 }
 

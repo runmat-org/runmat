@@ -6583,12 +6583,19 @@ run:
 
         let run = crate::analysis::AnalysisRunResult {
             run_id: "synthetic_plot_run".to_string(),
+            identity: runmat_analysis_core::AnalysisRunIdentity::experimental(
+                runmat_analysis_core::PhysicsFamily::Structural,
+                runmat_analysis_core::AnalysisProcedure::Static,
+                runmat_analysis_core::SolutionSpace::Direct,
+                [runmat_analysis_core::FormulationImplementation::LinearElasticStructural],
+            ),
             run: runmat_analysis_fea::FeaRunResult {
-                backend: ComputeBackend::Cpu,
-                solver_backend: "synthetic".to_string(),
+                requested_backend: ComputeBackend::Cpu,
+                execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
+                solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
-                solver_method: "synthetic".to_string(),
-                preconditioner: "none".to_string(),
+                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 fields: vec![AnalysisField::host_f64(
@@ -6621,14 +6628,15 @@ run:
             publishable: true,
             quality_reasons: Vec::new(),
             provenance: crate::analysis::RunProvenance {
-                backend: ComputeBackend::Cpu,
-                solver_backend: "synthetic".to_string(),
+                requested_backend: ComputeBackend::Cpu,
+                execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
+                solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
                 solver_host_sync_count: 0,
                 precision_mode: "fp64".to_string(),
                 deterministic_mode: true,
-                solver_method: "synthetic".to_string(),
-                preconditioner: "none".to_string(),
+                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
             },
@@ -6661,12 +6669,19 @@ run:
         let run_id = "synthetic_indexed_results".to_string();
         let run = crate::analysis::AnalysisRunResult {
             run_id: run_id.clone(),
+            identity: runmat_analysis_core::AnalysisRunIdentity::experimental(
+                runmat_analysis_core::PhysicsFamily::Structural,
+                runmat_analysis_core::AnalysisProcedure::TransientResponse,
+                runmat_analysis_core::SolutionSpace::Direct,
+                [runmat_analysis_core::FormulationImplementation::ReducedStructuralTransient],
+            ),
             run: runmat_analysis_fea::FeaRunResult {
-                backend: ComputeBackend::Cpu,
-                solver_backend: "synthetic".to_string(),
+                requested_backend: ComputeBackend::Cpu,
+                execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
+                solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
-                solver_method: "synthetic".to_string(),
-                preconditioner: "none".to_string(),
+                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 fields: Vec::new(),
@@ -6674,7 +6689,7 @@ run:
             render_topology: None,
             modal_results: Some(crate::analysis::ModalResultsData {
                 modal_payload_version: "modal_results/v1".to_string(),
-                eigenvalues_hz: vec![10.0, 20.0],
+                frequencies_hz: vec![10.0, 20.0],
                 mode_shapes: indexed_fields("mode_shape"),
                 residual_norms: vec![0.1, 0.2],
                 mode_units: crate::analysis::ModalFrequencyUnits::Hz,
@@ -6714,14 +6729,15 @@ run:
             publishable: true,
             quality_reasons: Vec::new(),
             provenance: crate::analysis::RunProvenance {
-                backend: ComputeBackend::Cpu,
-                solver_backend: "synthetic".to_string(),
+                requested_backend: ComputeBackend::Cpu,
+                execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
+                solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
                 solver_host_sync_count: 0,
                 precision_mode: "fp64".to_string(),
                 deterministic_mode: true,
-                solver_method: "synthetic".to_string(),
-                preconditioner: "none".to_string(),
+                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
             },
@@ -6747,7 +6763,7 @@ run:
         let Some(Value::Struct(modal)) = selected.properties.get("modal_results") else {
             panic!("modal results");
         };
-        let Some(Value::Tensor(eigenvalues)) = modal.fields.get("eigenvalues_hz") else {
+        let Some(Value::Tensor(eigenvalues)) = modal.fields.get("frequencies_hz") else {
             panic!("modal eigenvalues");
         };
         assert_eq!(eigenvalues.materialize_f64(), vec![20.0]);
