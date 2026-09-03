@@ -1,6 +1,6 @@
-//! Exact, deterministic number-theory primitives shared by discrete builtins.
+//! Deterministic full-width primality testing and factorization.
 
-pub(crate) fn is_prime(n: u64) -> bool {
+pub(in crate::builtins::math::discrete) fn is_prime(n: u64) -> bool {
     if n < 2 {
         return false;
     }
@@ -37,7 +37,7 @@ pub(crate) fn is_prime(n: u64) -> bool {
     true
 }
 
-pub(crate) fn prime_factors(n: u64) -> Vec<u64> {
+pub(in crate::builtins::math::discrete) fn prime_factors(n: u64) -> Vec<u64> {
     if n < 2 {
         return vec![n];
     }

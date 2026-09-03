@@ -226,7 +226,17 @@ pub enum MathInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DiscreteInferenceRule {
+    Binary(BinaryNumberTheoryRule),
+    Factor,
     Factorial,
+    IsPrime,
+    Primes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BinaryNumberTheoryRule {
+    Gcd,
+    Lcm,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
