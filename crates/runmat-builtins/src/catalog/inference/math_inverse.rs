@@ -1,4 +1,4 @@
-use super::math_fact_transforms::{materialize_output, preserve_shape_on_dynamic_input};
+use super::support::facts::{materialize, preserve_shape_as_dynamic};
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, InverseHyperbolicFunction, InverseTrigonometricFunction};
 use runmat_types::{
@@ -84,7 +84,7 @@ pub(super) fn infer_inverse_trigonometric(
             domain: NumericDomain::Complex,
         }) => {
             output.kind = numeric_kind(*class, NumericDomain::Complex);
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Numeric(NumericFact {
             class,
@@ -99,29 +99,29 @@ pub(super) fn infer_inverse_trigonometric(
                 (function == InverseTrigonometricFunction::Tangent).then_some(NumericDomain::Real)
             }) {
                 output.kind = numeric_kind(output_class, domain);
-                materialize_output(&mut output);
+                materialize(&mut output);
             } else {
-                preserve_shape_on_dynamic_input(&mut output);
+                preserve_shape_as_dynamic(&mut output);
                 output.residency = input.residency.clone();
             }
         }
         ValueKindFact::Logical => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Character => {
             if let Some(domain) = literal_domain.or_else(|| {
                 (function == InverseTrigonometricFunction::Tangent).then_some(NumericDomain::Real)
             }) {
                 output.kind = numeric_kind(NumericClass::Double, domain);
-                materialize_output(&mut output);
+                materialize(&mut output);
             } else {
-                preserve_shape_on_dynamic_input(&mut output);
+                preserve_shape_as_dynamic(&mut output);
                 output.residency = input.residency.clone();
             }
         }
         ValueKindFact::Unknown => {
-            preserve_shape_on_dynamic_input(&mut output);
+            preserve_shape_as_dynamic(&mut output);
             output.residency = input.residency.clone();
         }
         _ => {
@@ -212,7 +212,7 @@ pub(super) fn infer_inverse_hyperbolic(
             domain: NumericDomain::Complex,
         }) => {
             output.kind = numeric_kind(*class, NumericDomain::Complex);
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Numeric(NumericFact {
             class,
@@ -227,9 +227,9 @@ pub(super) fn infer_inverse_hyperbolic(
                 literal_domain.or_else(|| always_real.then_some(NumericDomain::Real))
             {
                 output.kind = numeric_kind(output_class, domain);
-                materialize_output(&mut output);
+                materialize(&mut output);
             } else {
-                preserve_shape_on_dynamic_input(&mut output);
+                preserve_shape_as_dynamic(&mut output);
                 output.residency = input.residency.clone();
             }
         }
@@ -238,9 +238,9 @@ pub(super) fn infer_inverse_hyperbolic(
                 literal_domain.or_else(|| logical_always_real.then_some(NumericDomain::Real))
             {
                 output.kind = numeric_kind(NumericClass::Double, domain);
-                materialize_output(&mut output);
+                materialize(&mut output);
             } else {
-                preserve_shape_on_dynamic_input(&mut output);
+                preserve_shape_as_dynamic(&mut output);
                 output.residency = input.residency.clone();
             }
         }
@@ -249,14 +249,14 @@ pub(super) fn infer_inverse_hyperbolic(
                 literal_domain.or_else(|| always_real.then_some(NumericDomain::Real))
             {
                 output.kind = numeric_kind(NumericClass::Double, domain);
-                materialize_output(&mut output);
+                materialize(&mut output);
             } else {
-                preserve_shape_on_dynamic_input(&mut output);
+                preserve_shape_as_dynamic(&mut output);
                 output.residency = input.residency.clone();
             }
         }
         ValueKindFact::Unknown => {
-            preserve_shape_on_dynamic_input(&mut output);
+            preserve_shape_as_dynamic(&mut output);
             output.residency = input.residency.clone();
         }
         _ => {

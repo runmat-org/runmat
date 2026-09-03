@@ -3,7 +3,7 @@ use runmat_types::{
     ViewFact,
 };
 
-pub(super) fn materialize_output(output: &mut ValueFact) {
+pub(in crate::catalog::inference) fn materialize(output: &mut ValueFact) {
     output.storage = if output.is_scalar() {
         StorageFact::Scalar
     } else {
@@ -16,17 +16,17 @@ pub(super) fn materialize_output(output: &mut ValueFact) {
     output.mutation = MutationFact::ValueSemantics;
 }
 
-pub(super) fn materialize_output_preserving_storage(output: &mut ValueFact) {
+pub(in crate::catalog::inference) fn materialize_preserving_sparse_storage(output: &mut ValueFact) {
     if matches!(output.storage, StorageFact::Sparse) {
         output.view = ViewFact::Materialized;
         output.alias = AliasFact::Unique;
         output.mutation = MutationFact::ValueSemantics;
     } else {
-        materialize_output(output);
+        materialize(output);
     }
 }
 
-pub(super) fn preserve_shape_on_dynamic_input(output: &mut ValueFact) {
+pub(in crate::catalog::inference) fn preserve_shape_as_dynamic(output: &mut ValueFact) {
     let shape = output.shape.clone();
     *output = ValueFact::unknown(DynamicReason::RuntimeValue);
     output.shape = shape;

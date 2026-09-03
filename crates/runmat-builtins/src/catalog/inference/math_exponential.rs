@@ -1,6 +1,4 @@
-use super::math_fact_transforms::{
-    materialize_output_preserving_storage, preserve_shape_on_dynamic_input,
-};
+use super::support::facts::{materialize_preserving_sparse_storage, preserve_shape_as_dynamic};
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
@@ -106,12 +104,12 @@ fn infer_exponential(
                 output.alias = AliasFact::Unique;
                 output.mutation = MutationFact::ValueSemantics;
             } else {
-                preserve_shape_on_dynamic_input(&mut output);
+                preserve_shape_as_dynamic(&mut output);
             }
             return finish_fixed(entry, request, output, diagnostics);
         }
         ValueKindFact::Unknown => {
-            preserve_shape_on_dynamic_input(&mut output);
+            preserve_shape_as_dynamic(&mut output);
             return finish_fixed(entry, request, output, diagnostics);
         }
         _ => {
@@ -141,6 +139,6 @@ fn infer_exponential(
     } else if changes_numeric_class && matches!(output.residency, ResidencyFact::Device { .. }) {
         output.residency = ResidencyFact::Unknown;
     }
-    materialize_output_preserving_storage(&mut output);
+    materialize_preserving_sparse_storage(&mut output);
     finish_fixed(entry, request, output, diagnostics)
 }

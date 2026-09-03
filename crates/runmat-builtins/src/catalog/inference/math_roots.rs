@@ -1,5 +1,5 @@
-use super::math_fact_transforms::{
-    materialize_output, materialize_output_preserving_storage, preserve_shape_on_dynamic_input,
+use super::support::facts::{
+    materialize, materialize_preserving_sparse_storage, preserve_shape_as_dynamic,
 };
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, RootKind};
@@ -89,7 +89,7 @@ fn infer_principal_root(
             domain: NumericDomain::Complex,
         }) => {
             output.kind = numeric_kind(*class, NumericDomain::Complex);
-            materialize_output(output);
+            materialize(output);
             dynamic_device_residency(output);
         }
         ValueKindFact::Numeric(NumericFact {
@@ -115,19 +115,19 @@ fn infer_principal_root(
                 });
             if let Some(domain) = domain {
                 output.kind = numeric_kind(output_class, domain);
-                materialize_output(output);
+                materialize(output);
                 dynamic_device_residency(output);
             } else {
-                preserve_shape_on_dynamic_input(output);
+                preserve_shape_as_dynamic(output);
             }
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(output);
+            materialize(output);
             dynamic_device_residency(output);
         }
         ValueKindFact::Symbolic => {}
-        ValueKindFact::Unknown => preserve_shape_on_dynamic_input(output),
+        ValueKindFact::Unknown => preserve_shape_as_dynamic(output),
         _ => {
             diagnostics.push(argument_error(
                 "RM-CATALOG-SQRT-INPUT",
@@ -160,14 +160,14 @@ fn infer_real_root(
                     0,
                 ));
             }
-            materialize_output_preserving_storage(output);
+            materialize_preserving_sparse_storage(output);
             if matches!(output.storage, StorageFact::Sparse) {
                 output.residency = ResidencyFact::Host;
             } else {
                 dynamic_device_residency(output);
             }
         }
-        ValueKindFact::Unknown => preserve_shape_on_dynamic_input(output),
+        ValueKindFact::Unknown => preserve_shape_as_dynamic(output),
         _ => {
             diagnostics.push(argument_error(
                 "RM-CATALOG-REALSQRT-INPUT",

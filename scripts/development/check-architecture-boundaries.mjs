@@ -203,7 +203,6 @@ const legacyRootInferenceLeaves = new Set([
   "math_components",
   "math_degree_trigonometric",
   "math_exponential",
-  "math_fact_transforms",
   "math_hyperbolic",
   "math_inverse",
   "math_logarithms",
@@ -240,6 +239,28 @@ for (const match of read(inferenceRootPath).matchAll(/^mod\s+([a-z][a-z0-9_]*)\s
       `${inferenceRootPath} declares new root semantic leaf ${moduleName}; ` +
       "route it through a bounded domain/family inference package"
     );
+  }
+}
+
+const inferenceSupportBoundaries = new Map([
+  ["crates/runmat-builtins/src/catalog/inference/support/mod.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/support/facts.rs", 64],
+]);
+for (const [sourcePath, ceiling] of inferenceSupportBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its inference-infrastructure boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/inference/support.rs",
+  "crates/runmat-builtins/src/catalog/inference/math_fact_transforms.rs",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete flat inference infrastructure and must not return`);
   }
 }
 const legacyInferenceLeafCeilings = new Map([

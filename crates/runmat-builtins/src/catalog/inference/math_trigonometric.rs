@@ -1,4 +1,4 @@
-use super::math_fact_transforms::{materialize_output, preserve_shape_on_dynamic_input};
+use super::support::facts::{materialize, preserve_shape_as_dynamic};
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, PiScaledTrigonometricFunction, TrigonometricFunction};
 use runmat_types::{
@@ -56,15 +56,15 @@ pub(super) fn infer_trigonometric(
                 ));
                 output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
             } else {
-                materialize_output(&mut output);
+                materialize(&mut output);
             }
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Symbolic => {}
-        ValueKindFact::Unknown => preserve_shape_on_dynamic_input(&mut output),
+        ValueKindFact::Unknown => preserve_shape_as_dynamic(&mut output),
         _ => {
             diagnostics.push(argument_error(
                 "RM-CATALOG-TRIGONOMETRIC-INPUT",
@@ -198,16 +198,16 @@ pub(super) fn infer_pi_scaled_trigonometric(
             if !matches!(numeric.class, NumericClass::Double | NumericClass::Single) {
                 numeric.class = NumericClass::Double;
             }
-            materialize_output(&mut output);
+            materialize(&mut output);
             output.residency = output_residency.clone();
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(&mut output);
+            materialize(&mut output);
             output.residency = output_residency.clone();
         }
         ValueKindFact::Unknown => {
-            preserve_shape_on_dynamic_input(&mut output);
+            preserve_shape_as_dynamic(&mut output);
             output.residency = output_residency;
         }
         _ => {
