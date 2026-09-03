@@ -9,6 +9,9 @@ pub(in crate::catalog::inference) fn infer(
     match rule {
         MathInferenceRule::Abs => super::super::numeric_abs::infer_abs(request, entry),
         MathInferenceRule::Atan2 => super::super::math_binary::infer_atan2(request, entry),
+        MathInferenceRule::Bitwise(rule) => {
+            super::super::math::bitwise::infer(rule, request, entry)
+        }
         MathInferenceRule::Hypot => super::super::math_binary::infer_hypot(request, entry),
         MathInferenceRule::Gamma => super::super::math_special::infer_gamma(request, entry),
         MathInferenceRule::GammaLn => super::super::math_special::infer_gammaln(request, entry),

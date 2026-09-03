@@ -5,5 +5,6 @@ mod transfer;
 pub use gpu_array::*;
 pub use transfer::*;
 
-pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] =
-    &[gpu_array::ENTRIES, transfer::ENTRIES];
+pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    super::extend_groups(entries, &[gpu_array::ENTRIES, transfer::ENTRIES]);
+}

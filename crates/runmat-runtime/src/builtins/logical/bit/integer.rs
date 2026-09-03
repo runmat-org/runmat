@@ -27,36 +27,6 @@ const BITSET_NAME: &str = "bitset";
 const BITXOR_NAME: &str = "bitxor";
 const BITSHIFT_NAME: &str = "bitshift";
 const IDIVIDE_NAME: &str = "idivide";
-const SWAPBYTES_NAME: &str = "swapbytes";
-
-pub const SWAPBYTES_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "swapbytes-explicit-gpu-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "Allow host fallback for explicit gpuArray input to swapbytes",
-        error_identifier: Some("RunMat:compatibility:SwapbytesExplicitGpuInputExtension"),
-    };
-pub const SWAPBYTES_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [SWAPBYTES_EXPLICIT_GPU_EXTENSION];
-const SWAPBYTES_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Every native integer class is documented; byte reversal preserves class and shape exactly.",
-    }];
-pub const SWAPBYTES_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = swapbytes(integer_X)",
-        inputs: &SWAPBYTES_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Each element's native byte sequence is reversed directly in authoritative storage; 8-bit classes are unchanged. Automatic residency gathers transparently, while explicit gpuArray fallback is independently gated.",
-    }];
 
 const BITAND_SINGLE_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "bitand-single-input",
@@ -740,14 +710,6 @@ const IDIVIDE_INPUTS_ROUNDING: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const SWAPBYTES_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric scalar or array whose element byte order is reversed.",
-}];
-
 const BITCMP_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
     ty: BuiltinParamType::NumericArray,
@@ -887,12 +849,6 @@ const IDIVIDE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
-const SWAPBYTES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = swapbytes(X)",
-    inputs: &SWAPBYTES_INPUTS,
-    outputs: &OUTPUT,
-}];
-
 const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.BITWISE.INVALID_INPUT",
     identifier: Some("RunMat:bitwise:InvalidInput"),
@@ -929,8 +885,6 @@ const IDIVIDE_ERRORS: [BuiltinErrorDescriptor; 4] = [
     ERROR_DIVIDE_BY_ZERO,
     ERROR_OVERFLOW,
 ];
-
-const SWAPBYTES_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
 
 pub const BITAND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &BITAND_SIGNATURES,
@@ -986,13 +940,6 @@ pub const IDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &IDIVIDE_ERRORS,
-};
-
-pub const SWAPBYTES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SWAPBYTES_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SWAPBYTES_ERRORS,
 };
 
 #[runtime_builtin(
@@ -1788,39 +1735,6 @@ async fn idivide_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         IDIVIDE_NAME,
     )?;
     restore_binary_bitwise_gpu_result(IDIVIDE_NAME, result, output_source.as_ref())
-}
-
-#[runtime_builtin(
-    name = "swapbytes",
-    category = "math/elementwise",
-    summary = "Reverse byte order of numeric values.",
-    keywords = "swapbytes,byte order,endian,numeric",
-    accel = "gather",
-    descriptor(crate::builtins::logical::bit::integer::SWAPBYTES_DESCRIPTOR),
-    extensions(crate::builtins::logical::bit::integer::SWAPBYTES_EXTENSIONS),
-    integer_capabilities(crate::builtins::logical::bit::integer::SWAPBYTES_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::logical::bit::integer"
-)]
-async fn swapbytes_builtin(value: Value) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &SWAPBYTES_EXPLICIT_GPU_EXTENSION,
-            SWAPBYTES_NAME,
-        )?;
-    }
-    let gathered = gpu_helpers::gather_value_async(&value)
-        .await
-        .map_err(|err| error_with_detail(SWAPBYTES_NAME, &ERROR_INVALID_INPUT, err.message()))?;
-    match gathered {
-        Value::Num(value) => Ok(Value::Num(f64::from_bits(value.to_bits().swap_bytes()))),
-        Value::Int(value) => Ok(Value::Int(swap_int_value(value))),
-        Value::Tensor(tensor) => swap_tensor_bytes(tensor),
-        other => Err(error_with_detail(
-            SWAPBYTES_NAME,
-            &ERROR_INVALID_INPUT,
-            format!("unsupported input {other:?}"),
-        )),
-    }
 }
 
 async fn binary_bitwise(
@@ -2914,125 +2828,6 @@ fn round_quotient_away_from_zero(dividend: i128, divisor: i128) -> i128 {
         quotient += 1;
     }
     (quotient as i128) * sign
-}
-
-fn swap_int_value(value: IntValue) -> IntValue {
-    match value {
-        IntValue::I8(value) => IntValue::I8(value),
-        IntValue::I16(value) => IntValue::I16(value.swap_bytes()),
-        IntValue::I32(value) => IntValue::I32(value.swap_bytes()),
-        IntValue::I64(value) => IntValue::I64(value.swap_bytes()),
-        IntValue::U8(value) => IntValue::U8(value),
-        IntValue::U16(value) => IntValue::U16(value.swap_bytes()),
-        IntValue::U32(value) => IntValue::U32(value.swap_bytes()),
-        IntValue::U64(value) => IntValue::U64(value.swap_bytes()),
-    }
-}
-
-fn swap_tensor_bytes(tensor: Tensor) -> BuiltinResult<Value> {
-    if let Some(storage) = tensor.integer_storage() {
-        let swapped = swap_integer_storage(storage);
-        return Tensor::new_integer(swapped, tensor.shape)
-            .map(Value::Tensor)
-            .map_err(|err| error_with_detail(SWAPBYTES_NAME, &ERROR_INVALID_INPUT, err));
-    }
-    let dtype = tensor.numeric_dtype();
-    let shape = tensor.shape.clone();
-    let data = tensor::tensor_into_values_f64(tensor)
-        .into_iter()
-        .map(|value| swap_tensor_scalar(value, dtype))
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    Tensor::new_with_dtype(data, shape, dtype)
-        .map(Value::Tensor)
-        .map_err(|err| error_with_detail(SWAPBYTES_NAME, &ERROR_INVALID_INPUT, err))
-}
-
-fn swap_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
-    match storage {
-        IntegerStorage::I8(values) => IntegerStorage::I8(values.clone()),
-        IntegerStorage::I16(values) => {
-            IntegerStorage::I16(values.iter().map(|value| value.swap_bytes()).collect())
-        }
-        IntegerStorage::I32(values) => {
-            IntegerStorage::I32(values.iter().map(|value| value.swap_bytes()).collect())
-        }
-        IntegerStorage::I64(values) => {
-            IntegerStorage::I64(values.iter().map(|value| value.swap_bytes()).collect())
-        }
-        IntegerStorage::U8(values) => IntegerStorage::U8(values.clone()),
-        IntegerStorage::U16(values) => {
-            IntegerStorage::U16(values.iter().map(|value| value.swap_bytes()).collect())
-        }
-        IntegerStorage::U32(values) => {
-            IntegerStorage::U32(values.iter().map(|value| value.swap_bytes()).collect())
-        }
-        IntegerStorage::U64(values) => {
-            IntegerStorage::U64(values.iter().map(|value| value.swap_bytes()).collect())
-        }
-    }
-}
-
-fn swap_tensor_scalar(value: f64, dtype: NumericDType) -> BuiltinResult<f64> {
-    Ok(match dtype {
-        NumericDType::F64 => f64::from_bits(value.to_bits().swap_bytes()),
-        NumericDType::F32 => f32::from_bits((value as f32).to_bits().swap_bytes()) as f64,
-        NumericDType::I8 => {
-            validate_signed_scalar(value, i8::MIN as f64, i8::MAX as f64)?;
-            value
-        }
-        NumericDType::I16 => {
-            validate_signed_scalar(value, i16::MIN as f64, i16::MAX as f64)?;
-            f64::from((value as i16).swap_bytes())
-        }
-        NumericDType::I32 => {
-            validate_signed_scalar(value, i32::MIN as f64, i32::MAX as f64)?;
-            (value as i32).swap_bytes() as f64
-        }
-        NumericDType::I64 => {
-            validate_signed_scalar(value, i64::MIN as f64, i64::MAX as f64)?;
-            (value as i64).swap_bytes() as f64
-        }
-        NumericDType::U8 => {
-            validate_unsigned_scalar(value, u8::MAX as f64)?;
-            value
-        }
-        NumericDType::U16 => {
-            validate_unsigned_scalar(value, u16::MAX as f64)?;
-            f64::from((value as u16).swap_bytes())
-        }
-        NumericDType::U32 => {
-            validate_unsigned_scalar(value, u32::MAX as f64)?;
-            (value as u32).swap_bytes() as f64
-        }
-        NumericDType::U64 => {
-            validate_unsigned_scalar(value, u64::MAX as f64)?;
-            (value as u64).swap_bytes() as f64
-        }
-    })
-}
-
-fn validate_unsigned_scalar(value: f64, max: f64) -> BuiltinResult<()> {
-    if value.is_finite() && value.fract() == 0.0 && (0.0..=max).contains(&value) {
-        Ok(())
-    } else {
-        Err(error_with_detail(
-            SWAPBYTES_NAME,
-            &ERROR_INVALID_INPUT,
-            "integer tensor values must be finite and within dtype range",
-        ))
-    }
-}
-
-fn validate_signed_scalar(value: f64, min: f64, max: f64) -> BuiltinResult<()> {
-    if value.is_finite() && value.fract() == 0.0 && (min..=max).contains(&value) {
-        Ok(())
-    } else {
-        Err(error_with_detail(
-            SWAPBYTES_NAME,
-            &ERROR_INVALID_INPUT,
-            "integer tensor values must be finite and within dtype range",
-        ))
-    }
 }
 
 fn error_with_detail(

@@ -154,6 +154,28 @@ if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/definition
   fail("the obsolete parallel catalog definitions tree must not return");
 }
 
+const catalogEntriesRootPath = "crates/runmat-builtins/src/catalog/entries/mod.rs";
+const catalogEntriesRoot = read(catalogEntriesRootPath);
+const catalogEntriesRootLines = catalogEntriesRoot.split("\n").length;
+if (catalogEntriesRootLines > 80) {
+  fail(`${catalogEntriesRootPath} must remain a domain-only composition root (found ${catalogEntriesRootLines} lines; maximum 80)`);
+}
+if (/::(?:ENTRIES|ENTRY_GROUPS)\b/.test(catalogEntriesRoot)) {
+  fail(`${catalogEntriesRootPath} must register domains, not family or identity entry slices`);
+}
+const declaredCatalogDomains = [...catalogEntriesRoot.matchAll(/^mod\s+([a-z][a-z0-9_]*)\s*;/gm)]
+  .map((match) => match[1])
+  .sort();
+const registeredCatalogDomains = [...catalogEntriesRoot.matchAll(/^\s+([a-z][a-z0-9_]*)::extend_entries\(entries\);$/gm)]
+  .map((match) => match[1])
+  .sort();
+if (declaredCatalogDomains.join("\n") !== registeredCatalogDomains.join("\n")) {
+  fail(
+    `${catalogEntriesRootPath} must register every declared domain exactly once; ` +
+    `declared=${declaredCatalogDomains.join(",")}, registered=${registeredCatalogDomains.join(",")}`
+  );
+}
+
 const inferenceRootPath = "crates/runmat-builtins/src/catalog/inference.rs";
 const inferenceRootLines = read(inferenceRootPath).split("\n").length;
 if (inferenceRootLines > 48) {
@@ -348,6 +370,36 @@ for (const [sourcePath, ceiling] of tabularBinaryBoundaries) {
       `${sourcePath} exceeds its tabular-binary domain boundary ` +
       `(found ${lines} lines; maximum ${ceiling})`
     );
+  }
+}
+
+const bitwiseByteSwapBoundaries = new Map([
+  ["crates/runmat-builtins/src/catalog/inference/math/bitwise/mod.rs", 64],
+  ["crates/runmat-builtins/src/catalog/inference/math/bitwise/swapbytes.rs", 96],
+  ["crates/runmat-builtins/src/catalog/inference/math/bitwise/tests.rs", 128],
+  ["crates/runmat-builtins/src/catalog/entries/math/bitwise/mod.rs", 64],
+  ["crates/runmat-builtins/src/catalog/entries/math/bitwise/swapbytes/mod.rs", 160],
+  ["crates/runmat-builtins/src/catalog/entries/math/bitwise/swapbytes/documentation.rs", 192],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/mod.rs", 64],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/swapbytes.rs", 128],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/swapbytes/tests.rs", 160],
+]);
+for (const [sourcePath, ceiling] of bitwiseByteSwapBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its bitwise byte-swap boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+for (const [sourcePath, ceiling] of [
+  ["crates/runmat-runtime/src/builtins/logical/bit/integer.rs", 2849],
+  ["crates/runmat-runtime/src/builtins/logical/bit/integer_tests.rs", 1945],
+]) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(`${sourcePath} is shrinking legacy bitwise-integer debt (found ${lines} lines; ceiling ${ceiling})`);
   }
 }
 

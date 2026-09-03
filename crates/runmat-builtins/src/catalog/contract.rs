@@ -194,6 +194,7 @@ pub enum StatsRandomInferenceRule {
 pub enum MathInferenceRule {
     Abs,
     Atan2,
+    Bitwise(BitwiseInferenceRule),
     Hypot,
     Gamma,
     GammaLn,
@@ -219,6 +220,11 @@ pub enum MathInferenceRule {
     DegreeTrigonometric(DegreeTrigonometricFunction),
     InverseTrigonometric(InverseTrigonometricFunction),
     InverseHyperbolic(InverseHyperbolicFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BitwiseInferenceRule {
+    SwapBytes,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

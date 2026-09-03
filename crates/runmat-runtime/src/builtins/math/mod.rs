@@ -1,3 +1,4 @@
+pub mod bitwise;
 pub mod discrete;
 pub mod elementwise;
 pub mod fft;

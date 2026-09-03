@@ -273,12 +273,17 @@ pub use distributed_arrays::*;
 pub use futures::*;
 pub use pools::*;
 
-pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
-    codistributors::ENTRIES,
-    collectives::ENTRIES,
-    context::ENTRIES,
-    current_execution::ENTRIES,
-    distributed_arrays::ENTRIES,
-    futures::ENTRIES,
-    pools::ENTRIES,
-];
+pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    super::extend_groups(
+        entries,
+        &[
+            codistributors::ENTRIES,
+            collectives::ENTRIES,
+            context::ENTRIES,
+            current_execution::ENTRIES,
+            distributed_arrays::ENTRIES,
+            futures::ENTRIES,
+            pools::ENTRIES,
+        ],
+    );
+}

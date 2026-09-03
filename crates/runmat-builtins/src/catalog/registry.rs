@@ -1,4 +1,4 @@
-use super::{entries::DOMAIN_ENTRY_GROUPS, BuiltinCatalogEntry};
+use super::{entries::extend_catalog_entries, BuiltinCatalogEntry};
 use std::sync::LazyLock;
 
 /// Canonical entries composed from domain-owned entry groups.
@@ -7,11 +7,9 @@ use std::sync::LazyLock;
 /// root registry composes domain groups only, so adding a builtin never
 /// requires editing a second, repository-wide list.
 static CATALOG_ENTRIES: LazyLock<Vec<&'static BuiltinCatalogEntry>> = LazyLock::new(|| {
-    DOMAIN_ENTRY_GROUPS
-        .iter()
-        .flat_map(|families| families.iter())
-        .flat_map(|entries| entries.iter().copied())
-        .collect()
+    let mut entries = Vec::new();
+    extend_catalog_entries(&mut entries);
+    entries
 });
 
 pub fn builtin_catalog_entries() -> &'static [&'static BuiltinCatalogEntry] {
