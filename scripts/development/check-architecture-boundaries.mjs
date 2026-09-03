@@ -192,6 +192,56 @@ const inferenceRootLines = read(inferenceRootPath).split("\n").length;
 if (inferenceRootLines > 48) {
   fail(`${inferenceRootPath} must remain a composition root (found ${inferenceRootLines} lines; maximum 48)`);
 }
+// These predate domain/family inference packages. The set is shrink-only: a
+// migrated family removes its old root leaf, while new semantics must enter
+// through a bounded domain package instead of expanding inference.rs.
+const legacyRootInferenceLeaves = new Set([
+  "acceleration_semantics",
+  "aggregate_semantics",
+  "introspection_semantics",
+  "math_binary",
+  "math_components",
+  "math_degree_trigonometric",
+  "math_exponential",
+  "math_fact_transforms",
+  "math_hyperbolic",
+  "math_inverse",
+  "math_logarithms",
+  "math_reduction",
+  "math_roots",
+  "math_rounding",
+  "math_trigonometric",
+  "metadata_predicate",
+  "numeric_abs",
+  "numeric_classification",
+  "numeric_component",
+  "numeric_conversion",
+  "numeric_limit",
+  "parallel_semantics",
+  "scalar_logical_reduction",
+  "unary_logical_scalar",
+]);
+const inferenceInfrastructureModules = new Set(["routing", "support"]);
+for (const match of read(inferenceRootPath).matchAll(/^mod\s+([a-z][a-z0-9_]*)\s*;/gm)) {
+  const moduleName = match[1];
+  const moduleDirectory = path.join(
+    repo,
+    "crates/runmat-builtins/src/catalog/inference",
+    moduleName
+  );
+  const isCompositionModule =
+    fs.existsSync(moduleDirectory) && fs.statSync(moduleDirectory).isDirectory();
+  if (
+    !isCompositionModule &&
+    !inferenceInfrastructureModules.has(moduleName) &&
+    !legacyRootInferenceLeaves.has(moduleName)
+  ) {
+    fail(
+      `${inferenceRootPath} declares new root semantic leaf ${moduleName}; ` +
+      "route it through a bounded domain/family inference package"
+    );
+  }
+}
 const legacyInferenceLeafCeilings = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math_binary.rs", 483],
   ["crates/runmat-builtins/src/catalog/inference/math_inverse.rs", 510],
@@ -602,45 +652,58 @@ if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/inference/
   fail("the monolithic distributed_semantics.rs inference module must not return");
 }
 
-const factorialBoundaries = new Map([
-  ["crates/runmat-builtins/src/catalog/entries/math/discrete/mod.rs", 32],
-  ["crates/runmat-builtins/src/catalog/entries/math/discrete/factorial/mod.rs", 224],
-  ["crates/runmat-builtins/src/catalog/entries/math/discrete/factorial/documentation.rs", 320],
-  ["crates/runmat-builtins/src/catalog/inference/math/discrete/mod.rs", 32],
-  ["crates/runmat-builtins/src/catalog/inference/math/discrete/factorial.rs", 192],
-  ["crates/runmat-builtins/src/catalog/inference/math/discrete/factorial_tests.rs", 128],
-  ["crates/runmat-builtins/src/catalog/inference/math/discrete/distributed_tests.rs", 96],
-  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/mod.rs", 160],
-  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/arguments.rs", 192],
-  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/evaluation.rs", 128],
-  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/integer.rs", 128],
-  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/provider.rs", 160],
-  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/spec.rs", 64],
-  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/tests.rs", 512],
-]);
-for (const [sourcePath, ceiling] of factorialBoundaries) {
-  const lines = read(sourcePath).split("\n").length;
-  if (lines > ceiling) {
-    fail(
-      `${sourcePath} exceeds its factorial identity boundary ` +
-      `(found ${lines} lines; maximum ${ceiling})`
-    );
+const discreteNumberTheoryRoots = [
+  "crates/runmat-builtins/src/catalog/entries/math/discrete",
+  "crates/runmat-builtins/src/catalog/inference/math/discrete",
+  "crates/runmat-runtime/src/builtins/math/discrete",
+];
+for (const sourceRoot of discreteNumberTheoryRoots) {
+  for (const { path: sourcePath, text } of rustSources(sourceRoot)) {
+    const lines = text.split("\n").length;
+    const relativePath = sourcePath.slice(sourceRoot.length + 1);
+    const isCompositionRoot = relativePath === "mod.rs";
+    const isDocumentation = sourcePath.endsWith("/documentation.rs");
+    const isTest = sourcePath.endsWith("/tests.rs") || sourcePath.endsWith("_tests.rs");
+    const ceiling = isCompositionRoot ? 64 : isDocumentation ? 320 : isTest ? 512 : 256;
+    if (lines > ceiling) {
+      fail(
+        sourcePath + " exceeds its role-based discrete number-theory boundary " +
+        "(found " + lines + " lines; maximum " + ceiling + ")"
+      );
+    }
   }
 }
 for (const sourcePath of [
   "crates/runmat-runtime/src/builtins/math/elementwise/factorial.rs",
   "crates/runmat-runtime/src/builtins/math/elementwise/factorial",
+  "crates/runmat-runtime/src/builtins/math/discrete/factor.rs",
+  "crates/runmat-runtime/src/builtins/math/discrete/lcm.rs",
+  "crates/runmat-runtime/src/builtins/math/discrete/isprime.rs",
+  "crates/runmat-runtime/src/builtins/math/discrete/integer_number_theory.rs",
+  "crates/runmat-runtime/src/builtins/math/discrete/primes.rs",
   "docs/builtins/reference/factorial.json",
+  "docs/builtins/reference/factor.json",
+  "docs/builtins/reference/isprime.json",
+  "docs/builtins/reference/lcm.json",
+  "docs/builtins/reference/primes.json",
   "crates/runmat-runtime/src/builtins/builtins-json/factorial.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/factor.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/isprime.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/lcm.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/primes.json",
 ]) {
   if (fs.existsSync(path.join(repo, sourcePath))) {
-    fail(`${sourcePath} is obsolete factorial identity or documentation debt and must not return`);
+    fail(`${sourcePath} is obsolete discrete number-theory identity or documentation debt and must not return`);
+  }
+}
+for (const sourceRoot of ["crates/runmat-runtime/src/builtins/math/discrete"]) {
+  for (const { path: sourcePath, text } of rustSources(sourceRoot)) {
+    if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)) {
+      fail(`${sourcePath} duplicates catalog-owned discrete number-theory metadata`);
+    }
   }
 }
 for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/builtins/math/discrete/factorial")) {
-  if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)) {
-    fail(`${sourcePath} duplicates catalog-owned factorial metadata`);
-  }
   if (/\.to_string\(\)\.contains\(|\.message\(\)\.contains\([^)]*(?:unsupported|factorial)/.test(text)) {
     fail(`${sourcePath} selects factorial behavior from error text; use typed runtime policy`);
   }
