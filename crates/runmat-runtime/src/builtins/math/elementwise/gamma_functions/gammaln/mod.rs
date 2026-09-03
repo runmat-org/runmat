@@ -21,6 +21,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::elementwise::logarithm_common::{
     probe_gpu_lower_bound, GpuDomainProbeError, GpuLowerBoundResult,
 };
+use crate::builtins::math::elementwise::resident_real_unary;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "gammaln";
@@ -40,7 +41,9 @@ const LANCZOS_COEFFS: [f64; 8] = [
     1.5056327351493116e-7,
 ];
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::gammaln")]
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::math::elementwise::gamma_functions::gammaln"
+)]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gammaln",
     op_kind: GpuOpKind::Elementwise,
@@ -61,7 +64,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "RunMat uses provider gammaln kernels only after proving gpuArray inputs are nonnegative; otherwise it gathers to enforce MATLAB's real-domain input rule.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::elementwise::gammaln")]
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::elementwise::gamma_functions::gammaln"
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "gammaln",
     shape: ShapeRequirements::Any,
@@ -75,7 +80,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "gammaln",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::elementwise::gammaln"
+    builtin_path = "crate::builtins::math::elementwise::gamma_functions::gammaln"
 )]
 async fn gammaln_builtin(value: Value) -> BuiltinResult<Value> {
     reject_excess_outputs()?;
@@ -144,7 +149,7 @@ async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         ));
     }
 
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let provider = resident_real_unary::exact_owner(&handle).ok_or_else(|| {
         error_with_detail(
             &GAMMALN_ERROR_INTERNAL,
             "GPU input has no registered owning provider",
@@ -162,34 +167,18 @@ async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 ))
             }
             Ok(GpuLowerBoundResult::AtOrAbove) => match provider.unary_gammaln(&handle).await {
-                Ok(output) => {
-                    if !gpu_helpers::unary_gpu_output_matches(
-                        &output,
-                        &handle,
-                        provider,
-                        gpu_helpers::UnaryGpuOutputContract {
-                            storage: GpuTensorStorage::Real,
-                            precision: runmat_accelerate_api::handle_precision(&handle),
-                            integer: None,
-                            logical: false,
-                            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
-                        },
-                    ) {
-                        gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
+                Ok(mut output) => {
+                    if !resident_real_unary::output_matches(&output, &handle, provider) {
+                        resident_real_unary::reject_output(&output, &handle, provider);
                         return Err(terminal_error(
                             &GAMMALN_ERROR_INTERNAL,
                             "provider unary_gammaln returned malformed output",
                         ));
                     }
-                    let mut output = output;
-                    runmat_accelerate_api::set_handle_provenance(
-                        &mut output,
-                        runmat_accelerate_api::handle_provenance(&handle)
-                            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-                    );
+                    resident_real_unary::preserve_residency_intent(&mut output, &handle);
                     return Ok(gpu_helpers::resident_gpu_value(output));
                 }
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) if resident_real_unary::hook_is_unsupported(&error) => {}
                 Err(error) => {
                     return Err(terminal_error(
                         &GAMMALN_ERROR_INTERNAL,
@@ -352,5 +341,4 @@ fn terminal_error(
 }
 
 #[cfg(test)]
-#[path = "gammaln/tests.rs"]
 mod tests;

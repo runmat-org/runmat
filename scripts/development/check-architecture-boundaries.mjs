@@ -197,7 +197,6 @@ const legacyInferenceLeafCeilings = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math_inverse.rs", 510],
   ["crates/runmat-builtins/src/catalog/inference/math_logarithms.rs", 481],
   ["crates/runmat-builtins/src/catalog/inference/math_rounding.rs", 269],
-  ["crates/runmat-builtins/src/catalog/inference/math_special.rs", 285],
   ["crates/runmat-builtins/src/catalog/inference/stats_random/two_parameter.rs", 366],
 ]);
 for (const { path: sourcePath, text } of rustSources("crates/runmat-builtins/src/catalog/inference")) {
@@ -490,7 +489,7 @@ const errorFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/error_functions/real_unary.rs", 224],
   ["crates/runmat-builtins/src/catalog/entries/math/elementwise/error_functions/mod.rs", 32],
   ["crates/runmat-runtime/src/builtins/math/elementwise/error_functions/mod.rs", 32],
-  ["crates/runmat-runtime/src/builtins/math/elementwise/error_functions/real_unary.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/elementwise/resident_real_unary.rs", 160],
 ]);
 for (const identity of ["erf", "erfcinv"]) {
   errorFunctionBoundaries.set(
@@ -528,6 +527,59 @@ for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/
     fail(`${sourcePath} duplicates catalog-owned error-function metadata`);
   }
   if (/\.to_string\(\)\.contains\(\s*"unary_(?:erf|erfcinv) not supported"/.test(text)) {
+    fail(`${sourcePath} interprets provider capability from error text; use the typed provider result`);
+  }
+}
+
+const gammaFunctionBoundaries = new Map([
+  ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/mod.rs", 40],
+  ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/common.rs", 64],
+  ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/gamma.rs", 96],
+  ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/gammaln.rs", 112],
+  ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/tests.rs", 192],
+  ["crates/runmat-builtins/src/catalog/entries/math/elementwise/gamma_functions/mod.rs", 32],
+  ["crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/mod.rs", 32],
+  ["crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gamma/mod.rs", 320],
+  ["crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gamma/tests.rs", 320],
+  ["crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gammaln/mod.rs", 384],
+  ["crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gammaln/tests.rs", 640],
+]);
+for (const identity of ["gamma", "gammaln"]) {
+  gammaFunctionBoundaries.set(
+    `crates/runmat-builtins/src/catalog/entries/math/elementwise/gamma_functions/${identity}/mod.rs`,
+    192
+  );
+  gammaFunctionBoundaries.set(
+    `crates/runmat-builtins/src/catalog/entries/math/elementwise/gamma_functions/${identity}/documentation.rs`,
+    160
+  );
+}
+for (const [sourcePath, ceiling] of gammaFunctionBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its gamma-function family boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/inference/math_special.rs",
+  "crates/runmat-builtins/src/catalog/entries/math/elementwise/gamma",
+  "crates/runmat-builtins/src/catalog/entries/math/elementwise/gammaln",
+  "crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/gammaln.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/gammaln",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete flat gamma-function debt and must not return`);
+  }
+}
+for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions")) {
+  if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)) {
+    fail(`${sourcePath} duplicates catalog-owned gamma-function metadata`);
+  }
+  if (/\.to_string\(\)\.contains\(\s*"unary_(?:gamma|gammaln) not supported"/.test(text)) {
     fail(`${sourcePath} interprets provider capability from error text; use the typed provider result`);
   }
 }

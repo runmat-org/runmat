@@ -196,10 +196,9 @@ pub enum MathInferenceRule {
     Atan2,
     Bitwise(BitwiseInferenceRule),
     ErrorFunction(ErrorFunctionInferenceRule),
+    GammaFunction(GammaFunctionInferenceRule),
     IntegerDivide,
     Hypot,
-    Gamma,
-    GammaLn,
     PhaseAngle,
     Exp,
     Expm1,
@@ -228,6 +227,12 @@ pub enum MathInferenceRule {
 pub enum ErrorFunctionInferenceRule {
     Erf,
     InverseComplementary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum GammaFunctionInferenceRule {
+    Gamma,
+    LogGamma,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

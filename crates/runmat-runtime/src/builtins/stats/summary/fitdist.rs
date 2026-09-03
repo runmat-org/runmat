@@ -17,7 +17,7 @@ use crate::builtins::common::broadcast;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::elementwise::gammaln::gammaln_nonnegative_scalar;
+use crate::builtins::math::elementwise::gamma_functions::gammaln::gammaln_nonnegative_scalar;
 use crate::builtins::stats::summary::distribution_math;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 

@@ -9,7 +9,7 @@ use crate::{
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
     BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, MathInferenceRule,
+    BuiltinSignatureDescriptor, GammaFunctionInferenceRule, MathInferenceRule,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
@@ -101,7 +101,9 @@ pub const GAMMA_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &GAMMA_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Gamma),
+        inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::GammaFunction(
+            GammaFunctionInferenceRule::Gamma,
+        )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
@@ -130,5 +132,3 @@ pub const GAMMA_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GAMMA_CATALOG_ENTRY];

@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-use super::real_unary;
+use super::super::resident_real_unary as real_unary;
 
 const BUILTIN_NAME: &str = "erf";
 
