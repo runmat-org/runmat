@@ -1,5 +1,7 @@
 use super::*;
 use crate::builtins::common::gpu_helpers;
+#[cfg(feature = "wgpu")]
+use crate::builtins::common::tensor;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_accelerate_api::HostTensorView;
@@ -65,7 +67,7 @@ fn eq_dense_integer_arrays_read_exact_storage_without_mirror() {
 
 #[cfg(feature = "wgpu")]
 fn run_eq_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    block_on(eq_host(lhs, rhs))
+    comparison::evaluate_host(lhs, rhs, runmat_builtins::RelationalOperator::Equal)
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

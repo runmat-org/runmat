@@ -1,5 +1,6 @@
 //! MATLAB table, timetable, categorical, and tabular workflow builtins.
 
+mod binary;
 pub(crate) mod builtins;
 mod containers;
 mod display;
@@ -17,6 +18,7 @@ pub use metadata::*;
 pub use prelude::{TABLE_CLASS, TIMETABLE_CLASS};
 pub use registry::ensure_table_class_registered;
 
+pub(crate) use binary::{finish_binary, plan_binary};
 use containers::*;
 pub(crate) use containers::{
     categorical_categories, categorical_compare, categorical_extrema_to_value,

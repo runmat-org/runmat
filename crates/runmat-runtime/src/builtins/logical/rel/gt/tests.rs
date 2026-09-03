@@ -109,7 +109,7 @@ fn gt_resident_single_does_not_round_a_double_scalar_for_comparison() {
 
 #[cfg(feature = "wgpu")]
 fn run_gt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    block_on(gt_host(lhs, rhs))
+    comparison::evaluate_host(lhs, rhs, runmat_builtins::RelationalOperator::GreaterThan)
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

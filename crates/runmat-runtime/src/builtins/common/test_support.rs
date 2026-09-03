@@ -99,6 +99,15 @@ pub fn accel_test_lock() -> AccelTestGuard {
     AccelTestGuard { _guard: guard }
 }
 
+#[cfg(feature = "wgpu")]
+pub fn wgpu_provider_if_available() -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
+    runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .ok()
+    .map(|provider| provider as &'static dyn runmat_accelerate_api::AccelProvider)
+}
+
 pub fn with_test_provider<F, R>(f: F) -> R
 where
     F: FnOnce(&'static dyn runmat_accelerate_api::AccelProvider) -> R,

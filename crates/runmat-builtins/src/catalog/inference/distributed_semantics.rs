@@ -1,4 +1,3 @@
-use super::infer_catalog_call_local;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, DistributedFact, ValueFact, ValueKindFact};
 
@@ -15,7 +14,7 @@ pub fn infer_partition_local_call(
             _ => argument.clone(),
         })
         .collect();
-    infer_catalog_call_local(entry, &projected)
+    super::routing::infer_local(entry, &projected)
 }
 
 pub(super) fn infer_distributed_map(

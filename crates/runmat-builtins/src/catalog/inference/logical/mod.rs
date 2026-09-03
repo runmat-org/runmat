@@ -1,3 +1,4 @@
+mod elementwise;
 mod relational;
 
 use crate::{BuiltinCatalogEntry, LogicalInferenceRule};
@@ -9,6 +10,7 @@ pub(super) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
+        LogicalInferenceRule::Elementwise(rule) => elementwise::infer(rule, request, entry),
         LogicalInferenceRule::NumericClassification(predicate) => {
             super::numeric_classification::infer(request, entry, predicate)
         }

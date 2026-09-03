@@ -454,7 +454,7 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
                         path.display()
                     );
                 }
-            } else if source.contains("_CATALOG_ENTRY") && !source.contains("const ENTRIES") {
+            } else if declares_catalog_entry(&source) && !source.contains("const ENTRIES") {
                 let family_module_path = path.parent().expect("family directory").join("mod.rs");
                 let family_module =
                     std::fs::read_to_string(&family_module_path).unwrap_or_else(|error| {
