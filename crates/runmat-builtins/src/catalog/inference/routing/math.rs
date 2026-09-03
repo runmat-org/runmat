@@ -8,6 +8,9 @@ pub(in crate::catalog::inference) fn infer(
 ) -> CallInference {
     match rule {
         MathInferenceRule::Abs => super::super::numeric_abs::infer_abs(request, entry),
+        MathInferenceRule::AngleConversion(rule) => {
+            super::super::math::angle_conversion::infer(rule, request, entry)
+        }
         MathInferenceRule::Atan2 => super::super::math_binary::infer_atan2(request, entry),
         MathInferenceRule::Bitwise(rule) => {
             super::super::math::bitwise::infer(rule, request, entry)

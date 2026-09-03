@@ -1,5 +1,6 @@
 mod acos;
 mod acosh;
+mod angle_conversion;
 mod asin;
 mod asinh;
 mod atan;
@@ -19,6 +20,7 @@ mod tanh;
 
 pub use acos::*;
 pub use acosh::*;
+pub use angle_conversion::*;
 pub use asin::*;
 pub use asinh::*;
 pub use atan::*;
@@ -44,6 +46,8 @@ pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &ATAN_CATALOG_ENTRY,
     &ATAN2_CATALOG_ENTRY,
     &ATANH_CATALOG_ENTRY,
+    &DEG2RAD_CATALOG_ENTRY,
+    &RAD2DEG_CATALOG_ENTRY,
     &COS_CATALOG_ENTRY,
     &COSH_CATALOG_ENTRY,
     &COSD_CATALOG_ENTRY,
