@@ -2,4 +2,6 @@ mod random;
 
 pub use random::*;
 
-pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = random::ENTRY_GROUPS;
+pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    super::extend_groups(entries, random::ENTRY_GROUPS);
+}

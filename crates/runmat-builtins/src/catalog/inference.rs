@@ -7,6 +7,7 @@ mod array;
 mod distributed_semantics;
 mod introspection_semantics;
 mod logical;
+mod math;
 mod math_binary;
 mod math_components;
 mod math_degree_trigonometric;

@@ -39,19 +39,20 @@ pub use math::*;
 pub use parallel::*;
 pub use stats::*;
 
-pub(super) const DOMAIN_ENTRY_GROUPS: &[&[&[&crate::BuiltinCatalogEntry]]] = &[
-    acceleration::ENTRY_GROUPS,
-    aggregate::ENTRY_GROUPS,
-    array::ENTRY_GROUPS,
-    array::INTROSPECTION_ENTRY_GROUPS,
-    introspection::ENTRY_GROUPS,
-    logical::ENTRY_GROUPS,
-    logical::OPERATOR_ENTRY_GROUPS,
-    logical::RELATIONAL_ENTRY_GROUPS,
-    math::ENTRY_GROUPS,
-    math::REDUCTION_ENTRY_GROUPS,
-    math::ROUNDING_ENTRY_GROUPS,
-    math::TRIGONOMETRY_ENTRY_GROUPS,
-    parallel::ENTRY_GROUPS,
-    stats::ENTRY_GROUPS,
-];
+pub(super) fn extend_catalog_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    acceleration::extend_entries(entries);
+    aggregate::extend_entries(entries);
+    array::extend_entries(entries);
+    introspection::extend_entries(entries);
+    logical::extend_entries(entries);
+    math::extend_entries(entries);
+    parallel::extend_entries(entries);
+    stats::extend_entries(entries);
+}
+
+fn extend_groups(
+    entries: &mut Vec<&'static crate::BuiltinCatalogEntry>,
+    groups: &[&[&'static crate::BuiltinCatalogEntry]],
+) {
+    entries.extend(groups.iter().flat_map(|group| group.iter().copied()));
+}

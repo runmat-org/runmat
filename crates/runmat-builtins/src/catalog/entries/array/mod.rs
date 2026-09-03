@@ -5,7 +5,7 @@ mod introspection;
 pub use creation::*;
 pub use introspection::*;
 
-pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[creation::ENTRIES];
-
-pub(super) const INTROSPECTION_ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] =
-    introspection::ENTRY_GROUPS;
+pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    super::extend_groups(entries, &[creation::ENTRIES]);
+    super::extend_groups(entries, introspection::ENTRY_GROUPS);
+}
