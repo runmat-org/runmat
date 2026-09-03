@@ -227,6 +227,11 @@ mod tests {
             })],
             boundaries: Vec::new(),
             connectors: Vec::new(),
+            signals: Vec::new(),
+            excitations: Vec::new(),
+            excitation_cases: Vec::new(),
+            initial_conditions: Vec::new(),
+            response_spectra: Vec::new(),
             loads: vec![LoadCase {
                 load_id: "l1".to_string(),
                 region_id: "tip".to_string(),

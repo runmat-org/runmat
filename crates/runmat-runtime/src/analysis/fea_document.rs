@@ -1170,6 +1170,11 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         constraints: Vec::new(),
         boundaries: Vec::new(),
         connectors: Vec::new(),
+        signals: Vec::new(),
+        excitations: Vec::new(),
+        excitation_cases: Vec::new(),
+        initial_conditions: Vec::new(),
+        response_spectra: Vec::new(),
         loads: Vec::new(),
         steps: Vec::new(),
     }

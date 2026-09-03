@@ -478,6 +478,25 @@ fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegio
             pressure_sign_for_kind(&load.kind),
         );
     }
+    for action in &model.excitations {
+        let runmat_analysis_core::ExcitationTarget::Region(target) = &action.excitation().target
+        else {
+            continue;
+        };
+        if target.entity_dimension == runmat_analysis_core::EntityDimension::Volume {
+            continue;
+        }
+        push_authored_boundary_region(
+            &mut regions,
+            &target.region_id,
+            "excitation",
+            Vec4::new(0.98, 0.30, 0.54, 1.0),
+            action.excitation().direction.map(|direction| {
+                Vec3::from_array(direction.vector.map(|component| component as f32))
+            }),
+            None,
+        );
+    }
     for constraint in &model.constraints {
         if let Some(target) = constraint.target() {
             push_authored_boundary_region(
@@ -2354,6 +2373,11 @@ mod tests {
             })],
             boundaries: Vec::new(),
             connectors: Vec::new(),
+            signals: Vec::new(),
+            excitations: Vec::new(),
+            excitation_cases: Vec::new(),
+            initial_conditions: Vec::new(),
+            response_spectra: Vec::new(),
             loads: vec![
                 LoadCase {
                     load_id: "force_load".to_string(),

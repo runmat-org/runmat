@@ -39,6 +39,30 @@ pub enum AnalysisValidationError {
         connector_id: String,
         detail: String,
     },
+    #[error("ANALYSIS_VALIDATION_INVALID_SIGNAL: signal `{signal_id}` is invalid: {detail}")]
+    InvalidSignal { signal_id: String, detail: String },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_EXCITATION: excitation `{excitation_id}` is invalid: {detail}"
+    )]
+    InvalidExcitation {
+        excitation_id: String,
+        detail: String,
+    },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_EXCITATION_CASE: excitation case `{case_id}` is invalid: {detail}"
+    )]
+    InvalidExcitationCase { case_id: String, detail: String },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_INITIAL_CONDITION: initial condition `{initial_condition_id}` is invalid: {detail}"
+    )]
+    InvalidInitialCondition {
+        initial_condition_id: String,
+        detail: String,
+    },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_RESPONSE_SPECTRUM: response spectrum `{spectrum_id}` is invalid: {detail}"
+    )]
+    InvalidResponseSpectrum { spectrum_id: String, detail: String },
     #[error(
         "ANALYSIS_VALIDATION_INVALID_MOMENT: moment load {load_id} must have finite components"
     )]

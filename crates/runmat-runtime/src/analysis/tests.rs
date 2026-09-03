@@ -236,6 +236,11 @@ fn sample_model() -> AnalysisModel {
         constraints: vec![fixed_constraint("bc_root", "node:1")],
         boundaries: Vec::new(),
         connectors: Vec::new(),
+        signals: Vec::new(),
+        excitations: Vec::new(),
+        excitation_cases: Vec::new(),
+        initial_conditions: Vec::new(),
+        response_spectra: Vec::new(),
         loads: vec![LoadCase {
             load_id: "load_tip".to_string(),
             region_id: "node:2".to_string(),

@@ -6,6 +6,8 @@ pub mod problem {
     pub mod constraint;
     pub mod coordinate_frame;
     pub mod domains;
+    pub mod excitation;
+    pub mod initial_condition;
     pub mod interfaces;
     pub mod loads;
     pub mod material_assignment;
@@ -13,7 +15,9 @@ pub mod problem {
     pub mod model;
     pub mod quantity;
     pub mod reference_point;
+    pub mod response_spectrum;
     pub mod schedule;
+    pub mod signal;
     pub mod steps;
     pub mod structure;
     pub mod target;
@@ -22,6 +26,8 @@ pub mod field;
 pub mod study;
 pub mod validate;
 mod validate_authored;
+mod validate_excitations;
+mod validate_signals;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};
@@ -41,6 +47,15 @@ pub use problem::domains::{
     ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
     ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
+pub use problem::excitation::{
+    AnalysisExcitation, Direction, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
+    ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
+    ProjectionRequirement,
+};
+pub use problem::initial_condition::{
+    InitialCondition, InitialConditionTarget, InitialConditionValue, InitialFieldArtifactRef,
+    InitialValue,
+};
 pub use problem::interfaces::{
     AnalysisInterface, AnalysisInterfaceKind, ConjugateHeatTransferInterfaceModel,
     ContactInterfaceModel, FluidStructureInterfaceModel,
@@ -53,14 +68,30 @@ pub use problem::materials::{
 };
 pub use problem::model::{AnalysisModel, AnalysisModelId};
 pub use problem::quantity::{
-    Damping, Displacement, ElectricCharge, ElectricCurrent, ElectricPotential, HeatFlux,
-    HeatTransferCoefficient, Length, MagneticVectorPotential, Position, Pressure, Rotation,
-    SpecificAcousticImpedance, Stiffness, Temperature, Velocity,
+    Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, Damping, Displacement,
+    ElectricCharge, ElectricChargeDensity, ElectricCurrent, ElectricCurrentDensity,
+    ElectricPotential, Force, HeatFlux, HeatGenerationDensity, HeatTransferCoefficient, Length,
+    MagneticVectorPotential, MassFlowRate, Moment, Position, Pressure, Rotation,
+    SpecificAcousticImpedance, Stiffness, Temperature, Traction, Velocity,
 };
 pub use problem::reference_point::ReferencePoint;
+pub use problem::response_spectrum::{
+    DirectionalCombination, ModalCombination, ModalTruncationPolicy, ResponseSpectrum,
+    ResponseSpectrumId, ShockResponseSpectrumMethod, SpectrumAbscissa, SpectrumConstruction,
+    SpectrumDamping, SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
+    SpectrumInterpolation, SpectrumResponse,
+};
 pub use problem::schedule::{
     FieldArtifactValue, ScheduleExtrapolation, ScheduleInterpolation, StepValue,
     StudyParameterValue, TabulatedSchedule, ValueSchedule,
+};
+pub use problem::signal::{
+    BreakpointSide, GeneratorArgument, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance,
+    PhysicalQuantityKind, PhysicalSignal, RandomDistribution, Signal, SignalApproximationEvidence,
+    SignalArtifactDomain, SignalArtifactRef, SignalAxis, SignalBreakpoint, SignalDomainKind,
+    SignalExtrapolation, SignalGenerator, SignalId, SignalInterpolation, SignalOrdinate,
+    SignalPrecision, SignalProvenance, SignalRepresentation, SignalSamplingPolicy, SignalShape,
+    SignalValue, StandardWaveform, StandardWaveformKind, TabulatedSignal,
 };
 pub use problem::steps::{AnalysisStep, AnalysisStepKind};
 pub use problem::structure::{
@@ -118,6 +149,11 @@ mod tests {
             })],
             boundaries: Vec::new(),
             connectors: Vec::new(),
+            signals: Vec::new(),
+            excitations: Vec::new(),
+            excitation_cases: Vec::new(),
+            initial_conditions: Vec::new(),
+            response_spectra: Vec::new(),
             loads: vec![LoadCase {
                 load_id: "load_tip".to_string(),
                 region_id: "tip".to_string(),
@@ -538,6 +574,284 @@ mod tests {
         assert!(matches!(
             validate_model(&model),
             Err(AnalysisValidationError::InvalidBoundary { .. })
+        ));
+    }
+
+    fn force_signal(id: &str, representation: SignalRepresentation<Force>) -> PhysicalSignal {
+        PhysicalSignal::Force(Signal {
+            signal_id: SignalId(id.to_string()),
+            shape: SignalShape::Scalar,
+            frame: None,
+            representation,
+            precision: SignalPrecision::Real64,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: None,
+                max_relative_error: None,
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+            provenance: SignalProvenance::Authored,
+        })
+    }
+
+    #[test]
+    fn malformed_signal_domain_and_generator_are_rejected() {
+        let mut model = valid_model();
+        model.signals = vec![force_signal(
+            "force_history",
+            SignalRepresentation::Tabulated(TabulatedSignal {
+                axis: SignalAxis::TimeSeconds(vec![0.0, 1.0, 0.5]),
+                values: vec![
+                    SignalOrdinate::Real(SignalValue::Scalar(Force::new(1.0))),
+                    SignalOrdinate::Real(SignalValue::Scalar(Force::new(2.0))),
+                    SignalOrdinate::Real(SignalValue::Scalar(Force::new(3.0))),
+                ],
+                interpolation: SignalInterpolation::Linear,
+                extrapolation: SignalExtrapolation::Reject,
+                breakpoints: Vec::new(),
+            }),
+        )];
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidSignal { .. })
+        ));
+
+        model.signals = vec![force_signal(
+            "generated_force",
+            SignalRepresentation::Generator(SignalGenerator {
+                qualified_function: "anonymousScript".to_string(),
+                arguments: Vec::new(),
+                domain: GeneratorDomain::TimeSeconds,
+                sampling: SignalSamplingPolicy::Uniform {
+                    start: 0.0,
+                    end: 1.0,
+                    sample_count: 101,
+                },
+                effects: GeneratorEffectPolicy::Pure,
+            }),
+        )];
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidSignal { .. })
+        ));
+    }
+
+    #[test]
+    fn excitation_signal_quantity_and_distribution_are_checked() {
+        let mut model = valid_model();
+        model.signals = vec![force_signal(
+            "tip_force",
+            SignalRepresentation::Constant(SignalValue::Scalar(Force::new(1000.0))),
+        )];
+        let excitation = AnalysisExcitation {
+            excitation_id: ExcitationId("tip_pressure".to_string()),
+            case_id: ExcitationCaseId("service_case".to_string()),
+            target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution: ExcitationDistribution::IntensityPerArea,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("tip_force".to_string()),
+            active_step_ids: vec!["step_static".to_string()],
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: false,
+                relative_tolerance: 1.0e-10,
+            },
+        };
+        model.excitations = vec![ExcitationAction::Pressure(excitation)];
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidExcitation { .. })
+        ));
+    }
+
+    #[test]
+    fn typed_excitation_case_and_initial_condition_are_accepted() {
+        let mut model = valid_model();
+        model.signals = vec![force_signal(
+            "tip_force",
+            SignalRepresentation::Constant(SignalValue::Scalar(Force::new(1000.0))),
+        )];
+        model.excitations = vec![ExcitationAction::Force(AnalysisExcitation {
+            excitation_id: ExcitationId("tip_force_action".to_string()),
+            case_id: ExcitationCaseId("service_case".to_string()),
+            target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
+            frame: CoordinateFrame::Global,
+            direction: Some(Direction {
+                vector: [0.0, -1.0, 0.0],
+            }),
+            distribution: ExcitationDistribution::PreserveResultant,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("tip_force".to_string()),
+            active_step_ids: vec!["step_static".to_string()],
+            combination_group: Some("service".to_string()),
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: true,
+                relative_tolerance: 1.0e-10,
+            },
+        })];
+        model.excitation_cases = vec![ExcitationCase {
+            case_id: ExcitationCaseId("service_case".to_string()),
+            action_ids: vec![ExcitationId("tip_force_action".to_string())],
+            activation: ExcitationCaseActivation::Always,
+        }];
+        model.initial_conditions = vec![InitialCondition::Velocity(InitialConditionValue {
+            initial_condition_id: "initial_velocity".to_string(),
+            target: InitialConditionTarget::Region(RegionTarget::volume("body")),
+            frame: CoordinateFrame::Global,
+            value: InitialValue::UniformVector3([
+                Velocity::new(0.0),
+                Velocity::new(0.0),
+                Velocity::new(0.0),
+            ]),
+            applies_before_step_id: "step_static".to_string(),
+        })];
+
+        validate_model(&model).expect("typed excitation model should be valid");
+        let encoded = serde_json::to_value(&model).expect("model should serialize");
+        let decoded: AnalysisModel =
+            serde_json::from_value(encoded).expect("model should deserialize");
+        assert_eq!(decoded, model);
+    }
+
+    #[test]
+    fn excitation_case_membership_is_reciprocal_and_exhaustive() {
+        let mut model = valid_model();
+        model.signals = vec![force_signal(
+            "tip_force",
+            SignalRepresentation::Constant(SignalValue::Scalar(Force::new(1000.0))),
+        )];
+        model.excitations = vec![ExcitationAction::Force(AnalysisExcitation {
+            excitation_id: ExcitationId("tip_force_action".to_string()),
+            case_id: ExcitationCaseId("declared_owner".to_string()),
+            target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
+            frame: CoordinateFrame::Global,
+            direction: Some(Direction {
+                vector: [0.0, -1.0, 0.0],
+            }),
+            distribution: ExcitationDistribution::PreserveResultant,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("tip_force".to_string()),
+            active_step_ids: vec!["step_static".to_string()],
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: false,
+                relative_tolerance: 1.0e-10,
+            },
+        })];
+        model.excitation_cases = vec![ExcitationCase {
+            case_id: ExcitationCaseId("different_case".to_string()),
+            action_ids: vec![ExcitationId("tip_force_action".to_string())],
+            activation: ExcitationCaseActivation::Always,
+        }];
+
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidExcitationCase { .. })
+        ));
+    }
+
+    #[test]
+    fn scalar_directional_excitation_requires_direction() {
+        let mut model = valid_model();
+        model.signals = vec![force_signal(
+            "tip_force",
+            SignalRepresentation::Constant(SignalValue::Scalar(Force::new(1000.0))),
+        )];
+        model.excitations = vec![ExcitationAction::Force(AnalysisExcitation {
+            excitation_id: ExcitationId("tip_force_action".to_string()),
+            case_id: ExcitationCaseId("service_case".to_string()),
+            target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution: ExcitationDistribution::PreserveResultant,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("tip_force".to_string()),
+            active_step_ids: vec!["step_static".to_string()],
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: false,
+                relative_tolerance: 1.0e-10,
+            },
+        })];
+
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidExcitation { .. })
+        ));
+    }
+
+    #[test]
+    fn initial_condition_shape_is_physics_typed() {
+        let mut model = valid_model();
+        model.initial_conditions = vec![InitialCondition::Temperature(InitialConditionValue {
+            initial_condition_id: "initial_temperature".to_string(),
+            target: InitialConditionTarget::WholeModel,
+            frame: CoordinateFrame::Global,
+            value: InitialValue::UniformVector3([
+                Temperature::new(293.15),
+                Temperature::new(293.15),
+                Temperature::new(293.15),
+            ]),
+            applies_before_step_id: "step_static".to_string(),
+        })];
+
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidInitialCondition { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_response_spectrum_is_rejected() {
+        let mut model = valid_model();
+        model.response_spectra = vec![ResponseSpectrum {
+            spectrum_id: ResponseSpectrumId("launch_srs".to_string()),
+            abscissa: SpectrumAbscissa::FrequencyHertz(vec![10.0, 100.0]),
+            ordinates: vec![5.0, 20.0],
+            damping: SpectrumDamping::Ratio(1.2),
+            response: SpectrumResponse::AbsoluteAcceleration,
+            envelope: SpectrumEnvelope::Maximax,
+            interpolation: SpectrumInterpolation::LogLog,
+            extrapolation: SpectrumExtrapolation::Reject,
+            direction: SpectrumDirection {
+                frame: CoordinateFrame::Global,
+                vector: [0.0, 0.0, 1.0],
+            },
+            modal_combination: ModalCombination::CompleteQuadraticCombination,
+            directional_combination: DirectionalCombination::Srss,
+            truncation: ModalTruncationPolicy {
+                minimum_cumulative_mass_ratio: 0.9,
+                include_residual_mode: true,
+                include_rigid_response: true,
+                include_missing_mass: true,
+            },
+            construction: SpectrumConstruction::AuthoredDesign,
+            evidence: SpectrumEvidence {
+                sampling_adequacy_ratio: 1.0,
+                max_interpolation_error: Some(0.01),
+            },
+            provenance_digest: "sha256:spectrum".to_string(),
+        }];
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidResponseSpectrum { .. })
+        ));
+
+        model.response_spectra[0].damping = SpectrumDamping::Ratio(0.05);
+        model.response_spectra[0].construction =
+            SpectrumConstruction::DerivedFromAccelerationHistory {
+                source_signal_id: SignalId("missing_acceleration".to_string()),
+                method: ShockResponseSpectrumMethod::ExactPiecewiseLinear,
+            };
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidResponseSpectrum { .. })
         ));
     }
 }

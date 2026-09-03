@@ -132,6 +132,22 @@ pub(crate) fn apply_boundary_region_ids(
             }
         }
     }
+    for action in &mut model.excitations {
+        if let runmat_analysis_core::ExcitationTarget::Region(target) =
+            &mut action.excitation_mut().target
+        {
+            if let Some(id) = aliases.get(&target.region_id) {
+                target.region_id = id.source_topology_id.clone();
+            }
+        }
+    }
+    for condition in &mut model.initial_conditions {
+        if let Some(target) = condition.region_target_mut() {
+            if let Some(id) = aliases.get(&target.region_id) {
+                target.region_id = id.source_topology_id.clone();
+            }
+        }
+    }
     for load in &mut model.loads {
         if let Some(id) = aliases.get(&load.region_id) {
             load.region_id = id.source_topology_id.clone();

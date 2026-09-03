@@ -7,10 +7,14 @@ use super::{
     constraint::AnalysisConstraint,
     coordinate_frame::CoordinateFrame,
     domains::{CfdDomain, ElectroThermalDomain, ElectromagneticDomain, ThermoMechanicalDomain},
+    excitation::{ExcitationAction, ExcitationCase},
+    initial_condition::InitialCondition,
     interfaces::AnalysisInterface,
     loads::LoadCase,
     material_assignment::MaterialAssignment,
     materials::MaterialModel,
+    response_spectrum::ResponseSpectrum,
+    signal::PhysicalSignal,
     steps::AnalysisStep,
     structure::StructuralModel,
 };
@@ -46,6 +50,11 @@ pub struct AnalysisModel {
     pub boundaries: Vec<AnalysisBoundary>,
     #[serde(default)]
     pub connectors: Vec<AnalysisConnector>,
+    pub signals: Vec<PhysicalSignal>,
+    pub excitations: Vec<ExcitationAction>,
+    pub excitation_cases: Vec<ExcitationCase>,
+    pub initial_conditions: Vec<InitialCondition>,
+    pub response_spectra: Vec<ResponseSpectrum>,
     pub loads: Vec<LoadCase>,
     pub steps: Vec<AnalysisStep>,
 }

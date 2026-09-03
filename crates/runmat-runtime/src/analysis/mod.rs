@@ -994,6 +994,11 @@ pub fn analysis_create_model_op(
         constraints,
         boundaries,
         connectors: Vec::new(),
+        signals: Vec::new(),
+        excitations: Vec::new(),
+        excitation_cases: Vec::new(),
+        initial_conditions: Vec::new(),
+        response_spectra: Vec::new(),
         loads: vec![default_load],
         steps: default_steps,
     };
@@ -9512,6 +9517,25 @@ fn boundary_region_mapping_reasons(
             });
         }
     }
+    for action in &model.excitations {
+        let runmat_analysis_core::ExcitationTarget::Region(target) = &action.excitation().target
+        else {
+            continue;
+        };
+        if target.expected_topology != runmat_analysis_core::ExpectedTopology::BoundaryFace {
+            continue;
+        }
+        if !boundary_region_ids.contains(target.region_id.as_str()) {
+            reasons.push(QualityReason {
+                code: QualityReasonCode::SolidMeshUnmappedLoadRegion,
+                detail: format!(
+                    "excitation `{}` references region `{}` but the solver mesh has no matching boundary provenance",
+                    action.excitation().excitation_id.0,
+                    target.region_id
+                ),
+            });
+        }
+    }
     for constraint in &model.constraints {
         let Some(target) = constraint.target() else {
             continue;
@@ -15115,6 +15139,55 @@ fn map_validate_error(
             format!("connector `{connector_id}` is invalid: {detail}"),
             BTreeMap::from([
                 ("connector_id".to_string(), connector_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidSignal { signal_id, detail } => (
+            "RM.FEA.VALIDATE.INVALID_SIGNAL",
+            format!("signal `{signal_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("signal_id".to_string(), signal_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidExcitation {
+            excitation_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_EXCITATION",
+            format!("excitation `{excitation_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("excitation_id".to_string(), excitation_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidExcitationCase { case_id, detail } => (
+            "RM.FEA.VALIDATE.INVALID_EXCITATION_CASE",
+            format!("excitation case `{case_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("case_id".to_string(), case_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidInitialCondition {
+            initial_condition_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_INITIAL_CONDITION",
+            format!("initial condition `{initial_condition_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("initial_condition_id".to_string(), initial_condition_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidResponseSpectrum {
+            spectrum_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_RESPONSE_SPECTRUM",
+            format!("response spectrum `{spectrum_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("spectrum_id".to_string(), spectrum_id),
                 ("detail".to_string(), detail),
             ]),
         ),

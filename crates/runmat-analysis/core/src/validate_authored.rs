@@ -14,10 +14,12 @@ pub(crate) fn validate_authored_model(
     validate_constraints(&model.constraints)?;
     validate_boundaries(&model.boundaries)?;
     validate_connectors(&model.connectors)?;
+    crate::validate_signals::validate_signals(&model.signals)?;
+    crate::validate_excitations::validate_model_excitations(model)?;
     Ok(())
 }
 
-fn validate_frame(frame: &CoordinateFrame) -> Result<(), AnalysisValidationError> {
+pub(crate) fn validate_frame(frame: &CoordinateFrame) -> Result<(), AnalysisValidationError> {
     let valid = match frame {
         CoordinateFrame::Global
         | CoordinateFrame::Material
@@ -268,7 +270,7 @@ fn validate_id(
     Ok(())
 }
 
-fn validate_target(target: &crate::RegionTarget) -> Result<(), String> {
+pub(crate) fn validate_target(target: &crate::RegionTarget) -> Result<(), String> {
     if target.region_id.trim().is_empty() {
         return Err("region id is empty".to_string());
     }
