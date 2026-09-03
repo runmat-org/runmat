@@ -1,4 +1,4 @@
-use super::math_fact_transforms::{materialize_output, preserve_shape_on_dynamic_input};
+use super::support::facts::{materialize, preserve_shape_as_dynamic};
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, DegreeTrigonometricFunction};
 use runmat_types::{
@@ -73,21 +73,21 @@ pub(super) fn infer_degree_trigonometric(
             if !matches!(numeric.class, NumericClass::Double | NumericClass::Single) {
                 numeric.class = NumericClass::Double;
             }
-            materialize_output(&mut output);
+            materialize(&mut output);
             output.residency = residency.clone();
         }
         ValueKindFact::Logical => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(&mut output);
+            materialize(&mut output);
             output.residency = residency.clone();
         }
         ValueKindFact::Character if accepts_character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(&mut output);
+            materialize(&mut output);
             output.residency = residency.clone();
         }
         ValueKindFact::Unknown => {
-            preserve_shape_on_dynamic_input(&mut output);
+            preserve_shape_as_dynamic(&mut output);
             output.residency = residency;
         }
         _ => {

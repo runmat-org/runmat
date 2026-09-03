@@ -5,6 +5,8 @@ use runmat_types::{
     ValueKindFact,
 };
 
+pub(super) mod facts;
+
 pub(crate) fn literal_text(literal: &LiteralValue) -> Option<String> {
     match literal {
         LiteralValue::String(value)

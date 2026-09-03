@@ -1,5 +1,5 @@
-use super::math_fact_transforms::{
-    materialize_output, materialize_output_preserving_storage, preserve_shape_on_dynamic_input,
+use super::support::facts::{
+    materialize, materialize_preserving_sparse_storage, preserve_shape_as_dynamic,
 };
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, LogarithmBase};
@@ -69,7 +69,7 @@ pub(super) fn infer_log1p(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
             domain: NumericDomain::Complex,
         }) => {
             output.kind = numeric_kind(*class, NumericDomain::Complex);
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Numeric(NumericFact {
             class,
@@ -93,18 +93,18 @@ pub(super) fn infer_log1p(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
             });
             if let Some(domain) = domain {
                 output.kind = numeric_kind(output_class, domain);
-                materialize_output(&mut output);
+                materialize(&mut output);
             } else {
-                preserve_shape_on_dynamic_input(&mut output);
+                preserve_shape_as_dynamic(&mut output);
             }
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
             changes_class = true;
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Object(_) | ValueKindFact::Unknown => {
-            preserve_shape_on_dynamic_input(&mut output);
+            preserve_shape_as_dynamic(&mut output);
         }
         _ => {
             diagnostics.push(argument_error(
@@ -228,11 +228,11 @@ fn log2_dissection_output(
                 numeric.class = NumericClass::Double;
             }
             numeric.domain = NumericDomain::Real;
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Object(object)
             if object.runtime_class.as_ref().is_some_and(|class| {
@@ -246,7 +246,7 @@ fn log2_dissection_output(
             output.mutation = MutationFact::ValueSemantics;
         }
         ValueKindFact::Object(_) | ValueKindFact::Unknown if !diagnose_invalid => {
-            preserve_shape_on_dynamic_input(&mut output);
+            preserve_shape_as_dynamic(&mut output);
         }
         _ => {
             if diagnose_invalid {
@@ -323,7 +323,7 @@ fn infer_logarithm_value(
             domain: NumericDomain::Complex,
         }) => {
             output.kind = numeric_kind(*class, NumericDomain::Complex);
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Numeric(NumericFact {
             class,
@@ -347,18 +347,18 @@ fn infer_logarithm_value(
             });
             if let Some(domain) = domain {
                 output.kind = numeric_kind(output_class, domain);
-                materialize_output(&mut output);
+                materialize(&mut output);
             } else {
-                preserve_shape_on_dynamic_input(&mut output);
+                preserve_shape_as_dynamic(&mut output);
             }
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
             changes_class = true;
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
         ValueKindFact::Symbolic if accepts_symbolic => {
-            materialize_output_preserving_storage(&mut output);
+            materialize_preserving_sparse_storage(&mut output);
         }
         ValueKindFact::Object(object)
             if object.runtime_class.as_ref().is_some_and(|class| {
@@ -375,7 +375,7 @@ fn infer_logarithm_value(
             output.mutation = MutationFact::ValueSemantics;
         }
         ValueKindFact::Object(_) | ValueKindFact::Unknown => {
-            preserve_shape_on_dynamic_input(&mut output);
+            preserve_shape_as_dynamic(&mut output);
         }
         _ => {
             diagnostics.push(argument_error(

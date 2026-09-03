@@ -12,7 +12,6 @@ mod math_binary;
 mod math_components;
 mod math_degree_trigonometric;
 mod math_exponential;
-mod math_fact_transforms;
 mod math_hyperbolic;
 mod math_inverse;
 mod math_logarithms;

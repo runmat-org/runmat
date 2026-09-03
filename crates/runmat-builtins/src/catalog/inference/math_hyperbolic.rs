@@ -1,4 +1,4 @@
-use super::math_fact_transforms::{materialize_output, preserve_shape_on_dynamic_input};
+use super::support::facts::{materialize, preserve_shape_as_dynamic};
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, HyperbolicFunction};
 use runmat_types::{
@@ -63,14 +63,14 @@ pub(super) fn infer_hyperbolic(
                 ));
                 output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
             } else {
-                materialize_output(&mut output);
+                materialize(&mut output);
             }
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
-        ValueKindFact::Unknown => preserve_shape_on_dynamic_input(&mut output),
+        ValueKindFact::Unknown => preserve_shape_as_dynamic(&mut output),
         _ => {
             diagnostics.push(argument_error(
                 "RM-CATALOG-HYPERBOLIC-INPUT",

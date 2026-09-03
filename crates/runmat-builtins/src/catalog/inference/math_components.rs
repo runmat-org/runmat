@@ -1,4 +1,4 @@
-use super::math_fact_transforms::{materialize_output, preserve_shape_on_dynamic_input};
+use super::support::facts::{materialize, preserve_shape_as_dynamic};
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
@@ -51,9 +51,9 @@ pub(super) fn infer_phase_angle(
             if matches!(numeric.class, NumericClass::Double | NumericClass::Single) =>
         {
             numeric.domain = NumericDomain::Real;
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
-        ValueKindFact::Unknown => preserve_shape_on_dynamic_input(&mut output),
+        ValueKindFact::Unknown => preserve_shape_as_dynamic(&mut output),
         _ => {
             diagnostics.push(argument_error(
                 "RM-CATALOG-PHASE-ANGLE-INPUT",
@@ -116,13 +116,13 @@ pub(super) fn infer_signum(request: &CallRequest, entry: &BuiltinCatalogEntry) -
             ));
             output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
         }
-        ValueKindFact::Numeric(_) => materialize_output(&mut output),
+        ValueKindFact::Numeric(_) => materialize(&mut output),
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
             changes_class = true;
-            materialize_output(&mut output);
+            materialize(&mut output);
         }
-        ValueKindFact::Unknown => preserve_shape_on_dynamic_input(&mut output),
+        ValueKindFact::Unknown => preserve_shape_as_dynamic(&mut output),
         _ => {
             diagnostics.push(argument_error(
                 "RM-CATALOG-SIGNUM-INPUT",

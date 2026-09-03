@@ -1,4 +1,4 @@
-use super::math_fact_transforms::{materialize_output, preserve_shape_on_dynamic_input};
+use super::support::facts::{materialize, preserve_shape_as_dynamic};
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, RoundingFunction};
 use runmat_types::{
@@ -145,16 +145,16 @@ pub(super) fn infer_round(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
         ValueKindFact::Numeric(numeric)
             if matches!(numeric.class, NumericClass::Double | NumericClass::Single) =>
         {
-            materialize_output(&mut output);
+            materialize(&mut output);
             output.residency = input.residency.clone();
         }
         ValueKindFact::Numeric(_) => {}
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(&mut output);
+            materialize(&mut output);
             output.residency = input.residency.clone();
         }
-        ValueKindFact::Unknown => preserve_shape_on_dynamic_input(&mut output),
+        ValueKindFact::Unknown => preserve_shape_as_dynamic(&mut output),
         _ => {
             diagnostics.push(argument_error(
                 "RM-CATALOG-ROUND-INPUT",
@@ -229,7 +229,7 @@ pub(super) fn infer_rounding(
         ValueKindFact::Numeric(numeric)
             if matches!(numeric.class, NumericClass::Double | NumericClass::Single) =>
         {
-            materialize_output(&mut output);
+            materialize(&mut output);
             output.residency = input.residency.clone();
         }
         ValueKindFact::Numeric(_) => {
@@ -238,7 +238,7 @@ pub(super) fn infer_rounding(
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize_output(&mut output);
+            materialize(&mut output);
             output.residency = input.residency.clone();
         }
         ValueKindFact::Object(object)
@@ -253,7 +253,7 @@ pub(super) fn infer_rounding(
             output.mutation = MutationFact::ValueSemantics;
         }
         ValueKindFact::Object(_) | ValueKindFact::Unknown => {
-            preserve_shape_on_dynamic_input(&mut output);
+            preserve_shape_as_dynamic(&mut output);
         }
         _ => {
             diagnostics.push(argument_error(
