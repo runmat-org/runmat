@@ -148,11 +148,6 @@ pub(crate) fn apply_boundary_region_ids(
             }
         }
     }
-    for load in &mut model.loads {
-        if let Some(id) = aliases.get(&load.region_id) {
-            load.region_id = id.source_topology_id.clone();
-        }
-    }
 }
 
 fn persist_canonical(path: &Path, bytes: &[u8]) -> Result<(), String> {

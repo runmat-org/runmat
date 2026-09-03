@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{visit_pair, visit_pair_ref, PairedConstraint};
 use crate::problem::{
+    prescribed_value::PrescribedValue,
     quantity::{Pressure, Velocity},
-    schedule::ValueSchedule,
     target::RegionTarget,
 };
 
@@ -19,11 +19,11 @@ pub struct FluidConstraint {
 pub enum FluidConstraintKind {
     PrescribedVelocity {
         target: RegionTarget,
-        value: ValueSchedule<Velocity>,
+        value: PrescribedValue<Velocity>,
     },
     MovingWall {
         target: RegionTarget,
-        velocity: ValueSchedule<Velocity>,
+        velocity: PrescribedValue<Velocity>,
     },
     NoSlipWall {
         target: RegionTarget,
@@ -37,7 +37,7 @@ pub enum FluidConstraintKind {
     Periodic(PairedConstraint),
     PressureReference {
         target: RegionTarget,
-        value: ValueSchedule<Pressure>,
+        value: PrescribedValue<Pressure>,
     },
 }
 

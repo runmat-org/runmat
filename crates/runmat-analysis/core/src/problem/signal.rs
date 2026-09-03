@@ -6,7 +6,7 @@ use super::{
         Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, Displacement,
         ElectricCharge, ElectricChargeDensity, ElectricCurrent, ElectricCurrentDensity,
         ElectricPotential, Force, HeatFlux, HeatGenerationDensity, MagneticVectorPotential,
-        MassFlowRate, Moment, Pressure, Temperature, Traction, Velocity,
+        MassFlowRate, Moment, Pressure, Rotation, Temperature, Traction, Velocity,
     },
 };
 
@@ -17,6 +17,7 @@ pub struct SignalId(pub String);
 #[serde(rename_all = "snake_case")]
 pub enum PhysicalQuantityKind {
     Displacement,
+    Rotation,
     Velocity,
     Acceleration,
     AngularVelocity,
@@ -51,6 +52,7 @@ pub enum SignalDomainKind {
 #[serde(rename_all = "snake_case")]
 pub enum PhysicalSignal {
     Displacement(Signal<Displacement>),
+    Rotation(Signal<Rotation>),
     Velocity(Signal<Velocity>),
     Acceleration(Signal<Acceleration>),
     AngularVelocity(Signal<AngularVelocity>),
@@ -76,6 +78,7 @@ impl PhysicalSignal {
     pub fn signal_id(&self) -> &SignalId {
         match self {
             Self::Displacement(value) => &value.signal_id,
+            Self::Rotation(value) => &value.signal_id,
             Self::Velocity(value) => &value.signal_id,
             Self::Acceleration(value) => &value.signal_id,
             Self::AngularVelocity(value) => &value.signal_id,
@@ -101,6 +104,7 @@ impl PhysicalSignal {
     pub fn quantity(&self) -> PhysicalQuantityKind {
         match self {
             Self::Displacement(_) => PhysicalQuantityKind::Displacement,
+            Self::Rotation(_) => PhysicalQuantityKind::Rotation,
             Self::Velocity(_) => PhysicalQuantityKind::Velocity,
             Self::Acceleration(_) => PhysicalQuantityKind::Acceleration,
             Self::AngularVelocity(_) => PhysicalQuantityKind::AngularVelocity,
@@ -126,6 +130,7 @@ impl PhysicalSignal {
     pub fn domain(&self) -> SignalDomainKind {
         match self {
             Self::Displacement(value) => signal_domain(value),
+            Self::Rotation(value) => signal_domain(value),
             Self::Velocity(value) => signal_domain(value),
             Self::Acceleration(value) => signal_domain(value),
             Self::AngularVelocity(value) => signal_domain(value),
@@ -151,6 +156,7 @@ impl PhysicalSignal {
     pub fn shape(&self) -> &SignalShape {
         match self {
             Self::Displacement(value) => &value.shape,
+            Self::Rotation(value) => &value.shape,
             Self::Velocity(value) => &value.shape,
             Self::Acceleration(value) => &value.shape,
             Self::AngularVelocity(value) => &value.shape,
@@ -176,6 +182,7 @@ impl PhysicalSignal {
     pub fn frame(&self) -> Option<&CoordinateFrame> {
         match self {
             Self::Displacement(value) => value.frame.as_ref(),
+            Self::Rotation(value) => value.frame.as_ref(),
             Self::Velocity(value) => value.frame.as_ref(),
             Self::Acceleration(value) => value.frame.as_ref(),
             Self::AngularVelocity(value) => value.frame.as_ref(),

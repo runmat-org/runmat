@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisModel, EvidenceConfidence, LoadKind, MaterialAssignment};
+use runmat_analysis_core::{AnalysisModel, EvidenceConfidence, MaterialAssignment};
 
 use crate::{
     assembly,
@@ -23,10 +23,7 @@ pub(crate) fn extend_common_run_diagnostics(
         || inputs.summary.structural_beam_element_count > 0
         || inputs.summary.structural_shell_element_count > 0
     {
-        diagnostics.push(structural_rotational_dof_diagnostic(
-            inputs.model,
-            inputs.summary,
-        ));
+        diagnostics.push(structural_rotational_dof_diagnostic(inputs.summary));
     }
     if let Some(thermo_mechanical) = inputs.summary.thermo_mechanical.as_ref() {
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
@@ -37,10 +34,8 @@ pub(crate) fn extend_common_run_diagnostics(
 }
 
 pub(crate) fn structural_rotational_dof_diagnostic(
-    model: &AnalysisModel,
     summary: &assembly::AssemblySummary,
 ) -> FeaDiagnostic {
-    let requested_moment_norm_n_m = requested_moment_norm_n_m(model);
     let direct_moment_coverage_ratio = if summary.structural_moment_load_count == 0 {
         1.0
     } else {
@@ -73,7 +68,7 @@ pub(crate) fn structural_rotational_dof_diagnostic(
             summary.structural_moment_load_count,
             summary.structural_direct_rotational_moment_load_count,
             direct_moment_coverage_ratio,
-            requested_moment_norm_n_m,
+            summary.structural_requested_moment_norm_n_m,
             summary.structural_rotational_constraint_count,
             summary.structural_beam_element_count,
             summary.structural_shell_element_count,
@@ -82,18 +77,6 @@ pub(crate) fn structural_rotational_dof_diagnostic(
             beam_stiffness_matrix_symmetry_residual
         ),
     }
-}
-
-fn requested_moment_norm_n_m(model: &AnalysisModel) -> f64 {
-    let mut moment = [0.0_f64; 3];
-    for load in &model.loads {
-        if let LoadKind::Moment { mx, my, mz } = load.kind {
-            moment[0] += mx;
-            moment[1] += my;
-            moment[2] += mz;
-        }
-    }
-    (moment[0] * moment[0] + moment[1] * moment[1] + moment[2] * moment[2]).sqrt()
 }
 
 fn beam_operator_symmetry_residual(summary: &assembly::AssemblySummary) -> f64 {

@@ -1,5 +1,5 @@
 use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, BoundaryOperator, LoadKind, ThermalConstraintKind,
+    validate_model, AnalysisField, AnalysisModel, BoundaryOperator, ThermalConstraintKind,
 };
 
 use crate::{
@@ -14,6 +14,7 @@ use crate::{
         builders::{material_assignment_diagnostics, thermo_mechanical_diagnostic},
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
+    excitation::{realize_model_excitations, RealizedExcitationKind},
     physics::{coupling::thermo_mechanical, thermal::constitutive_stats},
     progress::{check_cancelled, emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
 };
@@ -1029,13 +1030,13 @@ fn thermal_source_boundary_summary(
 ) -> ThermalSourceBoundarySummary {
     let mut thermal_source_count = 0usize;
     let mut volumetric_heat_source_w_per_m3 = 0.0_f64;
-    for load in &model.loads {
-        if let LoadKind::HeatSource {
-            volumetric_w_per_m3,
-        } = load.kind
-        {
-            thermal_source_count += 1;
-            volumetric_heat_source_w_per_m3 += volumetric_w_per_m3;
+    let excitations = realize_model_excitations(model).ok();
+    if let Some(excitations) = &excitations {
+        for load in excitations.iter() {
+            if let RealizedExcitationKind::HeatGeneration(value) = load.kind {
+                thermal_source_count += 1;
+                volumetric_heat_source_w_per_m3 += value.real;
+            }
         }
     }
 
@@ -1051,7 +1052,7 @@ fn thermal_source_boundary_summary(
             continue;
         };
         if let ThermalConstraintKind::Prescribed { value, .. } = &constraint.kind {
-            if let Some(temperature) = value.constant() {
+            if let Some(temperature) = value.study_constant(&model.signals) {
                 prescribed_temperature_count += 1;
                 prescribed_temperature_sum_k += temperature.kelvin;
             }
@@ -1060,7 +1061,7 @@ fn thermal_source_boundary_summary(
     for boundary in &model.boundaries {
         match &boundary.operator {
             BoundaryOperator::ThermalHeatFlux { value } => {
-                let Some(heat_flux) = value.constant() else {
+                let Some(heat_flux) = value.study_constant(&model.signals) else {
                     continue;
                 };
                 heat_flux_boundary_count += 1;
@@ -1070,7 +1071,8 @@ fn thermal_source_boundary_summary(
                 ambient_temperature,
                 coefficient,
             } => {
-                let Some(ambient_temperature) = ambient_temperature.constant() else {
+                let Some(ambient_temperature) = ambient_temperature.study_constant(&model.signals)
+                else {
                     continue;
                 };
                 convection_boundary_count += 1;
@@ -1110,7 +1112,8 @@ fn thermal_source_boundary_summary(
         prescribed_temperature_count,
         heat_flux_boundary_count,
         convection_boundary_count,
-        source_coverage_ratio: thermal_source_count as f64 / model.loads.len().max(1) as f64,
+        source_coverage_ratio: thermal_source_count as f64
+            / excitations.as_ref().map_or(1, |values| values.len().max(1)) as f64,
         boundary_coverage_ratio: thermal_boundary_count as f64
             / (model.constraints.len() + model.boundaries.len()).max(1) as f64,
         volumetric_heat_source_w_per_m3,

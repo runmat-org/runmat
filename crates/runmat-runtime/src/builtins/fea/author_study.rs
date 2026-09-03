@@ -2,7 +2,7 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_value::Value;
 
 use crate::analysis::{
-    analysis_author_study_op, AnalysisCreateModelProfile, AnalysisMeshSummary, AnalysisRunKind,
+    analysis_author_study_op, AnalysisMeshSummary, AnalysisModelTemplate, AnalysisRunKind,
     AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation,
 };
 use crate::operations::OperationContext;
@@ -33,7 +33,7 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
     let study_id = scalar_string(&args[0], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value_with_builtin(&args[1], AUTHOR_STUDY_NAME)?;
     let mesh_summary = mesh_summary_from_value(&args[2])?;
-    let mut profile = None::<AnalysisCreateModelProfile>;
+    let mut template = None::<AnalysisModelTemplate>;
     let mut run_kind = None::<AnalysisRunKind>;
     let mut backend = ComputeBackend::Cpu;
     let mut model_id = None::<String>;
@@ -48,9 +48,9 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
     for pair in args[3..].chunks(2) {
         let key = option_key(&pair[0], AUTHOR_STUDY_NAME)?;
         match key.as_str() {
-            "profile" => {
+            "template" => {
                 let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
-                profile = Some(parse_scalar_enum(&text, "Profile")?);
+                template = Some(parse_scalar_enum(&text, "Template")?);
             }
             "runkind" | "kind" => {
                 let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
@@ -108,23 +108,23 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             }
         }
     }
-    let profile = profile.ok_or_else(|| {
+    let template = template.ok_or_else(|| {
         builtin_error(
             AUTHOR_STUDY_NAME,
             &ERROR_INPUT,
-            "fea.authorStudy requires Profile; choose a physics profile from fea.capabilities().physicsProfiles",
+            "fea.authorStudy requires Template; choose a model template from fea.capabilities().modelTemplates",
         )
     })?;
-    let derived_run_kind = profile.derived_run_kind();
+    let derived_run_kind = template.derived_run_kind();
     let run_kind = match run_kind {
         Some(explicit_run_kind) if explicit_run_kind != derived_run_kind => {
             return Err(builtin_error(
                 AUTHOR_STUDY_NAME,
                 &ERROR_INPUT,
                 format!(
-                    "explicit solver {} does not match Profile {}; omit RunKind or choose a matching Profile",
+                    "explicit solver {} does not match Template {}; omit RunKind or choose a matching Template",
                     explicit_run_kind.as_snake_case(),
-                    profile.as_snake_case()
+                    template.as_snake_case()
                 ),
             ));
         }
@@ -138,7 +138,7 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             model_id,
             geometry,
             mesh_summary,
-            profile,
+            template,
             run_kind,
             backend,
             solver_mesh_artifact_path,
@@ -389,6 +389,35 @@ mod tests {
         .expect("diagram observation should convert")
     }
 
+    fn authored_force(model: &runmat_analysis_core::AnalysisModel) -> (&str, [f64; 3]) {
+        let action = model
+            .excitations
+            .first()
+            .expect("authored model should contain a force excitation")
+            .excitation();
+        let runmat_analysis_core::ExcitationTarget::Region(target) = &action.target else {
+            panic!("authored force should target a region")
+        };
+        let signal = model
+            .signals
+            .iter()
+            .find(|signal| signal.signal_id() == &action.signal_id)
+            .expect("authored force signal should resolve");
+        let runmat_analysis_core::PhysicalSignal::Force(signal) = signal else {
+            panic!("authored force should reference a force signal")
+        };
+        let runmat_analysis_core::SignalRepresentation::Constant(
+            runmat_analysis_core::SignalValue::Vector3(value),
+        ) = &signal.representation
+        else {
+            panic!("authored force should be a constant vector")
+        };
+        (
+            target.region_id.as_str(),
+            value.each_ref().map(|component| component.newtons),
+        )
+    }
+
     fn canonical_authoring_solver_mesh(dir: &std::path::Path) -> (String, Value) {
         use runmat_meshing_core::{
             CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind,
@@ -438,7 +467,7 @@ mod tests {
             Value::String("authored_static".to_string()),
             generic_authoring_geometry_value(),
             mesh_summary_value(),
-            Value::String("Profile".to_string()),
+            Value::String("Template".to_string()),
             Value::String("linear_static_structural".to_string()),
             Value::String("StructuralForceN".to_string()),
             Value::Tensor(
@@ -464,7 +493,7 @@ mod tests {
             model.constraints[0].target().expect("target").region_id,
             "root"
         );
-        assert_eq!(model.loads[0].region_id, "tip");
+        assert_eq!(authored_force(&model).0, "tip");
 
         let validation =
             block_on(fea_validate_builtin(study)).expect("authored study should validate");
@@ -485,7 +514,7 @@ mod tests {
             Value::String("authored_run_static".to_string()),
             generic_authoring_geometry_value(),
             summary,
-            Value::String("Profile".to_string()),
+            Value::String("Template".to_string()),
             Value::String("linear_static_structural".to_string()),
             Value::String("SolverMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
@@ -538,7 +567,7 @@ mod tests {
             Value::String("authored_diagram_static".to_string()),
             generic_authoring_geometry_value(),
             mesh_summary_value(),
-            Value::String("Profile".to_string()),
+            Value::String("Template".to_string()),
             Value::String("linear_static_structural".to_string()),
             Value::String("DiagramObservation".to_string()),
             diagram_observation_value(),
@@ -561,11 +590,7 @@ mod tests {
             model.constraints[0].target().expect("target").region_id,
             "tip"
         );
-        assert_eq!(model.loads[0].region_id, "root");
-        let runmat_analysis_core::LoadKind::Force { fx, fy, fz } = model.loads[0].kind else {
-            panic!("diagram-authored study should use a force load");
-        };
-        assert_eq!([fx, fy, fz], [12.0, -3.0, 4.0]);
+        assert_eq!(authored_force(&model), ("root", [12.0, -3.0, 4.0]));
     }
 
     #[test]
@@ -576,7 +601,7 @@ mod tests {
             Value::String("authored_minimal_static".to_string()),
             generic_authoring_geometry_value(),
             summary,
-            Value::String("Profile".to_string()),
+            Value::String("Template".to_string()),
             Value::String("linear_static_structural".to_string()),
             Value::String("SolverMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
@@ -602,11 +627,7 @@ mod tests {
             model.constraints[0].target().expect("target").region_id,
             "root"
         );
-        assert_eq!(model.loads[0].region_id, "tip");
-        let runmat_analysis_core::LoadKind::Force { fx, fy, fz } = model.loads[0].kind else {
-            panic!("minimal authored study should default to a force load");
-        };
-        assert_eq!([fx, fy, fz], [0.0, -1000.0, 0.0]);
+        assert_eq!(authored_force(model), ("tip", [0.0, -1000.0, 0.0]));
         assert_eq!(
             decoded_study.solver_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
@@ -634,15 +655,15 @@ mod tests {
     }
 
     #[test]
-    fn requires_profile() {
+    fn requires_template() {
         let err = create_author_study_object_from_args(vec![
-            Value::String("missing_profile".to_string()),
+            Value::String("missing_template".to_string()),
             generic_authoring_geometry_value(),
             mesh_summary_value(),
         ])
-        .expect_err("missing profile should fail");
+        .expect_err("missing template should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
-        assert!(err.message().contains("fea.authorStudy requires Profile"));
+        assert!(err.message().contains("fea.authorStudy requires Template"));
     }
 
     #[test]

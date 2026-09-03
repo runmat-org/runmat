@@ -14,10 +14,10 @@ use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure,
     AnalysisSequence, BeamElementModel, BeamSectionModel, CfdSolveFamily,
     ConductivityFrequencyPoint, CoordinateFrame, CoupledPhysicsFamily, ElectromagneticDomain,
-    EvidenceConfidence, FormulationImplementation, LoadCase, LoadKind, MaterialAssignment,
+    EvidenceConfidence, ExcitationAction, FormulationImplementation, MaterialAssignment,
     MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    PhysicsFamily, ProcedureStep, SolutionSpace, StructuralElement, StructuralElementKind,
-    StructuralModel, StructuralNode,
+    PhysicalSignal, PhysicsFamily, ProcedureStep, SignalRepresentation, SignalValue, SolutionSpace,
+    StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
@@ -138,7 +138,7 @@ fn sample_cfd_constraints(
             "bc_cfd_inlet",
             runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
                 target: runmat_analysis_core::RegionTarget::boundary("fluid_inlet"),
-                value: runmat_analysis_core::ValueSchedule::Constant(
+                value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::Velocity::new(inlet_velocity_m_per_s),
                 ),
             },
@@ -147,7 +147,7 @@ fn sample_cfd_constraints(
             "bc_cfd_outlet",
             runmat_analysis_core::FluidConstraintKind::PressureReference {
                 target: runmat_analysis_core::RegionTarget::boundary("fluid_outlet"),
-                value: runmat_analysis_core::ValueSchedule::Constant(
+                value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::Pressure::new(0.0),
                 ),
             },
@@ -172,7 +172,7 @@ fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn sample_model() -> AnalysisModel {
-    AnalysisModel {
+    let mut model = AnalysisModel {
         model_id: AnalysisModelId("beam_model".to_string()),
         geometry_id: "geo:beam".to_string(),
         geometry_revision: 1,
@@ -241,20 +241,24 @@ fn sample_model() -> AnalysisModel {
         excitation_cases: Vec::new(),
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
-        loads: vec![LoadCase {
-            load_id: "load_tip".to_string(),
-            region_id: "node:2".to_string(),
-            kind: LoadKind::Force {
-                fx: 0.0,
-                fy: -1000.0,
-                fz: 0.0,
-            },
-        }],
         sequence: AnalysisSequence::from_steps(
             "sample_sequence",
             vec![ProcedureStep::structural_static("step_static")],
         ),
-    }
+    };
+    append_constant_excitation(
+        &mut model,
+        "load_tip",
+        "node:2",
+        ConstantExcitation::Force([0.0, -1000.0, 0.0]),
+    );
+    let runmat_analysis_core::ExcitationTarget::Region(target) =
+        &mut model.excitations[0].excitation_mut().target
+    else {
+        panic!("expected region excitation target");
+    };
+    *target = runmat_analysis_core::RegionTarget::point("node:2");
+    model
 }
 
 fn sample_solid_model() -> AnalysisModel {
@@ -264,15 +268,15 @@ fn sample_solid_model() -> AnalysisModel {
     model.geometry_revision = 1;
     model.structural = None;
     model.constraints = vec![fixed_constraint("bc_root", "root")];
-    model.loads = vec![LoadCase {
-        load_id: "load_tip".to_string(),
-        region_id: "tip".to_string(),
-        kind: LoadKind::Force {
-            fx: 0.0,
-            fy: -1000.0,
-            fz: 0.0,
-        },
-    }];
+    model.signals.clear();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    append_constant_excitation(
+        &mut model,
+        "load_tip",
+        "tip",
+        ConstantExcitation::Force([0.0, -1000.0, 0.0]),
+    );
     model
 }
 
@@ -315,20 +319,107 @@ fn sample_cfd_domain(
         dynamic_viscosity_pa_s: 1.81e-5,
         inlet_velocity_m_per_s: 5.0,
         turbulence_intensity: 0.06,
-        time_profile: Vec::new(),
+        inlet_velocity_signal_id: None,
     }
 }
 
-fn sample_moment_load(load_id: &str) -> LoadCase {
-    LoadCase {
-        load_id: load_id.to_string(),
-        region_id: "tip".to_string(),
-        kind: LoadKind::Moment {
-            mx: 1.0,
-            my: 2.0,
-            mz: 3.0,
+fn replace_with_moment_excitation(model: &mut AnalysisModel, excitation_id: &str) {
+    use runmat_analysis_core::{
+        AnalysisExcitation, ExcitationCase, ExcitationCaseActivation, ExcitationCaseId,
+        ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget, Moment,
+        ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence, SignalId,
+        SignalPrecision, SignalProvenance, SignalShape,
+    };
+
+    let signal_id = SignalId(format!("{excitation_id}.signal"));
+    let case_id = ExcitationCaseId(format!("{excitation_id}.case"));
+    model.signals = vec![PhysicalSignal::Moment(Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Vector3,
+        frame: Some(CoordinateFrame::Global),
+        representation: SignalRepresentation::Constant(SignalValue::Vector3([
+            Moment::new(1.0),
+            Moment::new(2.0),
+            Moment::new(3.0),
+        ])),
+        precision: SignalPrecision::Real64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: None,
+            max_relative_error: None,
+            derivative_max_absolute_error: None,
+            sample_count: 1,
         },
-    }
+        provenance: SignalProvenance::Authored,
+    })];
+    model.excitations = vec![ExcitationAction::Moment(AnalysisExcitation {
+        excitation_id: ExcitationId(excitation_id.to_string()),
+        case_id: case_id.clone(),
+        target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
+        frame: CoordinateFrame::Global,
+        direction: None,
+        distribution: ExcitationDistribution::PreserveResultant,
+        kinematics: ExcitationKinematics::FixedFrame,
+        signal_id,
+        active_step_ids: Vec::new(),
+        combination_group: None,
+        projection: ProjectionRequirement {
+            preserve_resultant: true,
+            preserve_moment: true,
+            relative_tolerance: 1.0e-10,
+        },
+    })];
+    model.excitation_cases = vec![ExcitationCase {
+        case_id,
+        action_ids: vec![ExcitationId(excitation_id.to_string())],
+        activation: ExcitationCaseActivation::Always,
+    }];
+}
+
+fn excitation_id(action: &ExcitationAction) -> &str {
+    action.excitation().excitation_id.0.as_str()
+}
+
+fn excitation_region_id(action: &ExcitationAction) -> &str {
+    let runmat_analysis_core::ExcitationTarget::Region(target) = &action.excitation().target else {
+        panic!("expected a region excitation target");
+    };
+    target.region_id.as_str()
+}
+
+fn force_vector(model: &AnalysisModel, action: &ExcitationAction) -> Option<[f64; 3]> {
+    let ExcitationAction::Force(excitation) = action else {
+        return None;
+    };
+    let signal = model
+        .signals
+        .iter()
+        .find(|signal| signal.signal_id() == &excitation.signal_id)?;
+    let PhysicalSignal::Force(signal) = signal else {
+        return None;
+    };
+    let SignalRepresentation::Constant(SignalValue::Vector3(values)) = &signal.representation
+    else {
+        return None;
+    };
+    Some(values.each_ref().map(|value| value.newtons))
+}
+
+fn moment_vector(model: &AnalysisModel, action: &ExcitationAction) -> Option<[f64; 3]> {
+    let ExcitationAction::Moment(excitation) = action else {
+        return None;
+    };
+    let signal = model
+        .signals
+        .iter()
+        .find(|signal| signal.signal_id() == &excitation.signal_id)?;
+    let PhysicalSignal::Moment(signal) = signal else {
+        return None;
+    };
+    let SignalRepresentation::Constant(SignalValue::Vector3(values)) = &signal.representation
+    else {
+        return None;
+    };
+    Some(values.each_ref().map(|value| value.newton_meters))
 }
 
 fn sample_cht_model() -> AnalysisModel {
@@ -355,13 +446,13 @@ fn sample_cht_model() -> AnalysisModel {
                 region_id: "tip".to_string(),
                 temperature_delta_k: 70.0,
             }],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
+            sampled_time_profile: vec![
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
                     scale: 0.5,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
                     scale: 1.0,
                 },
             ],
@@ -380,6 +471,12 @@ fn sample_fsi_model() -> AnalysisModel {
             AnalysisProcedure::TransientResponse,
         )],
     );
+    let inlet_velocity_signal_id = append_velocity_history(
+        &mut model,
+        "fsi_inlet_velocity",
+        vec![0.0, 1.0],
+        vec![2.4, 4.0],
+    );
     model.cfd = Some(runmat_analysis_core::CfdDomain {
         enabled: true,
         solve_family: CfdSolveFamily::Transient,
@@ -387,21 +484,35 @@ fn sample_fsi_model() -> AnalysisModel {
         dynamic_viscosity_pa_s: 1.81e-5,
         inlet_velocity_m_per_s: 4.0,
         turbulence_intensity: 0.06,
-        time_profile: vec![
-            runmat_analysis_core::CfdTimeProfilePoint {
-                normalized_time: 0.0,
-                inlet_scale: 0.6,
-            },
-            runmat_analysis_core::CfdTimeProfilePoint {
-                normalized_time: 1.0,
-                inlet_scale: 1.0,
-            },
-        ],
+        inlet_velocity_signal_id: Some(inlet_velocity_signal_id),
     });
     model
 }
 
 fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanicalCouplingOptions) {
+    let temperature_signal_id = if coupling.sampled_time_profile.is_empty() {
+        None
+    } else {
+        let time_seconds = coupling
+            .sampled_time_profile
+            .iter()
+            .map(|point| point.normalized_coordinate)
+            .collect();
+        let kelvin = coupling
+            .sampled_time_profile
+            .iter()
+            .map(|point| {
+                coupling.reference_temperature_k
+                    + coupling.applied_temperature_delta_k * point.scale
+            })
+            .collect();
+        Some(append_temperature_history(
+            model,
+            "thermo_temperature_history",
+            time_seconds,
+            kelvin,
+        ))
+    };
     model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
         enabled: coupling.enabled,
         reference_temperature_k: coupling.reference_temperature_k,
@@ -430,14 +541,7 @@ fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanic
                 temperature_delta_k: delta.temperature_delta_k,
             })
             .collect(),
-        time_profile: coupling
-            .time_profile
-            .into_iter()
-            .map(|point| runmat_analysis_core::ThermoTimeProfilePoint {
-                normalized_time: point.normalized_time,
-                scale: point.scale,
-            })
-            .collect(),
+        temperature_signal_id,
     });
 }
 
@@ -452,6 +556,26 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroTherma
             conductivity_frequency_response: Vec::new(),
         });
     }
+    let electric_potential_signal_id = if coupling.sampled_time_profile.is_empty() {
+        None
+    } else {
+        let time_seconds = coupling
+            .sampled_time_profile
+            .iter()
+            .map(|point| point.normalized_coordinate)
+            .collect();
+        let volts = coupling
+            .sampled_time_profile
+            .iter()
+            .map(|point| coupling.applied_voltage_v * point.scale)
+            .collect();
+        Some(append_electric_potential_history(
+            model,
+            "electro_thermal_potential_history",
+            time_seconds,
+            volts,
+        ))
+    };
     model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
         enabled: coupling.enabled,
         reference_temperature_k: coupling.reference_temperature_k,
@@ -466,14 +590,7 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroTherma
                 },
             )
             .collect(),
-        time_profile: coupling
-            .time_profile
-            .into_iter()
-            .map(|point| runmat_analysis_core::ElectroTimeProfilePoint {
-                normalized_time: point.normalized_time,
-                current_scale: point.current_scale,
-            })
-            .collect(),
+        electric_potential_signal_id,
     });
 }
 
@@ -671,7 +788,7 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
         geometry: closed_cube_geometry_asset(),
         create_model_intent: AnalysisCreateModelIntentSpec {
             model_id: "study_model_linear_static_001".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            template: AnalysisModelTemplate::LinearStaticStructural,
         },
         model: None,
         run_kind: AnalysisRunKind::LinearStatic,
@@ -699,7 +816,7 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
         geometry: sample_geometry_asset(),
         create_model_intent: AnalysisCreateModelIntentSpec {
             model_id: "study_model_electromagnetic_001".to_string(),
-            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+            template: AnalysisModelTemplate::ElectromagneticStatic,
         },
         model: None,
         run_kind: AnalysisRunKind::Electromagnetic,
@@ -719,6 +836,14 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
         nonlinear_run_options: None,
         electromagnetic_run_options: None,
     }
+}
+
+fn fea_document_yaml(document: serde_json::Value) -> String {
+    serde_yaml::to_string(&document).expect("FEA document fixture should serialize")
+}
+
+fn static_sequence(sequence_id: &str, step_id: &str) -> AnalysisSequence {
+    AnalysisSequence::from_steps(sequence_id, vec![ProcedureStep::structural_static(step_id)])
 }
 
 #[test]
@@ -751,30 +876,27 @@ fn fea_document_resolves_study_geometry_and_run_options() {
     let _guard = analysis_test_guard();
     let tmp = tempfile::tempdir().expect("tempdir should be created");
     fs::write(tmp.path().join("part.stl"), TRIANGLE_STL).expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: bracket_static
-geometry:
-  path: part.stl
-  units: meter
-model:
-  profile: linear_static_structural
-run:
-  backend: cpu
-  options:
-    deterministic_mode: true
-    precision_mode: fp64
-    preconditioner_mode: jacobi
-    quality_policy: strict
-outputs:
-  - id: displacement_view
-    field: structural.displacement
-    location: nodes
-    kind: vector
-"#;
+    let run_options = AnalysisRunOptions {
+        deterministic_mode: true,
+        precision_mode: PrecisionMode::Fp64,
+        preconditioner_mode: PreconditionerMode::Jacobi,
+        quality_policy: QualityPolicy::Strict,
+        ..AnalysisRunOptions::default()
+    };
+    let input = fea_document_yaml(serde_json::json!({
+        "version": 1,
+        "kind": "study",
+        "id": "bracket_static",
+        "geometry": { "path": "part.stl", "units": "meter" },
+        "model": { "template": "linear_static_structural" },
+        "sequence": static_sequence("bracket.sequence", "static_step"),
+        "run": {
+            "backend": "cpu",
+            "solver": { "procedure": "linear_static", "options": run_options }
+        }
+    }));
 
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(&input, tmp.path()))
         .expect("FEA study document should resolve");
 
     let FeaResolvedDocument::Study(spec) = resolved else {
@@ -784,17 +906,13 @@ outputs:
     assert_eq!(spec.geometry.units, UnitSystem::Meter);
     assert!(spec.geometry.source.path.ends_with("part.stl"));
     assert_eq!(
-        spec.create_model_intent.profile,
-        AnalysisCreateModelProfile::LinearStaticStructural
+        spec.create_model_intent.template,
+        AnalysisModelTemplate::LinearStaticStructural
     );
     assert_eq!(spec.create_model_intent.model_id, "bracket_static_model");
     assert_eq!(spec.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(spec.backend, ComputeBackend::Cpu);
-    assert_eq!(spec.outputs.len(), 1);
-    assert_eq!(spec.outputs[0].id, "displacement_view");
-    assert_eq!(spec.outputs[0].field_id, "structural.displacement");
-    assert_eq!(spec.outputs[0].location.as_deref(), Some("nodes"));
-    assert_eq!(spec.outputs[0].kind.as_deref(), Some("vector"));
+    assert!(spec.outputs.is_empty());
     assert!(spec.model.is_none());
     let meshing_settings = spec
         .meshing_settings
@@ -815,29 +933,34 @@ outputs:
 }
 
 #[test]
-fn fea_document_rejects_legacy_run_kind_profile_mismatch() {
+fn fea_document_rejects_solver_sequence_mismatch() {
     let _guard = analysis_test_guard();
     let tmp = tempfile::tempdir().expect("tempdir should be created");
     fs::write(tmp.path().join("part.stl"), TRIANGLE_STL).expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: bracket_thermal
-geometry:
-  path: part.stl
-  units: meter
-model:
-  profile: thermal_standalone
-run:
-  kind: linear_static
-  backend: cpu
-"#;
+    let input = fea_document_yaml(serde_json::json!({
+        "version": 1,
+        "kind": "study",
+        "id": "bracket_thermal",
+        "geometry": { "path": "part.stl", "units": "meter" },
+        "model": { "template": "thermal_standalone" },
+        "sequence": AnalysisSequence::from_steps(
+            "thermal.sequence",
+            vec![ProcedureStep::thermal_static("thermal_step")],
+        ),
+        "run": {
+            "backend": "cpu",
+            "solver": {
+                "procedure": "linear_static",
+                "options": AnalysisRunOptions::default()
+            }
+        }
+    }));
 
-    let err = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
-        .expect_err("mismatched legacy run.kind should fail");
+    let err = pollster::block_on(parse_and_resolve_fea_document(&input, tmp.path()))
+        .expect_err("mismatched solver and sequence should fail");
 
-    assert!(err.contains("run.kind"));
-    assert!(err.contains("model.profile"));
+    assert!(err.contains("solver options"));
+    assert!(err.contains("sequence"));
 }
 
 #[test]
@@ -846,51 +969,60 @@ fn fea_document_resolves_explicit_model_and_sweep() {
     let tmp = tempfile::tempdir().expect("tempdir should be created");
     fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
         .expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: sweep
-id: bracket_sweep
-fail_fast: false
-studies:
-  - version: 1
-    id: bracket_static_a
-    geometry:
-      path: assembly.step
-      units: millimeter
-    model:
-      id: bracket_model
-      profile: linear_static_structural
-      defaults: none
-      frame: global
-    regions:
-      bracket:
-        selector: "name:Bracket_A"
-    materials:
-      aluminum:
-        name: Aluminum 6061
-        mechanical:
-          youngs_modulus_pa: 69000000000.0
-          poisson_ratio: 0.33
-    material_assignments:
-      - region: bracket
-        material: aluminum
-    boundary_conditions:
-      - id: fixed_bracket
-        region: bracket
-        kind: fixed
-    loads:
-      - id: pressure_load
-        region: bracket
-        type: pressure
-        magnitude_pa: 1200.0
-    steps:
-      - id: static_step
-        kind: static
-    run:
-      backend: cpu
-"#;
+    let mut authored = sample_solid_model();
+    authored.constraints = vec![fixed_constraint("fixed_bracket", "bracket")];
+    authored.signals.clear();
+    authored.excitations.clear();
+    authored.excitation_cases.clear();
+    append_constant_excitation(
+        &mut authored,
+        "pressure_load",
+        "bracket",
+        ConstantExcitation::AcousticPressure(1200.0),
+    );
+    let ExcitationAction::AcousticPressure(excitation) = authored.excitations.remove(0) else {
+        panic!("expected acoustic pressure fixture action");
+    };
+    authored
+        .excitations
+        .push(ExcitationAction::Pressure(excitation));
+    let input = fea_document_yaml(serde_json::json!({
+        "version": 1,
+        "kind": "sweep",
+        "id": "bracket_sweep",
+        "fail_fast": false,
+        "studies": [{
+            "version": 1,
+            "id": "bracket_static_a",
+            "geometry": { "path": "assembly.step", "units": "millimeter" },
+            "model": {
+                "id": "bracket_model",
+                "template": "linear_static_structural",
+                "defaults": "none",
+                "frame": "global"
+            },
+            "regions": { "bracket": { "selector": "name:Bracket_A" } },
+            "materials": {
+                "aluminum": {
+                    "name": "Aluminum 6061",
+                    "mechanical": {
+                        "youngs_modulus_pa": 69000000000.0,
+                        "poisson_ratio": 0.33,
+                        "density_kg_per_m3": 2700.0
+                    }
+                }
+            },
+            "material_assignments": [{ "region": "bracket", "material": "aluminum" }],
+            "constraints": authored.constraints,
+            "signals": authored.signals,
+            "excitation_cases": authored.excitation_cases,
+            "excitations": authored.excitations,
+            "sequence": static_sequence("bracket.sequence", "static_step"),
+            "run": { "backend": "cpu" }
+        }]
+    }));
 
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(&input, tmp.path()))
         .expect("FEA sweep document should resolve");
 
     let FeaResolvedDocument::Sweep(sweep) = resolved else {
@@ -910,70 +1042,69 @@ studies:
     assert_eq!(model.material_assignments.len(), 1);
     assert_eq!(model.material_assignments[0].region_id, "region_1");
     assert_eq!(model.constraints.len(), 1);
-    assert_eq!(model.loads.len(), 1);
+    assert_eq!(model.excitations.len(), 1);
+    assert_eq!(model.signals.len(), 1);
+    assert_eq!(model.excitation_cases.len(), 1);
     assert_eq!(model.sequence.steps.len(), 1);
 }
 
 #[test]
-fn fea_document_resolves_moment_loads() {
+fn fea_document_resolves_moment_excitations() {
     let _guard = analysis_test_guard();
     let tmp = tempfile::tempdir().expect("tempdir should be created");
     fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
         .expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: beam_static
-geometry:
-  path: assembly.step
-  units: meter
-model:
-  id: beam_model
-  profile: linear_static_structural
-  defaults: none
-regions:
-  tip:
-    selector: "name:Bracket_A"
-materials:
-  steel:
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.30
-material_assignments:
-  - region: tip
-    material: steel
-boundary_conditions:
-  - id: fixed_tip
-    region: tip
-    kind: fixed
-loads:
-  - id: tip_moment
-    region: tip
-    type: moment
-    vector: [10.0, 20.0, 30.0]
-steps:
-  - id: static_step
-    kind: static
-run:
-  backend: cpu
-"#;
+    let mut authored = sample_solid_model();
+    replace_with_moment_excitation(&mut authored, "tip_moment");
+    let PhysicalSignal::Moment(signal) = &mut authored.signals[0] else {
+        panic!("expected moment signal");
+    };
+    signal.representation = SignalRepresentation::Constant(SignalValue::Vector3([
+        runmat_analysis_core::Moment::new(10.0),
+        runmat_analysis_core::Moment::new(20.0),
+        runmat_analysis_core::Moment::new(30.0),
+    ]));
+    let input = fea_document_yaml(serde_json::json!({
+        "version": 1,
+        "kind": "study",
+        "id": "beam_static",
+        "geometry": { "path": "assembly.step", "units": "meter" },
+        "model": {
+            "id": "beam_model",
+            "template": "linear_static_structural",
+            "defaults": "none"
+        },
+        "regions": { "tip": { "selector": "name:Bracket_A" } },
+        "materials": {
+            "steel": {
+                "mechanical": {
+                    "youngs_modulus_pa": 200000000000.0,
+                    "poisson_ratio": 0.30,
+                    "density_kg_per_m3": 7850.0
+                }
+            }
+        },
+        "material_assignments": [{ "region": "tip", "material": "steel" }],
+        "constraints": [fixed_constraint("fixed_tip", "tip")],
+        "signals": authored.signals,
+        "excitation_cases": authored.excitation_cases,
+        "excitations": authored.excitations,
+        "sequence": static_sequence("beam.sequence", "static_step"),
+        "run": { "backend": "cpu" }
+    }));
 
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(&input, tmp.path()))
         .expect("FEA study document should resolve");
 
     let FeaResolvedDocument::Study(study) = resolved else {
         panic!("expected resolved study");
     };
     let model = study.model.as_ref().expect("explicit model should resolve");
-    assert_eq!(model.loads.len(), 1);
-    assert!(matches!(
-        model.loads[0].kind,
-        LoadKind::Moment {
-            mx: 10.0,
-            my: 20.0,
-            mz: 30.0
-        }
-    ));
+    assert_eq!(model.excitations.len(), 1);
+    assert_eq!(
+        moment_vector(model, &model.excitations[0]),
+        Some([10.0, 20.0, 30.0])
+    );
 }
 
 #[test]
@@ -982,48 +1113,61 @@ fn fea_document_resolves_prescribed_rotation_boundary_conditions() {
     let geometry_path = tmp.path().join("part.step");
     std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
 
-    let input = r#"
-version: 1
-kind: study
-id: rotation_bc_static
-geometry:
-  path: part.step
-  units: meter
-model:
-  id: rotation_bc_model
-  profile: linear_static_structural
-  defaults: none
-regions:
-  tip:
-    selector: "name:Bracket_A"
-materials:
-  steel:
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.30
-material_assignments:
-  - region: tip
-    material: steel
-boundary_conditions:
-  - id: tip_rotation
-    region: tip
-    type: prescribed_rotation
-    rx: 0.1
-    ry: 0.2
-    rz: 0.3
-loads:
-  - id: tip_force
-    region: tip
-    type: force
-    vector: [0.0, -1000.0, 0.0]
-steps:
-  - id: static_step
-    kind: static
-run:
-  backend: cpu
-"#;
+    let authored = sample_solid_model();
+    let rotation_constraint = runmat_analysis_core::AnalysisConstraint::Structural(
+        runmat_analysis_core::StructuralConstraint {
+            constraint_id: "tip_rotation".to_string(),
+            frame: CoordinateFrame::Global,
+            kind: runmat_analysis_core::StructuralConstraintKind::PrescribedRotations(
+                runmat_analysis_core::PrescribedRotations {
+                    target: runmat_analysis_core::RegionTarget::boundary("tip"),
+                    values: [
+                        (runmat_analysis_core::StructuralRotationDof::Rx, 0.1),
+                        (runmat_analysis_core::StructuralRotationDof::Ry, 0.2),
+                        (runmat_analysis_core::StructuralRotationDof::Rz, 0.3),
+                    ]
+                    .into_iter()
+                    .map(|(dof, radians)| runmat_analysis_core::RotationDofValue {
+                        dof,
+                        value: runmat_analysis_core::PrescribedValue::Constant(
+                            runmat_analysis_core::Rotation::new(radians),
+                        ),
+                    })
+                    .collect(),
+                },
+            ),
+        },
+    );
+    let input = fea_document_yaml(serde_json::json!({
+        "version": 1,
+        "kind": "study",
+        "id": "rotation_bc_static",
+        "geometry": { "path": "part.step", "units": "meter" },
+        "model": {
+            "id": "rotation_bc_model",
+            "template": "linear_static_structural",
+            "defaults": "none"
+        },
+        "regions": { "tip": { "selector": "name:Bracket_A" } },
+        "materials": {
+            "steel": {
+                "mechanical": {
+                    "youngs_modulus_pa": 200000000000.0,
+                    "poisson_ratio": 0.30,
+                    "density_kg_per_m3": 7850.0
+                }
+            }
+        },
+        "material_assignments": [{ "region": "tip", "material": "steel" }],
+        "constraints": [rotation_constraint],
+        "signals": authored.signals,
+        "excitation_cases": authored.excitation_cases,
+        "excitations": authored.excitations,
+        "sequence": static_sequence("rotation.sequence", "static_step"),
+        "run": { "backend": "cpu" }
+    }));
 
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(&input, tmp.path()))
         .expect("FEA study document should resolve");
 
     let FeaResolvedDocument::Study(study) = resolved else {
@@ -1043,7 +1187,13 @@ run:
         values
             .values
             .iter()
-            .map(|entry| entry.value.constant().expect("constant").radians)
+            .map(|entry| {
+                entry
+                    .value
+                    .study_constant(&model.signals)
+                    .expect("constant")
+                    .radians
+            })
             .collect::<Vec<_>>(),
         vec![0.1, 0.2, 0.3]
     );
@@ -1054,66 +1204,68 @@ fn fea_document_resolves_beam_structural_model_data() {
     let tmp = tempfile::tempdir().expect("tempdir should be created");
     std::fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
         .expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: beam_static
-geometry:
-  path: assembly.step
-  units: meter
-model:
-  id: beam_model
-  profile: linear_static_structural
-  defaults: none
-regions:
-  beam_span:
-    selector: "name:Bracket_A"
-materials:
-  steel:
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.30
-material_assignments:
-  - region: beam_span
-    material: steel
-nodes:
-  - id: 1
-    coordinates_m: [0.0, 0.0, 0.0]
-  - id: 2
-    coordinates_m: [1.0, 0.0, 0.0]
-elements:
-  - id: beam_1
-    region: beam_span
-    type: beam
-    nodes: [1, 2]
-    section: rect_20x10
-    reference_axis: [0.0, 0.0, 1.0]
-sections:
-  - id: rect_20x10
-    area_m2: 2.0e-4
-    iy_m4: 1.6e-9
-    iz_m4: 6.4e-9
-    torsion_j_m4: 2.4e-9
-    outer_fiber_y_m: 0.01
-    outer_fiber_z_m: 0.005
-    torsion_outer_radius_m: 0.011180339887498949
-boundary_conditions:
-  - id: fixed_root
-    region: beam_span
-    kind: fixed
-loads:
-  - id: tip_force
-    region: beam_span
-    type: force
-    vector: [0.0, -1000.0, 0.0]
-steps:
-  - id: static_step
-    kind: static
-run:
-  backend: cpu
-"#;
+    let mut authored = sample_model();
+    authored.constraints = vec![fixed_constraint("fixed_root", "beam_span")];
+    if let runmat_analysis_core::ExcitationTarget::Region(target) =
+        &mut authored.excitations[0].excitation_mut().target
+    {
+        *target = runmat_analysis_core::RegionTarget::boundary("beam_span");
+    }
+    let input = fea_document_yaml(serde_json::json!({
+        "version": 1,
+        "kind": "study",
+        "id": "beam_static",
+        "geometry": { "path": "assembly.step", "units": "meter" },
+        "model": {
+            "id": "beam_model",
+            "template": "linear_static_structural",
+            "defaults": "none"
+        },
+        "regions": { "beam_span": { "selector": "name:Bracket_A" } },
+        "materials": {
+            "steel": {
+                "mechanical": {
+                    "youngs_modulus_pa": 200000000000.0,
+                    "poisson_ratio": 0.30,
+                    "density_kg_per_m3": 7850.0
+                }
+            }
+        },
+        "material_assignments": [{ "region": "beam_span", "material": "steel" }],
+        "structural": {
+            "nodes": [
+                { "id": 1, "coordinates_m": [0.0, 0.0, 0.0] },
+                { "id": 2, "coordinates_m": [1.0, 0.0, 0.0] }
+            ],
+            "elements": [{
+                "id": "beam_1",
+                "region": "beam_span",
+                "type": "beam",
+                "nodes": [1, 2],
+                "section": "rect_20x10",
+                "reference_axis": [0.0, 0.0, 1.0]
+            }],
+            "sections": [{
+                "id": "rect_20x10",
+                "type": "beam",
+                "area_m2": 2.0e-4,
+                "iy_m4": 1.6e-9,
+                "iz_m4": 6.4e-9,
+                "torsion_j_m4": 2.4e-9,
+                "outer_fiber_y_m": 0.01,
+                "outer_fiber_z_m": 0.005,
+                "torsion_outer_radius_m": 0.011180339887498949
+            }]
+        },
+        "constraints": authored.constraints,
+        "signals": authored.signals,
+        "excitation_cases": authored.excitation_cases,
+        "excitations": authored.excitations,
+        "sequence": static_sequence("beam.sequence", "static_step"),
+        "run": { "backend": "cpu" }
+    }));
 
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(&input, tmp.path()))
         .expect("FEA study document should resolve");
 
     let FeaResolvedDocument::Study(study) = resolved else {
@@ -1148,66 +1300,74 @@ fn fea_document_resolves_shell_structural_model_data() {
     let tmp = tempfile::tempdir().expect("tempdir should be created");
     std::fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
         .expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: shell_static
-geometry:
-  path: assembly.step
-  units: meter
-model:
-  id: shell_model
-  profile: linear_static_structural
-  defaults: none
-regions:
-  shell_panel:
-    selector: "name:Bracket_A"
-materials:
-  steel:
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.30
-      density_kg_per_m3: 7850.0
-material_assignments:
-  - region: shell_panel
-    material: steel
-nodes:
-  - id: 1
-    coordinates_m: [0.0, 0.0, 0.0]
-  - id: 2
-    coordinates_m: [1.0, 0.0, 0.0]
-  - id: 3
-    coordinates_m: [0.0, 1.0, 0.0]
-elements:
-  - id: shell_1
-    region: shell_panel
-    type: shell
-    nodes: [1, 2, 3]
-    section: panel_2mm
-    reference_axis: [1.0, 0.0, 0.0]
-sections:
-  - id: panel_2mm
-    type: shell
-    thickness_m: 0.002
-    shear_correction: 0.8333333333333334
-    drilling_stiffness_scale: 0.0001
-boundary_conditions:
-  - id: fixed_edge
-    region: shell_panel
-    kind: fixed
-loads:
-  - id: edge_moment
-    region: shell_panel
-    type: moment
-    vector: [0.0, 5.0, 0.0]
-steps:
-  - id: static_step
-    kind: static
-run:
-  backend: cpu
-"#;
+    let mut authored = sample_solid_model();
+    authored.constraints = vec![fixed_constraint("fixed_edge", "shell_panel")];
+    replace_with_moment_excitation(&mut authored, "edge_moment");
+    if let runmat_analysis_core::ExcitationTarget::Region(target) =
+        &mut authored.excitations[0].excitation_mut().target
+    {
+        *target = runmat_analysis_core::RegionTarget::boundary("shell_panel");
+    }
+    let PhysicalSignal::Moment(signal) = &mut authored.signals[0] else {
+        panic!("expected moment signal");
+    };
+    signal.representation = SignalRepresentation::Constant(SignalValue::Vector3([
+        runmat_analysis_core::Moment::new(0.0),
+        runmat_analysis_core::Moment::new(5.0),
+        runmat_analysis_core::Moment::new(0.0),
+    ]));
+    let input = fea_document_yaml(serde_json::json!({
+        "version": 1,
+        "kind": "study",
+        "id": "shell_static",
+        "geometry": { "path": "assembly.step", "units": "meter" },
+        "model": {
+            "id": "shell_model",
+            "template": "linear_static_structural",
+            "defaults": "none"
+        },
+        "regions": { "shell_panel": { "selector": "name:Bracket_A" } },
+        "materials": {
+            "steel": {
+                "mechanical": {
+                    "youngs_modulus_pa": 200000000000.0,
+                    "poisson_ratio": 0.30,
+                    "density_kg_per_m3": 7850.0
+                }
+            }
+        },
+        "material_assignments": [{ "region": "shell_panel", "material": "steel" }],
+        "structural": {
+            "nodes": [
+                { "id": 1, "coordinates_m": [0.0, 0.0, 0.0] },
+                { "id": 2, "coordinates_m": [1.0, 0.0, 0.0] },
+                { "id": 3, "coordinates_m": [0.0, 1.0, 0.0] }
+            ],
+            "elements": [{
+                "id": "shell_1",
+                "region": "shell_panel",
+                "type": "shell",
+                "nodes": [1, 2, 3],
+                "section": "panel_2mm",
+                "reference_axis": [1.0, 0.0, 0.0]
+            }],
+            "sections": [{
+                "id": "panel_2mm",
+                "type": "shell",
+                "thickness_m": 0.002,
+                "shear_correction": 0.8333333333333334,
+                "drilling_stiffness_scale": 0.0001
+            }]
+        },
+        "constraints": authored.constraints,
+        "signals": authored.signals,
+        "excitation_cases": authored.excitation_cases,
+        "excitations": authored.excitations,
+        "sequence": static_sequence("shell.sequence", "static_step"),
+        "run": { "backend": "cpu" }
+    }));
 
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
+    let resolved = pollster::block_on(parse_and_resolve_fea_document(&input, tmp.path()))
         .expect("FEA shell study document should resolve");
 
     let FeaResolvedDocument::Study(study) = resolved else {
@@ -1245,7 +1405,7 @@ fn analysis_create_model_returns_v1_envelope() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "model_from_geo".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            template: AnalysisModelTemplate::LinearStaticStructural,
         },
         OperationContext::new(Some("trace-create-1".to_string()), None),
     )
@@ -1260,7 +1420,9 @@ fn analysis_create_model_returns_v1_envelope() {
     assert_eq!(envelope.data.frame, CoordinateFrame::Global);
     assert!(!envelope.data.materials.is_empty());
     assert!(!envelope.data.constraints.is_empty() || !envelope.data.boundaries.is_empty());
-    assert!(!envelope.data.loads.is_empty());
+    assert!(!envelope.data.excitations.is_empty());
+    assert!(!envelope.data.signals.is_empty());
+    assert!(!envelope.data.excitation_cases.is_empty());
     assert!(!envelope.data.sequence.steps.is_empty());
     assert_eq!(
         envelope.data.sequence.steps[0].procedure,
@@ -1336,7 +1498,7 @@ fn analysis_create_model_maps_invalid_intent_error() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "   ".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            template: AnalysisModelTemplate::LinearStaticStructural,
         },
         OperationContext::new(None, None),
     )
@@ -1348,18 +1510,18 @@ fn analysis_create_model_maps_invalid_intent_error() {
 }
 
 #[test]
-fn analysis_create_model_supports_nonlinear_profile_template() {
+fn analysis_create_model_supports_nonlinear_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "nonlinear_model".to_string(),
-            profile: AnalysisCreateModelProfile::NonlinearStructural,
+            template: AnalysisModelTemplate::NonlinearStructural,
         },
         OperationContext::new(None, None),
     )
-    .expect("nonlinear profile should be supported");
+    .expect("nonlinear template should be supported");
 
     assert_eq!(envelope.data.model_id.0, "nonlinear_model");
     assert_eq!(
@@ -1367,24 +1529,24 @@ fn analysis_create_model_supports_nonlinear_profile_template() {
         AnalysisProcedure::Nonlinear
     );
     assert_eq!(
-        envelope.data.loads[0].load_id,
-        "load_default_nonlinear_force"
+        excitation_id(&envelope.data.excitations[0]),
+        "excitation_default_nonlinear_force"
     );
 }
 
 #[test]
-fn analysis_create_model_supports_transient_profile_template() {
+fn analysis_create_model_supports_transient_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "transient_model".to_string(),
-            profile: AnalysisCreateModelProfile::TransientStructural,
+            template: AnalysisModelTemplate::TransientStructural,
         },
         OperationContext::new(None, None),
     )
-    .expect("transient profile should be supported");
+    .expect("transient template should be supported");
 
     assert_eq!(envelope.data.model_id.0, "transient_model");
     assert_eq!(
@@ -1392,24 +1554,24 @@ fn analysis_create_model_supports_transient_profile_template() {
         AnalysisProcedure::TransientResponse
     );
     assert_eq!(
-        envelope.data.loads[0].load_id,
-        "load_default_transient_force"
+        excitation_id(&envelope.data.excitations[0]),
+        "excitation_default_transient_force"
     );
 }
 
 #[test]
-fn analysis_create_model_supports_modal_profile_template() {
+fn analysis_create_model_supports_modal_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
+            template: AnalysisModelTemplate::ModalStructural,
         },
         OperationContext::new(None, None),
     )
-    .expect("modal profile should be supported");
+    .expect("modal template should be supported");
 
     assert_eq!(envelope.data.model_id.0, "modal_model");
     assert_eq!(
@@ -1420,22 +1582,23 @@ fn analysis_create_model_supports_modal_profile_template() {
         envelope.data.sequence.steps[0].family,
         PhysicsFamily::Structural
     );
-    assert_eq!(envelope.data.loads[0].load_id, "load_default_modal_seed");
+    assert!(envelope.data.excitations.is_empty());
+    assert!(envelope.data.excitation_cases.is_empty());
 }
 
 #[test]
-fn analysis_create_model_supports_acoustic_harmonic_profile_template() {
+fn analysis_create_model_supports_acoustic_harmonic_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_harmonic_model".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            template: AnalysisModelTemplate::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
-    .expect("acoustic harmonic profile should be supported");
+    .expect("acoustic harmonic template should be supported");
 
     assert_eq!(envelope.data.model_id.0, "acoustic_harmonic_model");
     assert_eq!(
@@ -1447,24 +1610,24 @@ fn analysis_create_model_supports_acoustic_harmonic_profile_template() {
         PhysicsFamily::Acoustic
     );
     assert_eq!(
-        envelope.data.loads[0].load_id,
-        "load_default_acoustic_harmonic_seed"
+        excitation_id(&envelope.data.excitations[0]),
+        "excitation_default_acoustic_pressure"
     );
 }
 
 #[test]
-fn analysis_create_model_supports_electromagnetic_profile_template() {
+fn analysis_create_model_supports_electromagnetic_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
-            model_id: "electromagnetic_profile_model".to_string(),
-            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+            model_id: "electromagnetic_template_model".to_string(),
+            template: AnalysisModelTemplate::ElectromagneticStatic,
         },
-        OperationContext::new(Some("trace-create-em-profile".to_string()), None),
+        OperationContext::new(Some("trace-create-em-template".to_string()), None),
     )
-    .expect("electromagnetic profile model creation should succeed");
+    .expect("electromagnetic template model creation should succeed");
 
     assert_eq!(
         envelope.data.sequence.steps[0].family,
@@ -1481,21 +1644,21 @@ fn analysis_create_model_supports_electromagnetic_profile_template() {
 }
 
 #[test]
-fn analysis_create_model_supports_electro_thermal_profile_template() {
+fn analysis_create_model_supports_electro_thermal_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
-            model_id: "electro_thermal_profile_model".to_string(),
-            profile: AnalysisCreateModelProfile::ElectroThermalCoupled,
+            model_id: "electro_thermal_template_model".to_string(),
+            template: AnalysisModelTemplate::ElectroThermalCoupled,
         },
         OperationContext::new(
-            Some("trace-create-electro-thermal-profile".to_string()),
+            Some("trace-create-electro-thermal-template".to_string()),
             None,
         ),
     )
-    .expect("electro-thermal profile model creation should succeed");
+    .expect("electro-thermal template model creation should succeed");
 
     assert_eq!(
         envelope.data.sequence.steps[0].procedure,
@@ -1505,8 +1668,8 @@ fn analysis_create_model_supports_electro_thermal_profile_template() {
         matches!(&envelope.data.constraints[0], runmat_analysis_core::AnalysisConstraint::Magnetic(value) if matches!(value.kind, runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround { .. }))
     );
     assert_eq!(
-        envelope.data.loads[0].load_id,
-        "load_default_electro_thermal_current"
+        excitation_id(&envelope.data.excitations[0]),
+        "excitation_default_electro_thermal_current"
     );
     let domain = envelope
         .data
@@ -1516,7 +1679,10 @@ fn analysis_create_model_supports_electro_thermal_profile_template() {
     assert!(domain.enabled);
     assert_eq!(domain.reference_temperature_k, 293.15);
     assert_eq!(domain.applied_voltage_v, 24.0);
-    assert_eq!(domain.time_profile.len(), 2);
+    assert_eq!(
+        electric_potential_scales(&envelope.data, domain),
+        vec![0.5, 1.0]
+    );
     assert!(envelope
         .data
         .materials
@@ -1525,18 +1691,18 @@ fn analysis_create_model_supports_electro_thermal_profile_template() {
 }
 
 #[test]
-fn analysis_create_model_supports_cfd_steady_profile_template() {
+fn analysis_create_model_supports_cfd_steady_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "cfd_steady_model".to_string(),
-            profile: AnalysisCreateModelProfile::CfdSteadyState,
+            template: AnalysisModelTemplate::CfdSteadyState,
         },
         OperationContext::new(None, None),
     )
-    .expect("cfd steady profile should be supported");
+    .expect("cfd steady template should be supported");
 
     assert_eq!(envelope.data.sequence.steps[0].family, PhysicsFamily::Fluid);
     let cfd = envelope
@@ -1545,22 +1711,22 @@ fn analysis_create_model_supports_cfd_steady_profile_template() {
         .as_ref()
         .expect("cfd domain should be populated");
     assert_eq!(cfd.solve_family, CfdSolveFamily::SteadyState);
-    assert!(cfd.time_profile.is_empty());
+    assert!(cfd.inlet_velocity_signal_id.is_none());
 }
 
 #[test]
-fn analysis_create_model_supports_cfd_transient_profile_template() {
+fn analysis_create_model_supports_cfd_transient_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "cfd_transient_model".to_string(),
-            profile: AnalysisCreateModelProfile::CfdTransient,
+            template: AnalysisModelTemplate::CfdTransient,
         },
         OperationContext::new(None, None),
     )
-    .expect("cfd transient profile should be supported");
+    .expect("cfd transient template should be supported");
 
     assert_eq!(envelope.data.sequence.steps[0].family, PhysicsFamily::Fluid);
     let cfd = envelope
@@ -1569,24 +1735,22 @@ fn analysis_create_model_supports_cfd_transient_profile_template() {
         .as_ref()
         .expect("cfd domain should be populated");
     assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
-    assert_eq!(cfd.time_profile.len(), 2);
-    assert_eq!(cfd.time_profile[0].normalized_time, 0.0);
-    assert_eq!(cfd.time_profile[1].normalized_time, 1.0);
+    assert_eq!(cfd_velocity_scales(&envelope.data, cfd), vec![0.5, 1.0]);
 }
 
 #[test]
-fn analysis_create_model_supports_cht_coupled_profile_template() {
+fn analysis_create_model_supports_cht_coupled_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "cht_coupled_model".to_string(),
-            profile: AnalysisCreateModelProfile::ChtCoupled,
+            template: AnalysisModelTemplate::ChtCoupled,
         },
         OperationContext::new(None, None),
     )
-    .expect("cht coupled profile should be supported");
+    .expect("cht coupled template should be supported");
 
     assert_eq!(envelope.data.sequence.steps.len(), 1);
     assert_eq!(
@@ -1601,9 +1765,9 @@ fn analysis_create_model_supports_cht_coupled_profile_template() {
         .data
         .cfd
         .as_ref()
-        .expect("cfd domain should be populated for cht profile");
+        .expect("cfd domain should be populated for cht template");
     assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
-    assert_eq!(cfd.time_profile.len(), 2);
+    assert_eq!(cfd_velocity_scales(&envelope.data, cfd), vec![0.5, 1.0]);
     assert!(
         envelope
             .data
@@ -1615,18 +1779,18 @@ fn analysis_create_model_supports_cht_coupled_profile_template() {
 }
 
 #[test]
-fn analysis_create_model_supports_fsi_coupled_profile_template() {
+fn analysis_create_model_supports_fsi_coupled_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "fsi_coupled_model".to_string(),
-            profile: AnalysisCreateModelProfile::FsiCoupled,
+            template: AnalysisModelTemplate::FsiCoupled,
         },
         OperationContext::new(None, None),
     )
-    .expect("fsi coupled profile should be supported");
+    .expect("fsi coupled template should be supported");
 
     assert_eq!(envelope.data.sequence.steps.len(), 1);
     assert_eq!(
@@ -1637,14 +1801,17 @@ fn analysis_create_model_supports_fsi_coupled_profile_template() {
         envelope.data.sequence.steps[0].procedure,
         AnalysisProcedure::TransientResponse
     );
-    assert_eq!(envelope.data.loads[0].load_id, "load_default_fsi_seed");
+    assert_eq!(
+        excitation_id(&envelope.data.excitations[0]),
+        "excitation_default_fsi_force"
+    );
     let cfd = envelope
         .data
         .cfd
         .as_ref()
-        .expect("cfd domain should be populated for fsi profile");
+        .expect("cfd domain should be populated for fsi template");
     assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
-    assert_eq!(cfd.time_profile.len(), 2);
+    assert_eq!(cfd_velocity_scales(&envelope.data, cfd), vec![0.5, 1.0]);
     assert!(envelope.data.thermo_mechanical.is_none());
 }
 
@@ -1701,7 +1868,7 @@ fn analysis_validate_study_rejects_unused_electromagnetic_options() {
         .any(|code| code == "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH"));
     assert!(envelope.data.issues.iter().any(|issue| {
         issue.code == "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH"
-            && issue.message.contains("solver selected by model.profile")
+            && issue.message.contains("solver selected by model.template")
     }));
 }
 
@@ -1924,8 +2091,8 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(envelope.data.study_id, spec.study_id);
     assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
     assert_eq!(
-        envelope.data.model_profile,
-        AnalysisCreateModelProfile::LinearStaticStructural
+        envelope.data.model_template,
+        AnalysisModelTemplate::LinearStaticStructural
     );
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
@@ -1993,7 +2160,7 @@ fn analysis_run_study_executes_linear_static_path() {
     )
     .expect("parse run evidence artifact");
     assert_eq!(
-        run_evidence_payload["model_profile"].as_str(),
+        run_evidence_payload["model_template"].as_str(),
         Some("linear_static_structural")
     );
     drop(env_guard);
@@ -2057,7 +2224,7 @@ fn analysis_author_study_uses_physical_mesh_regions() {
             model_id: None,
             geometry: closed_cube_geometry_asset(),
             mesh_summary: summary,
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            template: AnalysisModelTemplate::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
@@ -2082,14 +2249,10 @@ fn analysis_author_study_uses_physical_mesh_regions() {
         model.constraints[0].target().expect("target").region_id,
         "root"
     );
-    assert_eq!(model.loads[0].region_id, "tip");
+    assert_eq!(excitation_region_id(&model.excitations[0]), "tip");
     assert_eq!(
-        model.loads[0].kind,
-        LoadKind::Force {
-            fx: 25.0,
-            fy: -50.0,
-            fz: 0.0
-        }
+        force_vector(model, &model.excitations[0]),
+        Some([25.0, -50.0, 0.0])
     );
     assert_eq!(
         authored.data.evidence.selected_physical_region_id,
@@ -2144,7 +2307,7 @@ fn analysis_author_study_uses_physical_mesh_regions() {
 }
 
 #[test]
-fn analysis_author_study_preserves_non_structural_profile_defaults() {
+fn analysis_author_study_preserves_non_structural_template_defaults() {
     let _guard = analysis_test_guard();
     let root = temp_artifact_root("author-study-electromagnetic");
     let _ = fs::remove_dir_all(&root);
@@ -2158,7 +2321,7 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
             model_id: None,
             geometry: closed_cube_geometry_asset(),
             mesh_summary: summary,
-            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+            template: AnalysisModelTemplate::ElectromagneticStatic,
             run_kind: AnalysisRunKind::Electromagnetic,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
@@ -2171,7 +2334,7 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
         },
         OperationContext::new(Some("trace-author-em".to_string()), None),
     )
-    .expect("authoring should support non-structural physics profiles");
+    .expect("authoring should support non-structural model templates");
 
     let study = &authored.data.study;
     assert_eq!(study.run_kind, AnalysisRunKind::Electromagnetic);
@@ -2187,8 +2350,11 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
     assert!(
         matches!(&model.constraints[0], runmat_analysis_core::AnalysisConstraint::Magnetic(value) if matches!(value.kind, runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround { .. }))
     );
-    assert_eq!(model.loads[0].region_id, "coil");
-    assert!(matches!(model.loads[0].kind, LoadKind::CoilCurrent { .. }));
+    assert_eq!(excitation_region_id(&model.excitations[0]), "solid");
+    assert!(matches!(
+        model.excitations[0],
+        ExcitationAction::ElectricCurrent(_)
+    ));
     assert_eq!(
         model.sequence.steps[0].family,
         PhysicsFamily::Electromagnetic
@@ -2199,7 +2365,7 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
             .evidence
             .selected_driving_condition_region_id
             .as_deref(),
-        Some("coil")
+        Some("solid")
     );
     assert_eq!(
         authored
@@ -2207,7 +2373,7 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
             .evidence
             .selected_driving_condition_kind
             .as_deref(),
-        Some("coil_current")
+        Some("electric_current")
     );
     assert_eq!(authored.data.evidence.selected_structural_force_n, None);
 
@@ -2219,7 +2385,7 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
 }
 
 #[test]
-fn analysis_author_study_records_modal_driver_without_structural_force_evidence() {
+fn analysis_author_study_does_not_invent_a_modal_excitation() {
     let _guard = analysis_test_guard();
     let root = temp_artifact_root("author-study-modal-generic-driver");
     let _ = fs::remove_dir_all(&root);
@@ -2233,7 +2399,7 @@ fn analysis_author_study_records_modal_driver_without_structural_force_evidence(
             model_id: None,
             geometry: closed_cube_geometry_asset(),
             mesh_summary: summary,
-            profile: AnalysisCreateModelProfile::ModalStructural,
+            template: AnalysisModelTemplate::ModalStructural,
             run_kind: AnalysisRunKind::Modal,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
@@ -2246,7 +2412,7 @@ fn analysis_author_study_records_modal_driver_without_structural_force_evidence(
         },
         OperationContext::new(Some("trace-author-modal".to_string()), None),
     )
-    .expect("modal authoring should preserve generic driving-condition evidence");
+    .expect("modal authoring should not require an excitation");
 
     let model = authored
         .data
@@ -2258,8 +2424,7 @@ fn analysis_author_study_records_modal_driver_without_structural_force_evidence(
         model.constraints[0].target().expect("target").region_id,
         "root"
     );
-    assert_eq!(model.loads[0].region_id, "tip");
-    assert!(matches!(model.loads[0].kind, LoadKind::BodyForce { .. }));
+    assert!(model.excitations.is_empty());
     assert_eq!(
         authored
             .data
@@ -2269,21 +2434,10 @@ fn analysis_author_study_records_modal_driver_without_structural_force_evidence(
         Some("root")
     );
     assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_driving_condition_region_id
-            .as_deref(),
-        Some("tip")
+        authored.data.evidence.selected_driving_condition_region_id,
+        None
     );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_driving_condition_kind
-            .as_deref(),
-        Some("body_force")
-    );
+    assert_eq!(authored.data.evidence.selected_driving_condition_kind, None);
     assert_eq!(authored.data.evidence.selected_structural_force_n, None);
 
     let validation =
@@ -2309,7 +2463,7 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
             model_id: None,
             geometry: closed_cube_geometry_asset(),
             mesh_summary: summary,
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            template: AnalysisModelTemplate::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
@@ -2346,14 +2500,10 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
         model.constraints[0].target().expect("target").region_id,
         "tip"
     );
-    assert_eq!(model.loads[0].region_id, "root");
+    assert_eq!(excitation_region_id(&model.excitations[0]), "root");
     assert_eq!(
-        model.loads[0].kind,
-        LoadKind::Force {
-            fx: 12.0,
-            fy: -3.0,
-            fz: 4.0
-        }
+        force_vector(model, &model.excitations[0]),
+        Some([12.0, -3.0, 4.0])
     );
     assert_eq!(authored.data.evidence.physical_region_source, "diagram");
     assert_eq!(
@@ -2417,7 +2567,7 @@ fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
             model_id: None,
             geometry: closed_cube_geometry_asset(),
             mesh_summary: summary,
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            template: AnalysisModelTemplate::LinearStaticStructural,
             run_kind: AnalysisRunKind::LinearStatic,
             backend: ComputeBackend::Cpu,
             solver_mesh_artifact_path: None,
@@ -2741,7 +2891,7 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "model_from_step_like".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            template: AnalysisModelTemplate::LinearStaticStructural,
         },
         OperationContext::new(None, None),
     )
@@ -2765,7 +2915,10 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
             .region_id,
         "region_root"
     );
-    assert_eq!(envelope.data.loads[0].region_id, "region_tip");
+    assert_eq!(
+        excitation_region_id(&envelope.data.excitations[0]),
+        "region_tip"
+    );
 }
 
 #[test]
@@ -2798,22 +2951,26 @@ fn analysis_validate_maps_typed_error_code() {
 }
 
 #[test]
-fn analysis_validate_maps_invalid_moment_error_code() {
+fn analysis_validate_maps_invalid_moment_signal_error_code() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.loads[0].kind = LoadKind::Moment {
-        mx: f64::INFINITY,
-        my: 0.0,
-        mz: 1.0,
+    replace_with_moment_excitation(&mut model, "load_tip");
+    let PhysicalSignal::Moment(signal) = &mut model.signals[0] else {
+        panic!("expected moment signal");
     };
+    signal.representation = SignalRepresentation::Constant(SignalValue::Vector3([
+        runmat_analysis_core::Moment::new(f64::INFINITY),
+        runmat_analysis_core::Moment::new(0.0),
+        runmat_analysis_core::Moment::new(1.0),
+    ]));
     let context = OperationContext::new(None, None);
     let error = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
         .expect_err("validation should fail");
 
-    assert_eq!(error.error_code, "RM.FEA.VALIDATE.INVALID_MOMENT");
+    assert_eq!(error.error_code, "RM.FEA.VALIDATE.INVALID_SIGNAL");
     assert_eq!(
-        error.context.get("load_id").map(String::as_str),
-        Some("load_tip")
+        error.context.get("signal_id").map(String::as_str),
+        Some("load_tip.signal")
     );
 }
 
@@ -2882,7 +3039,7 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -3935,7 +4092,7 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_trend_model".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            template: AnalysisModelTemplate::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -4124,7 +4281,7 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
     set_model_electro_coupling(
@@ -4136,7 +4293,7 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
             base_electrical_conductivity_s_per_m: 3.5e7,
             resistive_heating_coefficient: 4.0e-4,
             region_conductivity_scales: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -4237,7 +4394,7 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
             base_electrical_conductivity_s_per_m: 3.5e7,
             resistive_heating_coefficient: 4.0e-4,
             region_conductivity_scales: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -4277,7 +4434,7 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_conductivity_scale() {
                 region_id: "tip".to_string(),
                 conductivity_scale: 0.0,
             }],
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -4317,7 +4474,7 @@ fn analysis_run_transient_rejects_unmapped_electro_thermal_region() {
                 region_id: "not_a_model_region".to_string(),
                 conductivity_scale: 1.0,
             }],
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -4355,7 +4512,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
     set_model_electro_coupling(
@@ -4367,7 +4524,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
             base_electrical_conductivity_s_per_m: 2.6e7,
             resistive_heating_coefficient: 6.0e-4,
             region_conductivity_scales: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -4597,7 +4754,12 @@ fn persistent_face(source_topology_id: &str) -> PersistentEntityId {
 fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
     let mut model = sample_model();
     model.constraints[0].visit_targets_mut(|target| target.region_id = "face_000001".to_owned());
-    model.loads[0].region_id = "face_000002".to_owned();
+    let runmat_analysis_core::ExcitationTarget::Region(target) =
+        &mut model.excitations[0].excitation_mut().target
+    else {
+        panic!("expected region excitation target");
+    };
+    target.region_id = "face_000002".to_owned();
     let aliases = BTreeMap::from([
         ("face_000001".to_owned(), persistent_face("exact-face-a")),
         ("face_000002".to_owned(), persistent_face("exact-face-b")),
@@ -4609,7 +4771,7 @@ fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
         model.constraints[0].target().expect("target").region_id,
         "exact-face-a"
     );
-    assert_eq!(model.loads[0].region_id, "exact-face-b");
+    assert_eq!(excitation_region_id(&model.excitations[0]), "exact-face-b");
 }
 
 #[test]
@@ -4781,7 +4943,7 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         &sample_geometry_asset(),
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_op_version_model".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            template: AnalysisModelTemplate::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -4806,13 +4968,13 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
+            sampled_time_profile: vec![
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
                     scale: 0.0,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
                     scale: 1.0,
                 },
             ],
@@ -5101,7 +5263,9 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
     model.structural = beam_model.structural;
     model.constraints = beam_model.constraints;
     model.boundaries = beam_model.boundaries;
-    model.loads = beam_model.loads;
+    model.signals = beam_model.signals;
+    model.excitations = beam_model.excitations;
+    model.excitation_cases = beam_model.excitation_cases;
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -5344,21 +5508,21 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_model_missing_source".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            template: AnalysisModelTemplate::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
     .expect("acoustic model should be created")
     .data;
-    acoustic_model.loads = vec![LoadCase {
-        load_id: "load_structural_force_not_acoustic_source".to_string(),
-        region_id: "region_default".to_string(),
-        kind: LoadKind::Force {
-            fx: 1.0,
-            fy: 0.0,
-            fz: 0.0,
-        },
-    }];
+    acoustic_model.signals.clear();
+    acoustic_model.excitations.clear();
+    acoustic_model.excitation_cases.clear();
+    append_constant_excitation(
+        &mut acoustic_model,
+        "load_structural_force_not_acoustic_source",
+        "region_default",
+        ConstantExcitation::Force([1.0, 0.0, 0.0]),
+    );
 
     let err = analysis_run_acoustic_op(
         &acoustic_model,
@@ -5374,27 +5538,27 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
 }
 
 #[test]
-fn analysis_run_acoustic_rejects_moment_loads() {
+fn analysis_run_acoustic_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let mut acoustic_model = analysis_create_model_op(
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_model_with_moment".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            template: AnalysisModelTemplate::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
     .expect("acoustic model should be created")
     .data;
-    acoustic_model.loads = vec![sample_moment_load("acoustic_moment")];
+    replace_with_moment_excitation(&mut acoustic_model, "acoustic_moment");
 
     let err = analysis_run_acoustic_op(
         &acoustic_model,
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect_err("acoustic run should reject structural moment loads");
+    .expect_err("acoustic run should reject structural moment excitations");
 
     assert_eq!(
         err.error_code,
@@ -5410,7 +5574,7 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_boundary() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_model_missing_boundary".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            template: AnalysisModelTemplate::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -5503,19 +5667,19 @@ fn analysis_run_cfd_rejects_disabled_cfd_domain() {
 }
 
 #[test]
-fn analysis_run_cfd_rejects_moment_loads() {
+fn analysis_run_cfd_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
-    model.loads = vec![sample_moment_load("cfd_moment")];
+    replace_with_moment_excitation(&mut model, "cfd_moment");
 
     let err = analysis_run_cfd_op(
         &model,
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect_err("cfd run should reject structural moment loads");
+    .expect_err("cfd run should reject structural moment excitations");
 
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
@@ -5567,13 +5731,15 @@ fn analysis_run_thermal_rejects_invalid_heat_source_values() {
     model.sequence.steps = vec![ProcedureStep::thermal_static(
         "thermal_invalid_source".to_string(),
     )];
-    model.loads = vec![LoadCase {
-        load_id: "load_invalid_heat_source".to_string(),
-        region_id: "thermal_core".to_string(),
-        kind: LoadKind::HeatSource {
-            volumetric_w_per_m3: f64::INFINITY,
-        },
-    }];
+    model.signals.clear();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    append_constant_excitation(
+        &mut model,
+        "load_invalid_heat_source",
+        "thermal_core",
+        ConstantExcitation::HeatGeneration(f64::INFINITY),
+    );
 
     let err = analysis_run_thermal_op(
         &model,
@@ -5582,22 +5748,22 @@ fn analysis_run_thermal_rejects_invalid_heat_source_values() {
     )
     .expect_err("thermal run should reject non-finite heat source values");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE");
+    assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_OPTIONS");
 }
 
 #[test]
-fn analysis_run_thermal_rejects_moment_loads() {
+fn analysis_run_thermal_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::thermal_static("thermal_moment".to_string())];
-    model.loads = vec![sample_moment_load("thermal_moment")];
+    replace_with_moment_excitation(&mut model, "thermal_moment");
 
     let err = analysis_run_thermal_op(
         &model,
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect_err("thermal run should reject structural moment loads");
+    .expect_err("thermal run should reject structural moment excitations");
 
     assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE");
 }
@@ -5614,7 +5780,7 @@ fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
         boundary_id: "bc_invalid_convection".to_string(),
         target: runmat_analysis_core::RegionTarget::boundary("thermal_open_wall"),
         operator: runmat_analysis_core::BoundaryOperator::ThermalConvection {
-            ambient_temperature: runmat_analysis_core::ValueSchedule::Constant(
+            ambient_temperature: runmat_analysis_core::PrescribedValue::Constant(
                 runmat_analysis_core::Temperature::new(293.15),
             ),
             coefficient: runmat_analysis_core::HeatTransferCoefficient::new(f64::NAN),
@@ -5649,7 +5815,7 @@ fn analysis_run_cht_rejects_uncoupled_thermal_step() {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
     let err = analysis_run_cht_op(
@@ -5704,17 +5870,17 @@ fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
 }
 
 #[test]
-fn analysis_run_cht_rejects_moment_loads() {
+fn analysis_run_cht_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let mut model = sample_cht_model();
-    model.loads = vec![sample_moment_load("cht_moment")];
+    replace_with_moment_excitation(&mut model, "cht_moment");
 
     let err = analysis_run_cht_op(
         &model,
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect_err("cht run should reject structural moment loads");
+    .expect_err("cht run should reject structural moment excitations");
 
     assert_eq!(err.operation, "fea.run_cht");
     assert_eq!(err.op_version, "fea.run_cht/v1");
@@ -5834,17 +6000,17 @@ fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
 }
 
 #[test]
-fn analysis_run_fsi_rejects_moment_loads() {
+fn analysis_run_fsi_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let mut model = sample_fsi_model();
-    model.loads = vec![sample_moment_load("fsi_moment")];
+    replace_with_moment_excitation(&mut model, "fsi_moment");
 
     let err = analysis_run_fsi_op(
         &model,
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect_err("fsi run should reject structural moment loads");
+    .expect_err("fsi run should reject structural moment excitations");
 
     assert_eq!(err.operation, "fea.run_fsi");
     assert_eq!(err.op_version, "fea.run_fsi/v1");
@@ -5953,15 +6119,19 @@ fn configure_valid_em_authoring(model: &mut AnalysisModel) {
     });
     model.constraints = vec![magnetic_ground("em_ground", "em_region")];
     model.boundaries = vec![magnetic_insulation("em_insulation", "em_region")];
-    model.loads = vec![LoadCase {
-        load_id: "em_source".to_string(),
-        region_id: "em_region".to_string(),
-        kind: LoadKind::CoilCurrent {
-            current_a: 120.0,
-            phase_rad: 0.0,
-            amplitude_scale: 1.0,
+    model.signals.clear();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    append_constant_excitation(
+        model,
+        "em_source",
+        "em_region",
+        ConstantExcitation::ElectricCurrent {
+            real_amperes: 120.0,
+            imaginary_amperes: 0.0,
+            frequency_hz: None,
         },
-    }];
+    );
 }
 
 #[test]
@@ -5990,15 +6160,15 @@ fn analysis_run_electromagnetic_rejects_missing_current_source() {
     let mut model = sample_model();
     model.sequence.steps[0] = ProcedureStep::electromagnetic_static("electromagnetic_test");
     configure_valid_em_authoring(&mut model);
-    model.loads = vec![LoadCase {
-        load_id: "structural_force".to_string(),
-        region_id: "em_region".to_string(),
-        kind: LoadKind::Force {
-            fx: 1.0,
-            fy: 0.0,
-            fz: 0.0,
-        },
-    }];
+    model.signals.clear();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    append_constant_excitation(
+        &mut model,
+        "structural_force",
+        "em_region",
+        ConstantExcitation::Force([1.0, 0.0, 0.0]),
+    );
 
     let err = analysis_run_electromagnetic_op(
         &model,
@@ -6013,18 +6183,18 @@ fn analysis_run_electromagnetic_rejects_missing_current_source() {
 }
 
 #[test]
-fn analysis_run_electromagnetic_rejects_moment_loads() {
+fn analysis_run_electromagnetic_rejects_moment_excitations() {
     let mut model = sample_model();
     model.sequence.steps[0] = ProcedureStep::electromagnetic_static("electromagnetic_test");
     configure_valid_em_authoring(&mut model);
-    model.loads = vec![sample_moment_load("em_moment")];
+    replace_with_moment_excitation(&mut model, "em_moment");
 
     let err = analysis_run_electromagnetic_op(
         &model,
         ComputeBackend::Cpu,
         OperationContext::new(Some("trace-em-run-moment-load".to_string()), None),
     )
-    .expect_err("electromagnetic run should reject structural moment loads");
+    .expect_err("electromagnetic run should reject structural moment excitations");
     assert_eq!(
         err.error_code,
         "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_SOURCE"
@@ -6448,13 +6618,13 @@ fn analysis_run_thermal_returns_temperature_payload() {
                 region_id: "tip".to_string(),
                 temperature_delta_k: 70.0,
             }],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
+            sampled_time_profile: vec![
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
                     scale: 0.5,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
                     scale: 1.0,
                 },
             ],
@@ -6574,7 +6744,7 @@ fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
         &sample_geometry_asset(),
         AnalysisCreateModelIntentSpec {
             model_id: "thermal_execution_provenance".to_string(),
-            profile: AnalysisCreateModelProfile::ThermalStandalone,
+            template: AnalysisModelTemplate::ThermalStandalone,
         },
         OperationContext::new(None, None),
     )
@@ -6644,13 +6814,13 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
                     temperature_delta_k: 60.0,
                 },
             ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
+            sampled_time_profile: vec![
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
                     scale: 0.3,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
                     scale: 1.0,
                 },
             ],
@@ -6974,7 +7144,7 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -7056,7 +7226,7 @@ fn nonlinear_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -7637,7 +7807,7 @@ fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
             constraint_id: "bc_cfd_inlet_only".to_string(),
             kind: runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
                 target: runmat_analysis_core::RegionTarget::boundary("fluid_inlet"),
-                value: runmat_analysis_core::ValueSchedule::Constant(
+                value: runmat_analysis_core::PrescribedValue::Constant(
                     runmat_analysis_core::Velocity::new(4.25),
                 ),
             },
@@ -8106,13 +8276,13 @@ fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
                 region_id: "tip".to_string(),
                 temperature_delta_k: 70.0,
             }],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.8,
+            sampled_time_profile: vec![
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 0.8,
                     scale: 1.0,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.5,
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 0.5,
                     scale: 0.9,
                 },
             ],
@@ -8125,7 +8295,7 @@ fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
         AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
-    .expect_err("non-monotonic thermo time profile should be rejected");
+    .expect_err("non-monotonic thermo time template should be rejected");
 
     assert_eq!(err.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_OPTIONS");
 }
@@ -8152,7 +8322,7 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
                 expected_region_ids: vec!["missing_region".to_string()],
             }),
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -8250,9 +8420,9 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
         "region_temperature_deltas": [
             {"region_id": "beam_span", "temperature_delta_k": 72.0}
         ],
-        "time_profile": [
-            {"normalized_time": 0.0, "scale": 0.5},
-            {"normalized_time": 1.0, "scale": 1.0}
+        "sampled_time_profile": [
+            {"normalized_coordinate": 0.0, "scale": 0.5},
+            {"normalized_coordinate": 1.0, "scale": 1.0}
         ]
     });
     let artifact_hash = thermo_field_payload_hash(
@@ -8279,7 +8449,7 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
             field_artifact_id: Some("field_ok".to_string()),
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
     let run = analysis_run_transient_with_options_op(
@@ -8325,7 +8495,7 @@ fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
             field_artifact_id: Some("missing".to_string()),
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -8368,9 +8538,9 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
         "region_temperature_deltas": [
             {"region_id": "beam_span", "temperature_delta_k": 90.0}
         ],
-        "time_profile": [
-            {"normalized_time": 0.0, "scale": 0.4},
-            {"normalized_time": 1.0, "scale": 1.0}
+        "sampled_time_profile": [
+            {"normalized_coordinate": 0.0, "scale": 0.4},
+            {"normalized_coordinate": 1.0, "scale": 1.0}
         ]
     });
     let inline_hash = thermo_field_payload_hash(
@@ -8403,13 +8573,13 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
                 region_id: "beam_span".to_string(),
                 temperature_delta_k: 90.0,
             }],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
+            sampled_time_profile: vec![
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
                     scale: 0.4,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
+                runmat_analysis_fea::SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
                     scale: 1.0,
                 },
             ],
@@ -8434,7 +8604,7 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
             field_artifact_id: Some("inline_equivalent".to_string()),
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
     let artifact_backed = analysis_run_transient_with_options_op(
@@ -8494,7 +8664,7 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -8578,7 +8748,7 @@ fn transient_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -8697,7 +8867,7 @@ fn analysis_run_modal_returns_native_modal_result() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_run".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
+            template: AnalysisModelTemplate::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -8792,7 +8962,7 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "acoustic_model_run".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            template: AnalysisModelTemplate::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
@@ -8916,7 +9086,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_run_opts".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
+            template: AnalysisModelTemplate::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -8955,7 +9125,7 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
+            template: AnalysisModelTemplate::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -9007,7 +9177,7 @@ fn analysis_results_query_can_exclude_modal_payload() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results_filter".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
+            template: AnalysisModelTemplate::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -9049,7 +9219,7 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
         &geometry,
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results_index".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
+            template: AnalysisModelTemplate::ModalStructural,
         },
         OperationContext::new(None, None),
     )

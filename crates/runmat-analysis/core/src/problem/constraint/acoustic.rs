@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{visit_pair, visit_pair_ref, PairedConstraint};
-use crate::problem::{quantity::Pressure, schedule::ValueSchedule, target::RegionTarget};
+use crate::problem::{prescribed_value::PrescribedValue, quantity::Pressure, target::RegionTarget};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -15,7 +15,7 @@ pub struct AcousticConstraint {
 pub enum AcousticConstraintKind {
     PrescribedPressure {
         target: RegionTarget,
-        value: ValueSchedule<Pressure>,
+        value: PrescribedValue<Pressure>,
     },
     Periodic(PairedConstraint),
 }

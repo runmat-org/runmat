@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
+    prescribed_value::PrescribedValue,
     quantity::{
         HeatFlux, HeatTransferCoefficient, Pressure, SpecificAcousticImpedance, Temperature,
         Velocity,
     },
-    schedule::ValueSchedule,
     target::RegionTarget,
 };
 
@@ -21,13 +21,13 @@ pub struct AnalysisBoundary {
 #[serde(rename_all = "snake_case")]
 pub enum BoundaryOperator {
     StructuralPressure {
-        value: ValueSchedule<Pressure>,
+        value: PrescribedValue<Pressure>,
     },
     ThermalHeatFlux {
-        value: ValueSchedule<HeatFlux>,
+        value: PrescribedValue<HeatFlux>,
     },
     ThermalConvection {
-        ambient_temperature: ValueSchedule<Temperature>,
+        ambient_temperature: PrescribedValue<Temperature>,
         coefficient: HeatTransferCoefficient,
     },
     MagneticInsulation,
@@ -37,10 +37,10 @@ pub enum BoundaryOperator {
         impedance: SpecificAcousticImpedance,
     },
     FluidInletVelocity {
-        value: ValueSchedule<Velocity>,
+        value: PrescribedValue<Velocity>,
     },
     FluidOutletPressure {
-        value: ValueSchedule<Pressure>,
+        value: PrescribedValue<Pressure>,
     },
     FluidNoSlipWall,
     FluidSlipWall,

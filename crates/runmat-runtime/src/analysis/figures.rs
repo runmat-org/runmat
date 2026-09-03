@@ -1,7 +1,8 @@
 use glam::{Vec3, Vec4};
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, AnalysisRunIdentity,
-    CoupledPhysicsFamily, LoadKind, PhysicsFamily,
+    CoupledPhysicsFamily, ExcitationAction, PhysicsFamily, PrescribedValue, Pressure,
+    SignalRepresentation, SignalValue,
 };
 use runmat_analysis_fea::contracts::{
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
@@ -465,19 +466,6 @@ struct AuthoredBoundaryRegion {
 
 fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegion> {
     let mut regions = Vec::<AuthoredBoundaryRegion>::new();
-    for load in &model.loads {
-        if !load_kind_requires_boundary_region(&load.kind) {
-            continue;
-        }
-        push_authored_boundary_region(
-            &mut regions,
-            &load.region_id,
-            "load",
-            Vec4::new(0.98, 0.30, 0.54, 1.0),
-            load_vector_for_kind(&load.kind),
-            pressure_sign_for_kind(&load.kind),
-        );
-    }
     for action in &model.excitations {
         let runmat_analysis_core::ExcitationTarget::Region(target) = &action.excitation().target
         else {
@@ -491,10 +479,8 @@ fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegio
             &target.region_id,
             "excitation",
             Vec4::new(0.98, 0.30, 0.54, 1.0),
-            action.excitation().direction.map(|direction| {
-                Vec3::from_array(direction.vector.map(|component| component as f32))
-            }),
-            None,
+            excitation_vector(model, action),
+            excitation_pressure_sign(model, action),
         );
     }
     for constraint in &model.constraints {
@@ -530,11 +516,19 @@ fn push_authored_boundary_region(
     load_vector: Option<Vec3>,
     pressure_sign: Option<f32>,
 ) {
-    if region_id.trim().is_empty()
-        || regions
-            .iter()
-            .any(|existing| existing.region_id == region_id && existing.role == role)
+    if region_id.trim().is_empty() {
+        return;
+    }
+    if let Some(existing) = regions
+        .iter_mut()
+        .find(|existing| existing.region_id == region_id && existing.role == role)
     {
+        if existing.load_vector.is_none() {
+            existing.load_vector = load_vector;
+        }
+        if existing.pressure_sign.is_none() {
+            existing.pressure_sign = pressure_sign;
+        }
         return;
     }
     regions.push(AuthoredBoundaryRegion {
@@ -546,54 +540,111 @@ fn push_authored_boundary_region(
     });
 }
 
-fn load_kind_requires_boundary_region(kind: &LoadKind) -> bool {
-    matches!(
-        kind,
-        LoadKind::Force { .. }
-            | LoadKind::Moment { .. }
-            | LoadKind::Wrench { .. }
-            | LoadKind::Pressure { .. }
-    )
-}
-
-fn load_vector_for_kind(kind: &LoadKind) -> Option<Vec3> {
-    let vector = match kind {
-        LoadKind::Force { fx, fy, fz } => {
-            Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
+fn excitation_vector(model: &AnalysisModel, action: &ExcitationAction) -> Option<Vec3> {
+    let signal = model
+        .signals
+        .iter()
+        .find(|signal| signal.signal_id() == &action.excitation().signal_id)?;
+    let components = match (action, signal) {
+        (ExcitationAction::Force(_), runmat_analysis_core::PhysicalSignal::Force(signal)) => {
+            constant_vector(&signal.representation, |value| value.newtons)
         }
-        LoadKind::Moment { mx, my, mz } => {
-            Vec3::new(f64_to_f32(*mx)?, f64_to_f32(*my)?, f64_to_f32(*mz)?)
+        (ExcitationAction::Moment(_), runmat_analysis_core::PhysicalSignal::Moment(signal)) => {
+            constant_vector(&signal.representation, |value| value.newton_meters)
         }
-        LoadKind::Wrench { fx, fy, fz, .. } => {
-            Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
+        (ExcitationAction::Traction(_), runmat_analysis_core::PhysicalSignal::Traction(signal)) => {
+            constant_vector(&signal.representation, |value| value.pascals)
         }
-        _ => return None,
+        (
+            ExcitationAction::BodyForce(_),
+            runmat_analysis_core::PhysicalSignal::BodyForceDensity(signal),
+        ) => constant_vector(&signal.representation, |value| {
+            value.newtons_per_cubic_meter
+        }),
+        _ => None,
     };
-    if vector.length_squared().is_finite() && vector.length_squared() > f32::EPSILON {
-        Some(vector.normalize())
-    } else if let LoadKind::Wrench { mx, my, mz, .. } = kind {
-        let moment = Vec3::new(f64_to_f32(*mx)?, f64_to_f32(*my)?, f64_to_f32(*mz)?);
-        if moment.length_squared().is_finite() && moment.length_squared() > f32::EPSILON {
-            Some(moment.normalize())
+    let direction_applies = matches!(
+        action,
+        ExcitationAction::Force(_)
+            | ExcitationAction::Moment(_)
+            | ExcitationAction::Traction(_)
+            | ExcitationAction::BodyForce(_)
+    );
+    let vector = components.or_else(|| {
+        if direction_applies {
+            action.excitation().direction.map(|direction| {
+                direction
+                    .vector
+                    .map(|component| component * constant_scalar_sign(signal).unwrap_or(1.0))
+            })
         } else {
             None
         }
+    })?;
+    normalized_vec3(vector)
+}
+
+fn constant_vector<Q>(
+    representation: &SignalRepresentation<Q>,
+    component: impl Fn(&Q) -> f64,
+) -> Option<[f64; 3]> {
+    let SignalRepresentation::Constant(SignalValue::Vector3(values)) = representation else {
+        return None;
+    };
+    Some([
+        component(&values[0]),
+        component(&values[1]),
+        component(&values[2]),
+    ])
+}
+
+fn constant_scalar_sign(signal: &runmat_analysis_core::PhysicalSignal) -> Option<f64> {
+    macro_rules! scalar_sign {
+        ($signal:expr, $field:ident) => {{
+            let SignalRepresentation::Constant(SignalValue::Scalar(value)) =
+                &$signal.representation
+            else {
+                return None;
+            };
+            Some(value.$field.signum())
+        }};
+    }
+    match signal {
+        runmat_analysis_core::PhysicalSignal::Force(signal) => scalar_sign!(signal, newtons),
+        runmat_analysis_core::PhysicalSignal::Moment(signal) => {
+            scalar_sign!(signal, newton_meters)
+        }
+        runmat_analysis_core::PhysicalSignal::Traction(signal) => scalar_sign!(signal, pascals),
+        runmat_analysis_core::PhysicalSignal::BodyForceDensity(signal) => {
+            scalar_sign!(signal, newtons_per_cubic_meter)
+        }
+        _ => None,
+    }
+}
+
+fn normalized_vec3(values: [f64; 3]) -> Option<Vec3> {
+    let vector = Vec3::new(
+        f64_to_f32(values[0])?,
+        f64_to_f32(values[1])?,
+        f64_to_f32(values[2])?,
+    );
+    if vector.length_squared().is_finite() && vector.length_squared() > f32::EPSILON {
+        Some(vector.normalize())
     } else {
         None
     }
 }
 
-fn pressure_sign_for_kind(kind: &LoadKind) -> Option<f32> {
-    match kind {
-        LoadKind::Pressure { magnitude_pa } => {
-            let magnitude = f64_to_f32(*magnitude_pa)?;
-            if magnitude.is_finite() && magnitude.abs() > f32::EPSILON {
-                Some(-magnitude.signum())
-            } else {
-                None
-            }
-        }
-        _ => None,
+fn excitation_pressure_sign(model: &AnalysisModel, action: &ExcitationAction) -> Option<f32> {
+    if !matches!(action, ExcitationAction::Pressure(_)) {
+        return None;
+    }
+    let prescribed = PrescribedValue::<Pressure>::Signal(action.excitation().signal_id.clone());
+    let magnitude = f64_to_f32(prescribed.study_constant(&model.signals)?.pascals)?;
+    if magnitude.abs() > f32::EPSILON {
+        Some(-magnitude.signum())
+    } else {
+        None
     }
 }
 
@@ -2254,8 +2305,12 @@ fn run_identity_label(identity: &AnalysisRunIdentity) -> String {
 mod tests {
     use super::*;
     use runmat_analysis_core::{
-        AnalysisConstraint, AnalysisModelId, AnalysisSequence, CoordinateFrame, LoadCase,
-        ProcedureStep, RegionTarget, StructuralConstraint, StructuralConstraintKind,
+        AnalysisConstraint, AnalysisExcitation, AnalysisModelId, AnalysisSequence,
+        BodyForceDensity, CoordinateFrame, ExcitationCase, ExcitationCaseActivation,
+        ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics,
+        ExcitationTarget, Force, Moment, PhysicalSignal, ProcedureStep, ProjectionRequirement,
+        RegionTarget, Signal, SignalApproximationEvidence, SignalId, SignalPrecision,
+        SignalProvenance, SignalShape, StructuralConstraint, StructuralConstraintKind,
     };
 
     fn simple_run_result(
@@ -2373,31 +2428,41 @@ mod tests {
             })],
             boundaries: Vec::new(),
             connectors: Vec::new(),
-            signals: Vec::new(),
-            excitations: Vec::new(),
-            excitation_cases: Vec::new(),
+            signals: vec![
+                PhysicalSignal::Force(test_vector_signal(
+                    "force_load.signal",
+                    [Force::new(0.0), Force::new(0.0), Force::new(-1.0)],
+                )),
+                PhysicalSignal::BodyForceDensity(test_vector_signal(
+                    "body_force.signal",
+                    [
+                        BodyForceDensity::new(0.0),
+                        BodyForceDensity::new(0.0),
+                        BodyForceDensity::new(-9.81),
+                    ],
+                )),
+            ],
+            excitations: vec![
+                test_action(
+                    "force_load",
+                    "loaded",
+                    "force_load.signal",
+                    ExcitationDistribution::PreserveResultant,
+                    ExcitationAction::Force,
+                    None,
+                ),
+                test_action(
+                    "body_force",
+                    "volume_only",
+                    "body_force.signal",
+                    ExcitationDistribution::IntensityPerVolume,
+                    ExcitationAction::BodyForce,
+                    None,
+                ),
+            ],
+            excitation_cases: vec![test_case("force_load"), test_case("body_force")],
             initial_conditions: Vec::new(),
             response_spectra: Vec::new(),
-            loads: vec![
-                LoadCase {
-                    load_id: "force_load".to_string(),
-                    region_id: "loaded".to_string(),
-                    kind: LoadKind::Force {
-                        fx: 0.0,
-                        fy: 0.0,
-                        fz: -1.0,
-                    },
-                },
-                LoadCase {
-                    load_id: "body_force".to_string(),
-                    region_id: "volume_only".to_string(),
-                    kind: LoadKind::BodyForce {
-                        gx: 0.0,
-                        gy: 0.0,
-                        gz: -9.81,
-                    },
-                },
-            ],
             sequence: AnalysisSequence::from_steps(
                 "figure_sequence",
                 vec![ProcedureStep::structural_static("static_step")],
@@ -2408,48 +2473,170 @@ mod tests {
     fn simple_pressure_region_model() -> AnalysisModel {
         let mut model = simple_boundary_region_model();
         model.constraints.clear();
-        model.loads = vec![LoadCase {
-            load_id: "pressure_load".to_string(),
-            region_id: "pressurized".to_string(),
-            kind: LoadKind::Pressure { magnitude_pa: 5.0 },
-        }];
+        replace_test_excitation(
+            &mut model,
+            PhysicalSignal::Pressure(test_scalar_signal(
+                "pressure_load.signal",
+                Pressure::new(5.0),
+            )),
+            test_action(
+                "pressure_load",
+                "pressurized",
+                "pressure_load.signal",
+                ExcitationDistribution::IntensityPerArea,
+                ExcitationAction::Pressure,
+                None,
+            ),
+        );
         model
     }
 
     fn simple_moment_region_model() -> AnalysisModel {
         let mut model = simple_boundary_region_model();
         model.constraints.clear();
-        model.loads = vec![LoadCase {
-            load_id: "axis_load".to_string(),
-            region_id: "axis_region".to_string(),
-            kind: LoadKind::Moment {
-                mx: 0.0,
-                my: 2.0,
-                mz: 0.0,
-            },
-        }];
+        replace_test_excitation(
+            &mut model,
+            PhysicalSignal::Moment(test_vector_signal(
+                "axis_load.signal",
+                [Moment::new(0.0), Moment::new(2.0), Moment::new(0.0)],
+            )),
+            test_action(
+                "axis_load",
+                "axis_region",
+                "axis_load.signal",
+                ExcitationDistribution::PreserveResultant,
+                ExcitationAction::Moment,
+                None,
+            ),
+        );
         model
     }
 
     fn simple_wrench_moment_region_model() -> AnalysisModel {
         let mut model = simple_boundary_region_model();
         model.constraints.clear();
-        model.loads = vec![LoadCase {
-            load_id: "wrench_axis_load".to_string(),
-            region_id: "wrench_axis_region".to_string(),
-            kind: LoadKind::Wrench {
-                fx: 0.0,
-                fy: 0.0,
-                fz: 0.0,
-                mx: 0.0,
-                my: 0.0,
-                mz: 4.0,
-                px: 0.0,
-                py: 0.0,
-                pz: 0.0,
-            },
+        model.signals.clear();
+        model.excitations.clear();
+        model.excitation_cases.clear();
+        model.signals.push(PhysicalSignal::Force(test_vector_signal(
+            "wrench_force.signal",
+            [Force::new(0.0), Force::new(0.0), Force::new(0.0)],
+        )));
+        model
+            .signals
+            .push(PhysicalSignal::Moment(test_vector_signal(
+                "wrench_moment.signal",
+                [Moment::new(0.0), Moment::new(0.0), Moment::new(4.0)],
+            )));
+        let mut wrench_force = test_action(
+            "wrench_force",
+            "wrench_axis_region",
+            "wrench_force.signal",
+            ExcitationDistribution::PreserveResultant,
+            ExcitationAction::Force,
+            Some("wrench"),
+        );
+        wrench_force.excitation_mut().case_id = ExcitationCaseId("wrench.case".to_string());
+        let mut wrench_moment = test_action(
+            "wrench_moment",
+            "wrench_axis_region",
+            "wrench_moment.signal",
+            ExcitationDistribution::PreserveResultant,
+            ExcitationAction::Moment,
+            Some("wrench"),
+        );
+        wrench_moment.excitation_mut().case_id = ExcitationCaseId("wrench.case".to_string());
+        model.excitations.extend([wrench_force, wrench_moment]);
+        model.excitation_cases = vec![ExcitationCase {
+            case_id: ExcitationCaseId("wrench.case".to_string()),
+            action_ids: vec![
+                ExcitationId("wrench_force".to_string()),
+                ExcitationId("wrench_moment".to_string()),
+            ],
+            activation: ExcitationCaseActivation::Always,
         }];
         model
+    }
+
+    fn replace_test_excitation(
+        model: &mut AnalysisModel,
+        signal: PhysicalSignal,
+        action: ExcitationAction,
+    ) {
+        let id = action.excitation().excitation_id.0.clone();
+        model.signals = vec![signal];
+        model.excitations = vec![action];
+        model.excitation_cases = vec![test_case(&id)];
+    }
+
+    fn test_action(
+        id: &str,
+        region_id: &str,
+        signal_id: &str,
+        distribution: ExcitationDistribution,
+        wrap: fn(AnalysisExcitation) -> ExcitationAction,
+        combination_group: Option<&str>,
+    ) -> ExcitationAction {
+        let mut action = wrap(AnalysisExcitation {
+            excitation_id: ExcitationId(id.to_string()),
+            case_id: ExcitationCaseId(format!("{id}.case")),
+            target: ExcitationTarget::Region(
+                if matches!(distribution, ExcitationDistribution::IntensityPerVolume) {
+                    RegionTarget::volume(region_id)
+                } else {
+                    RegionTarget::boundary(region_id)
+                },
+            ),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId(signal_id.to_string()),
+            active_step_ids: Vec::new(),
+            combination_group: combination_group.map(str::to_string),
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: false,
+                relative_tolerance: 1.0e-10,
+            },
+        });
+        if matches!(action, ExcitationAction::Moment(_)) {
+            action.excitation_mut().projection.preserve_moment = true;
+        }
+        action
+    }
+
+    fn test_case(id: &str) -> ExcitationCase {
+        ExcitationCase {
+            case_id: ExcitationCaseId(format!("{id}.case")),
+            action_ids: vec![ExcitationId(id.to_string())],
+            activation: ExcitationCaseActivation::Always,
+        }
+    }
+
+    fn test_vector_signal<Q>(id: &str, values: [Q; 3]) -> Signal<Q> {
+        test_signal(id, SignalShape::Vector3, SignalValue::Vector3(values))
+    }
+
+    fn test_scalar_signal<Q>(id: &str, value: Q) -> Signal<Q> {
+        test_signal(id, SignalShape::Scalar, SignalValue::Scalar(value))
+    }
+
+    fn test_signal<Q>(id: &str, shape: SignalShape, value: SignalValue<Q>) -> Signal<Q> {
+        Signal {
+            signal_id: SignalId(id.to_string()),
+            shape,
+            frame: Some(CoordinateFrame::Global),
+            representation: SignalRepresentation::Constant(value),
+            precision: SignalPrecision::Real64,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: None,
+                max_relative_error: None,
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+            provenance: SignalProvenance::Authored,
+        }
     }
 
     fn simple_render_topology() -> AnalysisRenderTopology {

@@ -2,31 +2,25 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use runmat_analysis_core::{
-    AnalysisBoundary, AnalysisConstraint, AnalysisInterface, AnalysisModel, AnalysisModelId,
-    AnalysisSequence, BeamElementModel, BeamSectionModel, BoundaryOperator, CfdDomain,
-    CoordinateFrame, Displacement, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence,
-    FluidConstraint, FluidConstraintKind, HeatFlux, HeatTransferCoefficient, LoadCase, LoadKind,
-    MagneticConstraint, MagneticConstraintKind, MaterialAcousticModel, MaterialAssignment,
-    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
-    MaterialThermalModel, PrescribedRotations, PrescribedTranslations, Pressure, ProcedureStep,
-    RegionTarget, Rotation, RotationDofValue, ShellElementModel, ShellSectionModel,
-    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind, StructuralElement,
-    StructuralElementKind, StructuralModel, StructuralNode, StructuralRotationDof,
-    StructuralTranslationDof, Temperature, ThermalConstraint, ThermalConstraintKind,
-    ThermoMechanicalDomain, TranslationDofValue, ValueSchedule, Velocity,
+    AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisInterface, AnalysisModel,
+    AnalysisModelId, AnalysisProcedure, AnalysisSequence, BeamElementModel, BeamSectionModel,
+    CfdDomain, CoordinateFrame, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence,
+    ExcitationAction, ExcitationCase, ExcitationTarget, InitialCondition, MaterialAcousticModel,
+    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialPlasticModel, MaterialThermalModel, PhysicalSignal, PhysicsFamily, RegionTarget,
+    ResponseSpectrum, ShellElementModel, ShellSectionModel, StructuralElement,
+    StructuralElementKind, StructuralModel, StructuralNode, ThermoMechanicalDomain,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
 use runmat_geometry_io::GeometryImportOptions;
 use runmat_meshing_core::{ElementOrder, MeshingRequestSettings};
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
-use super::contracts::AnalysisOutputRequest;
 use super::{
     analysis_create_model_op, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
-    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
-    AnalysisElectromagneticRunOptions, AnalysisFsiRunOptions, AnalysisModalRunOptions,
+    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisElectromagneticRunOptions,
+    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisModelTemplate,
     AnalysisNonlinearRunOptions, AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec,
     AnalysisStudySweepSpec, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
 };
@@ -76,23 +70,26 @@ struct FeaStudyDocument {
     #[serde(default)]
     structural: Option<FeaStructuralDocument>,
     #[serde(default)]
-    nodes: Vec<FeaStructuralNodeDocument>,
+    constraints: Vec<AnalysisConstraint>,
     #[serde(default)]
-    elements: Vec<FeaStructuralElementDocument>,
+    boundaries: Vec<AnalysisBoundary>,
     #[serde(default)]
-    sections: Vec<FeaStructuralSectionDocument>,
-    #[serde(default)]
-    boundary_conditions: Vec<FeaBoundaryConditionDocument>,
-    #[serde(default)]
-    loads: Vec<FeaLoadDocument>,
-    #[serde(default)]
-    steps: Vec<FeaStepDocument>,
-    #[serde(default)]
-    outputs: Vec<FeaOutputDocument>,
-    #[serde(default)]
-    domains: FeaDomainsDocument,
+    connectors: Vec<AnalysisConnector>,
     #[serde(default)]
     interfaces: Vec<AnalysisInterface>,
+    #[serde(default)]
+    signals: Vec<PhysicalSignal>,
+    #[serde(default)]
+    excitation_cases: Vec<ExcitationCase>,
+    #[serde(default)]
+    excitations: Vec<ExcitationAction>,
+    #[serde(default)]
+    initial_conditions: Vec<InitialCondition>,
+    #[serde(default)]
+    response_spectra: Vec<ResponseSpectrum>,
+    sequence: AnalysisSequence,
+    #[serde(default)]
+    domains: FeaDomainsDocument,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,7 +114,7 @@ struct FeaGeometryImportDocument {
 struct FeaModelDocument {
     #[serde(default)]
     id: Option<String>,
-    profile: AnalysisCreateModelProfile,
+    template: AnalysisModelTemplate,
     #[serde(default)]
     frame: Option<CoordinateFrame>,
     #[serde(default)]
@@ -145,7 +142,7 @@ struct FeaMeshDocument {
 #[serde(rename_all = "snake_case")]
 enum FeaModelDefaultsMode {
     #[default]
-    ProfileScaffold,
+    TemplateScaffold,
     None,
 }
 
@@ -205,7 +202,7 @@ struct FeaStructuralNodeDocument {
 struct FeaStructuralElementDocument {
     id: String,
     region: String,
-    #[serde(rename = "type", alias = "kind")]
+    #[serde(rename = "type")]
     element_type: FeaStructuralElementType,
     nodes: Vec<u32>,
     section: String,
@@ -224,7 +221,7 @@ enum FeaStructuralElementType {
 #[serde(deny_unknown_fields)]
 struct FeaStructuralSectionDocument {
     id: String,
-    #[serde(rename = "type", alias = "kind", default)]
+    #[serde(rename = "type")]
     section_type: FeaStructuralSectionType,
     #[serde(default)]
     area_m2: Option<f64>,
@@ -248,162 +245,21 @@ struct FeaStructuralSectionDocument {
     torsion_outer_radius_m: f64,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum FeaStructuralSectionType {
-    #[default]
     Beam,
-    BeamSection,
     Shell,
-    ShellSection,
 }
 
 impl FeaStructuralSectionType {
     fn is_beam(self) -> bool {
-        matches!(self, Self::Beam | Self::BeamSection)
+        matches!(self, Self::Beam)
     }
 
     fn is_shell(self) -> bool {
-        matches!(self, Self::Shell | Self::ShellSection)
+        matches!(self, Self::Shell)
     }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FeaBoundaryConditionDocument {
-    id: String,
-    region: String,
-    #[serde(alias = "type")]
-    kind: FeaBoundaryConditionKindDocument,
-    #[serde(default)]
-    rx: Option<f64>,
-    #[serde(default)]
-    ry: Option<f64>,
-    #[serde(default)]
-    rz: Option<f64>,
-    #[serde(default)]
-    specific_impedance_pa_s_per_m: Option<f64>,
-    #[serde(default)]
-    temperature_k: Option<f64>,
-    #[serde(default)]
-    heat_flux_w_per_m2: Option<f64>,
-    #[serde(default)]
-    ambient_temperature_k: Option<f64>,
-    #[serde(default)]
-    coefficient_w_per_m2k: Option<f64>,
-    #[serde(default)]
-    velocity_m_per_s: Option<f64>,
-    #[serde(default)]
-    pressure_pa: Option<f64>,
-}
-
-type FeaBoundaryConditionKindDocument = FeaBoundaryConditionType;
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum FeaBoundaryConditionType {
-    Fixed,
-    PrescribedDisplacement,
-    PrescribedRotation,
-    MagneticInsulation,
-    VectorPotentialGround,
-    AcousticRigidWall,
-    AcousticRadiation,
-    AcousticImpedance,
-    ThermalPrescribedTemperature,
-    ThermalHeatFlux,
-    ThermalConvection,
-    CfdInletVelocity,
-    CfdOutletPressure,
-    CfdNoSlipWall,
-    CfdSlipWall,
-    CfdSymmetry,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FeaLoadDocument {
-    id: String,
-    region: String,
-    #[serde(rename = "type", alias = "kind")]
-    load_type: FeaLoadType,
-    #[serde(default)]
-    vector: Option<[f64; 3]>,
-    #[serde(default)]
-    force: Option<[f64; 3]>,
-    #[serde(default)]
-    moment: Option<[f64; 3]>,
-    #[serde(default)]
-    point: Option<[f64; 3]>,
-    #[serde(default)]
-    magnitude_pa: Option<f64>,
-    #[serde(default)]
-    current_a: Option<f64>,
-    #[serde(default)]
-    phase_rad: Option<f64>,
-    #[serde(default)]
-    amplitude_scale: Option<f64>,
-    #[serde(default)]
-    volumetric_w_per_m3: Option<f64>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum FeaLoadType {
-    Force,
-    Moment,
-    Torque,
-    Wrench,
-    Pressure,
-    BodyForce,
-    CurrentDensity,
-    CoilCurrent,
-    HeatSource,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FeaStepDocument {
-    id: String,
-    kind: FeaStepKind,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum FeaStepKind {
-    Static,
-    Modal,
-    Transient,
-    Thermal,
-    Nonlinear,
-    Electromagnetic,
-    Cfd,
-}
-
-impl FeaStepDocument {
-    fn resolve(&self) -> ProcedureStep {
-        match self.kind {
-            FeaStepKind::Static => ProcedureStep::structural_static(&self.id),
-            FeaStepKind::Modal => ProcedureStep::structural_modal(&self.id),
-            FeaStepKind::Transient => ProcedureStep::structural_transient(&self.id),
-            FeaStepKind::Thermal => ProcedureStep::thermal_static(&self.id),
-            FeaStepKind::Nonlinear => ProcedureStep::structural_nonlinear(&self.id),
-            FeaStepKind::Electromagnetic => ProcedureStep::electromagnetic_static(&self.id),
-            FeaStepKind::Cfd => ProcedureStep::fluid_static(&self.id),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FeaOutputDocument {
-    id: String,
-    #[serde(rename = "field_id", alias = "field", alias = "name")]
-    field_id: String,
-    #[serde(default, alias = "target")]
-    location: Option<String>,
-    #[serde(default, rename = "kind", alias = "type")]
-    kind: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -422,12 +278,30 @@ struct FeaDomainsDocument {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeaRunDocument {
-    #[serde(default)]
-    kind: Option<AnalysisRunKind>,
     #[serde(default = "default_backend")]
     backend: ComputeBackend,
     #[serde(default)]
-    options: Option<serde_yaml::Value>,
+    solver: Option<FeaSolverOptionsDocument>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "procedure",
+    content = "options",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum FeaSolverOptionsDocument {
+    LinearStatic(AnalysisRunOptions),
+    Modal(AnalysisModalRunOptions),
+    Acoustic(AnalysisAcousticRunOptions),
+    Thermal(AnalysisThermalRunOptions),
+    Transient(AnalysisTransientRunOptions),
+    Cfd(AnalysisCfdRunOptions),
+    Cht(AnalysisChtRunOptions),
+    Fsi(AnalysisFsiRunOptions),
+    Nonlinear(AnalysisNonlinearRunOptions),
+    Electromagnetic(AnalysisElectromagneticRunOptions),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -506,14 +380,12 @@ async fn resolve_study(
         .unwrap_or_else(|| format!("{}_model", sanitize_id(&study.id)));
     let intent = AnalysisCreateModelIntentSpec {
         model_id: model_id.clone(),
-        profile: study.model.profile,
+        template: study.model.template,
     };
     let model = resolve_model(&study, &geometry, &intent)?;
-    let run_kind = resolve_run_kind(study.model.profile, &study.run)?;
+    let run_kind = resolve_run_kind(&study.sequence)?;
     let run_options = resolve_run_options(&study.run, run_kind)?;
-    let meshing_settings =
-        resolve_meshing_settings(study.mesh.as_ref(), study.model.profile, run_kind)?;
-    let outputs = study.outputs.iter().map(resolve_output_request).collect();
+    let meshing_settings = resolve_meshing_settings(study.mesh.as_ref(), run_kind)?;
     let spec = AnalysisStudySpec {
         study_id: study.id,
         geometry,
@@ -522,7 +394,7 @@ async fn resolve_study(
         run_kind,
         backend: study.run.backend,
         meshing_settings,
-        outputs,
+        outputs: Vec::new(),
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,
         linear_static_run_options: run_options.linear_static,
@@ -539,22 +411,11 @@ async fn resolve_study(
     Ok(ResolvedStudyParts { spec })
 }
 
-fn resolve_output_request(output: &FeaOutputDocument) -> AnalysisOutputRequest {
-    AnalysisOutputRequest {
-        id: output.id.clone(),
-        field_id: output.field_id.clone(),
-        location: output.location.clone(),
-        kind: output.kind.clone(),
-    }
-}
-
 fn resolve_meshing_settings(
     mesh: Option<&FeaMeshDocument>,
-    profile: AnalysisCreateModelProfile,
     run_kind: AnalysisRunKind,
 ) -> Result<Option<MeshingRequestSettings>, String> {
-    let required = matches!(profile, AnalysisCreateModelProfile::LinearStaticStructural)
-        && matches!(run_kind, AnalysisRunKind::LinearStatic);
+    let required = matches!(run_kind, AnalysisRunKind::LinearStatic);
     let Some(mesh) = mesh else {
         return Ok(required.then(MeshingRequestSettings::default));
     };
@@ -617,13 +478,13 @@ fn resolve_model(
     intent: &AnalysisCreateModelIntentSpec,
 ) -> Result<Option<AnalysisModel>, String> {
     if !has_explicit_model_data(study)
-        && study.model.defaults == FeaModelDefaultsMode::ProfileScaffold
+        && study.model.defaults == FeaModelDefaultsMode::TemplateScaffold
     {
         return Ok(None);
     }
 
     let mut model = match study.model.defaults {
-        FeaModelDefaultsMode::ProfileScaffold => {
+        FeaModelDefaultsMode::TemplateScaffold => {
             analysis_create_model_op(geometry, intent.clone(), OperationContext::new(None, None))
                 .map(|envelope| envelope.data)
                 .map_err(|err| format!("failed to create FEA model scaffold: {}", err.message))?
@@ -651,29 +512,17 @@ fn resolve_model(
     if has_structural_model_data(study) {
         model.structural = Some(resolve_structural_model(study, geometry)?);
     }
-    if !study.boundary_conditions.is_empty() {
-        model.constraints.clear();
-        model.boundaries.clear();
-        for bc in &study.boundary_conditions {
-            match resolve_boundary_condition(bc, geometry, &study.regions)? {
-                ResolvedCondition::Constraint(value) => model.constraints.push(value),
-                ResolvedCondition::Boundary(value) => model.boundaries.push(value),
-            }
-        }
-    }
-    if !study.loads.is_empty() {
-        model.loads = study
-            .loads
-            .iter()
-            .map(|load| resolve_load(load, geometry, &study.regions))
-            .collect::<Result<Vec<_>, _>>()?;
-    }
-    if !study.steps.is_empty() {
-        model.sequence = AnalysisSequence::from_steps(
-            format!("{}.sequence", model.model_id.0),
-            study.steps.iter().map(FeaStepDocument::resolve).collect(),
-        );
-    }
+    model.constraints = study.constraints.clone();
+    model.boundaries = study.boundaries.clone();
+    model.connectors = study.connectors.clone();
+    model.interfaces = study.interfaces.clone();
+    model.signals = study.signals.clone();
+    model.excitation_cases = study.excitation_cases.clone();
+    model.excitations = study.excitations.clone();
+    model.initial_conditions = study.initial_conditions.clone();
+    model.response_spectra = study.response_spectra.clone();
+    model.sequence = study.sequence.clone();
+    resolve_typed_region_targets(&mut model, geometry, &study.regions)?;
     if study.domains.thermo_mechanical.is_some() {
         model.thermo_mechanical = study.domains.thermo_mechanical.clone();
     }
@@ -686,10 +535,6 @@ fn resolve_model(
     if study.domains.cfd.is_some() {
         model.cfd = study.domains.cfd.clone();
     }
-    if !study.interfaces.is_empty() {
-        model.interfaces = study.interfaces.clone();
-    }
-
     Ok(Some(model))
 }
 
@@ -729,13 +574,13 @@ fn resolve_structural_model(
     let structural = study.structural.as_ref();
     let node_docs = structural
         .map(|value| value.nodes.as_slice())
-        .unwrap_or(study.nodes.as_slice());
+        .unwrap_or(&[]);
     let element_docs = structural
         .map(|value| value.elements.as_slice())
-        .unwrap_or(study.elements.as_slice());
+        .unwrap_or(&[]);
     let section_docs = structural
         .map(|value| value.sections.as_slice())
-        .unwrap_or(study.sections.as_slice());
+        .unwrap_or(&[]);
 
     Ok(StructuralModel {
         nodes: node_docs
@@ -828,272 +673,6 @@ fn resolve_shell_section(
     })
 }
 
-enum ResolvedCondition {
-    Constraint(AnalysisConstraint),
-    Boundary(AnalysisBoundary),
-}
-
-fn resolve_boundary_condition(
-    bc: &FeaBoundaryConditionDocument,
-    geometry: &GeometryAsset,
-    aliases: &BTreeMap<String, FeaRegionDocument>,
-) -> Result<ResolvedCondition, String> {
-    let target = RegionTarget::authored(resolve_region_ref(&bc.region, geometry, aliases)?);
-    resolve_boundary_condition_kind(bc, bc.kind, target)
-}
-
-fn resolve_boundary_condition_kind(
-    bc: &FeaBoundaryConditionDocument,
-    kind: FeaBoundaryConditionType,
-    target: RegionTarget,
-) -> Result<ResolvedCondition, String> {
-    Ok(match kind {
-        FeaBoundaryConditionType::Fixed => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Structural(StructuralConstraint {
-                constraint_id: bc.id.clone(),
-                frame: CoordinateFrame::Global,
-                kind: StructuralConstraintKind::Fixed { target },
-            }))
-        }
-        FeaBoundaryConditionType::PrescribedDisplacement => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Structural(StructuralConstraint {
-                constraint_id: bc.id.clone(),
-                frame: CoordinateFrame::Global,
-                kind: StructuralConstraintKind::PrescribedTranslations(PrescribedTranslations {
-                    target,
-                    values: [
-                        StructuralTranslationDof::Ux,
-                        StructuralTranslationDof::Uy,
-                        StructuralTranslationDof::Uz,
-                    ]
-                    .into_iter()
-                    .map(|dof| TranslationDofValue {
-                        dof,
-                        value: ValueSchedule::Constant(Displacement::new(0.0)),
-                    })
-                    .collect(),
-                }),
-            }))
-        }
-        FeaBoundaryConditionType::PrescribedRotation => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Structural(StructuralConstraint {
-                constraint_id: bc.id.clone(),
-                frame: CoordinateFrame::Global,
-                kind: StructuralConstraintKind::PrescribedRotations(PrescribedRotations {
-                    target,
-                    values: [
-                        (
-                            StructuralRotationDof::Rx,
-                            required_f64(bc.rx, "boundary.prescribed_rotation.rx")?,
-                        ),
-                        (
-                            StructuralRotationDof::Ry,
-                            required_f64(bc.ry, "boundary.prescribed_rotation.ry")?,
-                        ),
-                        (
-                            StructuralRotationDof::Rz,
-                            required_f64(bc.rz, "boundary.prescribed_rotation.rz")?,
-                        ),
-                    ]
-                    .into_iter()
-                    .map(|(dof, value)| RotationDofValue {
-                        dof,
-                        value: ValueSchedule::Constant(Rotation::new(value)),
-                    })
-                    .collect(),
-                }),
-            }))
-        }
-        FeaBoundaryConditionType::MagneticInsulation => {
-            ResolvedCondition::Boundary(AnalysisBoundary {
-                boundary_id: bc.id.clone(),
-                target,
-                operator: BoundaryOperator::MagneticInsulation,
-            })
-        }
-        FeaBoundaryConditionType::VectorPotentialGround => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Magnetic(MagneticConstraint {
-                constraint_id: bc.id.clone(),
-                kind: MagneticConstraintKind::VectorPotentialGround { target },
-            }))
-        }
-        FeaBoundaryConditionType::AcousticRigidWall => {
-            ResolvedCondition::Boundary(AnalysisBoundary {
-                boundary_id: bc.id.clone(),
-                target,
-                operator: BoundaryOperator::AcousticRigidWall,
-            })
-        }
-        FeaBoundaryConditionType::AcousticRadiation => {
-            ResolvedCondition::Boundary(AnalysisBoundary {
-                boundary_id: bc.id.clone(),
-                target,
-                operator: BoundaryOperator::AcousticRadiation,
-            })
-        }
-        FeaBoundaryConditionType::AcousticImpedance => {
-            ResolvedCondition::Boundary(AnalysisBoundary {
-                boundary_id: bc.id.clone(),
-                target,
-                operator: BoundaryOperator::AcousticImpedance {
-                    impedance: SpecificAcousticImpedance::new(required_f64(
-                        bc.specific_impedance_pa_s_per_m,
-                        "boundary.acoustic_impedance.specific_impedance_pa_s_per_m",
-                    )?),
-                },
-            })
-        }
-        FeaBoundaryConditionType::ThermalPrescribedTemperature => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Thermal(ThermalConstraint {
-                constraint_id: bc.id.clone(),
-                kind: ThermalConstraintKind::Prescribed {
-                    target,
-                    value: ValueSchedule::Constant(Temperature::new(required_f64(
-                        bc.temperature_k,
-                        "boundary.thermal_prescribed_temperature.temperature_k",
-                    )?)),
-                },
-            }))
-        }
-        FeaBoundaryConditionType::ThermalHeatFlux => {
-            ResolvedCondition::Boundary(AnalysisBoundary {
-                boundary_id: bc.id.clone(),
-                target,
-                operator: BoundaryOperator::ThermalHeatFlux {
-                    value: ValueSchedule::Constant(HeatFlux::new(required_f64(
-                        bc.heat_flux_w_per_m2,
-                        "boundary.thermal_heat_flux.heat_flux_w_per_m2",
-                    )?)),
-                },
-            })
-        }
-        FeaBoundaryConditionType::ThermalConvection => {
-            ResolvedCondition::Boundary(AnalysisBoundary {
-                boundary_id: bc.id.clone(),
-                target,
-                operator: BoundaryOperator::ThermalConvection {
-                    ambient_temperature: ValueSchedule::Constant(Temperature::new(required_f64(
-                        bc.ambient_temperature_k,
-                        "boundary.thermal_convection.ambient_temperature_k",
-                    )?)),
-                    coefficient: HeatTransferCoefficient::new(required_f64(
-                        bc.coefficient_w_per_m2k,
-                        "boundary.thermal_convection.coefficient_w_per_m2k",
-                    )?),
-                },
-            })
-        }
-        FeaBoundaryConditionType::CfdInletVelocity => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc.id.clone(),
-                kind: FluidConstraintKind::PrescribedVelocity {
-                    target,
-                    value: ValueSchedule::Constant(Velocity::new(required_f64(
-                        bc.velocity_m_per_s,
-                        "boundary.cfd_inlet_velocity.velocity_m_per_s",
-                    )?)),
-                },
-            }))
-        }
-        FeaBoundaryConditionType::CfdOutletPressure => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc.id.clone(),
-                kind: FluidConstraintKind::PressureReference {
-                    target,
-                    value: ValueSchedule::Constant(Pressure::new(required_f64(
-                        bc.pressure_pa,
-                        "boundary.cfd_outlet_pressure.pressure_pa",
-                    )?)),
-                },
-            }))
-        }
-        FeaBoundaryConditionType::CfdNoSlipWall => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc.id.clone(),
-                kind: FluidConstraintKind::NoSlipWall { target },
-            }))
-        }
-        FeaBoundaryConditionType::CfdSlipWall => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc.id.clone(),
-                kind: FluidConstraintKind::SlipWall { target },
-            }))
-        }
-        FeaBoundaryConditionType::CfdSymmetry => {
-            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc.id.clone(),
-                kind: FluidConstraintKind::Symmetry { target },
-            }))
-        }
-    })
-}
-
-fn resolve_load(
-    load: &FeaLoadDocument,
-    geometry: &GeometryAsset,
-    aliases: &BTreeMap<String, FeaRegionDocument>,
-) -> Result<LoadCase, String> {
-    let kind = match load.load_type {
-        FeaLoadType::Force => {
-            let [fx, fy, fz] = load_vector(load, "force")?;
-            LoadKind::Force { fx, fy, fz }
-        }
-        FeaLoadType::Moment | FeaLoadType::Torque => {
-            let [mx, my, mz] = load_vector(load, "moment")?;
-            LoadKind::Moment { mx, my, mz }
-        }
-        FeaLoadType::Wrench => {
-            let [fx, fy, fz] = load_force(load)?;
-            let [mx, my, mz] = load_moment(load)?;
-            let [px, py, pz] = point_in_meters(load_point(load)?, geometry.units);
-            LoadKind::Wrench {
-                fx,
-                fy,
-                fz,
-                mx,
-                my,
-                mz,
-                px,
-                py,
-                pz,
-            }
-        }
-        FeaLoadType::Pressure => LoadKind::Pressure {
-            magnitude_pa: required_f64(load.magnitude_pa, "pressure.magnitude_pa")?,
-        },
-        FeaLoadType::BodyForce => {
-            let [gx, gy, gz] = load_vector(load, "body_force")?;
-            LoadKind::BodyForce { gx, gy, gz }
-        }
-        FeaLoadType::CurrentDensity => {
-            let [jx, jy, jz] = load_vector(load, "current_density")?;
-            LoadKind::CurrentDensity {
-                jx,
-                jy,
-                jz,
-                phase_rad: load.phase_rad.unwrap_or_default(),
-                amplitude_scale: load.amplitude_scale.unwrap_or(1.0),
-            }
-        }
-        FeaLoadType::CoilCurrent => LoadKind::CoilCurrent {
-            current_a: required_f64(load.current_a, "coil_current.current_a")?,
-            phase_rad: load.phase_rad.unwrap_or_default(),
-            amplitude_scale: load.amplitude_scale.unwrap_or(1.0),
-        },
-        FeaLoadType::HeatSource => LoadKind::HeatSource {
-            volumetric_w_per_m3: required_f64(
-                load.volumetric_w_per_m3,
-                "heat_source.volumetric_w_per_m3",
-            )?,
-        },
-    };
-    Ok(LoadCase {
-        load_id: load.id.clone(),
-        region_id: resolve_region_ref(&load.region, geometry, aliases)?,
-        kind,
-    })
-}
-
 #[derive(Debug, Default)]
 struct ResolvedRunOptions {
     linear_static: Option<AnalysisRunOptions>,
@@ -1108,70 +687,108 @@ struct ResolvedRunOptions {
     electromagnetic: Option<AnalysisElectromagneticRunOptions>,
 }
 
-fn resolve_run_kind(
-    profile: AnalysisCreateModelProfile,
-    run: &FeaRunDocument,
-) -> Result<AnalysisRunKind, String> {
-    let derived = profile.derived_run_kind();
-    if let Some(explicit) = run.kind {
-        if explicit != derived {
-            return Err(format!(
-                "run.kind {:?} does not match the solver selected by model.profile {:?}; omit run.kind unless you need an advanced matching solver override",
-                explicit, profile
-            ));
+fn resolve_run_kind(sequence: &AnalysisSequence) -> Result<AnalysisRunKind, String> {
+    let [step] = sequence.steps.as_slice() else {
+        return Err(format!(
+            "version 1 FEA execution requires exactly one procedure step; sequence `{}` contains {}",
+            sequence.sequence_id,
+            sequence.steps.len()
+        ));
+    };
+    match (step.family, step.procedure) {
+        (PhysicsFamily::Structural, AnalysisProcedure::Static) => Ok(AnalysisRunKind::LinearStatic),
+        (
+            PhysicsFamily::Structural,
+            AnalysisProcedure::ModalExtraction | AnalysisProcedure::PrestressedModalExtraction,
+        ) => Ok(AnalysisRunKind::Modal),
+        (PhysicsFamily::Structural, AnalysisProcedure::TransientResponse) => {
+            Ok(AnalysisRunKind::Transient)
         }
+        (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear) => Ok(AnalysisRunKind::Nonlinear),
+        (PhysicsFamily::Thermal, AnalysisProcedure::Static) => Ok(AnalysisRunKind::Thermal),
+        (PhysicsFamily::Electromagnetic, AnalysisProcedure::Static | AnalysisProcedure::HarmonicResponse) => {
+            Ok(AnalysisRunKind::Electromagnetic)
+        }
+        (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse) => Ok(AnalysisRunKind::Acoustic),
+        (PhysicsFamily::Fluid, AnalysisProcedure::Static | AnalysisProcedure::TransientResponse) => {
+            Ok(AnalysisRunKind::Cfd)
+        }
+        (
+            PhysicsFamily::Coupled(
+                runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical
+                | runmat_analysis_core::CoupledPhysicsFamily::Electrothermal,
+            ),
+            AnalysisProcedure::Static | AnalysisProcedure::TransientResponse,
+        ) => Ok(AnalysisRunKind::Transient),
+        (PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::ConjugateHeatTransfer), AnalysisProcedure::Static | AnalysisProcedure::TransientResponse) => {
+            Ok(AnalysisRunKind::Cht)
+        }
+        (PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction), AnalysisProcedure::Static | AnalysisProcedure::TransientResponse) => {
+            Ok(AnalysisRunKind::Fsi)
+        }
+        (family, procedure) => Err(format!(
+            "procedure step `{}` selects unsupported version 1 execution combination {family:?}/{procedure:?}",
+            step.step_id.as_str()
+        )),
     }
-    Ok(derived)
 }
 
 fn resolve_run_options(
     run: &FeaRunDocument,
     run_kind: AnalysisRunKind,
 ) -> Result<ResolvedRunOptions, String> {
-    let Some(options) = run.options.clone() else {
+    let Some(options) = &run.solver else {
         return Ok(ResolvedRunOptions::default());
     };
     let mut resolved = ResolvedRunOptions::default();
-    match run_kind {
-        AnalysisRunKind::LinearStatic => {
-            resolved.linear_static = Some(parse_options(options, "linear_static options")?);
+    let selected = match options {
+        FeaSolverOptionsDocument::LinearStatic(value) => {
+            resolved.linear_static = Some(value.clone());
+            AnalysisRunKind::LinearStatic
         }
-        AnalysisRunKind::Modal => {
-            resolved.modal = Some(parse_options(options, "modal options")?);
+        FeaSolverOptionsDocument::Modal(value) => {
+            resolved.modal = Some(value.clone());
+            AnalysisRunKind::Modal
         }
-        AnalysisRunKind::Acoustic => {
-            resolved.acoustic = Some(parse_options(options, "acoustic options")?);
+        FeaSolverOptionsDocument::Acoustic(value) => {
+            resolved.acoustic = Some(value.clone());
+            AnalysisRunKind::Acoustic
         }
-        AnalysisRunKind::Thermal => {
-            resolved.thermal = Some(parse_options(options, "thermal options")?);
+        FeaSolverOptionsDocument::Thermal(value) => {
+            resolved.thermal = Some(value.clone());
+            AnalysisRunKind::Thermal
         }
-        AnalysisRunKind::Transient => {
-            resolved.transient = Some(parse_options(options, "transient options")?);
+        FeaSolverOptionsDocument::Transient(value) => {
+            resolved.transient = Some(value.clone());
+            AnalysisRunKind::Transient
         }
-        AnalysisRunKind::Cfd => {
-            resolved.cfd = Some(parse_options(options, "cfd options")?);
+        FeaSolverOptionsDocument::Cfd(value) => {
+            resolved.cfd = Some(value.clone());
+            AnalysisRunKind::Cfd
         }
-        AnalysisRunKind::Cht => {
-            resolved.cht = Some(parse_options(options, "cht options")?);
+        FeaSolverOptionsDocument::Cht(value) => {
+            resolved.cht = Some(value.clone());
+            AnalysisRunKind::Cht
         }
-        AnalysisRunKind::Fsi => {
-            resolved.fsi = Some(parse_options(options, "fsi options")?);
+        FeaSolverOptionsDocument::Fsi(value) => {
+            resolved.fsi = Some(value.clone());
+            AnalysisRunKind::Fsi
         }
-        AnalysisRunKind::Nonlinear => {
-            resolved.nonlinear = Some(parse_options(options, "nonlinear options")?);
+        FeaSolverOptionsDocument::Nonlinear(value) => {
+            resolved.nonlinear = Some(value.clone());
+            AnalysisRunKind::Nonlinear
         }
-        AnalysisRunKind::Electromagnetic => {
-            resolved.electromagnetic = Some(parse_options(options, "electromagnetic options")?);
+        FeaSolverOptionsDocument::Electromagnetic(value) => {
+            resolved.electromagnetic = Some(value.clone());
+            AnalysisRunKind::Electromagnetic
         }
+    };
+    if selected != run_kind {
+        return Err(format!(
+            "run solver options select {selected:?}, but the sequence selects {run_kind:?}"
+        ));
     }
     Ok(resolved)
-}
-
-fn parse_options<T: DeserializeOwned>(
-    options: serde_yaml::Value,
-    label: &str,
-) -> Result<T, String> {
-    serde_yaml::from_value(options).map_err(|err| format!("invalid {label}: {err}"))
 }
 
 fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
@@ -1197,7 +814,6 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         excitation_cases: Vec::new(),
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
-        loads: Vec::new(),
         sequence: AnalysisSequence::from_steps(format!("{model_id}.sequence"), Vec::new()),
     }
 }
@@ -1205,15 +821,20 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
 fn has_explicit_model_data(study: &FeaStudyDocument) -> bool {
     !study.materials.is_empty()
         || !study.material_assignments.is_empty()
-        || !study.boundary_conditions.is_empty()
-        || !study.loads.is_empty()
-        || !study.steps.is_empty()
+        || !study.constraints.is_empty()
+        || !study.boundaries.is_empty()
+        || !study.connectors.is_empty()
+        || !study.interfaces.is_empty()
+        || !study.signals.is_empty()
+        || !study.excitation_cases.is_empty()
+        || !study.excitations.is_empty()
+        || !study.initial_conditions.is_empty()
+        || !study.response_spectra.is_empty()
         || has_structural_model_data(study)
         || study.domains.thermo_mechanical.is_some()
         || study.domains.electro_thermal.is_some()
         || study.domains.electromagnetic.is_some()
         || study.domains.cfd.is_some()
-        || !study.interfaces.is_empty()
         || study.model.frame.is_some()
 }
 
@@ -1222,9 +843,96 @@ fn has_structural_model_data(study: &FeaStudyDocument) -> bool {
         !structural.nodes.is_empty()
             || !structural.elements.is_empty()
             || !structural.sections.is_empty()
-    }) || !study.nodes.is_empty()
-        || !study.elements.is_empty()
-        || !study.sections.is_empty()
+    })
+}
+
+fn resolve_typed_region_targets(
+    model: &mut AnalysisModel,
+    geometry: &GeometryAsset,
+    aliases: &BTreeMap<String, FeaRegionDocument>,
+) -> Result<(), String> {
+    let mut failure = None;
+    for assignment in &mut model.material_assignments {
+        resolve_region_id(&mut assignment.region_id, geometry, aliases, &mut failure);
+    }
+    if let Some(structural) = &mut model.structural {
+        for element in &mut structural.elements {
+            resolve_region_id(&mut element.region_id, geometry, aliases, &mut failure);
+        }
+    }
+    for constraint in &mut model.constraints {
+        constraint.visit_targets_mut(|target| {
+            resolve_region_target(target, geometry, aliases, &mut failure)
+        });
+    }
+    for boundary in &mut model.boundaries {
+        resolve_region_target(&mut boundary.target, geometry, aliases, &mut failure);
+    }
+    for connector in &mut model.connectors {
+        resolve_region_target(&mut connector.primary, geometry, aliases, &mut failure);
+        if let Some(secondary) = &mut connector.secondary {
+            resolve_region_target(secondary, geometry, aliases, &mut failure);
+        }
+    }
+    for interface in &mut model.interfaces {
+        resolve_region_id(
+            &mut interface.primary_region_id,
+            geometry,
+            aliases,
+            &mut failure,
+        );
+        resolve_region_id(
+            &mut interface.secondary_region_id,
+            geometry,
+            aliases,
+            &mut failure,
+        );
+    }
+    for action in &mut model.excitations {
+        if let ExcitationTarget::Region(target) = &mut action.excitation_mut().target {
+            resolve_region_target(target, geometry, aliases, &mut failure);
+        }
+    }
+    for initial_condition in &mut model.initial_conditions {
+        if let Some(target) = initial_condition.region_target_mut() {
+            resolve_region_target(target, geometry, aliases, &mut failure);
+        }
+    }
+    if let Some(domain) = &mut model.thermo_mechanical {
+        for region in &mut domain.region_temperature_deltas {
+            resolve_region_id(&mut region.region_id, geometry, aliases, &mut failure);
+        }
+    }
+    if let Some(domain) = &mut model.electro_thermal {
+        for region in &mut domain.region_conductivity_scales {
+            resolve_region_id(&mut region.region_id, geometry, aliases, &mut failure);
+        }
+    }
+    failure.map_or(Ok(()), Err)
+}
+
+fn resolve_region_target(
+    target: &mut RegionTarget,
+    geometry: &GeometryAsset,
+    aliases: &BTreeMap<String, FeaRegionDocument>,
+    failure: &mut Option<String>,
+) {
+    resolve_region_id(&mut target.region_id, geometry, aliases, failure);
+}
+
+fn resolve_region_id(
+    region_id: &mut String,
+    geometry: &GeometryAsset,
+    aliases: &BTreeMap<String, FeaRegionDocument>,
+    failure: &mut Option<String>,
+) {
+    if failure.is_some() {
+        return;
+    }
+    match resolve_region_ref(region_id, geometry, aliases) {
+        Ok(resolved) => *region_id = resolved,
+        Err(error) => *failure = Some(error),
+    }
 }
 
 fn resolve_region_ref(
@@ -1232,9 +940,6 @@ fn resolve_region_ref(
     geometry: &GeometryAsset,
     aliases: &BTreeMap<String, FeaRegionDocument>,
 ) -> Result<String, String> {
-    if reference.strip_prefix("node:").is_some() || reference.parse::<u32>().is_ok() {
-        return Ok(reference.to_string());
-    }
     if let Some(alias) = aliases.get(reference) {
         return resolve_region_selector(&alias.selector, geometry);
     }
@@ -1274,39 +979,6 @@ fn require_region_id(region_id: &str, geometry: &GeometryAsset) -> Result<String
         .find(|region| region.region_id == region_id)
         .map(|region| region.region_id.clone())
         .ok_or_else(|| format!("region id `{region_id}` was not found in geometry"))
-}
-
-fn load_vector(load: &FeaLoadDocument, label: &str) -> Result<[f64; 3], String> {
-    load.vector
-        .ok_or_else(|| format!("{label} load requires vector: [x, y, z]"))
-}
-
-fn load_force(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
-    load.force
-        .ok_or_else(|| "wrench load requires force: [fx, fy, fz]".to_string())
-}
-
-fn load_moment(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
-    load.moment
-        .ok_or_else(|| "wrench load requires moment: [mx, my, mz]".to_string())
-}
-
-fn load_point(load: &FeaLoadDocument) -> Result<[f64; 3], String> {
-    load.point
-        .ok_or_else(|| "wrench load requires point: [px, py, pz]".to_string())
-}
-
-fn point_in_meters(point: [f64; 3], units: UnitSystem) -> [f64; 3] {
-    let scale = geometry_unit_scale_to_meters(units);
-    [point[0] * scale, point[1] * scale, point[2] * scale]
-}
-
-fn geometry_unit_scale_to_meters(units: UnitSystem) -> f64 {
-    match units {
-        UnitSystem::Meter | UnitSystem::Unspecified => 1.0,
-        UnitSystem::Millimeter => 1.0e-3,
-        UnitSystem::Inch => 0.0254,
-    }
 }
 
 fn required_f64(value: Option<f64>, label: &str) -> Result<f64, String> {
@@ -1426,156 +1098,276 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fea_document_resolves_moment_and_torque_loads() {
-        let geometry = sample_geometry();
-        for (load_type, expected_id) in [("moment", "tip_moment"), ("torque", "tip_torque")] {
-            let load: FeaLoadDocument = serde_yaml::from_str(&format!(
-                r#"
-id: {expected_id}
-region: tag:tip
-type: {load_type}
-vector: [1.0, 2.0, 3.0]
-"#
+    fn minimal_study_yaml() -> serde_yaml::Value {
+        let mut document = serde_yaml::Mapping::new();
+        document.insert("kind".into(), "study".into());
+        document.insert("version".into(), FEA_DOCUMENT_VERSION.into());
+        document.insert("id".into(), "typed-study".into());
+        document.insert(
+            "geometry".into(),
+            serde_yaml::from_str("path: fixture.step\n").expect("geometry YAML"),
+        );
+        let mut model = serde_yaml::Mapping::new();
+        model.insert(
+            "template".into(),
+            serde_yaml::to_value(AnalysisModelTemplate::LinearStaticStructural)
+                .expect("model template"),
+        );
+        model.insert("defaults".into(), "none".into());
+        document.insert("model".into(), model.into());
+        document.insert(
+            "run".into(),
+            serde_yaml::from_str("backend: cpu\n").expect("run YAML"),
+        );
+        document.insert(
+            "sequence".into(),
+            serde_yaml::to_value(AnalysisSequence::from_steps(
+                "typed-sequence",
+                vec![runmat_analysis_core::ProcedureStep::structural_static(
+                    "solve",
+                )],
             ))
-            .expect("load document should parse");
+            .expect("sequence"),
+        );
+        document.into()
+    }
 
-            let resolved = resolve_load(&load, &geometry, &BTreeMap::new())
-                .expect("load should resolve against geometry");
+    #[test]
+    fn typed_document_fields_deserialize_without_legacy_translation() {
+        let mut document = minimal_study_yaml();
+        let mapping = document.as_mapping_mut().expect("study mapping");
+        mapping.insert(
+            "constraints".into(),
+            serde_yaml::to_value(vec![AnalysisConstraint::Structural(
+                runmat_analysis_core::StructuralConstraint {
+                    constraint_id: "fixed".into(),
+                    frame: CoordinateFrame::Global,
+                    kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
+                        target: RegionTarget::boundary("tip"),
+                    },
+                },
+            )])
+            .expect("constraints"),
+        );
 
-            assert_eq!(resolved.load_id, expected_id);
-            assert_eq!(resolved.region_id, "tip");
-            assert!(matches!(
-                resolved.kind,
-                LoadKind::Moment {
-                    mx: 1.0,
-                    my: 2.0,
-                    mz: 3.0
-                }
-            ));
+        let parsed: RawFeaDocument = serde_yaml::from_value(document).expect("typed document");
+        let RawFeaDocument::Study(study) = parsed else {
+            panic!("expected study")
+        };
+        assert_eq!(study.constraints[0].constraint_id(), "fixed");
+        assert_eq!(study.sequence.steps[0].step_id.as_str(), "solve");
+    }
+
+    #[test]
+    fn required_sequence_is_not_authored_model_data() {
+        let mut document = minimal_study_yaml();
+        document
+            .as_mapping_mut()
+            .expect("study mapping")
+            .get_mut("model")
+            .expect("model")
+            .as_mapping_mut()
+            .expect("model mapping")
+            .insert("defaults".into(), "template_scaffold".into());
+
+        let parsed: RawFeaDocument = serde_yaml::from_value(document).expect("study document");
+        let RawFeaDocument::Study(study) = parsed else {
+            panic!("expected study")
+        };
+
+        assert!(!study.sequence.steps.is_empty());
+        assert!(!has_explicit_model_data(&study));
+        assert_eq!(study.model.defaults, FeaModelDefaultsMode::TemplateScaffold);
+        let intent = AnalysisCreateModelIntentSpec {
+            model_id: "scaffold-model".into(),
+            template: study.model.template,
+        };
+        assert!(resolve_model(&study, &sample_geometry(), &intent)
+            .expect("resolve scaffold-only model")
+            .is_none());
+    }
+
+    #[test]
+    fn retired_document_keys_and_run_kind_are_rejected() {
+        for key in [
+            "boundary_conditions",
+            "loads",
+            "steps",
+            "outputs",
+            "nodes",
+            "elements",
+            "sections",
+        ] {
+            let mut document = minimal_study_yaml();
+            document
+                .as_mapping_mut()
+                .expect("study mapping")
+                .insert(key.into(), serde_yaml::Value::Sequence(Vec::new()));
+            let error = serde_yaml::from_value::<RawFeaDocument>(document)
+                .expect_err("retired key must fail");
+            assert!(error.to_string().contains("unknown field"), "{error}");
         }
+
+        let error = serde_yaml::from_str::<FeaRunDocument>("backend: cpu\nkind: linear_static\n")
+            .expect_err("run.kind must fail");
+        assert!(error.to_string().contains("unknown field"), "{error}");
+        let error = serde_yaml::from_str::<FeaRunDocument>("backend: cpu\noptions: {}\n")
+            .expect_err("untyped run options must fail");
+        assert!(error.to_string().contains("unknown field"), "{error}");
     }
 
     #[test]
-    fn fea_document_moment_requires_vector() {
-        let geometry = sample_geometry();
-        let load: FeaLoadDocument = serde_yaml::from_str(
-            r#"
-id: tip_moment
-region: tip
-type: moment
-"#,
-        )
-        .expect("load document should parse");
-
-        let err = resolve_load(&load, &geometry, &BTreeMap::new())
-            .expect_err("moment without vector should fail");
-
-        assert!(err.contains("moment load requires vector: [x, y, z]"));
+    fn structural_kind_aliases_are_rejected() {
+        let element = "id: beam\nregion: tip\nkind: beam\nnodes: [1, 2]\nsection: section\n";
+        assert!(serde_yaml::from_str::<FeaStructuralElementDocument>(element).is_err());
+        let section = "id: section\nkind: beam\narea_m2: 1\niy_m4: 1\niz_m4: 1\ntorsion_j_m4: 1\n";
+        assert!(serde_yaml::from_str::<FeaStructuralSectionDocument>(section).is_err());
+        let retired_variant =
+            "id: section\ntype: beam_section\narea_m2: 1\niy_m4: 1\niz_m4: 1\ntorsion_j_m4: 1\n";
+        assert!(serde_yaml::from_str::<FeaStructuralSectionDocument>(retired_variant).is_err());
     }
 
     #[test]
-    fn fea_document_resolves_wrench_load() {
+    fn execution_kind_is_derived_from_one_sequence_step() {
+        let sequence = AnalysisSequence::from_steps(
+            "sequence",
+            vec![runmat_analysis_core::ProcedureStep::structural_modal(
+                "modes",
+            )],
+        );
+        assert_eq!(resolve_run_kind(&sequence).unwrap(), AnalysisRunKind::Modal);
+
+        let multiple = AnalysisSequence::from_steps(
+            "sequence",
+            vec![
+                runmat_analysis_core::ProcedureStep::structural_static("static"),
+                runmat_analysis_core::ProcedureStep::structural_modal("modes"),
+            ],
+        );
+        assert!(resolve_run_kind(&multiple)
+            .expect_err("multi-step execution is not implemented")
+            .contains("exactly one procedure step"));
+    }
+
+    #[test]
+    fn typed_solver_options_must_match_the_sequence() {
+        let run = FeaRunDocument {
+            backend: ComputeBackend::Cpu,
+            solver: Some(FeaSolverOptionsDocument::LinearStatic(
+                AnalysisRunOptions::default(),
+            )),
+        };
+        assert!(resolve_run_options(&run, AnalysisRunKind::Modal)
+            .expect_err("mismatched solver options must fail")
+            .contains("sequence selects Modal"));
+    }
+
+    #[test]
+    fn region_aliases_resolve_across_typed_model_targets() {
         let geometry = sample_geometry();
-        let load: FeaLoadDocument = serde_yaml::from_str(
-            r#"
-id: tip_wrench
-region: tag:tip
-type: wrench
-force: [10.0, 20.0, 30.0]
-moment: [1.0, 2.0, 3.0]
-point: [0.1, 0.2, 0.3]
-"#,
-        )
-        .expect("load document should parse");
+        let mut aliases = BTreeMap::new();
+        aliases.insert(
+            "loaded".into(),
+            FeaRegionDocument {
+                selector: "tag:tip".into(),
+            },
+        );
+        let mut model = empty_model("model".into(), &geometry);
+        model.constraints = vec![AnalysisConstraint::Structural(
+            runmat_analysis_core::StructuralConstraint {
+                constraint_id: "fixed".into(),
+                frame: CoordinateFrame::Global,
+                kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
+                    target: RegionTarget::boundary("loaded"),
+                },
+            },
+        )];
+        model.boundaries = vec![AnalysisBoundary {
+            boundary_id: "insulation".into(),
+            target: RegionTarget::boundary("loaded"),
+            operator: runmat_analysis_core::BoundaryOperator::MagneticInsulation,
+        }];
+        model.connectors = vec![AnalysisConnector {
+            connector_id: "spring".into(),
+            primary: RegionTarget::authored("loaded"),
+            secondary: Some(RegionTarget::authored("loaded")),
+            kind: runmat_analysis_core::ConnectorKind::TranslationalSpring {
+                stiffness: runmat_analysis_core::Stiffness::new(1.0),
+            },
+        }];
+        model.interfaces = vec![AnalysisInterface {
+            interface_id: "contact".into(),
+            primary_region_id: "loaded".into(),
+            secondary_region_id: "loaded".into(),
+            kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
+                runmat_analysis_core::ContactInterfaceModel {
+                    penalty_stiffness_scale: 1.0,
+                    max_penetration_ratio: 0.01,
+                    friction_coefficient: 0.0,
+                },
+            ),
+        }];
+        model.excitations = vec![ExcitationAction::Force(
+            runmat_analysis_core::AnalysisExcitation {
+                excitation_id: runmat_analysis_core::ExcitationId("force".into()),
+                case_id: runmat_analysis_core::ExcitationCaseId("case".into()),
+                target: ExcitationTarget::Region(RegionTarget::authored("loaded")),
+                frame: CoordinateFrame::Global,
+                direction: None,
+                distribution: runmat_analysis_core::ExcitationDistribution::PreserveResultant,
+                kinematics: runmat_analysis_core::ExcitationKinematics::FixedFrame,
+                signal_id: runmat_analysis_core::SignalId("force".into()),
+                active_step_ids: Vec::new(),
+                combination_group: None,
+                projection: runmat_analysis_core::ProjectionRequirement {
+                    preserve_resultant: true,
+                    preserve_moment: true,
+                    relative_tolerance: 1.0e-12,
+                },
+            },
+        )];
+        model.initial_conditions = vec![runmat_analysis_core::InitialCondition::Temperature(
+            runmat_analysis_core::InitialConditionValue {
+                initial_condition_id: "temperature".into(),
+                target: runmat_analysis_core::InitialConditionTarget::Region(RegionTarget::volume(
+                    "loaded",
+                )),
+                frame: CoordinateFrame::Global,
+                value: runmat_analysis_core::InitialValue::Uniform(
+                    runmat_analysis_core::Temperature::new(293.15),
+                ),
+                applies_before_step_id: "solve".into(),
+            },
+        )];
 
-        let resolved = resolve_load(&load, &geometry, &BTreeMap::new())
-            .expect("load should resolve against geometry");
+        resolve_typed_region_targets(&mut model, &geometry, &aliases).expect("resolve aliases");
 
-        assert_eq!(resolved.load_id, "tip_wrench");
-        assert_eq!(resolved.region_id, "tip");
+        assert_eq!(model.constraints[0].target().unwrap().region_id, "tip");
+        assert_eq!(model.boundaries[0].target.region_id, "tip");
+        assert_eq!(model.connectors[0].primary.region_id, "tip");
+        assert_eq!(
+            model.connectors[0].secondary.as_ref().unwrap().region_id,
+            "tip"
+        );
+        assert_eq!(model.interfaces[0].primary_region_id, "tip");
         assert!(matches!(
-            resolved.kind,
-            LoadKind::Wrench {
-                fx: 10.0,
-                fy: 20.0,
-                fz: 30.0,
-                mx: 1.0,
-                my: 2.0,
-                mz: 3.0,
-                px: 0.1,
-                py: 0.2,
-                pz: 0.3,
-            }
+            &model.excitations[0].excitation().target,
+            ExcitationTarget::Region(target) if target.region_id == "tip"
         ));
+        assert_eq!(
+            model.initial_conditions[0]
+                .region_target_mut()
+                .unwrap()
+                .region_id,
+            "tip"
+        );
     }
 
     #[test]
-    fn fea_document_scales_wrench_point_from_geometry_units_to_meters() {
-        let mut geometry = sample_geometry();
-        geometry.units = UnitSystem::Millimeter;
-        let load: FeaLoadDocument = serde_yaml::from_str(
-            r#"
-id: tip_wrench
-region: tag:tip
-type: wrench
-force: [10.0, 20.0, 30.0]
-moment: [1.0, 2.0, 3.0]
-point: [100.0, 200.0, 300.0]
-"#,
-        )
-        .expect("load document should parse");
-
-        let resolved = resolve_load(&load, &geometry, &BTreeMap::new())
-            .expect("load should resolve against geometry");
-
-        assert!(matches!(
-            resolved.kind,
-            LoadKind::Wrench {
-                px,
-                py,
-                pz,
-                ..
-            } if (px - 0.1).abs() <= 1.0e-12
-                && (py - 0.2).abs() <= 1.0e-12
-                && (pz - 0.3).abs() <= 1.0e-12
-        ));
-    }
-
-    #[test]
-    fn fea_document_wrench_requires_force_moment_and_point() {
-        let geometry = sample_geometry();
-        let load: FeaLoadDocument = serde_yaml::from_str(
-            r#"
-id: tip_wrench
-region: tip
-type: wrench
-force: [1.0, 0.0, 0.0]
-moment: [0.0, 0.0, 1.0]
-"#,
-        )
-        .expect("load document should parse");
-
-        let err = resolve_load(&load, &geometry, &BTreeMap::new())
-            .expect_err("wrench without point should fail");
-
-        assert!(err.contains("wrench load requires point: [px, py, pz]"));
-    }
-
-    #[test]
-    fn fea_document_moment_rejects_unknown_fields() {
-        let err = serde_yaml::from_str::<FeaLoadDocument>(
-            r#"
-id: tip_moment
-region: tip
-type: moment
-vector: [1.0, 2.0, 3.0]
-units: n_m
-"#,
-        )
-        .expect_err("unknown moment load fields should be rejected");
-
-        assert!(err.to_string().contains("unknown field"));
+    fn structural_node_syntax_is_not_inferred_as_a_region() {
+        let error = resolve_region_ref("node:2", &sample_geometry(), &BTreeMap::new())
+            .expect_err("node syntax is not a region selector");
+        assert!(error.contains("node:2"));
     }
 
     #[test]
@@ -1584,13 +1376,9 @@ units: n_m
             "element_order: tet10\ntarget_edge_length_m: 0.02\nmaximum_chordal_deviation_m: 0.0002\nmaximum_grading_ratio: 1.5\nmaximum_elements: 42000\ndeterministic_seed: 17\n",
         )
         .unwrap();
-        let settings = resolve_meshing_settings(
-            Some(&mesh),
-            AnalysisCreateModelProfile::LinearStaticStructural,
-            AnalysisRunKind::LinearStatic,
-        )
-        .unwrap()
-        .unwrap();
+        let settings = resolve_meshing_settings(Some(&mesh), AnalysisRunKind::LinearStatic)
+            .unwrap()
+            .unwrap();
         assert_eq!(settings.element_order, ElementOrder::Tet10);
         assert_eq!(settings.target_edge_length_m, 0.02);
         assert_eq!(settings.maximum_chordal_deviation_m, 0.0002);
@@ -1601,20 +1389,14 @@ units: n_m
 
     #[test]
     fn fea_document_defaults_meshing_only_for_solid_structural_studies() {
-        assert!(resolve_meshing_settings(
-            None,
-            AnalysisCreateModelProfile::LinearStaticStructural,
-            AnalysisRunKind::LinearStatic,
-        )
-        .unwrap()
-        .is_some());
-        assert!(resolve_meshing_settings(
-            None,
-            AnalysisCreateModelProfile::ModalStructural,
-            AnalysisRunKind::Modal,
-        )
-        .unwrap()
-        .is_none());
+        assert!(
+            resolve_meshing_settings(None, AnalysisRunKind::LinearStatic,)
+                .unwrap()
+                .is_some()
+        );
+        assert!(resolve_meshing_settings(None, AnalysisRunKind::Modal,)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -1623,7 +1405,7 @@ units: n_m
             "backend: auto",
             "kind: solid",
             "element: tetrahedron4",
-            "profile: analysis_ready",
+            "template: analysis_ready",
             "refinement: {}",
             "validation: {}",
         ] {
@@ -1643,12 +1425,7 @@ units: n_m
             "maximum_elements: 0",
         ] {
             let mesh = serde_yaml::from_str::<FeaMeshDocument>(source).unwrap();
-            assert!(resolve_meshing_settings(
-                Some(&mesh),
-                AnalysisCreateModelProfile::LinearStaticStructural,
-                AnalysisRunKind::LinearStatic,
-            )
-            .is_err());
+            assert!(resolve_meshing_settings(Some(&mesh), AnalysisRunKind::LinearStatic,).is_err());
         }
     }
 }

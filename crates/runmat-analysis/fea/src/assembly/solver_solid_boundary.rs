@@ -1,15 +1,15 @@
-use runmat_analysis_core::{
-    AnalysisModel, LoadKind, StructuralConstraintKind, StructuralTranslationDof,
-};
+use runmat_analysis_core::{AnalysisModel, StructuralConstraintKind, StructuralTranslationDof};
 use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
     dofs::{StructuralDofKind, StructuralDofLayout},
     SolverMeshRegionMappingError, WrenchLoweringSummary,
 };
+use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
 
 pub(super) fn apply_solver_mesh_structural_regions(
     model: &AnalysisModel,
+    excitations: &RealizedExcitations,
     mesh: &SolverMeshArtifact,
     layout: &StructuralDofLayout,
     constrained: &mut [bool],
@@ -20,15 +20,19 @@ pub(super) fn apply_solver_mesh_structural_regions(
     constrained.fill(false);
 
     let mut wrench_lowering = Vec::new();
-    for load in &model.loads {
-        let target_nodes = solver_mesh_region_node_indices(mesh, &load.region_id);
+    for load in excitations.iter() {
+        let Some(region_id) = load.target.solver_region_id() else {
+            continue;
+        };
+        let target_nodes = solver_mesh_region_node_indices(mesh, region_id);
         match load.kind {
-            LoadKind::Force { fx, fy, fz } => {
+            RealizedExcitationKind::Force(value) => {
+                let [fx, fy, fz] = value.real;
                 if target_nodes.is_empty() {
                     if strict_region_mapping {
                         return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
-                            load_id: load.load_id.clone(),
-                            region_id: load.region_id.clone(),
+                            load_id: load.excitation_id.0.clone(),
+                            region_id: region_id.to_string(),
                             load_kind: "force",
                         });
                     }
@@ -41,22 +45,16 @@ pub(super) fn apply_solver_mesh_structural_regions(
                     add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, fz * scale);
                 }
             }
-            LoadKind::Wrench {
-                fx,
-                fy,
-                fz,
-                mx,
-                my,
-                mz,
-                px,
-                py,
-                pz,
+            RealizedExcitationKind::Wrench {
+                force,
+                moment,
+                point,
             } => {
                 if target_nodes.is_empty() {
                     if strict_region_mapping {
                         return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
-                            load_id: load.load_id.clone(),
-                            region_id: load.region_id.clone(),
+                            load_id: load.excitation_id.0.clone(),
+                            region_id: region_id.to_string(),
                             load_kind: "wrench",
                         });
                     }
@@ -67,32 +65,33 @@ pub(super) fn apply_solver_mesh_structural_regions(
                     layout,
                     rhs,
                     &target_nodes,
-                    [fx, fy, fz],
-                    [mx, my, mz],
-                    [px, py, pz],
+                    force.real,
+                    moment.real,
+                    point.meters,
                 );
                 wrench_lowering.push(WrenchLoweringSummary {
-                    load_id: load.load_id.clone(),
-                    region_id: load.region_id.clone(),
+                    load_id: load.excitation_id.0.clone(),
+                    region_id: region_id.to_string(),
                     ..summary
                 });
             }
-            LoadKind::Pressure { magnitude_pa } => {
+            RealizedExcitationKind::Pressure(value) => {
                 if strict_region_mapping
                     && !mesh.topology.boundary_faces.iter().any(|face| {
-                        boundary_face_matches_region(face, &load.region_id)
+                        boundary_face_matches_region(face, region_id)
                             && matches!(face.node_ids.len(), 3 | 6)
                     })
                 {
                     return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
-                        load_id: load.load_id.clone(),
-                        region_id: load.region_id.clone(),
+                        load_id: load.excitation_id.0.clone(),
+                        region_id: region_id.to_string(),
                         load_kind: "pressure",
                     });
                 }
-                apply_solver_mesh_pressure(mesh, layout, rhs, &load.region_id, magnitude_pa);
+                apply_solver_mesh_pressure(mesh, layout, rhs, region_id, value.real);
             }
-            LoadKind::BodyForce { gx, gy, gz } => {
+            RealizedExcitationKind::BodyForce(value) => {
+                let [gx, gy, gz] = value.real;
                 let all_nodes = (0..mesh.topology.nodes.len()).collect::<Vec<_>>();
                 let scale = 1.0 / all_nodes.len().max(1) as f64;
                 for node_index in all_nodes {
@@ -147,7 +146,7 @@ pub(super) fn apply_solver_mesh_structural_regions(
                 }
                 StructuralConstraintKind::PrescribedTranslations(values) => {
                     for prescribed in &values.values {
-                        let Some(value) = prescribed.value.constant() else {
+                        let Some(value) = prescribed.value.study_constant(&model.signals) else {
                             continue;
                         };
                         let kind = match prescribed.dof {

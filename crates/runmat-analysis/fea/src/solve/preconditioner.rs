@@ -176,76 +176,13 @@ pub fn build_spd_preconditioner(
 
 #[cfg(test)]
 mod tests {
-    use runmat_analysis_core::{
-        AnalysisConstraint, AnalysisModel, AnalysisModelId, AnalysisSequence, CoordinateFrame,
-        LoadCase, LoadKind, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-        ProcedureStep, RegionTarget, StructuralConstraint, StructuralConstraintKind,
-    };
-    use runmat_geometry_core::UnitSystem;
-
     use crate::assembly::assemble_linear_system;
+    use crate::fixtures::{fixture_model, FixtureId};
 
     use super::*;
 
-    fn model() -> AnalysisModel {
-        AnalysisModel {
-            model_id: AnalysisModelId("pc-test".to_string()),
-            geometry_id: "geo:test".to_string(),
-            geometry_revision: 1,
-            units: UnitSystem::Meter,
-            frame: CoordinateFrame::Global,
-            materials: vec![MaterialModel {
-                material_id: "m1".to_string(),
-                name: "Steel".to_string(),
-                mechanical: MaterialMechanicalModel {
-                    youngs_modulus_pa: 200e9,
-                    poisson_ratio: 0.3,
-                    density_kg_per_m3: 7850.0,
-                },
-                thermal: MaterialThermalModel {
-                    reference_temperature_k: 293.15,
-                    modulus_temp_coeff_per_k: -2.5e-4,
-                    ..MaterialThermalModel::default()
-                },
-                acoustic: None,
-                electrical: None,
-                plastic: None,
-            }],
-            material_assignments: Vec::new(),
-            structural: None,
-            thermo_mechanical: None,
-            electro_thermal: None,
-            electromagnetic: None,
-            cfd: None,
-            interfaces: Vec::new(),
-            constraints: vec![AnalysisConstraint::Structural(StructuralConstraint {
-                constraint_id: "bc".to_string(),
-                frame: CoordinateFrame::Global,
-                kind: StructuralConstraintKind::Fixed {
-                    target: RegionTarget::boundary("root"),
-                },
-            })],
-            boundaries: Vec::new(),
-            connectors: Vec::new(),
-            signals: Vec::new(),
-            excitations: Vec::new(),
-            excitation_cases: Vec::new(),
-            initial_conditions: Vec::new(),
-            response_spectra: Vec::new(),
-            loads: vec![LoadCase {
-                load_id: "l1".to_string(),
-                region_id: "tip".to_string(),
-                kind: LoadKind::Force {
-                    fx: 0.0,
-                    fy: -1000.0,
-                    fz: 0.0,
-                },
-            }],
-            sequence: AnalysisSequence::from_steps(
-                "preconditioner_test_sequence",
-                vec![ProcedureStep::structural_static("s1")],
-            ),
-        }
+    fn model() -> runmat_analysis_core::AnalysisModel {
+        fixture_model(FixtureId::CantileverLinearStatic)
     }
 
     #[test]

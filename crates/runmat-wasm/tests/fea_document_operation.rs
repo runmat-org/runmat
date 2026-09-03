@@ -16,7 +16,7 @@ async fn apply_fea_study_document_operation_creates_and_summarizes_document() {
     let create_input = serde_wasm_bindgen::to_value(&serde_json::json!({
         "geometry_path": "bracket.step",
         "geometry_units": "millimeter",
-        "model_profile": "linear_static_structural"
+        "model_template": "linear_static_structural"
     }))
     .expect("serialize create input");
     let created: JsonValue = serde_wasm_bindgen::from_value(
@@ -35,7 +35,7 @@ async fn apply_fea_study_document_operation_creates_and_summarizes_document() {
     assert_eq!(created["result"]["summary"]["studyId"], "bracket_static");
     assert_eq!(created["result"]["summary"]["geometryPath"], "bracket.step");
     assert_eq!(
-        created["result"]["summary"]["modelProfile"],
+        created["result"]["summary"]["modelTemplate"],
         "linear_static_structural"
     );
     assert_eq!(created["result"]["summary"]["runKind"], "linear_static");

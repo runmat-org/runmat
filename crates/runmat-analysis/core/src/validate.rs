@@ -1,7 +1,7 @@
 use runmat_geometry_core::UnitSystem;
 use thiserror::Error;
 
-use crate::problem::{coordinate_frame::CoordinateFrame, loads::LoadKind, model::AnalysisModel};
+use crate::problem::{coordinate_frame::CoordinateFrame, model::AnalysisModel};
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum AnalysisValidationError {
@@ -11,8 +11,6 @@ pub enum AnalysisValidationError {
     MissingMaterials,
     #[error("ANALYSIS_VALIDATION_MISSING_CONDITIONS: analysis model must include at least one constraint or natural boundary")]
     MissingConstraintsOrBoundaries,
-    #[error("ANALYSIS_VALIDATION_MISSING_LOADS: analysis model must include at least one load")]
-    MissingLoads,
     #[error("ANALYSIS_VALIDATION_INVALID_ID: {kind} id must be non-empty")]
     InvalidId { kind: &'static str },
     #[error("ANALYSIS_VALIDATION_DUPLICATE_ID: duplicate {kind} id `{id}`")]
@@ -41,6 +39,11 @@ pub enum AnalysisValidationError {
     },
     #[error("ANALYSIS_VALIDATION_INVALID_SIGNAL: signal `{signal_id}` is invalid: {detail}")]
     InvalidSignal { signal_id: String, detail: String },
+    #[error("ANALYSIS_VALIDATION_INVALID_DOMAIN: {domain} domain is invalid: {detail}")]
+    InvalidDomain {
+        domain: &'static str,
+        detail: String,
+    },
     #[error(
         "ANALYSIS_VALIDATION_INVALID_EXCITATION: excitation `{excitation_id}` is invalid: {detail}"
     )]
@@ -84,20 +87,6 @@ pub enum AnalysisValidationError {
     )]
     InvalidAccuracyPlan { plan_id: String, detail: String },
     #[error(
-        "ANALYSIS_VALIDATION_INVALID_MOMENT: moment load {load_id} must have finite components"
-    )]
-    InvalidMomentVector { load_id: String },
-    #[error("ANALYSIS_VALIDATION_ZERO_MOMENT: moment load {load_id} must have nonzero magnitude")]
-    ZeroMomentVector { load_id: String },
-    #[error(
-        "ANALYSIS_VALIDATION_INVALID_WRENCH: wrench load {load_id} must have finite force, moment, and point components"
-    )]
-    InvalidWrench { load_id: String },
-    #[error(
-        "ANALYSIS_VALIDATION_ZERO_WRENCH: wrench load {load_id} must have nonzero force or moment"
-    )]
-    ZeroWrench { load_id: String },
-    #[error(
         "ANALYSIS_VALIDATION_UNIT_MISMATCH: model units {model:?} do not match geometry units {geometry:?}"
     )]
     UnitMismatch {
@@ -120,56 +109,7 @@ pub fn validate_model(model: &AnalysisModel) -> Result<(), AnalysisValidationErr
     if model.constraints.is_empty() && model.boundaries.is_empty() {
         return Err(AnalysisValidationError::MissingConstraintsOrBoundaries);
     }
-    if model.loads.is_empty() {
-        return Err(AnalysisValidationError::MissingLoads);
-    }
     crate::validate_authored::validate_authored_model(model)?;
-    for load in &model.loads {
-        if let LoadKind::Moment { mx, my, mz } = load.kind {
-            if !mx.is_finite() || !my.is_finite() || !mz.is_finite() {
-                return Err(AnalysisValidationError::InvalidMomentVector {
-                    load_id: load.load_id.clone(),
-                });
-            }
-            if mx == 0.0 && my == 0.0 && mz == 0.0 {
-                return Err(AnalysisValidationError::ZeroMomentVector {
-                    load_id: load.load_id.clone(),
-                });
-            }
-        }
-        if let LoadKind::Wrench {
-            fx,
-            fy,
-            fz,
-            mx,
-            my,
-            mz,
-            px,
-            py,
-            pz,
-        } = load.kind
-        {
-            if !fx.is_finite()
-                || !fy.is_finite()
-                || !fz.is_finite()
-                || !mx.is_finite()
-                || !my.is_finite()
-                || !mz.is_finite()
-                || !px.is_finite()
-                || !py.is_finite()
-                || !pz.is_finite()
-            {
-                return Err(AnalysisValidationError::InvalidWrench {
-                    load_id: load.load_id.clone(),
-                });
-            }
-            if fx == 0.0 && fy == 0.0 && fz == 0.0 && mx == 0.0 && my == 0.0 && mz == 0.0 {
-                return Err(AnalysisValidationError::ZeroWrench {
-                    load_id: load.load_id.clone(),
-                });
-            }
-        }
-    }
     Ok(())
 }
 

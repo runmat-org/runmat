@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, BoundaryOperator, EvidenceConfidence, LoadKind,
+    validate_model, AnalysisField, AnalysisModel, BoundaryOperator, EvidenceConfidence,
     MagneticConstraintKind,
 };
 
@@ -20,6 +20,7 @@ use crate::{
         FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
     },
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    excitation::{realize_model_excitations, ComplexVector3, RealizedExcitationKind},
     operator::{apply_k, OperatorSystem},
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::backend::kind::LinearAlgebraBackendKind,
@@ -176,7 +177,9 @@ pub fn run_electromagnetic_with_options(
         mapped_boundary_condition_count as f64 / electromagnetic_boundary_count as f64
     };
 
-    let total_load_count = model.loads.len().max(1);
+    let excitations = realize_model_excitations(model)
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let total_load_count = excitations.len().max(1);
     let mut electromagnetic_source_count = 0usize;
     let mut electromagnetic_source_strength = 0.0_f64;
     let mut mapped_source_count = 0usize;
@@ -185,50 +188,33 @@ pub fn run_electromagnetic_with_options(
     let mut per_source_imag_profiles = Vec::new();
     let mut localized_source_abs_total = 0.0_f64;
     let h = 1.0 / (node_count - 1) as f64;
-    for load in &model.loads {
+    for load in excitations.iter() {
         let source_inputs = match load.kind {
-            LoadKind::CurrentDensity {
-                jx,
-                jy,
-                jz,
-                phase_rad,
-                amplitude_scale,
-            } => {
-                let magnitude = (jx * jx + jy * jy + jz * jz).sqrt().clamp(0.0, 2.5);
+            RealizedExcitationKind::CurrentDensity(value) => {
+                let magnitude = complex_vector_magnitude(value).clamp(0.0, 2.5);
                 if magnitude <= 1.0e-12 {
                     None
                 } else {
-                    let directional_mix =
-                        (jx.abs() + 2.0 * jy.abs() + 3.0 * jz.abs()) / magnitude.max(1.0e-12);
+                    let directional_mix = (value.real[0].hypot(value.imaginary[0])
+                        + 2.0 * value.real[1].hypot(value.imaginary[1])
+                        + 3.0 * value.real[2].hypot(value.imaginary[2]))
+                        / magnitude.max(1.0e-12);
                     Some((
                         magnitude,
-                        phase_rad + 0.05 * directional_mix,
-                        amplitude_scale.abs().clamp(0.05, 4.0),
+                        complex_vector_phase(value) + 0.05 * directional_mix,
+                        1.0,
                         false,
                     ))
                 }
             }
-            LoadKind::CoilCurrent {
-                current_a,
-                phase_rad,
-                amplitude_scale,
-            } => {
-                let magnitude =
-                    (current_a.abs() / domain.applied_current_a.max(1.0e-9)).clamp(0.0, 2.5);
+            RealizedExcitationKind::ElectricCurrent(value) => {
+                let magnitude = (value.real.hypot(value.imaginary)
+                    / domain.applied_current_a.max(1.0e-9))
+                .clamp(0.0, 2.5);
                 if magnitude <= 1.0e-12 {
                     None
                 } else {
-                    let signed_phase = if current_a >= 0.0 {
-                        phase_rad
-                    } else {
-                        phase_rad + std::f64::consts::PI
-                    };
-                    Some((
-                        magnitude,
-                        signed_phase,
-                        amplitude_scale.abs().clamp(0.05, 4.0),
-                        true,
-                    ))
+                    Some((magnitude, value.imaginary.atan2(value.real), 1.0, true))
                 }
             }
             _ => None,
@@ -242,7 +228,10 @@ pub fn run_electromagnetic_with_options(
         let mut source_profile_real = vec![0.0_f64; node_count];
         let mut source_profile_imag = vec![0.0_f64; node_count];
 
-        if let Some(region_index) = region_index_by_id.get(load.region_id.as_str()).copied() {
+        let Some(region_id) = load.target.solver_region_id() else {
+            continue;
+        };
+        if let Some(region_index) = region_index_by_id.get(region_id).copied() {
             mapped_source_count += 1;
             if let Some(region) = coefficient_profile
                 .region_coefficients
@@ -257,7 +246,7 @@ pub fn run_electromagnetic_with_options(
                     .map(|mesh| {
                         solver_mesh_topology::boundary_node_indices(
                             mesh,
-                            std::iter::once(load.region_id.as_str()),
+                            std::iter::once(region_id),
                         )
                     })
                     .unwrap_or_default();
@@ -303,7 +292,7 @@ pub fn run_electromagnetic_with_options(
             .zip(source_profile_imag.iter())
             .map(|(real, imag)| (real * real + imag * imag).sqrt())
             .sum::<f64>();
-        if region_index_by_id.contains_key(load.region_id.as_str()) {
+        if region_index_by_id.contains_key(region_id) {
             localized_source_abs_total += source_abs_sum;
         } else {
             // Keep unmatched-region source deposition observable via interference/coverage metrics.
@@ -1943,6 +1932,27 @@ fn confidence_weight(confidence: EvidenceConfidence) -> f64 {
         EvidenceConfidence::Probable => 0.75,
         EvidenceConfidence::Inferred => 0.5,
     }
+}
+
+fn complex_vector_magnitude(value: ComplexVector3) -> f64 {
+    value
+        .real
+        .into_iter()
+        .zip(value.imaginary)
+        .map(|(real, imaginary)| real * real + imaginary * imaginary)
+        .sum::<f64>()
+        .sqrt()
+}
+
+fn complex_vector_phase(value: ComplexVector3) -> f64 {
+    (0..3)
+        .max_by(|left, right| {
+            value.real[*left]
+                .hypot(value.imaginary[*left])
+                .total_cmp(&value.real[*right].hypot(value.imaginary[*right]))
+        })
+        .map(|index| value.imaginary[index].atan2(value.real[index]))
+        .unwrap_or(0.0)
 }
 
 fn harmonic_mean(a: f64, b: f64) -> f64 {

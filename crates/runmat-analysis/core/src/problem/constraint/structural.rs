@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use super::{visit_pair, visit_pair_ref, PairedConstraint};
 use crate::problem::{
     coordinate_frame::CoordinateFrame,
+    prescribed_value::PrescribedValue,
     quantity::{Displacement, Rotation},
     reference_point::ReferencePoint,
-    schedule::ValueSchedule,
     target::RegionTarget,
 };
 
@@ -27,7 +27,7 @@ pub enum StructuralConstraintKind {
     PrescribedRotations(PrescribedRotations),
     NormalDisplacement {
         target: RegionTarget,
-        value: ValueSchedule<Displacement>,
+        value: PrescribedValue<Displacement>,
     },
     Symmetry {
         target: RegionTarget,
@@ -112,14 +112,14 @@ pub enum StructuralRotationDof {
 #[serde(deny_unknown_fields)]
 pub struct TranslationDofValue {
     pub dof: StructuralTranslationDof,
-    pub value: ValueSchedule<Displacement>,
+    pub value: PrescribedValue<Displacement>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RotationDofValue {
     pub dof: StructuralRotationDof,
-    pub value: ValueSchedule<Rotation>,
+    pub value: PrescribedValue<Rotation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

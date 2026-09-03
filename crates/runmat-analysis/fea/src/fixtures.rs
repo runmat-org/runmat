@@ -1,12 +1,282 @@
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, AnalysisModelId, AnalysisSequence, BeamElementModel,
-    BeamSectionModel, CoordinateFrame, Displacement, EvidenceConfidence, LoadCase, LoadKind,
-    MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    PrescribedTranslations, ProcedureStep, RegionTarget, ShellElementModel, ShellSectionModel,
-    StructuralConstraint, StructuralConstraintKind, StructuralElement, StructuralElementKind,
-    StructuralModel, StructuralNode, StructuralTranslationDof, TranslationDofValue, ValueSchedule,
+    AnalysisConstraint, AnalysisExcitation, AnalysisModel, AnalysisModelId, AnalysisSequence,
+    BeamElementModel, BeamSectionModel, BodyForceDensity, CoordinateFrame, Direction, Displacement,
+    EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
+    ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
+    Force, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    Moment, PhysicalSignal, PrescribedTranslations, PrescribedValue, Pressure, ProcedureStep,
+    ProjectionRequirement, RegionTarget, ShellElementModel, ShellSectionModel, Signal,
+    SignalApproximationEvidence, SignalId, SignalPrecision, SignalProvenance, SignalRepresentation,
+    SignalShape, SignalValue, StructuralConstraint, StructuralConstraintKind, StructuralElement,
+    StructuralElementKind, StructuralModel, StructuralNode, StructuralTranslationDof,
+    TranslationDofValue,
 };
+#[cfg(test)]
+use runmat_analysis_core::{Position, ReferencePoint};
 use runmat_geometry_core::UnitSystem;
+
+#[derive(Debug, Clone)]
+pub(crate) struct FixtureExcitation {
+    pub id: String,
+    pub region_id: String,
+    pub kind: FixtureExcitationKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FixtureExcitationKind {
+    Force([f64; 3]),
+    Moment([f64; 3]),
+    Pressure(f64),
+    BodyForce([f64; 3]),
+    #[cfg(test)]
+    Wrench {
+        force: [f64; 3],
+        moment: [f64; 3],
+        point_m: [f64; 3],
+    },
+}
+
+pub(crate) fn replace_fixture_excitations(
+    model: &mut AnalysisModel,
+    specifications: Vec<FixtureExcitation>,
+) {
+    model.signals.clear();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    for specification in specifications {
+        append_fixture_excitation(model, specification);
+    }
+}
+
+fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureExcitation) {
+    let case_id = ExcitationCaseId(format!("{}.case", specification.id));
+    let target = match specification.kind {
+        FixtureExcitationKind::Pressure(_) => {
+            ExcitationTarget::Region(RegionTarget::boundary(&specification.region_id))
+        }
+        FixtureExcitationKind::BodyForce(_) => {
+            ExcitationTarget::Region(RegionTarget::volume(&specification.region_id))
+        }
+        _ => ExcitationTarget::Region(RegionTarget::authored(&specification.region_id)),
+    };
+    let mut action_ids = Vec::new();
+    match specification.kind {
+        FixtureExcitationKind::Force(value) => append_vector_excitation(
+            model,
+            &specification.id,
+            case_id.clone(),
+            target,
+            value,
+            VectorExcitationKind::Force,
+        ),
+        FixtureExcitationKind::Moment(value) => append_vector_excitation(
+            model,
+            &specification.id,
+            case_id.clone(),
+            target,
+            value,
+            VectorExcitationKind::Moment,
+        ),
+        FixtureExcitationKind::Pressure(value) => append_scalar_excitation(
+            model,
+            &specification.id,
+            case_id.clone(),
+            target,
+            Pressure::new(value),
+            PhysicalSignal::Pressure,
+            ExcitationAction::Pressure,
+        ),
+        FixtureExcitationKind::BodyForce(value) => append_vector_excitation(
+            model,
+            &specification.id,
+            case_id.clone(),
+            target,
+            value,
+            VectorExcitationKind::BodyForce,
+        ),
+        #[cfg(test)]
+        FixtureExcitationKind::Wrench {
+            force,
+            moment,
+            point_m,
+        } => {
+            let target = ExcitationTarget::ReferencePoint(ReferencePoint {
+                reference_point_id: specification.region_id,
+                position: Position::new(point_m),
+            });
+            let force_id = specification.id.clone();
+            let moment_id = format!("{}.moment", specification.id);
+            append_vector_excitation(
+                model,
+                &force_id,
+                case_id.clone(),
+                target.clone(),
+                force,
+                VectorExcitationKind::Force,
+            );
+            append_vector_excitation(
+                model,
+                &moment_id,
+                case_id.clone(),
+                target,
+                moment,
+                VectorExcitationKind::Moment,
+            );
+            action_ids.extend([ExcitationId(force_id), ExcitationId(moment_id)]);
+        }
+    }
+    if action_ids.is_empty() {
+        action_ids.push(ExcitationId(specification.id));
+    }
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids,
+        activation: ExcitationCaseActivation::Always,
+    });
+}
+
+#[derive(Debug, Clone, Copy)]
+enum VectorExcitationKind {
+    Force,
+    Moment,
+    BodyForce,
+}
+
+fn append_vector_excitation(
+    model: &mut AnalysisModel,
+    id: &str,
+    case_id: ExcitationCaseId,
+    target: ExcitationTarget,
+    values: [f64; 3],
+    kind: VectorExcitationKind,
+) {
+    let signal_id = SignalId(format!("{id}.signal"));
+    let (signal, distribution) = match kind {
+        VectorExcitationKind::Force => (
+            PhysicalSignal::Force(fixture_vector_signal(signal_id.clone(), values)),
+            ExcitationDistribution::PreserveResultant,
+        ),
+        VectorExcitationKind::Moment => (
+            PhysicalSignal::Moment(fixture_vector_signal(signal_id.clone(), values)),
+            ExcitationDistribution::PreserveResultant,
+        ),
+        VectorExcitationKind::BodyForce => (
+            PhysicalSignal::BodyForceDensity(fixture_vector_signal(signal_id.clone(), values)),
+            ExcitationDistribution::IntensityPerVolume,
+        ),
+    };
+    model.signals.push(signal);
+    let action = fixture_action(id, case_id, target, signal_id, distribution);
+    model.excitations.push(match kind {
+        VectorExcitationKind::Force => ExcitationAction::Force(action),
+        VectorExcitationKind::Moment => ExcitationAction::Moment(action),
+        VectorExcitationKind::BodyForce => ExcitationAction::BodyForce(action),
+    });
+}
+
+fn fixture_vector_signal<Q: Copy + FromFixtureComponent>(
+    signal_id: SignalId,
+    values: [f64; 3],
+) -> Signal<Q> {
+    Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Vector3,
+        frame: Some(CoordinateFrame::Global),
+        representation: SignalRepresentation::Constant(SignalValue::Vector3(
+            values.map(Q::from_component),
+        )),
+        precision: SignalPrecision::Real64,
+        evidence: exact_signal_evidence(),
+        provenance: SignalProvenance::Authored,
+    }
+}
+
+fn append_scalar_excitation<Q>(
+    model: &mut AnalysisModel,
+    id: &str,
+    case_id: ExcitationCaseId,
+    target: ExcitationTarget,
+    value: Q,
+    signal_kind: impl FnOnce(Signal<Q>) -> PhysicalSignal,
+    action_kind: impl FnOnce(AnalysisExcitation) -> ExcitationAction,
+) {
+    let signal_id = SignalId(format!("{id}.signal"));
+    model.signals.push(signal_kind(Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Constant(SignalValue::Scalar(value)),
+        precision: SignalPrecision::Real64,
+        evidence: exact_signal_evidence(),
+        provenance: SignalProvenance::Authored,
+    }));
+    model.excitations.push(action_kind(fixture_action(
+        id,
+        case_id,
+        target,
+        signal_id,
+        ExcitationDistribution::IntensityPerArea,
+    )));
+}
+
+fn fixture_action(
+    id: &str,
+    case_id: ExcitationCaseId,
+    target: ExcitationTarget,
+    signal_id: SignalId,
+    distribution: ExcitationDistribution,
+) -> AnalysisExcitation {
+    AnalysisExcitation {
+        excitation_id: ExcitationId(id.to_string()),
+        case_id,
+        target,
+        frame: CoordinateFrame::Global,
+        direction: Some(Direction {
+            vector: [1.0, 0.0, 0.0],
+        }),
+        distribution,
+        kinematics: ExcitationKinematics::FixedFrame,
+        signal_id,
+        active_step_ids: Vec::new(),
+        combination_group: None,
+        projection: ProjectionRequirement {
+            preserve_resultant: true,
+            preserve_moment: true,
+            relative_tolerance: 1.0e-12,
+        },
+    }
+}
+
+fn exact_signal_evidence() -> SignalApproximationEvidence {
+    SignalApproximationEvidence {
+        max_absolute_error: Some(0.0),
+        max_relative_error: Some(0.0),
+        derivative_max_absolute_error: None,
+        sample_count: 1,
+    }
+}
+
+trait FromFixtureComponent {
+    fn from_component(value: f64) -> Self;
+}
+
+impl FromFixtureComponent for Force {
+    fn from_component(value: f64) -> Self {
+        Self::new(value)
+    }
+}
+
+impl FromFixtureComponent for Moment {
+    fn from_component(value: f64) -> Self {
+        Self::new(value)
+    }
+}
+
+impl FromFixtureComponent for BodyForceDensity {
+    fn from_component(value: f64) -> Self {
+        Self::new(value)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FixtureId {
@@ -40,7 +310,6 @@ pub enum FixtureId {
     ElectroThermalJoulePathological,
     MultiMaterialAssembly,
     MissingMaterials,
-    MissingLoads,
 }
 
 fn fixed_constraint(constraint_id: &str, region_id: &str) -> AnalysisConstraint {
@@ -67,7 +336,7 @@ fn prescribed_zero_translations(constraint_id: &str, region_id: &str) -> Analysi
             .into_iter()
             .map(|dof| TranslationDofValue {
                 dof,
-                value: ValueSchedule::Constant(Displacement::new(0.0)),
+                value: PrescribedValue::Constant(Displacement::new(0.0)),
             })
             .collect(),
         }),
@@ -120,12 +389,11 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::ElectroThermalJoulePathological => electro_thermal_joule_pathological_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
-        FixtureId::MissingLoads => missing_loads(),
     }
 }
 
 fn cantilever_linear_static() -> AnalysisModel {
-    AnalysisModel {
+    let mut model = AnalysisModel {
         model_id: AnalysisModelId("cantilever".to_string()),
         geometry_id: "geo:cantilever".to_string(),
         geometry_revision: 1,
@@ -168,59 +436,53 @@ fn cantilever_linear_static() -> AnalysisModel {
         excitation_cases: Vec::new(),
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
-        loads: vec![LoadCase {
-            load_id: "tip_load".to_string(),
-            region_id: "tip".to_string(),
-            kind: LoadKind::Force {
-                fx: 0.0,
-                fy: -1000.0,
-                fz: 0.0,
-            },
-        }],
         sequence: AnalysisSequence::from_steps(
             "cantilever_sequence",
             vec![ProcedureStep::structural_static("static_1")],
         ),
-    }
+    };
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "tip_load".into(),
+            region_id: "tip".into(),
+            kind: FixtureExcitationKind::Force([0.0, -1000.0, 0.0]),
+        }],
+    );
+    model
 }
 
 fn cantilever_load_sweep() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("cantilever_load_sweep".to_string());
-    model.loads = (0..128)
+    let excitations = (0..128)
         .map(|i| {
             let scale = 1.0 + (i as f64) * 0.01;
-            LoadCase {
-                load_id: format!("tip_load_{i}"),
+            FixtureExcitation {
+                id: format!("tip_load_{i}"),
                 region_id: format!("tip_{i}"),
-                kind: LoadKind::Force {
-                    fx: 0.0,
-                    fy: -1000.0 * scale,
-                    fz: 0.0,
-                },
+                kind: FixtureExcitationKind::Force([0.0, -1000.0 * scale, 0.0]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model
 }
 
 fn cantilever_large_load_sweep() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("cantilever_large_load_sweep".to_string());
-    model.loads = (0..512)
+    let excitations = (0..512)
         .map(|i| {
             let scale = 1.0 + (i as f64) * 0.005;
-            LoadCase {
-                load_id: format!("tip_load_large_{i}"),
+            FixtureExcitation {
+                id: format!("tip_load_large_{i}"),
                 region_id: format!("tip_large_{i}"),
-                kind: LoadKind::Force {
-                    fx: 0.0,
-                    fy: -800.0 * scale,
-                    fz: 0.0,
-                },
+                kind: FixtureExcitationKind::Force([0.0, -800.0 * scale, 0.0]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model
 }
 
@@ -228,17 +490,14 @@ fn structural_axial_bar_reference() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("structural_axial_bar_reference".to_string());
     model.geometry_id = "geo:structural_axial_bar".to_string();
-    model.loads = (0..12)
-        .map(|i| LoadCase {
-            load_id: format!("axial_bar_tension_{i}"),
+    let excitations = (0..12)
+        .map(|i| FixtureExcitation {
+            id: format!("axial_bar_tension_{i}"),
             region_id: format!("bar_station_{i}"),
-            kind: LoadKind::Force {
-                fx: 2_000.0,
-                fy: 0.0,
-                fz: 0.0,
-            },
+            kind: FixtureExcitationKind::Force([2_000.0, 0.0, 0.0]),
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model.material_assignments = vec![MaterialAssignment {
         region_id: "bar_span".to_string(),
         expected_material_id: "mat_steel".to_string(),
@@ -252,20 +511,17 @@ fn structural_beam_bending_reference() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("structural_beam_bending_reference".to_string());
     model.geometry_id = "geo:structural_beam_bending".to_string();
-    model.loads = (0..12)
+    let excitations = (0..12)
         .map(|i| {
             let span_fraction = (i + 1) as f64 / 12.0;
-            LoadCase {
-                load_id: format!("beam_bending_station_{i}"),
+            FixtureExcitation {
+                id: format!("beam_bending_station_{i}"),
                 region_id: format!("beam_station_{i}"),
-                kind: LoadKind::Force {
-                    fx: 0.0,
-                    fy: -500.0 * span_fraction,
-                    fz: 0.0,
-                },
+                kind: FixtureExcitationKind::Force([0.0, -500.0 * span_fraction, 0.0]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model.material_assignments = vec![MaterialAssignment {
         region_id: "beam_span".to_string(),
         expected_material_id: "mat_steel".to_string(),
@@ -279,14 +535,10 @@ fn structural_beam_cantilever_end_moment_reference() -> AnalysisModel {
     structural_beam_reference_model(
         "structural_beam_cantilever_end_moment_reference",
         "geo:structural_beam_end_moment",
-        vec![LoadCase {
-            load_id: "tip_moment_z".to_string(),
-            region_id: "node:2".to_string(),
-            kind: LoadKind::Moment {
-                mx: 0.0,
-                my: 0.0,
-                mz: 125.0,
-            },
+        vec![FixtureExcitation {
+            id: "tip_moment_z".into(),
+            region_id: "node:2".into(),
+            kind: FixtureExcitationKind::Moment([0.0, 0.0, 125.0]),
         }],
     )
 }
@@ -295,14 +547,10 @@ fn structural_beam_torsion_reference() -> AnalysisModel {
     structural_beam_reference_model(
         "structural_beam_torsion_reference",
         "geo:structural_beam_torsion",
-        vec![LoadCase {
-            load_id: "tip_torque_x".to_string(),
-            region_id: "node:2".to_string(),
-            kind: LoadKind::Moment {
-                mx: 80.0,
-                my: 0.0,
-                mz: 0.0,
-            },
+        vec![FixtureExcitation {
+            id: "tip_torque_x".into(),
+            region_id: "node:2".into(),
+            kind: FixtureExcitationKind::Moment([80.0, 0.0, 0.0]),
         }],
     )
 }
@@ -312,23 +560,15 @@ fn structural_beam_force_and_moment_reference() -> AnalysisModel {
         "structural_beam_force_and_moment_reference",
         "geo:structural_beam_force_and_moment",
         vec![
-            LoadCase {
-                load_id: "tip_force_y".to_string(),
-                region_id: "node:2".to_string(),
-                kind: LoadKind::Force {
-                    fx: 0.0,
-                    fy: 500.0,
-                    fz: 0.0,
-                },
+            FixtureExcitation {
+                id: "tip_force_y".into(),
+                region_id: "node:2".into(),
+                kind: FixtureExcitationKind::Force([0.0, 500.0, 0.0]),
             },
-            LoadCase {
-                load_id: "tip_moment_z".to_string(),
-                region_id: "node:2".to_string(),
-                kind: LoadKind::Moment {
-                    mx: 0.0,
-                    my: 0.0,
-                    mz: 90.0,
-                },
+            FixtureExcitation {
+                id: "tip_moment_z".into(),
+                region_id: "node:2".into(),
+                kind: FixtureExcitationKind::Moment([0.0, 0.0, 90.0]),
             },
         ],
     )
@@ -338,15 +578,14 @@ fn structural_invalid_moment_without_rotational_dofs() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("structural_invalid_moment_without_rotational_dofs".into());
     model.geometry_id = "geo:structural_invalid_moment_without_rotational_dofs".to_string();
-    model.loads = vec![LoadCase {
-        load_id: "solid_tip_moment".to_string(),
-        region_id: "tip".to_string(),
-        kind: LoadKind::Moment {
-            mx: 0.0,
-            my: 0.0,
-            mz: 125.0,
-        },
-    }];
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "solid_tip_moment".into(),
+            region_id: "tip".into(),
+            kind: FixtureExcitationKind::Moment([0.0, 0.0, 125.0]),
+        }],
+    );
     model
 }
 
@@ -355,15 +594,14 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
     model.model_id = AnalysisModelId("structural_shell_plate_moment_reference".to_string());
     model.geometry_id = "geo:structural_shell_plate_moment".to_string();
     model.constraints = vec![fixed_constraint("fixed_corner", "node:1")];
-    model.loads = vec![LoadCase {
-        load_id: "free_corner_moment_y".to_string(),
-        region_id: "node:3".to_string(),
-        kind: LoadKind::Moment {
-            mx: 0.0,
-            my: 10.0,
-            mz: 0.0,
-        },
-    }];
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "free_corner_moment_y".into(),
+            region_id: "node:3".into(),
+            kind: FixtureExcitationKind::Moment([0.0, 10.0, 0.0]),
+        }],
+    );
     model.material_assignments = vec![MaterialAssignment {
         region_id: "shell_panel".to_string(),
         expected_material_id: "mat_steel".to_string(),
@@ -408,13 +646,13 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
 fn structural_beam_reference_model(
     model_id: &str,
     geometry_id: &str,
-    loads: Vec<LoadCase>,
+    excitations: Vec<FixtureExcitation>,
 ) -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId(model_id.to_string());
     model.geometry_id = geometry_id.to_string();
     model.constraints = vec![fixed_constraint("fixed_root", "node:1")];
-    model.loads = loads;
+    replace_fixture_excitations(&mut model, excitations);
     model.material_assignments = vec![MaterialAssignment {
         region_id: "beam_span".to_string(),
         expected_material_id: "mat_steel".to_string(),
@@ -479,21 +717,18 @@ fn transient_shock_fixture() -> AnalysisModel {
         "bc_mid_prescribed",
         "mid_support",
     ));
-    model.loads = (0..256)
+    let excitations = (0..256)
         .map(|i| {
             let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
             let scale = 1.0 + (i as f64) * 0.01;
-            LoadCase {
-                load_id: format!("shock_load_{i}"),
+            FixtureExcitation {
+                id: format!("shock_load_{i}"),
                 region_id: format!("shock_region_{i}"),
-                kind: LoadKind::Force {
-                    fx: 50.0 * scale,
-                    fy: sign * -1500.0 * scale,
-                    fz: 0.0,
-                },
+                kind: FixtureExcitationKind::Force([50.0 * scale, sign * -1500.0 * scale, 0.0]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model.sequence.steps = vec![ProcedureStep::structural_transient(
         "transient_shock_1".to_string(),
     )];
@@ -516,21 +751,22 @@ fn nonlinear_assembly_stress_fixture() -> AnalysisModel {
         "bc_stress_mid_support",
         "mid_support_stress",
     ));
-    model.loads = (0..640)
+    let excitations = (0..640)
         .map(|i| {
             let phase = if i % 3 == 0 { -1.0 } else { 1.0 };
             let scale = 1.0 + (i as f64) * 0.003;
-            LoadCase {
-                load_id: format!("nonlinear_stress_load_{i}"),
+            FixtureExcitation {
+                id: format!("nonlinear_stress_load_{i}"),
                 region_id: format!("nonlinear_stress_region_{}", i % 48),
-                kind: LoadKind::Force {
-                    fx: 75.0 * scale,
-                    fy: phase * -1800.0 * scale,
-                    fz: 20.0 * scale,
-                },
+                kind: FixtureExcitationKind::Force([
+                    75.0 * scale,
+                    phase * -1800.0 * scale,
+                    20.0 * scale,
+                ]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
         "nonlinear_stress_1".to_string(),
     )];
@@ -590,21 +826,22 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
             confidence: EvidenceConfidence::Verified,
         },
     ];
-    model.loads = (0..720)
+    let excitations = (0..720)
         .map(|i| {
             let phase = if i % 4 == 0 { -1.0 } else { 1.0 };
             let drift = 1.0 + (i as f64) * 0.0025;
-            LoadCase {
-                load_id: format!("nonlinear_softening_load_{i}"),
+            FixtureExcitation {
+                id: format!("nonlinear_softening_load_{i}"),
                 region_id: format!("nonlinear_softening_region_{}", i % 64),
-                kind: LoadKind::Force {
-                    fx: 65.0 * drift,
-                    fy: phase * -2100.0 * drift,
-                    fz: 28.0 * drift,
-                },
+                kind: FixtureExcitationKind::Force([
+                    65.0 * drift,
+                    phase * -2100.0 * drift,
+                    28.0 * drift,
+                ]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
         "nonlinear_softening_1".to_string(),
     )];
@@ -618,41 +855,40 @@ fn nonlinear_load_path_mix_fixture() -> AnalysisModel {
         "bc_mix_path_support",
         "mix_path_support",
     ));
-    model.loads = (0..480)
+    let excitations = (0..480)
         .map(|i| {
             let scale = 1.0 + (i as f64) * 0.0035;
             if i % 3 == 0 {
-                LoadCase {
-                    load_id: format!("mix_force_{i}"),
+                FixtureExcitation {
+                    id: format!("mix_force_{i}"),
                     region_id: format!("mix_force_region_{}", i % 36),
-                    kind: LoadKind::Force {
-                        fx: 90.0 * scale,
-                        fy: -1300.0 * scale,
-                        fz: 40.0 * scale,
-                    },
+                    kind: FixtureExcitationKind::Force([
+                        90.0 * scale,
+                        -1300.0 * scale,
+                        40.0 * scale,
+                    ]),
                 }
             } else if i % 3 == 1 {
-                LoadCase {
-                    load_id: format!("mix_pressure_{i}"),
+                FixtureExcitation {
+                    id: format!("mix_pressure_{i}"),
                     region_id: format!("mix_pressure_region_{}", i % 24),
-                    kind: LoadKind::Pressure {
-                        magnitude_pa: 9.0e5 * scale,
-                    },
+                    kind: FixtureExcitationKind::Pressure(9.0e5 * scale),
                 }
             } else {
                 let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
-                LoadCase {
-                    load_id: format!("mix_body_{i}"),
+                FixtureExcitation {
+                    id: format!("mix_body_{i}"),
                     region_id: format!("mix_body_region_{}", i % 18),
-                    kind: LoadKind::BodyForce {
-                        gx: 0.35 * scale,
-                        gy: sign * -9.81 * scale,
-                        gz: 0.12 * scale,
-                    },
+                    kind: FixtureExcitationKind::BodyForce([
+                        0.35 * scale,
+                        sign * -9.81 * scale,
+                        0.12 * scale,
+                    ]),
                 }
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
         "nonlinear_mix_1".to_string(),
     )];
@@ -690,30 +926,29 @@ fn nonlinear_contact_frictionless_reference_complex_fixture() -> AnalysisModel {
     let mut model = nonlinear_contact_frictionless_reference_fixture();
     model.model_id =
         AnalysisModelId("nonlinear_contact_frictionless_reference_complex_fixture".to_string());
-    model.loads = (0..560)
+    let excitations = (0..560)
         .map(|i| {
             let scale = 1.0 + (i as f64) * 0.004;
             if i % 2 == 0 {
-                LoadCase {
-                    load_id: format!("contact_ref_force_{i}"),
+                FixtureExcitation {
+                    id: format!("contact_ref_force_{i}"),
                     region_id: format!("contact_ref_force_region_{}", i % 32),
-                    kind: LoadKind::Force {
-                        fx: 80.0 * scale,
-                        fy: -1400.0 * scale,
-                        fz: 32.0 * scale,
-                    },
+                    kind: FixtureExcitationKind::Force([
+                        80.0 * scale,
+                        -1400.0 * scale,
+                        32.0 * scale,
+                    ]),
                 }
             } else {
-                LoadCase {
-                    load_id: format!("contact_ref_pressure_{i}"),
+                FixtureExcitation {
+                    id: format!("contact_ref_pressure_{i}"),
                     region_id: format!("contact_ref_pressure_region_{}", i % 28),
-                    kind: LoadKind::Pressure {
-                        magnitude_pa: 1.05e6 * scale,
-                    },
+                    kind: FixtureExcitationKind::Pressure(1.05e6 * scale),
                 }
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model
 }
 
@@ -747,60 +982,56 @@ fn nonlinear_plastic_hardening_reference_complex_fixture() -> AnalysisModel {
     let mut model = nonlinear_plastic_hardening_reference_fixture();
     model.model_id =
         AnalysisModelId("nonlinear_plastic_hardening_reference_complex_fixture".to_string());
-    model.loads = (0..620)
+    let excitations = (0..620)
         .map(|i| {
             let scale = 1.0 + (i as f64) * 0.0045;
             if i % 3 == 0 {
-                LoadCase {
-                    load_id: format!("plastic_ref_force_{i}"),
+                FixtureExcitation {
+                    id: format!("plastic_ref_force_{i}"),
                     region_id: format!("plastic_ref_force_region_{}", i % 36),
-                    kind: LoadKind::Force {
-                        fx: 85.0 * scale,
-                        fy: -1450.0 * scale,
-                        fz: 28.0 * scale,
-                    },
+                    kind: FixtureExcitationKind::Force([
+                        85.0 * scale,
+                        -1450.0 * scale,
+                        28.0 * scale,
+                    ]),
                 }
             } else if i % 3 == 1 {
-                LoadCase {
-                    load_id: format!("plastic_ref_pressure_{i}"),
+                FixtureExcitation {
+                    id: format!("plastic_ref_pressure_{i}"),
                     region_id: format!("plastic_ref_pressure_region_{}", i % 30),
-                    kind: LoadKind::Pressure {
-                        magnitude_pa: 1.1e6 * scale,
-                    },
+                    kind: FixtureExcitationKind::Pressure(1.1e6 * scale),
                 }
             } else {
-                LoadCase {
-                    load_id: format!("plastic_ref_body_{i}"),
+                FixtureExcitation {
+                    id: format!("plastic_ref_body_{i}"),
                     region_id: format!("plastic_ref_body_region_{}", i % 22),
-                    kind: LoadKind::BodyForce {
-                        gx: 0.28 * scale,
-                        gy: -9.81 * scale,
-                        gz: 0.09 * scale,
-                    },
+                    kind: FixtureExcitationKind::BodyForce([
+                        0.28 * scale,
+                        -9.81 * scale,
+                        0.09 * scale,
+                    ]),
                 }
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model
 }
 
 fn thermo_mechanical_kickoff_fixture() -> AnalysisModel {
     let mut model = multi_material_assembly();
     model.model_id = AnalysisModelId("thermo_mechanical_kickoff_fixture".to_string());
-    model.loads = (0..240)
+    let excitations = (0..240)
         .map(|i| {
             let scale = 1.0 + (i as f64) * 0.004;
-            LoadCase {
-                load_id: format!("thermo_mech_force_{i}"),
+            FixtureExcitation {
+                id: format!("thermo_mech_force_{i}"),
                 region_id: format!("thermo_mech_region_{}", i % 24),
-                kind: LoadKind::Force {
-                    fx: 35.0 * scale,
-                    fy: -900.0 * scale,
-                    fz: 12.0 * scale,
-                },
+                kind: FixtureExcitationKind::Force([35.0 * scale, -900.0 * scale, 12.0 * scale]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model.sequence.steps = vec![ProcedureStep::structural_transient(
         "thermo_mech_transient_1".to_string(),
     )];
@@ -830,20 +1061,17 @@ fn thermo_gradient_benign_fixture() -> AnalysisModel {
             confidence: EvidenceConfidence::Probable,
         },
     ];
-    model.loads = (0..260)
+    let excitations = (0..260)
         .map(|i| {
             let scale = 1.0 + (i as f64) * 0.003;
-            LoadCase {
-                load_id: format!("thermo_grad_benign_load_{i}"),
+            FixtureExcitation {
+                id: format!("thermo_grad_benign_load_{i}"),
                 region_id: format!("thermo_grad_benign_region_{}", i % 28),
-                kind: LoadKind::Force {
-                    fx: 30.0 * scale,
-                    fy: -850.0 * scale,
-                    fz: 14.0 * scale,
-                },
+                kind: FixtureExcitationKind::Force([30.0 * scale, -850.0 * scale, 14.0 * scale]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model.sequence.steps = vec![ProcedureStep::structural_transient(
         "thermo_grad_benign_transient_1".to_string(),
     )];
@@ -873,20 +1101,17 @@ fn thermo_gradient_pathological_fixture() -> AnalysisModel {
             confidence: EvidenceConfidence::Inferred,
         },
     ];
-    model.loads = (0..320)
+    let excitations = (0..320)
         .map(|i| {
             let scale = 1.0 + (i as f64) * 0.0038;
-            LoadCase {
-                load_id: format!("thermo_grad_pathological_load_{i}"),
+            FixtureExcitation {
+                id: format!("thermo_grad_pathological_load_{i}"),
                 region_id: format!("thermo_grad_pathological_region_{}", i % 32),
-                kind: LoadKind::Force {
-                    fx: 52.0 * scale,
-                    fy: -1150.0 * scale,
-                    fz: 26.0 * scale,
-                },
+                kind: FixtureExcitationKind::Force([52.0 * scale, -1150.0 * scale, 26.0 * scale]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model.sequence.steps = vec![ProcedureStep::structural_transient(
         "thermo_grad_pathological_transient_1".to_string(),
     )];
@@ -896,41 +1121,39 @@ fn thermo_gradient_pathological_fixture() -> AnalysisModel {
 fn thermo_ramp_smooth_fixture() -> AnalysisModel {
     let mut model = thermo_gradient_benign_fixture();
     model.model_id = AnalysisModelId("thermo_ramp_smooth_fixture".to_string());
-    model.loads = (0..280)
+    let excitations = (0..280)
         .map(|i| {
             let scale = 0.6 + (i as f64) * 0.0025;
-            LoadCase {
-                load_id: format!("thermo_ramp_smooth_load_{i}"),
+            FixtureExcitation {
+                id: format!("thermo_ramp_smooth_load_{i}"),
                 region_id: format!("thermo_ramp_smooth_region_{}", i % 30),
-                kind: LoadKind::Force {
-                    fx: 24.0 * scale,
-                    fy: -760.0 * scale,
-                    fz: 10.0 * scale,
-                },
+                kind: FixtureExcitationKind::Force([24.0 * scale, -760.0 * scale, 10.0 * scale]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model
 }
 
 fn thermo_shock_oscillatory_fixture() -> AnalysisModel {
     let mut model = thermo_gradient_pathological_fixture();
     model.model_id = AnalysisModelId("thermo_shock_oscillatory_fixture".to_string());
-    model.loads = (0..360)
+    let excitations = (0..360)
         .map(|i| {
             let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
             let scale = 1.0 + (i as f64) * 0.004;
-            LoadCase {
-                load_id: format!("thermo_shock_osc_load_{i}"),
+            FixtureExcitation {
+                id: format!("thermo_shock_osc_load_{i}"),
                 region_id: format!("thermo_shock_osc_region_{}", i % 36),
-                kind: LoadKind::Force {
-                    fx: sign * 48.0 * scale,
-                    fy: sign * -1320.0 * scale,
-                    fz: sign * 28.0 * scale,
-                },
+                kind: FixtureExcitationKind::Force([
+                    sign * 48.0 * scale,
+                    sign * -1320.0 * scale,
+                    sign * 28.0 * scale,
+                ]),
             }
         })
         .collect();
+    replace_fixture_excitations(&mut model, excitations);
     model
 }
 
@@ -1008,33 +1231,26 @@ fn multi_material_assembly() -> AnalysisModel {
         prescribed_zero_translations("bc_interface", "interface"),
     ];
 
-    model.loads = vec![
-        LoadCase {
-            load_id: "load_tip_force".to_string(),
-            region_id: "tip_steel".to_string(),
-            kind: LoadKind::Force {
-                fx: 0.0,
-                fy: -1200.0,
-                fz: 0.0,
+    replace_fixture_excitations(
+        &mut model,
+        vec![
+            FixtureExcitation {
+                id: "load_tip_force".into(),
+                region_id: "tip_steel".into(),
+                kind: FixtureExcitationKind::Force([0.0, -1200.0, 0.0]),
             },
-        },
-        LoadCase {
-            load_id: "load_mid_pressure".to_string(),
-            region_id: "mid_aluminum".to_string(),
-            kind: LoadKind::Pressure {
-                magnitude_pa: 8.5e5,
+            FixtureExcitation {
+                id: "load_mid_pressure".into(),
+                region_id: "mid_aluminum".into(),
+                kind: FixtureExcitationKind::Pressure(8.5e5),
             },
-        },
-        LoadCase {
-            load_id: "load_body".to_string(),
-            region_id: "polymer_segment".to_string(),
-            kind: LoadKind::BodyForce {
-                gx: 0.0,
-                gy: -9.81,
-                gz: 0.0,
+            FixtureExcitation {
+                id: "load_body".into(),
+                region_id: "polymer_segment".into(),
+                kind: FixtureExcitationKind::BodyForce([0.0, -9.81, 0.0]),
             },
-        },
-    ];
+        ],
+    );
 
     model.material_assignments = vec![
         MaterialAssignment {
@@ -1064,12 +1280,5 @@ fn missing_materials() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("missing_materials".to_string());
     model.materials.clear();
-    model
-}
-
-fn missing_loads() -> AnalysisModel {
-    let mut model = cantilever_linear_static();
-    model.model_id = AnalysisModelId("missing_loads".to_string());
-    model.loads.clear();
     model
 }

@@ -14,6 +14,7 @@ pub(crate) fn validate_signals(signals: &[PhysicalSignal]) -> Result<(), Analysi
         }
         let result = match signal {
             PhysicalSignal::Displacement(value) => validate_signal(value),
+            PhysicalSignal::Rotation(value) => validate_signal(value),
             PhysicalSignal::Velocity(value) => validate_signal(value),
             PhysicalSignal::Acceleration(value) => validate_signal(value),
             PhysicalSignal::AngularVelocity(value) => validate_signal(value),

@@ -36,7 +36,7 @@ fn zero_translation_constraint(
                     .into_iter()
                     .map(|dof| runmat_analysis_core::TranslationDofValue {
                         dof,
-                        value: runmat_analysis_core::ValueSchedule::Constant(
+                        value: runmat_analysis_core::PrescribedValue::Constant(
                             runmat_analysis_core::Displacement::new(0.0),
                         ),
                     })
@@ -91,7 +91,7 @@ fn thermal_temperature(
         constraint_id: id.into(),
         kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
             target: runmat_analysis_core::RegionTarget::authored(region),
-            value: runmat_analysis_core::ValueSchedule::Constant(
+            value: runmat_analysis_core::PrescribedValue::Constant(
                 runmat_analysis_core::Temperature::new(kelvin),
             ),
         },
@@ -120,13 +120,13 @@ fn fluid_constraint(
     let kind = match kind {
         "inlet" => runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
             target,
-            value: runmat_analysis_core::ValueSchedule::Constant(
+            value: runmat_analysis_core::PrescribedValue::Constant(
                 runmat_analysis_core::Velocity::new(value),
             ),
         },
         "outlet" => runmat_analysis_core::FluidConstraintKind::PressureReference {
             target,
-            value: runmat_analysis_core::ValueSchedule::Constant(
+            value: runmat_analysis_core::PrescribedValue::Constant(
                 runmat_analysis_core::Pressure::new(value),
             ),
         },
@@ -142,7 +142,7 @@ fn fluid_constraint(
 }
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
-    fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id,
+    fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id, SolverSampledScalePoint,
     FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
@@ -152,10 +152,400 @@ use runmat_analysis_fea::{
 };
 use runmat_runtime::analysis::{
     AnalysisRunResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
-    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, PlasticityConstitutiveOptions,
-    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
+    ElectroThermalCouplingOptions, PlasticityConstitutiveOptions, ThermoMechanicalCouplingOptions,
+    ThermoRegionTemperatureDelta,
 };
 use sha2::{Digest, Sha256};
+
+enum FixtureExcitationQuantity {
+    Force([f64; 3]),
+    Moment([f64; 3]),
+    Pressure(f64),
+    AcousticPressure(f64),
+    HeatGeneration(f64),
+    ElectricCurrent {
+        amperes: f64,
+        phase_radians: f64,
+        amplitude_scale: f64,
+    },
+    CurrentDensity {
+        amperes_per_square_meter: [f64; 3],
+        phase_radians: f64,
+        amplitude_scale: f64,
+    },
+}
+
+struct FixtureExcitation {
+    excitation_id: String,
+    region_id: String,
+    quantity: FixtureExcitationQuantity,
+}
+
+fn replace_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcitation>) {
+    let replaced_signal_ids = model
+        .excitations
+        .iter()
+        .map(|action| action.excitation().signal_id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    model
+        .signals
+        .retain(|signal| !replaced_signal_ids.contains(signal.signal_id()));
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    append_fixture_excitations(model, specs);
+}
+
+fn append_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcitation>) {
+    use runmat_analysis_core::{
+        AnalysisExcitation, CoordinateFrame, ExcitationAction, ExcitationCase,
+        ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution, ExcitationId,
+        ExcitationKinematics, ExcitationTarget, PhysicalSignal, ProjectionRequirement, Signal,
+        SignalApproximationEvidence, SignalId, SignalPrecision, SignalProvenance,
+        SignalRepresentation, SignalShape, SignalValue,
+    };
+
+    let case_id = ExcitationCaseId(format!("fixture_case_{}", model.excitation_cases.len()));
+    let first_action = model.excitations.len();
+
+    for spec in specs {
+        let excitation_id = ExcitationId(spec.excitation_id);
+        let signal_id = SignalId(format!("{}_signal", excitation_id.0));
+        let (signal, action, distribution, volume_target, preserve_moment): (
+            PhysicalSignal,
+            fn(AnalysisExcitation) -> ExcitationAction,
+            ExcitationDistribution,
+            bool,
+            bool,
+        ) = match spec.quantity {
+            FixtureExcitationQuantity::Force(value) => (
+                PhysicalSignal::Force(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Vector3,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Vector3(
+                        value.map(runmat_analysis_core::Force::new),
+                    )),
+                )),
+                ExcitationAction::Force as fn(AnalysisExcitation) -> ExcitationAction,
+                ExcitationDistribution::PreserveResultant,
+                false,
+                false,
+            ),
+            FixtureExcitationQuantity::Moment(value) => (
+                PhysicalSignal::Moment(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Vector3,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Vector3(
+                        value.map(runmat_analysis_core::Moment::new),
+                    )),
+                )),
+                ExcitationAction::Moment,
+                ExcitationDistribution::PreserveResultant,
+                false,
+                true,
+            ),
+            FixtureExcitationQuantity::Pressure(value) => (
+                PhysicalSignal::Pressure(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Scalar,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Scalar(
+                        runmat_analysis_core::Pressure::new(value),
+                    )),
+                )),
+                ExcitationAction::Pressure,
+                ExcitationDistribution::IntensityPerArea,
+                false,
+                false,
+            ),
+            FixtureExcitationQuantity::AcousticPressure(value) => (
+                PhysicalSignal::Pressure(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Scalar,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Scalar(
+                        runmat_analysis_core::Pressure::new(value),
+                    )),
+                )),
+                ExcitationAction::AcousticPressure,
+                ExcitationDistribution::IntensityPerArea,
+                false,
+                false,
+            ),
+            FixtureExcitationQuantity::HeatGeneration(value) => (
+                PhysicalSignal::HeatGenerationDensity(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Scalar,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Scalar(
+                        runmat_analysis_core::HeatGenerationDensity::new(value),
+                    )),
+                )),
+                ExcitationAction::HeatGeneration,
+                ExcitationDistribution::IntensityPerVolume,
+                true,
+                false,
+            ),
+            FixtureExcitationQuantity::ElectricCurrent {
+                amperes,
+                phase_radians,
+                amplitude_scale,
+            } => {
+                let amplitude = amperes * amplitude_scale;
+                let real =
+                    runmat_analysis_core::ElectricCurrent::new(amplitude * phase_radians.cos());
+                let imaginary =
+                    runmat_analysis_core::ElectricCurrent::new(amplitude * phase_radians.sin());
+                (
+                    PhysicalSignal::ElectricCurrent(fixture_signal(
+                        signal_id.clone(),
+                        SignalShape::Scalar,
+                        SignalPrecision::Complex128,
+                        SignalRepresentation::Tabulated(runmat_analysis_core::TabulatedSignal {
+                            axis: runmat_analysis_core::SignalAxis::FrequencyHertz(vec![1.0]),
+                            values: vec![runmat_analysis_core::SignalOrdinate::Complex {
+                                real: SignalValue::Scalar(real),
+                                imaginary: SignalValue::Scalar(imaginary),
+                            }],
+                            interpolation: runmat_analysis_core::SignalInterpolation::Linear,
+                            extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
+                            breakpoints: Vec::new(),
+                        }),
+                    )),
+                    ExcitationAction::ElectricCurrent,
+                    ExcitationDistribution::Concentrated,
+                    false,
+                    false,
+                )
+            }
+            FixtureExcitationQuantity::CurrentDensity {
+                amperes_per_square_meter,
+                phase_radians,
+                amplitude_scale,
+            } => {
+                let real = amperes_per_square_meter.map(|value| {
+                    runmat_analysis_core::ElectricCurrentDensity::new(
+                        value * amplitude_scale * phase_radians.cos(),
+                    )
+                });
+                let imaginary = amperes_per_square_meter.map(|value| {
+                    runmat_analysis_core::ElectricCurrentDensity::new(
+                        value * amplitude_scale * phase_radians.sin(),
+                    )
+                });
+                (
+                    PhysicalSignal::ElectricCurrentDensity(fixture_signal(
+                        signal_id.clone(),
+                        SignalShape::Vector3,
+                        SignalPrecision::Complex128,
+                        SignalRepresentation::Tabulated(runmat_analysis_core::TabulatedSignal {
+                            axis: runmat_analysis_core::SignalAxis::FrequencyHertz(vec![1.0]),
+                            values: vec![runmat_analysis_core::SignalOrdinate::Complex {
+                                real: SignalValue::Vector3(real),
+                                imaginary: SignalValue::Vector3(imaginary),
+                            }],
+                            interpolation: runmat_analysis_core::SignalInterpolation::Linear,
+                            extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
+                            breakpoints: Vec::new(),
+                        }),
+                    )),
+                    ExcitationAction::CurrentDensity,
+                    ExcitationDistribution::TopologyField,
+                    false,
+                    false,
+                )
+            }
+        };
+        let target = if volume_target {
+            runmat_analysis_core::RegionTarget::volume(spec.region_id)
+        } else {
+            runmat_analysis_core::RegionTarget::boundary(spec.region_id)
+        };
+        model.signals.push(signal);
+        model.excitations.push(action(AnalysisExcitation {
+            excitation_id: excitation_id.clone(),
+            case_id: case_id.clone(),
+            target: ExcitationTarget::Region(target),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id,
+            active_step_ids: Vec::new(),
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: distribution == ExcitationDistribution::PreserveResultant,
+                preserve_moment,
+                relative_tolerance: 1.0e-10,
+            },
+        }));
+    }
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids: model
+            .excitations
+            .iter()
+            .skip(first_action)
+            .map(|action| action.excitation().excitation_id.clone())
+            .collect(),
+        activation: ExcitationCaseActivation::Always,
+    });
+
+    fn fixture_signal<Q>(
+        signal_id: SignalId,
+        shape: SignalShape,
+        precision: SignalPrecision,
+        representation: SignalRepresentation<Q>,
+    ) -> Signal<Q> {
+        let frame = if shape == SignalShape::Scalar {
+            None
+        } else {
+            Some(CoordinateFrame::Global)
+        };
+        Signal {
+            signal_id,
+            shape,
+            frame,
+            representation,
+            precision,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: None,
+                max_relative_error: None,
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+            provenance: SignalProvenance::Authored,
+        }
+    }
+}
+
+fn set_temperature_history(
+    model: &mut AnalysisModel,
+    signal_id: &str,
+    reference_kelvin: f64,
+    delta_kelvin: f64,
+    points: &[(f64, f64)],
+) -> Option<runmat_analysis_core::SignalId> {
+    if points.is_empty() {
+        return None;
+    }
+    let id = runmat_analysis_core::SignalId(signal_id.to_string());
+    model.signals.retain(|signal| signal.signal_id() != &id);
+    model
+        .signals
+        .push(runmat_analysis_core::PhysicalSignal::Temperature(
+            scalar_time_signal(id.clone(), points, |scale| {
+                runmat_analysis_core::Temperature::new(reference_kelvin + delta_kelvin * scale)
+            }),
+        ));
+    Some(id)
+}
+
+fn set_electric_potential_history(
+    model: &mut AnalysisModel,
+    signal_id: &str,
+    applied_voltage: f64,
+    points: &[(f64, f64)],
+) -> Option<runmat_analysis_core::SignalId> {
+    if points.is_empty() {
+        return None;
+    }
+    let id = runmat_analysis_core::SignalId(signal_id.to_string());
+    model.signals.retain(|signal| signal.signal_id() != &id);
+    model
+        .signals
+        .push(runmat_analysis_core::PhysicalSignal::ElectricPotential(
+            scalar_time_signal(id.clone(), points, |scale| {
+                runmat_analysis_core::ElectricPotential::new(applied_voltage * scale)
+            }),
+        ));
+    Some(id)
+}
+
+fn set_velocity_history(
+    model: &mut AnalysisModel,
+    signal_id: &str,
+    inlet_velocity: f64,
+    points: &[(f64, f64)],
+) -> Option<runmat_analysis_core::SignalId> {
+    if points.is_empty() {
+        return None;
+    }
+    let id = runmat_analysis_core::SignalId(signal_id.to_string());
+    model.signals.retain(|signal| signal.signal_id() != &id);
+    model
+        .signals
+        .push(runmat_analysis_core::PhysicalSignal::Velocity(
+            scalar_time_signal(id.clone(), points, |scale| {
+                runmat_analysis_core::Velocity::new(inlet_velocity * scale)
+            }),
+        ));
+    Some(id)
+}
+
+fn fixture_cfd_domain(
+    model: &mut AnalysisModel,
+    signal_id: &str,
+    solve_family: runmat_analysis_core::CfdSolveFamily,
+    inlet_velocity_m_per_s: f64,
+    dynamic_viscosity_pa_s: f64,
+    turbulence_intensity: f64,
+    points: &[(f64, f64)],
+) -> runmat_analysis_core::CfdDomain {
+    runmat_analysis_core::CfdDomain {
+        enabled: true,
+        solve_family,
+        reference_density_kg_per_m3: 1.225,
+        dynamic_viscosity_pa_s,
+        inlet_velocity_m_per_s,
+        turbulence_intensity,
+        inlet_velocity_signal_id: set_velocity_history(
+            model,
+            signal_id,
+            inlet_velocity_m_per_s,
+            points,
+        ),
+    }
+}
+
+fn scalar_time_signal<Q>(
+    signal_id: runmat_analysis_core::SignalId,
+    points: &[(f64, f64)],
+    value: impl Fn(f64) -> Q,
+) -> runmat_analysis_core::Signal<Q> {
+    runmat_analysis_core::Signal {
+        signal_id,
+        shape: runmat_analysis_core::SignalShape::Scalar,
+        frame: None,
+        representation: runmat_analysis_core::SignalRepresentation::Tabulated(
+            runmat_analysis_core::TabulatedSignal {
+                axis: runmat_analysis_core::SignalAxis::TimeSeconds(
+                    points.iter().map(|point| point.0).collect(),
+                ),
+                values: points
+                    .iter()
+                    .map(|point| {
+                        runmat_analysis_core::SignalOrdinate::Real(
+                            runmat_analysis_core::SignalValue::Scalar(value(point.1)),
+                        )
+                    })
+                    .collect(),
+                interpolation: runmat_analysis_core::SignalInterpolation::Linear,
+                extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
+                breakpoints: Vec::new(),
+            },
+        ),
+        precision: runmat_analysis_core::SignalPrecision::Real64,
+        evidence: runmat_analysis_core::SignalApproximationEvidence {
+            max_absolute_error: None,
+            max_relative_error: None,
+            derivative_max_absolute_error: None,
+            sample_count: points.len(),
+        },
+        provenance: runmat_analysis_core::SignalProvenance::Authored,
+    }
+}
 
 fn thermo_field_payload_hash_for_value(payload: &serde_json::Value) -> String {
     let schema = payload
@@ -220,14 +610,14 @@ fn thermo_field_payload_hash_for_value(payload: &serde_json::Value) -> String {
         })
         .unwrap_or_default();
     let time_terms = payload
-        .get("time_profile")
+        .get("sampled_time_profile")
         .and_then(|value| value.as_array())
         .map(|values| {
             values
                 .iter()
                 .map(|entry| {
                     let t = entry
-                        .get("normalized_time")
+                        .get("normalized_coordinate")
                         .and_then(|value| value.as_f64())
                         .unwrap_or(0.0)
                         .to_bits();
@@ -490,13 +880,13 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                     temperature_delta_k: 55.0,
                 },
             ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
+            sampled_time_profile: vec![
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
                     scale: 0.6,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
                     scale: 1.0,
                 },
             ],
@@ -518,13 +908,13 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                     temperature_delta_k: 50.0,
                 },
             ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
+            sampled_time_profile: vec![
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
                     scale: 0.7,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
                     scale: 1.0,
                 },
             ],
@@ -546,17 +936,17 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                     temperature_delta_k: 120.0,
                 },
             ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
+            sampled_time_profile: vec![
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
                     scale: 0.2,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.4,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.4,
                     scale: 1.3,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
                     scale: 0.9,
                 },
             ],
@@ -582,17 +972,17 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                         temperature_delta_k: 68.0,
                     },
                 ],
-                time_profile: vec![
-                    ThermoTimeProfilePoint {
-                        normalized_time: 0.0,
+                sampled_time_profile: vec![
+                    SolverSampledScalePoint {
+                        normalized_coordinate: 0.0,
                         scale: 0.3,
                     },
-                    ThermoTimeProfilePoint {
-                        normalized_time: 0.5,
+                    SolverSampledScalePoint {
+                        normalized_coordinate: 0.5,
                         scale: 0.7,
                     },
-                    ThermoTimeProfilePoint {
-                        normalized_time: 1.0,
+                    SolverSampledScalePoint {
+                        normalized_coordinate: 1.0,
                         scale: 1.0,
                     },
                 ],
@@ -606,7 +996,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             field_artifact_id: Some("thermo_ramp_smooth_approved".to_string()),
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         }),
         "thermo_shock_oscillatory_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
             enabled: true,
@@ -625,25 +1015,25 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                     temperature_delta_k: 90.0,
                 },
             ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
+            sampled_time_profile: vec![
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
                     scale: 0.4,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.25,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.25,
                     scale: 1.4,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.5,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.5,
                     scale: 0.5,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.75,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.75,
                     scale: 1.3,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
                     scale: 0.6,
                 },
             ],
@@ -657,7 +1047,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                 field_artifact_id: Some("thermo_shock_oscillatory_approved".to_string()),
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
+                sampled_time_profile: Vec::new(),
             })
         }
         _ => None,
@@ -682,14 +1072,14 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
                     conductivity_scale: 0.98,
                 },
             ],
-            time_profile: vec![
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.0,
-                    current_scale: 0.7,
+            sampled_time_profile: vec![
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
+                    scale: 0.7,
                 },
-                ElectroTimeProfilePoint {
-                    normalized_time: 1.0,
-                    current_scale: 1.0,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
+                    scale: 1.0,
                 },
             ],
         }),
@@ -709,22 +1099,22 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
                     conductivity_scale: 0.55,
                 },
             ],
-            time_profile: vec![
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.0,
-                    current_scale: 0.45,
+            sampled_time_profile: vec![
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
+                    scale: 0.45,
                 },
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.3,
-                    current_scale: 1.45,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.3,
+                    scale: 1.45,
                 },
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.6,
-                    current_scale: 0.6,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.6,
+                    scale: 0.6,
                 },
-                ElectroTimeProfilePoint {
-                    normalized_time: 1.0,
-                    current_scale: 1.25,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
+                    scale: 1.25,
                 },
             ],
         }),
@@ -735,7 +1125,7 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
             base_electrical_conductivity_s_per_m: 3.8e7,
             resistive_heating_coefficient: 3.5e-4,
             region_conductivity_scales: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         }),
         "electro_thermal_invalid_conductivity_scale" => Some(ElectroThermalCouplingOptions {
             enabled: true,
@@ -747,7 +1137,7 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
                 region_id: "tip_steel".to_string(),
                 conductivity_scale: 0.0,
             }],
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         }),
         "electro_thermal_unmapped_region" => Some(ElectroThermalCouplingOptions {
             enabled: true,
@@ -759,7 +1149,7 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
                 region_id: "electro_region_not_mapped".to_string(),
                 conductivity_scale: 1.0,
             }],
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         }),
         "nonlinear_load_path_mix_gpu_provider" => Some(ElectroThermalCouplingOptions {
             enabled: true,
@@ -777,18 +1167,18 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
                     conductivity_scale: 0.85,
                 },
             ],
-            time_profile: vec![
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.0,
-                    current_scale: 0.55,
+            sampled_time_profile: vec![
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.0,
+                    scale: 0.55,
                 },
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.5,
-                    current_scale: 1.2,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 0.5,
+                    scale: 1.2,
                 },
-                ElectroTimeProfilePoint {
-                    normalized_time: 1.0,
-                    current_scale: 0.9,
+                SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
+                    scale: 0.9,
                 },
             ],
         }),
@@ -1023,22 +1413,24 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 },
             ),
         ];
-        model.loads = vec![runmat_analysis_core::LoadCase {
-            load_id: format!("load_acoustic_pressure_{}", spec_id),
-            region_id: "acoustic_source".to_string(),
-            kind: runmat_analysis_core::LoadKind::Pressure { magnitude_pa: 1.0 },
-        }];
+        replace_fixture_excitations(
+            model,
+            vec![FixtureExcitation {
+                excitation_id: format!("load_acoustic_pressure_{}", spec_id),
+                region_id: "acoustic_source".to_string(),
+                quantity: FixtureExcitationQuantity::AcousticPressure(1.0),
+            }],
+        );
         match spec_id {
             "acoustic_harmonic_missing_source" => {
-                model.loads = vec![runmat_analysis_core::LoadCase {
-                    load_id: format!("load_acoustic_invalid_force_{}", spec_id),
-                    region_id: "acoustic_source".to_string(),
-                    kind: runmat_analysis_core::LoadKind::Force {
-                        fx: 1.0,
-                        fy: 0.0,
-                        fz: 0.0,
-                    },
-                }];
+                replace_fixture_excitations(
+                    model,
+                    vec![FixtureExcitation {
+                        excitation_id: format!("load_acoustic_invalid_force_{}", spec_id),
+                        region_id: "acoustic_source".to_string(),
+                        quantity: FixtureExcitationQuantity::Force([1.0, 0.0, 0.0]),
+                    }],
+                );
             }
             "acoustic_harmonic_missing_boundary" => {
                 model.boundaries.clear();
@@ -1068,7 +1460,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 format!("bc_thermal_flux_{spec_id}"),
                 "thermal_flux_wall",
                 runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
-                    value: runmat_analysis_core::ValueSchedule::Constant(
+                    value: runmat_analysis_core::PrescribedValue::Constant(
                         runmat_analysis_core::HeatFlux::new(4500.0),
                     ),
                 },
@@ -1077,20 +1469,21 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 format!("bc_thermal_convection_{spec_id}"),
                 "thermal_open_wall",
                 runmat_analysis_core::BoundaryOperator::ThermalConvection {
-                    ambient_temperature: runmat_analysis_core::ValueSchedule::Constant(
+                    ambient_temperature: runmat_analysis_core::PrescribedValue::Constant(
                         runmat_analysis_core::Temperature::new(308.15),
                     ),
                     coefficient: runmat_analysis_core::HeatTransferCoefficient::new(35.0),
                 },
             ),
         ];
-        model.loads = vec![runmat_analysis_core::LoadCase {
-            load_id: format!("load_thermal_heat_source_{}", spec_id),
-            region_id: "thermal_core".to_string(),
-            kind: runmat_analysis_core::LoadKind::HeatSource {
-                volumetric_w_per_m3: 1.2e6,
-            },
-        }];
+        replace_fixture_excitations(
+            model,
+            vec![FixtureExcitation {
+                excitation_id: format!("load_thermal_heat_source_{}", spec_id),
+                region_id: "thermal_core".to_string(),
+                quantity: FixtureExcitationQuantity::HeatGeneration(1.2e6),
+            }],
+        );
         match spec_id {
             "thermal_standalone_ramp_invalid_material" => {
                 if let Some(material) = model.materials.first_mut() {
@@ -1098,13 +1491,14 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 }
             }
             "thermal_standalone_ramp_invalid_source" => {
-                model.loads = vec![runmat_analysis_core::LoadCase {
-                    load_id: format!("load_thermal_invalid_heat_source_{}", spec_id),
-                    region_id: "thermal_core".to_string(),
-                    kind: runmat_analysis_core::LoadKind::HeatSource {
-                        volumetric_w_per_m3: f64::INFINITY,
-                    },
-                }];
+                replace_fixture_excitations(
+                    model,
+                    vec![FixtureExcitation {
+                        excitation_id: format!("load_thermal_invalid_heat_source_{}", spec_id),
+                        region_id: "thermal_core".to_string(),
+                        quantity: FixtureExcitationQuantity::Moment([1.0, 0.0, 0.0]),
+                    }],
+                );
             }
             "thermal_standalone_ramp_invalid_boundary" => {
                 model.constraints.clear();
@@ -1112,7 +1506,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     format!("bc_thermal_invalid_convection_{spec_id}"),
                     "thermal_open_wall",
                     runmat_analysis_core::BoundaryOperator::ThermalConvection {
-                        ambient_temperature: runmat_analysis_core::ValueSchedule::Constant(
+                        ambient_temperature: runmat_analysis_core::PrescribedValue::Constant(
                             runmat_analysis_core::Temperature::new(293.15),
                         ),
                         coefficient: runmat_analysis_core::HeatTransferCoefficient::new(f64::NAN),
@@ -1136,15 +1530,15 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.interfaces.clear();
         model.boundaries.clear();
         model.constraints = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.06,
-            time_profile: Vec::new(),
-        });
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("cfd_velocity_{spec_id}"),
+            runmat_analysis_core::CfdSolveFamily::SteadyState,
+            5.0,
+            1.81e-5,
+            0.06,
+            &[],
+        ));
     }
     if spec_id.starts_with("cfd_transient_") {
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(format!(
@@ -1156,24 +1550,15 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.interfaces.clear();
         model.boundaries.clear();
         model.constraints = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.06,
-            time_profile: vec![
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 0.0,
-                    inlet_scale: 0.65,
-                },
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 1.0,
-                    inlet_scale: 1.0,
-                },
-            ],
-        });
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("cfd_velocity_{spec_id}"),
+            runmat_analysis_core::CfdSolveFamily::Transient,
+            5.0,
+            1.81e-5,
+            0.06,
+            &[(0.0, 0.65), (1.0, 1.0)],
+        ));
     }
     if spec_id == "cfd_invalid_domain_options" || spec_id == "cfd_invalid_boundary_conditions" {
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(format!(
@@ -1194,19 +1579,19 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         } else {
             authored_cfd_boundaries_for_fixture(spec_id, 5.0)
         };
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: if spec_id == "cfd_invalid_domain_options" {
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("cfd_velocity_{spec_id}"),
+            runmat_analysis_core::CfdSolveFamily::SteadyState,
+            5.0,
+            if spec_id == "cfd_invalid_domain_options" {
                 0.0
             } else {
                 1.81e-5
             },
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.06,
-            time_profile: Vec::new(),
-        });
+            0.06,
+            &[],
+        ));
     }
     if spec_id.starts_with("cht_coupled_") {
         model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
@@ -1219,47 +1604,25 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         );
         model.electro_thermal = None;
         model.interfaces.clear();
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.06,
-            time_profile: vec![
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 0.0,
-                    inlet_scale: 0.8,
-                },
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 1.0,
-                    inlet_scale: 1.0,
-                },
-            ],
-        });
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("cht_velocity_{spec_id}"),
+            runmat_analysis_core::CfdSolveFamily::Transient,
+            5.0,
+            1.81e-5,
+            0.06,
+            &[(0.0, 0.8), (1.0, 1.0)],
+        ));
         if spec_id == "cht_coupled_channel_slab_cpu" {
-            model.cfd = Some(runmat_analysis_core::CfdDomain {
-                enabled: true,
-                solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-                reference_density_kg_per_m3: 1.225,
-                dynamic_viscosity_pa_s: 1.81e-5,
-                inlet_velocity_m_per_s: 4.1,
-                turbulence_intensity: 0.052,
-                time_profile: vec![
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 0.0,
-                        inlet_scale: 0.7,
-                    },
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 0.5,
-                        inlet_scale: 0.9,
-                    },
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 1.0,
-                        inlet_scale: 1.0,
-                    },
-                ],
-            });
+            model.cfd = Some(fixture_cfd_domain(
+                model,
+                &format!("cht_velocity_{spec_id}"),
+                runmat_analysis_core::CfdSolveFamily::Transient,
+                4.1,
+                1.81e-5,
+                0.052,
+                &[(0.0, 0.7), (0.5, 0.9), (1.0, 1.0)],
+            ));
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("cht_channel_slab_interface_{spec_id}"),
                 primary_region_id: "fluid_channel".to_string(),
@@ -1294,16 +1657,13 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     temperature_delta_k: 45.0,
                 },
             ],
-            time_profile: vec![
-                runmat_analysis_core::ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.5,
-                },
-                runmat_analysis_core::ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 1.0,
-                },
-            ],
+            temperature_signal_id: set_temperature_history(
+                model,
+                &format!("cht_temperature_{spec_id}"),
+                293.15,
+                60.0,
+                &[(0.0, 0.5), (1.0, 1.0)],
+            ),
         });
         if spec_id == "cht_coupled_invalid_interface_mapping" {
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
@@ -1332,54 +1692,33 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 4.0,
-            turbulence_intensity: 0.06,
-            time_profile: vec![
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 0.0,
-                    inlet_scale: 0.6,
-                },
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 1.0,
-                    inlet_scale: 1.0,
-                },
-            ],
-        });
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("fsi_velocity_{spec_id}"),
+            runmat_analysis_core::CfdSolveFamily::Transient,
+            4.0,
+            1.81e-5,
+            0.06,
+            &[(0.0, 0.6), (1.0, 1.0)],
+        ));
         if spec_id == "fsi_coupled_pipe_plate_cpu" {
-            model.cfd = Some(runmat_analysis_core::CfdDomain {
-                enabled: true,
-                solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-                reference_density_kg_per_m3: 1.225,
-                dynamic_viscosity_pa_s: 1.81e-5,
-                inlet_velocity_m_per_s: 4.2,
-                turbulence_intensity: 0.055,
-                time_profile: vec![
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 0.0,
-                        inlet_scale: 0.5,
-                    },
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 0.5,
-                        inlet_scale: 0.85,
-                    },
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 1.0,
-                        inlet_scale: 1.0,
-                    },
-                ],
-            });
-            model.loads.push(runmat_analysis_core::LoadCase {
-                load_id: format!("pipe_plate_pressure_preload_{spec_id}"),
-                region_id: "pipe_wall".to_string(),
-                kind: runmat_analysis_core::LoadKind::Pressure {
-                    magnitude_pa: 2.5e4,
-                },
-            });
+            model.cfd = Some(fixture_cfd_domain(
+                model,
+                &format!("fsi_velocity_{spec_id}"),
+                runmat_analysis_core::CfdSolveFamily::Transient,
+                4.2,
+                1.81e-5,
+                0.055,
+                &[(0.0, 0.5), (0.5, 0.85), (1.0, 1.0)],
+            ));
+            append_fixture_excitations(
+                model,
+                vec![FixtureExcitation {
+                    excitation_id: format!("pipe_plate_pressure_preload_{spec_id}"),
+                    region_id: "pipe_wall".to_string(),
+                    quantity: FixtureExcitationQuantity::Pressure(2.5e4),
+                }],
+            );
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("fsi_pipe_plate_interface_{spec_id}"),
                 primary_region_id: "fluid_pipe".to_string(),
@@ -1878,39 +2217,38 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     magnetic_insulation("em_bc_insulation_0", "em_region_homogeneous"),
                     magnetic_insulation("em_bc_insulation_1", "em_region_homogeneous"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_coil_0".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_coil_0".to_string(),
+                            region_id: "em_region_homogeneous".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_current_density_0".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 1.0,
-                            jy: 0.0,
-                            jz: 0.0,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_current_density_0".to_string(),
+                            region_id: "em_region_homogeneous".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [1.0, 0.0, 0.0],
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_current_density_1".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.0,
-                            jy: 1.0,
-                            jz: 0.0,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_current_density_1".to_string(),
+                            region_id: "em_region_homogeneous".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.0, 1.0, 0.0],
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::Heterogeneous => {
                 model.constraints = vec![
@@ -1921,37 +2259,34 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     magnetic_insulation("em_bc_insulation_hetero_0", "em_region_1"),
                     magnetic_insulation("em_bc_insulation_hetero_1", "em_region_2"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_coil_hetero".to_string(),
-                        region_id: "em_region_0".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.85,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_coil_hetero".to_string(),
+                            region_id: "em_region_0".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.85,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_current_density_hetero".to_string(),
-                        region_id: "em_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.8,
-                            jy: 0.3,
-                            jz: 0.1,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_current_density_hetero".to_string(),
+                            region_id: "em_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.8, 0.3, 0.1],
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_structural_mixed".to_string(),
-                        region_id: "em_region_2".to_string(),
-                        kind: runmat_analysis_core::LoadKind::Force {
-                            fx: 0.0,
-                            fy: -50.0,
-                            fz: 0.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_structural_mixed".to_string(),
+                            region_id: "em_region_2".to_string(),
+                            quantity: FixtureExcitationQuantity::Force([0.0, -50.0, 0.0]),
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::SparseAssignments => {
                 model.boundaries.clear();
@@ -1961,50 +2296,47 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     fixed_constraint("em_bc_sparse_struct_1", "em_sparse_region_2"),
                     zero_translation_constraint("em_bc_sparse_struct_2", "em_sparse_region_3"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_sparse_coil".to_string(),
-                        region_id: "em_sparse_region_0".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.4,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_sparse_coil".to_string(),
+                            region_id: "em_sparse_region_0".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.4,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_sparse_current_density_0".to_string(),
-                        region_id: "em_sparse_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.0,
-                            jy: 0.6,
-                            jz: 0.2,
-                            phase_rad: 0.2,
-                            amplitude_scale: 0.8,
+                        FixtureExcitation {
+                            excitation_id: "em_load_sparse_current_density_0".to_string(),
+                            region_id: "em_sparse_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.0, 0.6, 0.2],
+                                phase_radians: 0.2,
+                                amplitude_scale: 0.8,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_sparse_current_density_1".to_string(),
-                        region_id: "em_sparse_region_2".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.3,
-                            jy: 0.1,
-                            jz: 0.4,
-                            phase_rad: 0.4,
-                            amplitude_scale: 0.7,
+                        FixtureExcitation {
+                            excitation_id: "em_load_sparse_current_density_1".to_string(),
+                            region_id: "em_sparse_region_2".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.3, 0.1, 0.4],
+                                phase_radians: 0.4,
+                                amplitude_scale: 0.7,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_sparse_current_density_2".to_string(),
-                        region_id: "em_sparse_region_3".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.1,
-                            jy: 0.0,
-                            jz: 0.7,
-                            phase_rad: 0.6,
-                            amplitude_scale: 0.6,
+                        FixtureExcitation {
+                            excitation_id: "em_load_sparse_current_density_2".to_string(),
+                            region_id: "em_sparse_region_3".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.1, 0.0, 0.7],
+                                phase_radians: 0.6,
+                                amplitude_scale: 0.6,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::MultiRegionAssignments => {
                 model.constraints = vec![
@@ -2025,61 +2357,56 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         "em_multiregion_region_4",
                     ),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_coil".to_string(),
-                        region_id: "em_multiregion_region_0".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.25,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_coil".to_string(),
+                            region_id: "em_multiregion_region_0".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.25,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_current_density_0".to_string(),
-                        region_id: "em_multiregion_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.4,
-                            jy: 0.2,
-                            jz: 0.1,
-                            phase_rad: 0.15,
-                            amplitude_scale: 0.9,
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_current_density_0".to_string(),
+                            region_id: "em_multiregion_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.4, 0.2, 0.1],
+                                phase_radians: 0.15,
+                                amplitude_scale: 0.9,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_current_density_1".to_string(),
-                        region_id: "em_multiregion_region_2".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.1,
-                            jy: 0.5,
-                            jz: 0.2,
-                            phase_rad: 0.35,
-                            amplitude_scale: 0.8,
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_current_density_1".to_string(),
+                            region_id: "em_multiregion_region_2".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.1, 0.5, 0.2],
+                                phase_radians: 0.35,
+                                amplitude_scale: 0.8,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_current_density_2".to_string(),
-                        region_id: "em_multiregion_region_3".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.2,
-                            jy: 0.1,
-                            jz: 0.6,
-                            phase_rad: 0.55,
-                            amplitude_scale: 0.7,
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_current_density_2".to_string(),
+                            region_id: "em_multiregion_region_3".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.2, 0.1, 0.6],
+                                phase_radians: 0.55,
+                                amplitude_scale: 0.7,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_current_density_3".to_string(),
-                        region_id: "em_multiregion_region_4".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.3,
-                            jy: 0.3,
-                            jz: 0.3,
-                            phase_rad: 0.75,
-                            amplitude_scale: 0.65,
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_current_density_3".to_string(),
+                            region_id: "em_multiregion_region_4".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.3, 0.3, 0.3],
+                                phase_radians: 0.75,
+                                amplitude_scale: 0.65,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::OverlapInterference => {
                 model.constraints = vec![magnetic_ground(
@@ -2090,48 +2417,47 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     magnetic_insulation("em_bc_overlap_insulation_0", "em_overlap_region_1"),
                     magnetic_insulation("em_bc_overlap_insulation_1", "em_overlap_region_2"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_overlap_coil_pos".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_overlap_coil_pos".to_string(),
+                            region_id: "em_overlap_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_overlap_coil_neg".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: -profile.applied_current_a * 0.92,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_overlap_coil_neg".to_string(),
+                            region_id: "em_overlap_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: -profile.applied_current_a * 0.92,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_overlap_cd_pos".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 1.0,
-                            jy: 0.4,
-                            jz: 0.0,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_overlap_cd_pos".to_string(),
+                            region_id: "em_overlap_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [1.0, 0.4, 0.0],
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_overlap_cd_neg".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: -0.8,
-                            jy: -0.35,
-                            jz: 0.0,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_overlap_cd_neg".to_string(),
+                            region_id: "em_overlap_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [-0.8, -0.35, 0.0],
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::BoundaryKernel => {
                 model.constraints = vec![
@@ -2156,28 +2482,29 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         "em_boundary_unmapped_insulation_1",
                     ),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_boundary_coil_primary".to_string(),
-                        region_id: "em_boundary_region_24".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.9,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_boundary_coil_primary".to_string(),
+                            region_id: "em_boundary_region_24".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.9,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_boundary_current_density".to_string(),
-                        region_id: "em_boundary_region_25".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.9,
-                            jy: -0.5,
-                            jz: 0.2,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_boundary_current_density".to_string(),
+                            region_id: "em_boundary_region_25".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.9, -0.5, 0.2],
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::BoundaryPenaltyStress => {
                 model.constraints = (0..18)
@@ -2197,37 +2524,38 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         )
                     })
                     .collect();
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_penalty_coil_0".to_string(),
-                        region_id: "em_penalty_region_10".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_penalty_coil_0".to_string(),
+                            region_id: "em_penalty_region_10".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_penalty_coil_1".to_string(),
-                        region_id: "em_penalty_region_13".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * -0.65,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_penalty_coil_1".to_string(),
+                            region_id: "em_penalty_region_13".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * -0.65,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_penalty_density".to_string(),
-                        region_id: "em_penalty_region_29".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 1.2,
-                            jy: -0.7,
-                            jz: 0.15,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_penalty_density".to_string(),
+                            region_id: "em_penalty_region_29".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [1.2, -0.7, 0.15],
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::MultiRegionPhasedSource => {
                 model.constraints = vec![
@@ -2238,57 +2566,56 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     "em_bc_phase_insulation_0",
                     "em_phase_region_5",
                 )];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_coil_0".to_string(),
-                        region_id: "em_phase_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_coil_0".to_string(),
+                            region_id: "em_phase_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a,
+                                phase_radians: 0.0,
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_coil_1".to_string(),
-                        region_id: "em_phase_region_3".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: -profile.applied_current_a * 0.8,
-                            phase_rad: std::f64::consts::PI * 0.85,
-                            amplitude_scale: 0.9,
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_coil_1".to_string(),
+                            region_id: "em_phase_region_3".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: -profile.applied_current_a * 0.8,
+                                phase_radians: std::f64::consts::PI * 0.85,
+                                amplitude_scale: 0.9,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_coil_2".to_string(),
-                        region_id: "em_phase_region_7".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.55,
-                            phase_rad: std::f64::consts::FRAC_PI_2,
-                            amplitude_scale: 0.8,
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_coil_2".to_string(),
+                            region_id: "em_phase_region_7".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.55,
+                                phase_radians: std::f64::consts::FRAC_PI_2,
+                                amplitude_scale: 0.8,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_density_0".to_string(),
-                        region_id: "em_phase_region_10".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.9,
-                            jy: -0.45,
-                            jz: 0.2,
-                            phase_rad: std::f64::consts::PI / 3.0,
-                            amplitude_scale: 0.9,
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_density_0".to_string(),
+                            region_id: "em_phase_region_10".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.9, -0.45, 0.2],
+                                phase_radians: std::f64::consts::PI / 3.0,
+                                amplitude_scale: 0.9,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_density_1".to_string(),
-                        region_id: "em_phase_region_12".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: -0.85,
-                            jy: 0.35,
-                            jz: -0.1,
-                            phase_rad: -std::f64::consts::FRAC_PI_2,
-                            amplitude_scale: 0.85,
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_density_1".to_string(),
+                            region_id: "em_phase_region_12".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [-0.85, 0.35, -0.1],
+                                phase_radians: -std::f64::consts::FRAC_PI_2,
+                                amplitude_scale: 0.85,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
         }
 
@@ -2304,15 +2631,14 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 }
             }
             "electromagnetic_missing_source" => {
-                model.loads = vec![runmat_analysis_core::LoadCase {
-                    load_id: "em_invalid_structural_force".to_string(),
-                    region_id: "em_region_homogeneous".to_string(),
-                    kind: runmat_analysis_core::LoadKind::Force {
-                        fx: 1.0,
-                        fy: 0.0,
-                        fz: 0.0,
-                    },
-                }];
+                replace_fixture_excitations(
+                    model,
+                    vec![FixtureExcitation {
+                        excitation_id: "em_invalid_structural_force".to_string(),
+                        region_id: "em_region_homogeneous".to_string(),
+                        quantity: FixtureExcitationQuantity::Force([1.0, 0.0, 0.0]),
+                    }],
+                );
             }
             "electromagnetic_missing_boundary" => {
                 model.boundaries.clear();
@@ -2335,10 +2661,22 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+            sampled_time_profile: Vec::new(),
         });
     }
     if let Some(value) = thermo {
+        let temperature_points = value
+            .sampled_time_profile
+            .iter()
+            .map(|point| (point.normalized_coordinate, point.scale))
+            .collect::<Vec<_>>();
+        let temperature_signal_id = set_temperature_history(
+            model,
+            &format!("thermo_temperature_{spec_id}"),
+            value.reference_temperature_k,
+            value.applied_temperature_delta_k,
+            &temperature_points,
+        );
         model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
             enabled: value.enabled,
             reference_temperature_k: value.reference_temperature_k,
@@ -2367,18 +2705,22 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     temperature_delta_k: delta.temperature_delta_k,
                 })
                 .collect(),
-            time_profile: value
-                .time_profile
-                .into_iter()
-                .map(|point| runmat_analysis_core::ThermoTimeProfilePoint {
-                    normalized_time: point.normalized_time,
-                    scale: point.scale,
-                })
-                .collect(),
+            temperature_signal_id,
         });
     }
 
     if let Some(electro) = electro_coupling_for_fixture(spec_id) {
+        let potential_points = electro
+            .sampled_time_profile
+            .iter()
+            .map(|point| (point.normalized_coordinate, point.scale))
+            .collect::<Vec<_>>();
+        let electric_potential_signal_id = set_electric_potential_history(
+            model,
+            &format!("electro_potential_{spec_id}"),
+            electro.applied_voltage_v,
+            &potential_points,
+        );
         let mut material_region_ids = model
             .material_assignments
             .iter()
@@ -2459,19 +2801,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             reference_temperature_k: electro.reference_temperature_k,
             applied_voltage_v: electro.applied_voltage_v,
             region_conductivity_scales,
-            time_profile: electro
-                .time_profile
-                .into_iter()
-                .map(
-                    |ElectroTimeProfilePoint {
-                         normalized_time,
-                         current_scale,
-                     }| runmat_analysis_core::ElectroTimeProfilePoint {
-                        normalized_time,
-                        current_scale,
-                    },
-                )
-                .collect(),
+            electric_potential_signal_id,
         });
     }
 
@@ -2483,7 +2813,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 saturation_exponent: plastic.saturation_exponent,
             });
         }
-        model.loads = plastic_load_cases_for_fixture(spec_id);
+        replace_fixture_excitations(model, plastic_excitations_for_fixture(spec_id));
     }
 
     if let Some(contact) = contact_for_fixture(spec_id) {
@@ -2520,7 +2850,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     }
 }
 
-fn plastic_load_cases_for_fixture(spec_id: &str) -> Vec<runmat_analysis_core::LoadCase> {
+fn plastic_excitations_for_fixture(spec_id: &str) -> Vec<FixtureExcitation> {
     let peak_force = match spec_id {
         "nonlinear_plasticity_benchmark_gpu_provider" => 1.2e7,
         "nonlinear_plastic_hardening_reference_gpu_provider" => 3.0e7,
@@ -2528,30 +2858,24 @@ fn plastic_load_cases_for_fixture(spec_id: &str) -> Vec<runmat_analysis_core::Lo
         _ => 1.0e7,
     };
     vec![
-        runmat_analysis_core::LoadCase {
-            load_id: format!("plastic_axial_drive_{spec_id}"),
+        FixtureExcitation {
+            excitation_id: format!("plastic_axial_drive_{spec_id}"),
             region_id: "plastic_drive_tip".to_string(),
-            kind: runmat_analysis_core::LoadKind::Force {
-                fx: peak_force,
-                fy: 0.0,
-                fz: 0.0,
-            },
+            quantity: FixtureExcitationQuantity::Force([peak_force, 0.0, 0.0]),
         },
-        runmat_analysis_core::LoadCase {
-            load_id: format!("plastic_shear_drive_{spec_id}"),
+        FixtureExcitation {
+            excitation_id: format!("plastic_shear_drive_{spec_id}"),
             region_id: "plastic_drive_web".to_string(),
-            kind: runmat_analysis_core::LoadKind::Force {
-                fx: 0.0,
-                fy: -0.35 * peak_force,
-                fz: 0.12 * peak_force,
-            },
+            quantity: FixtureExcitationQuantity::Force([
+                0.0,
+                -0.35 * peak_force,
+                0.12 * peak_force,
+            ]),
         },
-        runmat_analysis_core::LoadCase {
-            load_id: format!("plastic_pressure_drive_{spec_id}"),
+        FixtureExcitation {
+            excitation_id: format!("plastic_pressure_drive_{spec_id}"),
             region_id: "plastic_drive_face".to_string(),
-            kind: runmat_analysis_core::LoadKind::Pressure {
-                magnitude_pa: 0.08 * peak_force,
-            },
+            quantity: FixtureExcitationQuantity::Pressure(0.08 * peak_force),
         },
     ]
 }
@@ -2563,7 +2887,7 @@ fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisMode
                           source_id: &str,
                           interpolation_mode: &str,
                           region_temperature_deltas: serde_json::Value,
-                          time_profile: serde_json::Value| {
+                          sampled_time_profile: serde_json::Value| {
         let mut payload = serde_json::json!({
             "schema_version": "analysis_thermo_field_artifact/v1",
             "source_geometry_id": model.geometry_id,
@@ -2579,7 +2903,7 @@ fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisMode
                 "expected_region_ids": [],
             },
             "region_temperature_deltas": region_temperature_deltas,
-            "time_profile": time_profile,
+            "sampled_time_profile": sampled_time_profile,
         });
         let payload_hash = thermo_field_payload_hash_for_value(&payload);
         payload["payload_hash"] = serde_json::Value::String(payload_hash.clone());
@@ -2601,9 +2925,9 @@ fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisMode
                 {"region_id": "mid_aluminum", "temperature_delta_k": 68.0}
             ]),
             serde_json::json!([
-                {"normalized_time": 0.0, "scale": 0.3},
-                {"normalized_time": 0.5, "scale": 0.7},
-                {"normalized_time": 1.0, "scale": 1.0}
+                {"normalized_coordinate": 0.0, "scale": 0.3},
+                {"normalized_coordinate": 0.5, "scale": 0.7},
+                {"normalized_coordinate": 1.0, "scale": 1.0}
             ]),
         );
     }
@@ -2618,11 +2942,11 @@ fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisMode
                 {"region_id": "polymer_segment", "temperature_delta_k": 90.0}
             ]),
             serde_json::json!([
-                {"normalized_time": 0.0, "scale": 0.4},
-                {"normalized_time": 0.25, "scale": 1.4},
-                {"normalized_time": 0.5, "scale": 0.5},
-                {"normalized_time": 0.75, "scale": 1.3},
-                {"normalized_time": 1.0, "scale": 0.6}
+                {"normalized_coordinate": 0.0, "scale": 0.4},
+                {"normalized_coordinate": 0.25, "scale": 1.4},
+                {"normalized_coordinate": 0.5, "scale": 0.5},
+                {"normalized_coordinate": 0.75, "scale": 1.3},
+                {"normalized_coordinate": 1.0, "scale": 0.6}
             ]),
         );
     }
@@ -4360,7 +4684,13 @@ fn write_fixture_solver_mesh_artifact(
             .iter()
             .map(|boundary| boundary.target.region_id.clone()),
     );
-    boundary_regions.extend(model.loads.iter().map(|load| load.region_id.clone()));
+    for excitation in &model.excitations {
+        if let runmat_analysis_core::ExcitationTarget::Region(target) =
+            &excitation.excitation().target
+        {
+            boundary_regions.insert(target.region_id.clone());
+        }
+    }
     for interface in &model.interfaces {
         boundary_regions.insert(interface.primary_region_id.clone());
         boundary_regions.insert(interface.secondary_region_id.clone());
@@ -4404,15 +4734,14 @@ fn configure_mesh_backed_electro_thermal_model(spec: &FixtureSpec, model: &mut A
     if !spec.id.starts_with("electro_thermal_joule_") {
         return;
     }
-    model.loads = vec![runmat_analysis_core::LoadCase {
-        load_id: format!("{}_force", spec.id),
-        region_id: "fixture_force_face".to_owned(),
-        kind: runmat_analysis_core::LoadKind::Force {
-            fx: 0.0,
-            fy: -100.0,
-            fz: 0.0,
-        },
-    }];
+    replace_fixture_excitations(
+        model,
+        vec![FixtureExcitation {
+            excitation_id: format!("{}_force", spec.id),
+            region_id: "fixture_force_face".to_owned(),
+            quantity: FixtureExcitationQuantity::Force([0.0, -100.0, 0.0]),
+        }],
+    );
     model.boundaries.clear();
     model.constraints = vec![fixed_constraint(
         format!("{}_fixed", spec.id),

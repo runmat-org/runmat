@@ -1,5 +1,5 @@
 use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, LoadKind, StructuralConstraintKind,
+    validate_model, AnalysisField, AnalysisModel, StructuralConstraintKind,
 };
 
 use crate::{
@@ -15,6 +15,7 @@ use crate::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
+    excitation::{realize_model_excitations, RealizedExcitationKind},
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     post::fields::{
@@ -546,17 +547,18 @@ fn structural_beam_closed_form_diagnostic(
     let mut tip_force_y_n = 0.0_f64;
     let mut tip_torque_x_n_m = 0.0_f64;
     let mut tip_moment_z_n_m = 0.0_f64;
-    for load in &model.loads {
-        if load.region_id != "node:2" {
+    let excitations = realize_model_excitations(model).ok()?;
+    for load in excitations.iter() {
+        if load.target.solver_region_id() != Some("node:2") {
             continue;
         }
         match load.kind {
-            LoadKind::Force { fy, .. } => {
-                tip_force_y_n += fy;
+            RealizedExcitationKind::Force(value) => {
+                tip_force_y_n += value.real[1];
             }
-            LoadKind::Moment { mx, mz, .. } => {
-                tip_torque_x_n_m += mx;
-                tip_moment_z_n_m += mz;
+            RealizedExcitationKind::Moment(value) => {
+                tip_torque_x_n_m += value.real[0];
+                tip_moment_z_n_m += value.real[2];
             }
             _ => {}
         }
@@ -667,19 +669,23 @@ fn structural_moment_balance_diagnostic(
 
 fn requested_moment_vector(model: &AnalysisModel) -> [f64; 3] {
     let mut out = [0.0_f64; 3];
-    for load in &model.loads {
+    let Ok(excitations) = realize_model_excitations(model) else {
+        return out;
+    };
+    for load in excitations.iter() {
         match load.kind {
-            LoadKind::Moment { mx, my, mz } => {
-                out[0] += mx;
-                out[1] += my;
-                out[2] += mz;
+            RealizedExcitationKind::Moment(value) => {
+                for (total, value) in out.iter_mut().zip(value.real) {
+                    *total += value;
+                }
             }
-            LoadKind::Force { fx, fy, fz } => {
-                if let Some(force_moment) = structural_force_moment_about_reaction_origin(
-                    model,
-                    &load.region_id,
-                    [fx, fy, fz],
-                ) {
+            RealizedExcitationKind::Force(value) => {
+                let Some(region_id) = load.target.solver_region_id() else {
+                    continue;
+                };
+                if let Some(force_moment) =
+                    structural_force_moment_about_reaction_origin(model, region_id, value.real)
+                {
                     out[0] += force_moment[0];
                     out[1] += force_moment[1];
                     out[2] += force_moment[2];

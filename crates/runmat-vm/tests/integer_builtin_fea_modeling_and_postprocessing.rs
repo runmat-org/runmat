@@ -20,12 +20,7 @@ const INTEGER_CLASSES: [BuiltinIntegerClass; 8] = [
     BuiltinIntegerClass::Uint64,
 ];
 
-const FEA_INTEGER_CONSTRUCTORS: [&str; 4] = [
-    "fea.domain",
-    "fea.interface",
-    "fea.loadCase",
-    "fea.material",
-];
+const FEA_INTEGER_CONSTRUCTORS: [&str; 3] = ["fea.domain", "fea.interface", "fea.material"];
 
 const FEA_INTEGER_INAPPLICABLE: [&str; 5] = [
     "fea.compare",
@@ -44,8 +39,6 @@ fn fea_numeric_constructors_accept_every_host_integer_class() {
                 "AppliedCurrentA", {constructor}(2));
             interface = fea.interface("contact", "left", "right", ...
                 "FrictionCoefficient", {constructor}(1));
-            load = fea.loadCase("pressure", "face", "pressure", ...
-                "MagnitudePa", {constructor}(3));
             material = fea.material("steel", ...
                 "YoungsModulusPa", {constructor}(200), ...
                 "PoissonRatio", {constructor}(0));
@@ -53,12 +46,7 @@ fn fea_numeric_constructors_accept_every_host_integer_class() {
         );
         let values = execute_source(&source)
             .unwrap_or_else(|error| panic!("{constructor} compiled FEA constructors: {error}"));
-        for class_name in [
-            "fea.Domain",
-            "fea.Interface",
-            "fea.LoadCase",
-            "fea.Material",
-        ] {
+        for class_name in ["fea.Domain", "fea.Interface", "fea.Material"] {
             assert!(
                 values.iter().any(|value| {
                     matches!(value, Value::Object(object) if object.class_name == class_name)

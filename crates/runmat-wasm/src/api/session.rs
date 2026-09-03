@@ -1088,7 +1088,7 @@ impl RunMatWasm {
                 ".gltf".to_string(),
                 ".glb".to_string(),
             ],
-            physics_profiles: runmat_runtime::analysis::analysis_runtime_physics_profile_catalog(),
+            model_templates: runmat_runtime::analysis::analysis_runtime_model_template_catalog(),
             supports_check: true,
             supports_run: true,
             supports_results: true,

@@ -1,15 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+use super::signal::SignalId;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThermoRegionTemperatureDelta {
     pub region_id: String,
     pub temperature_delta_k: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ThermoTimeProfilePoint {
-    pub normalized_time: f64,
-    pub scale: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,6 +17,7 @@ pub enum ThermoFieldInterpolationMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThermoFieldSource {
     pub source_id: String,
     pub revision: u32,
@@ -30,6 +28,7 @@ pub struct ThermoFieldSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThermoMechanicalDomain {
     pub enabled: bool,
     pub reference_temperature_k: f64,
@@ -41,22 +40,18 @@ pub struct ThermoMechanicalDomain {
     #[serde(default)]
     pub region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,
     #[serde(default)]
-    pub time_profile: Vec<ThermoTimeProfilePoint>,
+    pub temperature_signal_id: Option<SignalId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ElectroRegionConductivityScale {
     pub region_id: String,
     pub conductivity_scale: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ElectroTimeProfilePoint {
-    pub normalized_time: f64,
-    pub current_scale: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ElectroThermalDomain {
     pub enabled: bool,
     pub reference_temperature_k: f64,
@@ -64,10 +59,11 @@ pub struct ElectroThermalDomain {
     #[serde(default)]
     pub region_conductivity_scales: Vec<ElectroRegionConductivityScale>,
     #[serde(default)]
-    pub time_profile: Vec<ElectroTimeProfilePoint>,
+    pub electric_potential_signal_id: Option<SignalId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ElectromagneticDomain {
     pub enabled: bool,
     pub reference_frequency_hz: f64,
@@ -82,12 +78,7 @@ pub enum CfdSolveFamily {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CfdTimeProfilePoint {
-    pub normalized_time: f64,
-    pub inlet_scale: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CfdDomain {
     pub enabled: bool,
     pub solve_family: CfdSolveFamily,
@@ -96,5 +87,5 @@ pub struct CfdDomain {
     pub inlet_velocity_m_per_s: f64,
     pub turbulence_intensity: f64,
     #[serde(default)]
-    pub time_profile: Vec<CfdTimeProfilePoint>,
+    pub inlet_velocity_signal_id: Option<SignalId>,
 }

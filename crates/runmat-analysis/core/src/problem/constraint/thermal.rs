@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::{visit_pair, visit_pair_ref, PairedConstraint};
-use crate::problem::{quantity::Temperature, schedule::ValueSchedule, target::RegionTarget};
+use crate::problem::{
+    prescribed_value::PrescribedValue, quantity::Temperature, target::RegionTarget,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -15,13 +17,13 @@ pub struct ThermalConstraint {
 pub enum ThermalConstraintKind {
     Prescribed {
         target: RegionTarget,
-        value: ValueSchedule<Temperature>,
+        value: PrescribedValue<Temperature>,
     },
     Periodic(PairedConstraint),
     Tie(PairedConstraint),
     AffineJump {
         pair: PairedConstraint,
-        temperature_jump: ValueSchedule<Temperature>,
+        temperature_jump: PrescribedValue<Temperature>,
     },
 }
 

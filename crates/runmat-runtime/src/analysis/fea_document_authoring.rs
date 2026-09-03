@@ -3,7 +3,7 @@ use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
 use std::str::FromStr;
 
-use super::contracts::{AnalysisCreateModelProfile, AnalysisRunKind};
+use super::contracts::{AnalysisModelTemplate, AnalysisRunKind};
 
 pub const FEA_STUDY_DOCUMENT_OPERATION_NAMES: &[&str] = &[
     "get_summary",
@@ -111,8 +111,8 @@ pub struct FeaStudySummary {
     pub geometry_path: Option<String>,
     #[serde(rename = "geometryUnits")]
     pub geometry_units: Option<String>,
-    #[serde(rename = "modelProfile")]
-    pub model_profile: Option<String>,
+    #[serde(rename = "modelTemplate")]
+    pub model_template: Option<String>,
     #[serde(rename = "modelDefaults")]
     pub model_defaults: Option<String>,
     #[serde(rename = "meshProfile")]
@@ -266,9 +266,9 @@ pub fn apply_fea_study_document_operation_typed(
         let geometry_path = required_string(&input, &["geometry_path", "geometryPath"])?;
         let geometry_units =
             read_string(&input, &["geometry_units", "geometryUnits"]).unwrap_or("millimeter");
-        let model_profile = required_string(&input, &["model_profile", "modelProfile"])?;
+        let model_template = required_string(&input, &["model_template", "modelTemplate"])?;
         let next_source =
-            create_fea_study_source(&study_id, geometry_path, geometry_units, model_profile)?;
+            create_fea_study_source(&study_id, geometry_path, geometry_units, model_template)?;
         return Ok(FeaStudyDocumentOperationOutput {
             result: with_diff(path, "", &next_source, &["document"])?,
             source: next_source,
@@ -424,12 +424,12 @@ fn create_fea_study_source(
     study_id: &str,
     geometry_path: &str,
     geometry_units: &str,
-    model_profile: &str,
+    model_template: &str,
 ) -> Result<String, String> {
-    let normalized_model_profile = model_profile.trim().to_ascii_lowercase();
-    let model_profile = AnalysisCreateModelProfile::from_snake_case(&normalized_model_profile)
-        .ok_or_else(|| format!("unsupported physics model profile: {model_profile}"))?;
-    let run_kind = model_profile.derived_run_kind();
+    let normalized_model_template = model_template.trim().to_ascii_lowercase();
+    let model_template = AnalysisModelTemplate::from_snake_case(&normalized_model_template)
+        .ok_or_else(|| format!("unsupported physics model template: {model_template}"))?;
+    let run_kind = model_template.derived_run_kind();
     let study_id = normalize_yaml_key(study_id).ok_or_else(|| {
         "study_id must include at least one ASCII letter, number, or underscore".to_string()
     })?;
@@ -447,8 +447,8 @@ fn create_fea_study_source(
         (
             "model",
             YamlValue::Mapping(mapping_from_pairs([(
-                "profile",
-                yaml_string(model_profile.as_snake_case()),
+                "template",
+                yaml_string(model_template.as_snake_case()),
             )])),
         ),
         (
@@ -650,21 +650,21 @@ fn with_diff(
 }
 
 fn summarize_fea_study(document: &YamlValue) -> FeaStudySummary {
-    let model_profile = read_yaml_string(document, &["model", "profile"]);
+    let model_template = read_yaml_string(document, &["model", "template"]);
     let explicit_run_kind = read_yaml_string(document, &["run", "kind"]);
     let run_kind = explicit_run_kind.or_else(|| {
-        model_profile
+        model_template
             .as_deref()
-            .and_then(derive_fea_run_kind_from_profile)
+            .and_then(derive_fea_run_kind_from_template)
             .map(str::to_string)
     });
     FeaStudySummary {
         study_id: read_yaml_string(document, &["id"]),
         geometry_path: read_yaml_string(document, &["geometry", "path"]),
         geometry_units: read_yaml_string(document, &["geometry", "units"]),
-        model_profile,
+        model_template,
         model_defaults: read_yaml_string(document, &["model", "defaults"]),
-        mesh_profile: read_yaml_string(document, &["mesh", "profile"]),
+        mesh_profile: read_yaml_string(document, &["mesh", "template"]),
         mesh_target_size: read_yaml_string(document, &["mesh", "target_size"]),
         mesh_max_elements: read_yaml_string(document, &["mesh", "max_elements"]),
         run_kind,
@@ -672,9 +672,9 @@ fn summarize_fea_study(document: &YamlValue) -> FeaStudySummary {
     }
 }
 
-fn derive_fea_run_kind_from_profile(profile: &str) -> Option<&'static str> {
-    AnalysisCreateModelProfile::from_snake_case(profile)
-        .map(AnalysisCreateModelProfile::derived_run_kind)
+fn derive_fea_run_kind_from_template(template: &str) -> Option<&'static str> {
+    AnalysisModelTemplate::from_snake_case(template)
+        .map(AnalysisModelTemplate::derived_run_kind)
         .map(AnalysisRunKind::as_snake_case)
 }
 
@@ -691,12 +691,12 @@ enum FeaStudyReadinessProfile {
 
 impl FeaStudyReadinessProfile {
     fn from_summary(summary: &FeaStudySummary) -> Option<Self> {
-        let profile =
-            AnalysisCreateModelProfile::from_snake_case(summary.model_profile.as_deref()?.trim())?;
-        if profile.catalog_entry().family == "coupled physics" {
+        let template =
+            AnalysisModelTemplate::from_snake_case(summary.model_template.as_deref()?.trim())?;
+        if template.catalog_entry().family == "coupled physics" {
             return Some(Self::Coupled);
         }
-        match profile.derived_run_kind() {
+        match template.derived_run_kind() {
             AnalysisRunKind::LinearStatic
             | AnalysisRunKind::Transient
             | AnalysisRunKind::Nonlinear => Some(Self::Structural),
@@ -777,29 +777,29 @@ fn study_readiness(
     if summary.geometry_path.as_deref().is_none_or(str::is_empty) {
         blockers.push("Set geometry.path to the CAD or mesh file for this study.");
     }
-    let model_profile = summary.model_profile.as_deref();
-    if model_profile.is_none_or(str::is_empty) {
-        blockers.push("Choose a physics model profile.");
+    let model_template = summary.model_template.as_deref();
+    if model_template.is_none_or(str::is_empty) {
+        blockers.push("Choose a physics model template.");
     }
     if summary.run_backend.as_deref().is_none_or(str::is_empty) {
         blockers.push("Choose a run backend.");
     }
-    if model_profile.is_some() && FeaStudyReadinessProfile::from_summary(summary).is_none() {
-        blockers.push("Choose a supported physics model profile.");
+    if model_template.is_some() && FeaStudyReadinessProfile::from_summary(summary).is_none() {
+        blockers.push("Choose a supported physics model template.");
     }
-    if let Some(profile) = FeaStudyReadinessProfile::from_summary(summary) {
+    if let Some(template) = FeaStudyReadinessProfile::from_summary(summary) {
         if materials.is_empty() {
-            blockers.push(profile.material_blocker());
+            blockers.push(template.material_blocker());
         }
         if !has_material_assignment(material_assignments) {
-            blockers.push(profile.material_assignment_blocker());
+            blockers.push(template.material_assignment_blocker());
         }
-        if let Some(blocker) = profile.boundary_blocker() {
+        if let Some(blocker) = template.boundary_blocker() {
             if !has_boundary_condition(boundary_conditions) {
                 blockers.push(blocker);
             }
         }
-        if let Some(blocker) = profile.driving_condition_blocker() {
+        if let Some(blocker) = template.driving_condition_blocker() {
             if !has_driving_condition(driving_conditions) {
                 blockers.push(blocker);
             }
@@ -1143,7 +1143,7 @@ fn mesh_document(input: &JsonValue) -> Result<YamlValue, String> {
         input,
         &["element_order", "elementOrder"],
     );
-    insert_optional_string(&mut mesh, "profile", input, &["profile"]);
+    insert_optional_string(&mut mesh, "template", input, &["template"]);
     insert_optional_number(
         &mut mesh,
         "max_elements",
@@ -1815,7 +1815,7 @@ fn format_engineering_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::contracts::ANALYSIS_PHYSICS_PROFILE_CATALOG;
+    use crate::analysis::contracts::ANALYSIS_MODEL_TEMPLATE_CATALOG;
 
     #[test]
     fn operation_names_are_the_rust_owned_contract() {
@@ -1845,7 +1845,7 @@ mod tests {
             serde_json::json!({
                 "geometry_path": "WallHook_30mm.stp",
                 "geometry_units": "millimeter",
-                "model_profile": "linear_static_structural"
+                "model_template": "linear_static_structural"
             }),
         )
         .expect("create should succeed");
@@ -1872,38 +1872,38 @@ mod tests {
     }
 
     #[test]
-    fn document_authoring_accepts_every_supported_physics_profile() {
-        for entry in ANALYSIS_PHYSICS_PROFILE_CATALOG {
-            let profile = serde_json::to_value(entry.profile)
-                .expect("profile serializes")
+    fn document_authoring_accepts_every_supported_model_template() {
+        for entry in ANALYSIS_MODEL_TEMPLATE_CATALOG {
+            let template = serde_json::to_value(entry.template)
+                .expect("template serializes")
                 .as_str()
-                .expect("profile serializes as string")
+                .expect("template serializes as string")
                 .to_string();
-            let expected_run_kind = serde_json::to_value(entry.profile.derived_run_kind())
+            let expected_run_kind = serde_json::to_value(entry.template.derived_run_kind())
                 .expect("run kind serializes")
                 .as_str()
                 .expect("run kind serializes as string")
                 .to_string();
             assert!(
                 !entry.default_outputs.is_empty(),
-                "{profile} should publish default output fields"
+                "{template} should publish default output fields"
             );
 
             let created = apply_fea_study_document_operation(
                 "create",
-                &format!("/project/{profile}.fea"),
+                &format!("/project/{template}.fea"),
                 None,
                 serde_json::json!({
                     "geometry_path": "geometry/assembly.step",
                     "geometry_units": "millimeter",
-                    "model_profile": profile
+                    "model_template": template
                 }),
             )
-            .unwrap_or_else(|err| panic!("create {profile}: {err}"));
+            .unwrap_or_else(|err| panic!("create {template}: {err}"));
 
             assert_eq!(
-                created.result.summary.model_profile.as_deref(),
-                Some(profile.as_str())
+                created.result.summary.model_template.as_deref(),
+                Some(template.as_str())
             );
             assert_eq!(
                 created.result.summary.run_kind.as_deref(),
@@ -1911,7 +1911,7 @@ mod tests {
             );
             assert!(
                 FeaStudyReadinessProfile::from_summary(&created.result.summary).is_some(),
-                "{profile} should map to a readiness profile"
+                "{template} should map to a readiness template"
             );
         }
     }
@@ -1924,7 +1924,7 @@ mod tests {
             None,
             serde_json::json!({
                 "geometry_path": "part.step",
-                "model_profile": "linear_static_structural"
+                "model_template": "linear_static_structural"
             }),
         )
         .expect("create should succeed with path-derived fallback");
@@ -1943,7 +1943,7 @@ mod tests {
             serde_json::json!({
                 "study_id": "---",
                 "geometry_path": "part.step",
-                "model_profile": "linear_static_structural"
+                "model_template": "linear_static_structural"
             }),
         )
         .expect_err("invalid explicit study id should fail");
@@ -1955,7 +1955,7 @@ mod tests {
             None,
             serde_json::json!({
                 "geometry_path": "part.step",
-                "model_profile": "linear_static_structural"
+                "model_template": "linear_static_structural"
             }),
         )
         .expect("create");
@@ -1977,7 +1977,7 @@ mod tests {
             None,
             serde_json::json!({
                 "geometry_path": "bracket.step",
-                "model_profile": "linear_static_structural"
+                "model_template": "linear_static_structural"
             }),
         )
         .expect("create");
@@ -2063,7 +2063,7 @@ id: duct_acoustics
 geometry:
   path: geometry/duct.step
 model:
-  profile: acoustic_harmonic
+  template: acoustic_harmonic
 run:
   backend: cpu
 regions:
@@ -2120,7 +2120,7 @@ id: media_test
 geometry:
   path: geometry/part.step
 model:
-  profile: cfd_transient
+  template: cfd_transient
 run:
   backend: cpu
 "#;
@@ -2299,19 +2299,19 @@ run:
             ),
         ];
 
-        for (profile, expected_blocker, modal_without_driver) in cases {
+        for (template, expected_blocker, modal_without_driver) in cases {
             let source = format!(
-                "version: 1\nkind: study\nid: profile_test\ngeometry:\n  path: part.step\nmodel:\n  profile: {profile}\nrun:\n  backend: cpu\n"
+                "version: 1\nkind: study\nid: profile_test\ngeometry:\n  path: part.step\nmodel:\n  template: {template}\nrun:\n  backend: cpu\n"
             );
-            let result = summarize_fea_study_document_contract("/project/profile.fea", &source)
+            let result = summarize_fea_study_document_contract("/project/template.fea", &source)
                 .expect("summary");
             assert!(
                 !result.readiness.ready_to_solve,
-                "{profile} should not be ready with only geometry/profile/backend"
+                "{template} should not be ready with only geometry/template/backend"
             );
             assert!(
                 result.readiness.blockers.contains(&expected_blocker),
-                "{profile} blockers should contain {expected_blocker:?}, got {:?}",
+                "{template} blockers should contain {expected_blocker:?}, got {:?}",
                 result.readiness.blockers
             );
             assert_eq!(
@@ -2321,14 +2321,14 @@ run:
                     || blocker.contains("driver")
                     || blocker.contains("excitation")),
                 !modal_without_driver,
-                "{profile} driving/source gate mismatch: {:?}",
+                "{template} driving/source gate mismatch: {:?}",
                 result.readiness.blockers
             );
         }
     }
 
     #[test]
-    fn typed_authoring_creates_edits_and_checks_every_supported_physics_profile() {
+    fn typed_authoring_creates_edits_and_checks_every_supported_model_template() {
         let cases = vec![
             (
                 "linear_static_structural",
@@ -2551,19 +2551,19 @@ run:
 
         let covered_profiles = cases
             .iter()
-            .map(|(profile, ..)| *profile)
+            .map(|(template, ..)| *template)
             .collect::<std::collections::BTreeSet<_>>();
-        let catalog_profiles = ANALYSIS_PHYSICS_PROFILE_CATALOG
+        let catalog_profiles = ANALYSIS_MODEL_TEMPLATE_CATALOG
             .iter()
-            .map(|entry| entry.profile.as_snake_case())
+            .map(|entry| entry.template.as_snake_case())
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
             covered_profiles, catalog_profiles,
-            "typed authoring readiness coverage must track the full supported physics profile catalog"
+            "typed authoring readiness coverage must track the full supported model template catalog"
         );
 
         for (
-            profile,
+            template,
             run_kind,
             material_input,
             constraint_input,
@@ -2572,7 +2572,7 @@ run:
             expect_no_structural_material,
         ) in cases
         {
-            let path = format!("/project/{profile}.fea");
+            let path = format!("/project/{template}.fea");
             let created = apply_fea_study_document_operation(
                 "create",
                 &path,
@@ -2580,22 +2580,22 @@ run:
                 serde_json::json!({
                     "geometry_path": "geometry/assembly.step",
                     "geometry_units": "millimeter",
-                    "model_profile": profile
+                    "model_template": template
                 }),
             )
-            .unwrap_or_else(|err| panic!("create {profile}: {err}"));
+            .unwrap_or_else(|err| panic!("create {template}: {err}"));
             assert_eq!(
-                created.result.summary.model_profile.as_deref(),
-                Some(profile)
+                created.result.summary.model_template.as_deref(),
+                Some(template)
             );
             assert_eq!(created.result.summary.run_kind.as_deref(), Some(run_kind));
             assert!(
-                created.source.contains(&format!("profile: {profile}")),
-                "{profile} source should retain model profile"
+                created.source.contains(&format!("template: {template}")),
+                "{template} source should retain model template"
             );
             assert!(
                 created.source.contains(&format!("kind: {run_kind}")),
-                "{profile} source should persist derived run kind"
+                "{template} source should persist derived run kind"
             );
 
             let with_region = apply_fea_study_document_operation(
@@ -2607,7 +2607,7 @@ run:
                     "selector": "region:body_1"
                 }),
             )
-            .unwrap_or_else(|err| panic!("add region {profile}: {err}"));
+            .unwrap_or_else(|err| panic!("add region {template}: {err}"));
 
             let mut material_input = material_input;
             material_input["material_id"] = JsonValue::String("medium".to_string());
@@ -2618,7 +2618,7 @@ run:
                 Some(&with_region.source),
                 material_input,
             )
-            .unwrap_or_else(|err| panic!("add material {profile}: {err}"));
+            .unwrap_or_else(|err| panic!("add material {template}: {err}"));
 
             let with_assignment = apply_fea_study_document_operation(
                 "assign_material",
@@ -2629,7 +2629,7 @@ run:
                     "material_id": "medium"
                 }),
             )
-            .unwrap_or_else(|err| panic!("assign material {profile}: {err}"));
+            .unwrap_or_else(|err| panic!("assign material {template}: {err}"));
 
             let mut constraint_input = constraint_input;
             constraint_input["constraint_id"] = JsonValue::String("boundary".to_string());
@@ -2640,7 +2640,7 @@ run:
                 Some(&with_assignment.source),
                 constraint_input,
             )
-            .unwrap_or_else(|err| panic!("add constraint {profile}: {err}"));
+            .unwrap_or_else(|err| panic!("add constraint {template}: {err}"));
 
             let with_driver = if let Some(mut driver_input) = driver_input {
                 driver_input["driving_condition_id"] = JsonValue::String("driver".to_string());
@@ -2651,7 +2651,7 @@ run:
                     Some(&with_constraint.source),
                     driver_input,
                 )
-                .unwrap_or_else(|err| panic!("add driver {profile}: {err}"))
+                .unwrap_or_else(|err| panic!("add driver {template}: {err}"))
             } else {
                 with_constraint
             };
@@ -2666,11 +2666,11 @@ run:
                     "location": "domain"
                 }),
             )
-            .unwrap_or_else(|err| panic!("set outputs {profile}: {err}"));
+            .unwrap_or_else(|err| panic!("set outputs {template}: {err}"));
 
             assert!(
                 changed.result.readiness.ready_to_solve,
-                "{profile} should be ready after family-appropriate authoring: {:?}",
+                "{template} should be ready after family-appropriate authoring: {:?}",
                 changed.result.readiness.blockers
             );
             assert_eq!(changed.result.counts.regions, 1);
@@ -2684,30 +2684,30 @@ run:
             if expect_no_structural_material {
                 assert!(
                     changed.result.materials[0].youngs_modulus_pa.is_none(),
-                    "{profile} should not need structural Young's modulus"
+                    "{template} should not need structural Young's modulus"
                 );
                 assert!(
                     changed.result.materials[0].poisson_ratio.is_none(),
-                    "{profile} should not need structural Poisson ratio"
+                    "{template} should not need structural Poisson ratio"
                 );
             }
         }
     }
 
     #[test]
-    fn create_rejects_unknown_physics_profile() {
+    fn create_rejects_unknown_model_template() {
         let err = apply_fea_study_document_operation(
             "create",
             "/project/unknown.fea",
             None,
             serde_json::json!({
                 "geometry_path": "part.step",
-                "model_profile": "linear_stress_only"
+                "model_template": "linear_stress_only"
             }),
         )
-        .expect_err("create should reject unknown profiles");
+        .expect_err("create should reject unknown templates");
 
-        assert!(err.contains("unsupported physics model profile: linear_stress_only"));
+        assert!(err.contains("unsupported physics model template: linear_stress_only"));
     }
 
     #[test]
@@ -2718,7 +2718,7 @@ run:
             None,
             serde_json::json!({
                 "geometry_path": "bracket.step",
-                "model_profile": "linear_static_structural"
+                "model_template": "linear_static_structural"
             }),
         )
         .expect("create");
@@ -2872,7 +2872,7 @@ run:
                 "backend": "auto",
                 "kind": "solid",
                 "element": "tetrahedron4",
-                "profile": "balanced",
+                "template": "balanced",
                 "max_elements": 50000,
                 "target_size": 0.002,
                 "refinement_strategy": "adaptive",

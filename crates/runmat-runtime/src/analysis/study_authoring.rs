@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::{EvidenceConfidence, LoadKind, MaterialAssignment};
+use runmat_analysis_core::{
+    EvidenceConfidence, ExcitationAction, ExcitationTarget, Force, MaterialAssignment,
+    PhysicalSignal, SignalRepresentation, SignalShape, SignalValue,
+};
 use runmat_meshing_core::MeshingRequestSettings;
 
 use crate::operations::{
@@ -9,10 +12,11 @@ use crate::operations::{
 };
 
 use super::{
-    analysis_create_model_op, persist_study_evidence, profile_supports_run_kind, study_fingerprint,
-    validate_study_issue_codes, AnalysisCreateModelIntentSpec, AnalysisStudyAuthoringData,
-    AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation,
-    AnalysisStudySpec, ANALYSIS_AUTHOR_STUDY_OPERATION, ANALYSIS_AUTHOR_STUDY_OP_VERSION,
+    analysis_create_model_op, persist_study_evidence, study_fingerprint,
+    template_supports_run_kind, validate_study_issue_codes, AnalysisCreateModelIntentSpec,
+    AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent,
+    AnalysisStudyDiagramObservation, AnalysisStudySpec, ANALYSIS_AUTHOR_STUDY_OPERATION,
+    ANALYSIS_AUTHOR_STUDY_OP_VERSION,
 };
 
 pub fn analysis_author_study_op(
@@ -53,13 +57,13 @@ pub fn analysis_author_study_op(
             ]),
         ));
     }
-    if !profile_supports_run_kind(intent.profile, intent.run_kind) {
+    if !template_supports_run_kind(intent.template, intent.run_kind) {
         return Err(author_study_error(
             &context,
             "RM.FEA.AUTHOR_STUDY.RUN_KIND_PROFILE_MISMATCH",
-            "profile does not support requested run kind",
+            "template does not support requested run kind",
             BTreeMap::from([
-                ("profile".to_string(), format!("{:?}", intent.profile)),
+                ("template".to_string(), format!("{:?}", intent.template)),
                 ("run_kind".to_string(), format!("{:?}", intent.run_kind)),
             ]),
         ));
@@ -85,7 +89,7 @@ pub fn analysis_author_study_op(
         .unwrap_or_else(|| format!("{}_model", intent.study_id.trim()));
     let create_model_intent = AnalysisCreateModelIntentSpec {
         model_id: model_id.clone(),
-        profile: intent.profile,
+        template: intent.template,
     };
     let mut model = analysis_create_model_op(
         &intent.geometry,
@@ -127,9 +131,23 @@ pub fn analysis_author_study_op(
             })?;
             (Some(region_id), Some(source))
         };
-    let (driving_condition_region_id, driving_condition_region_source) = if model.loads.is_empty() {
-        (None, None)
-    } else {
+    let driving_action_index = model
+        .excitations
+        .iter()
+        .position(|action| matches!(&action.excitation().target, ExcitationTarget::Region(_)));
+    let driving_targets_volume = driving_action_index.is_some_and(|index| {
+        matches!(
+            &model.excitations[index].excitation().target,
+            ExcitationTarget::Region(target)
+                if target.entity_dimension == runmat_analysis_core::EntityDimension::Volume
+        )
+    });
+    let (driving_condition_region_id, driving_condition_region_source) = if driving_targets_volume {
+        (
+            Some(physical_region_id.clone()),
+            Some("physical_region".to_string()),
+        )
+    } else if driving_action_index.is_some() {
         let (region_id, source) = select_authoring_boundary_region(
             &intent.mesh_summary,
             intent.driving_condition_region_id.as_deref(),
@@ -148,6 +166,8 @@ pub fn analysis_author_study_op(
             )
         })?;
         (Some(region_id), Some(source))
+    } else {
+        (None, None)
     };
     if let Some(region_id) = &boundary_condition_region_id {
         if let Some(constraint) = model.constraints.first_mut() {
@@ -157,11 +177,14 @@ pub fn analysis_author_study_op(
         }
     }
     let mut selected_structural_force_n = None;
-    if let Some(load) = model.loads.first_mut() {
+    if let Some(action_index) = driving_action_index {
+        let action = &mut model.excitations[action_index];
         if let Some(region_id) = &driving_condition_region_id {
-            load.region_id = region_id.clone();
+            if let ExcitationTarget::Region(target) = &mut action.excitation_mut().target {
+                target.region_id = region_id.clone();
+            }
         }
-        if let LoadKind::Force { fx, fy, fz } = &mut load.kind {
+        if matches!(action, ExcitationAction::Force(_)) {
             let force_n = intent
                 .structural_force_n
                 .or_else(|| {
@@ -171,16 +194,14 @@ pub fn analysis_author_study_op(
                         .and_then(|observation| observation.structural_force_n)
                 })
                 .unwrap_or([0.0, -1000.0, 0.0]);
-            *fx = force_n[0];
-            *fy = force_n[1];
-            *fz = force_n[2];
+            let signal_id = action.excitation().signal_id.clone();
+            set_authored_force_signal(&mut model.signals, &signal_id, force_n);
             selected_structural_force_n = Some(force_n);
         }
     }
-    let selected_driving_condition_kind = model
-        .loads
-        .first()
-        .map(|load| load_kind_label(&load.kind).to_string());
+    let selected_driving_condition_kind = driving_action_index
+        .and_then(|index| model.excitations.get(index))
+        .map(|action| excitation_kind_label(action).to_string());
 
     let study = AnalysisStudySpec {
         study_id: intent.study_id,
@@ -278,16 +299,49 @@ pub fn analysis_author_study_op(
     ))
 }
 
-fn load_kind_label(load: &LoadKind) -> &'static str {
-    match load {
-        LoadKind::Force { .. } => "force",
-        LoadKind::Moment { .. } => "moment",
-        LoadKind::Wrench { .. } => "wrench",
-        LoadKind::Pressure { .. } => "pressure",
-        LoadKind::BodyForce { .. } => "body_force",
-        LoadKind::CurrentDensity { .. } => "current_density",
-        LoadKind::CoilCurrent { .. } => "coil_current",
-        LoadKind::HeatSource { .. } => "heat_source",
+fn set_authored_force_signal(
+    signals: &mut [PhysicalSignal],
+    signal_id: &runmat_analysis_core::SignalId,
+    force_n: [f64; 3],
+) {
+    let Some(PhysicalSignal::Force(signal)) = signals
+        .iter_mut()
+        .find(|signal| signal.signal_id() == signal_id)
+    else {
+        return;
+    };
+    signal.shape = SignalShape::Vector3;
+    signal.representation =
+        SignalRepresentation::Constant(SignalValue::Vector3(force_n.map(Force::new)));
+    signal.evidence.max_absolute_error = None;
+    signal.evidence.max_relative_error = None;
+    signal.evidence.derivative_max_absolute_error = None;
+    signal.evidence.sample_count = 1;
+}
+
+fn excitation_kind_label(action: &ExcitationAction) -> &'static str {
+    match action {
+        ExcitationAction::Force(_) => "force",
+        ExcitationAction::Moment(_) => "moment",
+        ExcitationAction::Traction(_) => "traction",
+        ExcitationAction::Pressure(_) => "pressure",
+        ExcitationAction::BodyForce(_) => "body_force",
+        ExcitationAction::BaseDisplacement(_) => "base_displacement",
+        ExcitationAction::BaseVelocity(_) => "base_velocity",
+        ExcitationAction::BaseAcceleration(_) => "base_acceleration",
+        ExcitationAction::HeatGeneration(_) => "heat_generation",
+        ExcitationAction::HeatFlux(_) => "heat_flux",
+        ExcitationAction::AmbientTemperature(_) => "ambient_temperature",
+        ExcitationAction::TerminalVoltage(_) => "terminal_voltage",
+        ExcitationAction::ElectricCurrent(_) => "electric_current",
+        ExcitationAction::ElectricCharge(_) => "electric_charge",
+        ExcitationAction::CurrentDensity(_) => "current_density",
+        ExcitationAction::MagneticVectorPotential(_) => "magnetic_vector_potential",
+        ExcitationAction::AcousticPressure(_) => "acoustic_pressure",
+        ExcitationAction::NormalVelocity(_) => "normal_velocity",
+        ExcitationAction::InletVelocity(_) => "inlet_velocity",
+        ExcitationAction::MassFlow(_) => "mass_flow",
+        ExcitationAction::WallMotion(_) => "wall_motion",
     }
 }
 

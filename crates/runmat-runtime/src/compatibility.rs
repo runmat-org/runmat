@@ -2056,7 +2056,6 @@ mod tests {
             "fea.boundaryCondition",
             "fea.domain",
             "fea.interface",
-            "fea.loadCase",
             "fea.material",
             "fea.results",
             "fea.runOptions",

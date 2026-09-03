@@ -14,7 +14,10 @@ use crate::{
     fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
     fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
     fea_transient_von_mises_field_id,
-    fixtures::{fixture_model, FixtureId},
+    fixtures::{
+        fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind,
+        FixtureId,
+    },
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
     ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext,
@@ -203,7 +206,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
                 thermal_expansion_coefficient: 1.2e-5,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
+                sampled_time_profile: Vec::new(),
             }),
             ..ThermalSolveOptions::default()
         },
@@ -278,11 +281,14 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
 #[test]
 fn moment_loads_require_rotational_dofs() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.loads[0].kind = runmat_analysis_core::LoadKind::Moment {
-        mx: 0.0,
-        my: 0.0,
-        mz: 125.0,
-    };
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "tip_load".into(),
+            region_id: "tip".into(),
+            kind: FixtureExcitationKind::Moment([0.0, 0.0, 125.0]),
+        }],
+    );
 
     let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
         .expect_err("moment loads should require rotational DOFs");
@@ -304,7 +310,7 @@ fn prescribed_rotations_require_rotational_dofs() {
                     target: runmat_analysis_core::RegionTarget::boundary("tip"),
                     values: vec![runmat_analysis_core::RotationDofValue {
                         dof: runmat_analysis_core::StructuralRotationDof::Rx,
-                        value: runmat_analysis_core::ValueSchedule::Constant(
+                        value: runmat_analysis_core::PrescribedValue::Constant(
                             runmat_analysis_core::Rotation::new(0.1),
                         ),
                     }],
@@ -321,13 +327,65 @@ fn prescribed_rotations_require_rotational_dofs() {
 }
 
 #[test]
+fn canonical_constant_signal_drives_prescribed_translation_assembly() {
+    let inline_model = fixture_model(FixtureId::TransientShock);
+    let inline = crate::assembly::assemble_linear_system(&inline_model, None, None, None);
+
+    let mut signal_model = inline_model.clone();
+    signal_model
+        .signals
+        .push(runmat_analysis_core::PhysicalSignal::Displacement(
+            runmat_analysis_core::Signal {
+                signal_id: runmat_analysis_core::SignalId("zero_displacement".into()),
+                shape: runmat_analysis_core::SignalShape::Scalar,
+                frame: None,
+                representation: runmat_analysis_core::SignalRepresentation::Constant(
+                    runmat_analysis_core::SignalValue::Scalar(
+                        runmat_analysis_core::Displacement::new(0.0),
+                    ),
+                ),
+                precision: runmat_analysis_core::SignalPrecision::Real64,
+                evidence: runmat_analysis_core::SignalApproximationEvidence {
+                    max_absolute_error: None,
+                    max_relative_error: None,
+                    derivative_max_absolute_error: None,
+                    sample_count: 1,
+                },
+                provenance: runmat_analysis_core::SignalProvenance::Authored,
+            },
+        ));
+    for constraint in &mut signal_model.constraints {
+        let runmat_analysis_core::AnalysisConstraint::Structural(constraint) = constraint else {
+            continue;
+        };
+        let runmat_analysis_core::StructuralConstraintKind::PrescribedTranslations(values) =
+            &mut constraint.kind
+        else {
+            continue;
+        };
+        for prescribed in &mut values.values {
+            prescribed.value = runmat_analysis_core::PrescribedValue::Signal(
+                runmat_analysis_core::SignalId("zero_displacement".into()),
+            );
+        }
+    }
+
+    let referenced = crate::assembly::assemble_linear_system(&signal_model, None, None, None);
+    assert_eq!(referenced.operator.constrained, inline.operator.constrained);
+    assert_eq!(referenced.operator.rhs, inline.operator.rhs);
+}
+
+#[test]
 fn assembly_summary_reports_structural_dof_layout_metrics() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.loads[0].kind = runmat_analysis_core::LoadKind::Moment {
-        mx: 0.0,
-        my: 0.0,
-        mz: 125.0,
-    };
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "tip_load".into(),
+            region_id: "tip".into(),
+            kind: FixtureExcitationKind::Moment([0.0, 0.0, 125.0]),
+        }],
+    );
 
     let summary = crate::assembly::assemble_linear_system(&model, None, None, None);
 
@@ -489,15 +547,14 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         shell_sections: Vec::new(),
     });
     model.constraints = vec![fixed_constraint("fixed_root", "node:1")];
-    model.loads = vec![runmat_analysis_core::LoadCase {
-        load_id: "tip_moment".to_string(),
-        region_id: "node:2".to_string(),
-        kind: runmat_analysis_core::LoadKind::Moment {
-            mx: 0.0,
-            my: 0.0,
-            mz: moment_n_m,
-        },
-    }];
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "tip_moment".into(),
+            region_id: "node:2".into(),
+            kind: FixtureExcitationKind::Moment([0.0, 0.0, moment_n_m]),
+        }],
+    );
 
     let result = crate::run_linear_static(&model, ComputeBackend::Cpu)
         .expect("beam moment solve should run");
@@ -632,7 +689,7 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
                 thermal_expansion_coefficient: 1.2e-5,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
+                sampled_time_profile: Vec::new(),
             }),
             ..LinearStaticSolveOptions::default()
         },
@@ -803,7 +860,17 @@ fn single_tetrahedron_solver_mesh_for_model(
             .filter_map(|condition| condition.target().map(|target| target.region_id.clone())),
     );
     let mut loaded_regions = std::collections::BTreeSet::from(["tip".to_string()]);
-    loaded_regions.extend(model.loads.iter().map(|load| load.region_id.clone()));
+    loaded_regions.extend(model.excitations.iter().filter_map(|action| {
+        match &action.excitation().target {
+            runmat_analysis_core::ExcitationTarget::Region(target) => {
+                Some(target.region_id.clone())
+            }
+            runmat_analysis_core::ExcitationTarget::ReferencePoint(point) => {
+                Some(point.reference_point_id.clone())
+            }
+            _ => None,
+        }
+    }));
     loaded_regions.extend(
         model
             .material_assignments
@@ -895,16 +962,6 @@ fn fixture_missing_materials_is_rejected() {
     assert!(err
         .to_string()
         .contains("ANALYSIS_VALIDATION_MISSING_MATERIALS"));
-}
-
-#[test]
-fn fixture_missing_loads_is_rejected() {
-    let model = fixture_model(FixtureId::MissingLoads);
-    let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
-        .expect_err("fixture should fail validation");
-    assert!(err
-        .to_string()
-        .contains("ANALYSIS_VALIDATION_MISSING_LOADS"));
 }
 
 #[test]
@@ -1143,7 +1200,7 @@ fn thermal_solver_emits_heat_transfer_fields() {
                 thermal_expansion_coefficient: 1.2e-5,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
+                sampled_time_profile: Vec::new(),
             }),
             ..ThermalSolveOptions::default()
         },
@@ -1310,7 +1367,7 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
                 thermal_expansion_coefficient: 1.2e-5,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
+                sampled_time_profile: Vec::new(),
             }),
             ..TransientSolveOptions::default()
         },
@@ -1413,7 +1470,7 @@ fn electro_thermal_transient_emits_coupled_fields() {
                 base_electrical_conductivity_s_per_m: 3.5e7,
                 resistive_heating_coefficient: 4.0e-4,
                 region_conductivity_scales: Vec::new(),
-                time_profile: Vec::new(),
+                sampled_time_profile: Vec::new(),
             }),
             ..TransientSolveOptions::default()
         },
@@ -1713,7 +1770,7 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
                 thermal_expansion_coefficient: 1.4e-5,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
+                sampled_time_profile: Vec::new(),
             }),
             ..NonlinearSolveOptions::default()
         },
@@ -1818,8 +1875,12 @@ fn load_sweep_fixture_uses_solver_mesh_gate() {
     )
     .expect("baseline solve should succeed");
     let mut model = fixture_model(FixtureId::CantileverLoadSweep);
-    for load in &mut model.loads {
-        load.region_id = "tip".to_owned();
+    for action in &mut model.excitations {
+        if let runmat_analysis_core::ExcitationTarget::Region(target) =
+            &mut action.excitation_mut().target
+        {
+            target.region_id = "tip".to_owned();
+        }
     }
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect("solve should succeed");
@@ -1858,8 +1919,12 @@ fn load_sweep_fixture_uses_solver_mesh_gate() {
 #[test]
 fn large_load_sweep_fixture_scales_dof_count() {
     let mut model = fixture_model(FixtureId::CantileverLargeLoadSweep);
-    for load in &mut model.loads {
-        load.region_id = "tip".to_owned();
+    for action in &mut model.excitations {
+        if let runmat_analysis_core::ExcitationTarget::Region(target) =
+            &mut action.excitation_mut().target
+        {
+            target.region_id = "tip".to_owned();
+        }
     }
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect("solve should succeed");
@@ -1983,7 +2048,11 @@ fn structural_invalid_moment_without_rotational_dofs_fixture_is_typed() {
 #[test]
 fn moment_load_region_must_resolve_to_rotational_dofs() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    model.loads[0].region_id = "node:99".to_string();
+    if let runmat_analysis_core::ExcitationTarget::Region(target) =
+        &mut model.excitations[0].excitation_mut().target
+    {
+        target.region_id = "node:99".to_string();
+    }
 
     let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
         .expect_err("unresolved beam moment target should fail");

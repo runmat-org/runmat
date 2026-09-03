@@ -425,6 +425,7 @@ mod tests {
             structural_rotation_node_count: 0,
             structural_moment_load_count: 0,
             structural_direct_rotational_moment_load_count: 0,
+            structural_requested_moment_norm_n_m: 0.0,
             structural_wrench_lowering: Vec::new(),
             structural_rotational_constraint_count: 0,
             structural_beam_element_count: 0,

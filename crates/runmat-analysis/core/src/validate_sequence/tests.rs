@@ -33,7 +33,6 @@ fn model_with_steps(steps: Vec<ProcedureStep>) -> AnalysisModel {
         excitation_cases: Vec::new(),
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
-        loads: Vec::new(),
         sequence: crate::AnalysisSequence::from_steps("sequence", steps),
     }
 }

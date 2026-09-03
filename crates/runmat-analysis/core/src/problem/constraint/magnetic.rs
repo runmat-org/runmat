@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{visit_pair, visit_pair_ref, PairedConstraint};
 use crate::problem::{
-    quantity::MagneticVectorPotential, schedule::ValueSchedule, target::RegionTarget,
+    prescribed_value::PrescribedValue, quantity::MagneticVectorPotential, target::RegionTarget,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,7 +17,7 @@ pub struct MagneticConstraint {
 pub enum MagneticConstraintKind {
     PrescribedVectorPotential {
         target: RegionTarget,
-        value: ValueSchedule<MagneticVectorPotential>,
+        value: PrescribedValue<MagneticVectorPotential>,
     },
     Periodic(PairedConstraint),
     VectorPotentialGround {

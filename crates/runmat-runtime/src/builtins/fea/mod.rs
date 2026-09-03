@@ -2,14 +2,15 @@ use runmat_analysis_core::{
     AnalysisBoundary, AnalysisConstraint, AnalysisField, AnalysisFieldValues, AnalysisInterface,
     AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisProcedure, AnalysisSequence,
     BoundaryOperator, CfdDomain, CoordinateFrame, Displacement, ElectroThermalDomain,
-    ElectromagneticDomain, EvidenceConfidence, FluidConstraint, FluidConstraintKind, HeatFlux,
-    HeatTransferCoefficient, LoadCase, LoadKind, MagneticConstraint, MagneticConstraintKind,
-    MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
-    MaterialModel, MaterialPlasticModel, MaterialThermalModel, PhysicsFamily, PrescribedRotations,
-    PrescribedTranslations, Pressure, ProcedureStep, RegionTarget, Rotation, RotationDofValue,
-    SolutionSpace, SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
+    ElectromagneticDomain, EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationTarget,
+    FluidConstraint, FluidConstraintKind, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
+    MagneticConstraintKind, MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel,
+    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
+    PhysicalSignal, PhysicsFamily, PrescribedRotations, PrescribedTranslations, PrescribedValue,
+    Pressure, ProcedureStep, RegionTarget, Rotation, RotationDofValue, SolutionSpace,
+    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
     StructuralRotationDof, StructuralTranslationDof, Temperature, ThermalConstraint,
-    ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue, ValueSchedule, Velocity,
+    ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue, Velocity,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
@@ -36,8 +37,8 @@ use crate::analysis::{
     analysis_run_study_sweep_op, analysis_trends_op, analysis_validate_study_op,
     analysis_validate_study_sweep_op, load_fea_document_from_path_async,
     AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions,
-    AnalysisFieldDescriptor, AnalysisFsiRunOptions, AnalysisModalRunOptions,
+    AnalysisCreateModelIntentSpec, AnalysisElectromagneticRunOptions, AnalysisFieldDescriptor,
+    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisModelTemplate,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
     AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec, AnalysisStudySweepData,
     AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepSpec,
@@ -64,7 +65,6 @@ const FEA_MODEL_CLASS: &str = "fea.Model";
 const FEA_MATERIAL_CLASS: &str = "fea.Material";
 const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
 const FEA_BOUNDARY_CONDITION_CLASS: &str = "fea.BoundaryCondition";
-const FEA_LOAD_CASE_CLASS: &str = "fea.LoadCase";
 const FEA_STEP_CLASS: &str = "fea.Step";
 const FEA_DOMAIN_CLASS: &str = "fea.Domain";
 const FEA_INTERFACE_CLASS: &str = "fea.Interface";
@@ -91,7 +91,6 @@ const MODEL_NAME: &str = "fea.model";
 const MATERIAL_NAME: &str = "fea.material";
 const MATERIAL_ASSIGNMENT_NAME: &str = "fea.materialAssignment";
 const BOUNDARY_CONDITION_NAME: &str = "fea.boundaryCondition";
-const LOAD_CASE_NAME: &str = "fea.loadCase";
 const STEP_NAME: &str = "fea.step";
 const DOMAIN_NAME: &str = "fea.domain";
 const INTERFACE_NAME: &str = "fea.interface";
@@ -150,7 +149,7 @@ const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description:
-            "Required Profile plus optional Mesh, Backend, ModelId, and model setup options.",
+            "Required Template plus optional Mesh, Backend, ModelId, and model setup options.",
     },
 ];
 const IN_AUTHOR_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
@@ -181,7 +180,7 @@ const IN_AUTHOR_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description:
-            "Required Profile plus Backend, boundary/driving region selectors, structural force vector, and analysis mesh artifact paths.",
+            "Required Template plus Backend, boundary/driving region selectors, structural force vector, and analysis mesh artifact paths.",
     },
 ];
 const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -212,7 +211,7 @@ const MODEL_INPUTS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Profile, frame, defaults, and typed model-component options.",
+        description: "Template, frame, defaults, and typed model-component options.",
     },
 ];
 const MATERIAL_INPUTS: [BuiltinParamDescriptor; 2] = [
@@ -252,36 +251,6 @@ const MATERIAL_ASSIGNMENT_INPUTS: [BuiltinParamDescriptor; 3] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description: "Expected-material and confidence options.",
-    },
-];
-const LOAD_CASE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Load-case id.",
-    },
-    BuiltinParamDescriptor {
-        name: "region",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Geometry region selector.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Load kind.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Numeric fields required by the selected load kind.",
     },
 ];
 const DOMAIN_INPUTS: [BuiltinParamDescriptor; 2] = [
@@ -533,11 +502,6 @@ const MATERIAL_ASSIGNMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
         inputs: &MATERIAL_ASSIGNMENT_INPUTS,
         outputs: &OUT_ANY,
     }];
-const LOAD_CASE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "load = fea.loadCase(id, region, kind, Name, Value, ...)",
-    inputs: &LOAD_CASE_INPUTS,
-    outputs: &OUT_ANY,
-}];
 const DOMAIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "domain = fea.domain(kind, Name, Value, ...)",
     inputs: &DOMAIN_INPUTS,
@@ -717,12 +681,6 @@ pub const FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescrip
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
-pub const FEA_LOAD_CASE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOAD_CASE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 pub const FEA_DOMAIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DOMAIN_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -839,62 +797,6 @@ pub const FEA_MATERIAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
     fea_floating_capability(
         "plastic material fields",
         &MATERIAL_PLASTIC_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::ScalarOnly,
-    ),
-];
-
-const LOAD_VECTOR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
-    "three-element vector",
-    BuiltinIntegerScalarDoubleRule::NotApplicable,
-)];
-const LOAD_SCALAR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
-    "scalar physics fields",
-    BuiltinIntegerScalarDoubleRule::Allowed,
-)];
-const LOAD_CURRENT_DENSITY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    fea_floating_input(
-        "three-element vector",
-        BuiltinIntegerScalarDoubleRule::NotApplicable,
-    ),
-    fea_floating_input(
-        "phase and amplitude",
-        BuiltinIntegerScalarDoubleRule::Allowed,
-    ),
-];
-pub const FEA_LOAD_CASE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 7] = [
-    fea_floating_capability(
-        "force vector",
-        &LOAD_VECTOR_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::FunctionSpecific,
-    ),
-    fea_floating_capability(
-        "moment or torque vector",
-        &LOAD_VECTOR_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::FunctionSpecific,
-    ),
-    fea_floating_capability(
-        "pressure magnitude",
-        &LOAD_SCALAR_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::ScalarOnly,
-    ),
-    fea_floating_capability(
-        "body-force vector",
-        &LOAD_VECTOR_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::FunctionSpecific,
-    ),
-    fea_floating_capability(
-        "current-density fields",
-        &LOAD_CURRENT_DENSITY_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::Multiple,
-    ),
-    fea_floating_capability(
-        "coil-current fields",
-        &LOAD_SCALAR_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::Multiple,
-    ),
-    fea_floating_capability(
-        "volumetric heat source",
-        &LOAD_SCALAR_INTEGER_INPUTS,
         BuiltinIntegerOverloadKind::ScalarOnly,
     ),
 ];
@@ -1265,19 +1167,6 @@ pub async fn fea_boundary_condition_builtin(args: Vec<Value>) -> BuiltinResult<V
 }
 
 #[runtime_builtin(
-    name = "fea.loadCase",
-    category = "fea",
-    summary = "Create a typed FEA load case.",
-    keywords = "fea,load,force,moment,torque,pressure,current",
-    descriptor(crate::builtins::fea::FEA_LOAD_CASE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_LOAD_CASE_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::fea"
-)]
-pub async fn fea_load_case_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    create_load_case_object_from_args(args)
-}
-
-#[runtime_builtin(
     name = "fea.step",
     category = "fea",
     summary = "Create a typed FEA analysis step.",
@@ -1540,20 +1429,20 @@ enum ModelConditionPayload {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelDefaultsMode {
-    ProfileScaffold,
+    TemplateScaffold,
     None,
 }
 
 impl Default for ModelDefaultsMode {
     fn default() -> Self {
-        Self::ProfileScaffold
+        Self::TemplateScaffold
     }
 }
 
 #[derive(Debug, Default)]
 struct StudyConstructorOptions {
     run_kind: Option<AnalysisRunKind>,
-    profile: Option<AnalysisCreateModelProfile>,
+    template: Option<AnalysisModelTemplate>,
     backend: Option<ComputeBackend>,
     model_id: Option<String>,
     model: Option<AnalysisModel>,
@@ -1562,7 +1451,9 @@ struct StudyConstructorOptions {
     materials: Vec<MaterialModel>,
     material_assignments: Vec<MaterialAssignment>,
     boundary_conditions: Vec<ModelConditionPayload>,
-    loads: Vec<LoadCase>,
+    signals: Vec<PhysicalSignal>,
+    excitations: Vec<ExcitationAction>,
+    excitation_cases: Vec<ExcitationCase>,
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<AnalysisInterface>,
@@ -1582,7 +1473,7 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let geometry = geometry_asset_from_value(STUDY_NAME, &args[1])?;
     let options = StudyConstructorOptions::parse(&args[2..])?;
     let supplied_mesh = options.mesh.clone();
-    let (profile, run_kind) = resolve_study_profile_and_run_kind(&options)?;
+    let (template, run_kind) = resolve_study_template_and_run_kind(&options)?;
     let model_id = options.model_id.clone().unwrap_or_else(|| {
         options
             .model
@@ -1596,13 +1487,15 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             STUDY_NAME,
             &geometry,
             model_id.clone(),
-            profile,
+            template,
             options.model_defaults,
             options.frame,
             options.materials,
             options.material_assignments,
             options.boundary_conditions,
-            options.loads,
+            options.signals,
+            options.excitations,
+            options.excitation_cases,
             options.steps,
             options.domains,
             options.interfaces,
@@ -1625,7 +1518,7 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let spec = AnalysisStudySpec {
         study_id,
         geometry,
-        create_model_intent: AnalysisCreateModelIntentSpec { model_id, profile },
+        create_model_intent: AnalysisCreateModelIntentSpec { model_id, template },
         model,
         run_kind,
         backend: options.backend.unwrap_or(ComputeBackend::Cpu),
@@ -1668,7 +1561,7 @@ impl StudyConstructorOptions {
                 "runkind" | "kind" => "runkind",
                 "materialassignments" | "assignments" => "materialassignments",
                 "boundaryconditions" | "bcs" => "boundaryconditions",
-                "loads" | "loadcases" => "loads",
+                "excitationcases" | "cases" => "excitationcases",
                 "runoptions" | "options" => "runoptions",
                 other => other,
             };
@@ -1684,9 +1577,9 @@ impl StudyConstructorOptions {
                     let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
                     options.run_kind = Some(parse_scalar_enum(&text, "RunKind")?);
                 }
-                "profile" => {
+                "template" => {
                     let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
-                    options.profile = Some(parse_scalar_enum(&text, "Profile")?);
+                    options.template = Some(parse_scalar_enum(&text, "Template")?);
                 }
                 "backend" => {
                     let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
@@ -1723,8 +1616,16 @@ impl StudyConstructorOptions {
                     options.boundary_conditions =
                         boundary_condition_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
-                "loads" | "loadcases" => {
-                    options.loads = load_case_vec_from_value(STUDY_NAME, &pair[1])?;
+                "signals" => {
+                    options.signals = typed_vec_from_value(STUDY_NAME, &pair[1], "signals")?;
+                }
+                "excitations" => {
+                    options.excitations =
+                        typed_vec_from_value(STUDY_NAME, &pair[1], "excitations")?;
+                }
+                "excitationcases" | "cases" => {
+                    options.excitation_cases =
+                        typed_vec_from_value(STUDY_NAME, &pair[1], "excitation cases")?;
                 }
                 "steps" => options.steps = step_vec_from_value(STUDY_NAME, &pair[1])?,
                 "domains" => options.domains = domain_vec_from_value(STUDY_NAME, &pair[1])?,
@@ -1752,7 +1653,9 @@ impl StudyConstructorOptions {
             || !self.materials.is_empty()
             || !self.material_assignments.is_empty()
             || !self.boundary_conditions.is_empty()
-            || !self.loads.is_empty()
+            || !self.signals.is_empty()
+            || !self.excitations.is_empty()
+            || !self.excitation_cases.is_empty()
             || !self.steps.is_empty()
             || !self.domains.is_empty()
             || !self.interfaces.is_empty()
@@ -1761,13 +1664,15 @@ impl StudyConstructorOptions {
 
 #[derive(Debug, Default)]
 struct ModelConstructorOptions {
-    profile: Option<AnalysisCreateModelProfile>,
+    template: Option<AnalysisModelTemplate>,
     frame: Option<CoordinateFrame>,
     defaults: ModelDefaultsMode,
     materials: Vec<MaterialModel>,
     material_assignments: Vec<MaterialAssignment>,
     boundary_conditions: Vec<ModelConditionPayload>,
-    loads: Vec<LoadCase>,
+    signals: Vec<PhysicalSignal>,
+    excitations: Vec<ExcitationAction>,
+    excitation_cases: Vec<ExcitationCase>,
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<AnalysisInterface>,
@@ -1839,24 +1744,26 @@ fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let model_id = scalar_string(&args[0], MODEL_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value(MODEL_NAME, &args[1])?;
     let options = parse_model_constructor_options(MODEL_NAME, &args[2..])?;
-    let profile = options.profile.ok_or_else(|| {
+    let template = options.template.ok_or_else(|| {
         builtin_error(
             MODEL_NAME,
             &ERROR_INPUT,
-            "fea.model requires Profile; choose a physics profile from fea.capabilities().physicsProfiles",
+            "fea.model requires Template; choose a model template from fea.capabilities().modelTemplates",
         )
     })?;
     let model = build_model_from_parts(
         MODEL_NAME,
         &geometry,
         model_id,
-        profile,
+        template,
         options.defaults,
         options.frame,
         options.materials,
         options.material_assignments,
         options.boundary_conditions,
-        options.loads,
+        options.signals,
+        options.excitations,
+        options.excitation_cases,
         options.steps,
         options.domains,
         options.interfaces,
@@ -1879,9 +1786,9 @@ fn parse_model_constructor_options(
     let mut options = ModelConstructorOptions::default();
     for pair in expect_name_value_tail(builtin, args)? {
         match pair.key.as_str() {
-            "profile" => {
+            "template" => {
                 let text = scalar_string(pair.value, builtin, &ERROR_INPUT)?;
-                options.profile = Some(parse_scalar_enum(&text, "Profile")?);
+                options.template = Some(parse_scalar_enum(&text, "Template")?);
             }
             "frame" => {
                 let text = scalar_string(pair.value, builtin, &ERROR_INPUT)?;
@@ -1900,7 +1807,14 @@ fn parse_model_constructor_options(
                 options.boundary_conditions =
                     boundary_condition_vec_from_value(builtin, pair.value)?;
             }
-            "loads" | "loadcases" => options.loads = load_case_vec_from_value(builtin, pair.value)?,
+            "signals" => options.signals = typed_vec_from_value(builtin, pair.value, "signals")?,
+            "excitations" => {
+                options.excitations = typed_vec_from_value(builtin, pair.value, "excitations")?
+            }
+            "excitationcases" | "cases" => {
+                options.excitation_cases =
+                    typed_vec_from_value(builtin, pair.value, "excitation cases")?
+            }
             "steps" => options.steps = step_vec_from_value(builtin, pair.value)?,
             "domains" => options.domains = domain_vec_from_value(builtin, pair.value)?,
             "interfaces" => options.interfaces = interface_vec_from_value(builtin, pair.value)?,
@@ -2137,7 +2051,7 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
                     .into_iter()
                     .map(|dof| TranslationDofValue {
                         dof,
-                        value: ValueSchedule::Constant(Displacement::new(0.0)),
+                        value: PrescribedValue::Constant(Displacement::new(0.0)),
                     })
                     .collect(),
                 }),
@@ -2166,7 +2080,7 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
                     .into_iter()
                     .map(|(dof, value)| RotationDofValue {
                         dof,
-                        value: ValueSchedule::Constant(Rotation::new(value)),
+                        value: PrescribedValue::Constant(Rotation::new(value)),
                     })
                     .collect(),
                 }),
@@ -2208,10 +2122,9 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
                 constraint_id: bc_id,
                 kind: ThermalConstraintKind::Prescribed {
                     target,
-                    value: ValueSchedule::Constant(Temperature::new(remove_required_boundary_f64(
-                        &mut fields,
-                        "temperature_k",
-                    )?)),
+                    value: PrescribedValue::Constant(Temperature::new(
+                        remove_required_boundary_f64(&mut fields, "temperature_k")?,
+                    )),
                 },
             }))
         }
@@ -2219,7 +2132,7 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
             boundary_id: bc_id,
             target,
             operator: BoundaryOperator::ThermalHeatFlux {
-                value: ValueSchedule::Constant(HeatFlux::new(remove_required_boundary_f64(
+                value: PrescribedValue::Constant(HeatFlux::new(remove_required_boundary_f64(
                     &mut fields,
                     "heat_flux_w_per_m2",
                 )?)),
@@ -2229,7 +2142,7 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
             boundary_id: bc_id,
             target,
             operator: BoundaryOperator::ThermalConvection {
-                ambient_temperature: ValueSchedule::Constant(Temperature::new(
+                ambient_temperature: PrescribedValue::Constant(Temperature::new(
                     remove_required_boundary_f64(&mut fields, "ambient_temperature_k")?,
                 )),
                 coefficient: HeatTransferCoefficient::new(remove_required_boundary_f64(
@@ -2243,7 +2156,7 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
                 constraint_id: bc_id,
                 kind: FluidConstraintKind::PrescribedVelocity {
                     target,
-                    value: ValueSchedule::Constant(Velocity::new(remove_required_boundary_f64(
+                    value: PrescribedValue::Constant(Velocity::new(remove_required_boundary_f64(
                         &mut fields,
                         "velocity_m_per_s",
                     )?)),
@@ -2255,7 +2168,7 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
                 constraint_id: bc_id,
                 kind: FluidConstraintKind::PressureReference {
                     target,
-                    value: ValueSchedule::Constant(Pressure::new(remove_required_boundary_f64(
+                    value: PrescribedValue::Constant(Pressure::new(remove_required_boundary_f64(
                         &mut fields,
                         "pressure_pa",
                     )?)),
@@ -2390,80 +2303,6 @@ fn reject_unknown_boundary_fields(fields: HashMap<String, &Value>) -> BuiltinRes
     Ok(())
 }
 
-fn create_load_case_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() < 3 {
-        return Err(builtin_error(
-            LOAD_CASE_NAME,
-            &ERROR_INPUT,
-            "fea.loadCase requires id, region, and kind arguments",
-        ));
-    }
-    let load_id = scalar_string(&args[0], LOAD_CASE_NAME, &ERROR_INPUT)?;
-    let region_id = scalar_string(&args[1], LOAD_CASE_NAME, &ERROR_INPUT)?;
-    let kind_text = scalar_string(&args[2], LOAD_CASE_NAME, &ERROR_INPUT)?;
-    let mut fields = json_fields_from_name_values(LOAD_CASE_NAME, &args[3..])?;
-    let kind = match normalize_token(&kind_text).as_str() {
-        "force" => {
-            let [fx, fy, fz] = remove_required_vector3(&mut fields, LOAD_CASE_NAME, "vector")?;
-            LoadKind::Force { fx, fy, fz }
-        }
-        "moment" | "torque" => {
-            let [mx, my, mz] = remove_required_vector3(&mut fields, LOAD_CASE_NAME, "vector")?;
-            LoadKind::Moment { mx, my, mz }
-        }
-        "pressure" => LoadKind::Pressure {
-            magnitude_pa: remove_required_f64(&mut fields, LOAD_CASE_NAME, "magnitude_pa")?,
-        },
-        "bodyforce" => {
-            let [gx, gy, gz] = remove_required_vector3(&mut fields, LOAD_CASE_NAME, "vector")?;
-            LoadKind::BodyForce { gx, gy, gz }
-        }
-        "currentdensity" => {
-            let [jx, jy, jz] = remove_required_vector3(&mut fields, LOAD_CASE_NAME, "vector")?;
-            LoadKind::CurrentDensity {
-                jx,
-                jy,
-                jz,
-                phase_rad: remove_optional_f64(&mut fields, LOAD_CASE_NAME, "phase_rad")?
-                    .unwrap_or_default(),
-                amplitude_scale: remove_optional_f64(
-                    &mut fields,
-                    LOAD_CASE_NAME,
-                    "amplitude_scale",
-                )?
-                .unwrap_or(1.0),
-            }
-        }
-        "coilcurrent" => LoadKind::CoilCurrent {
-            current_a: remove_required_f64(&mut fields, LOAD_CASE_NAME, "current_a")?,
-            phase_rad: remove_optional_f64(&mut fields, LOAD_CASE_NAME, "phase_rad")?
-                .unwrap_or_default(),
-            amplitude_scale: remove_optional_f64(&mut fields, LOAD_CASE_NAME, "amplitude_scale")?
-                .unwrap_or(1.0),
-        },
-        "heatsource" => LoadKind::HeatSource {
-            volumetric_w_per_m3: remove_required_f64(
-                &mut fields,
-                LOAD_CASE_NAME,
-                "volumetric_w_per_m3",
-            )?,
-        },
-        other => {
-            return Err(builtin_error(
-                LOAD_CASE_NAME,
-                &ERROR_INPUT,
-                format!("unsupported load kind `{other}`"),
-            ));
-        }
-    };
-    reject_unknown_fields(LOAD_CASE_NAME, fields)?;
-    load_case_to_object(LoadCase {
-        load_id,
-        region_id,
-        kind,
-    })
-}
-
 fn create_step_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() != 4 {
         return Err(builtin_error(
@@ -2555,7 +2394,7 @@ fn create_domain_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
                         "field_artifact_id": null,
                         "field_source": null,
                         "region_temperature_deltas": [],
-                        "time_profile": []
+                        "temperature_signal_id": null
                     }),
                     fields,
                     "thermo_mechanical domain",
@@ -2574,7 +2413,7 @@ fn create_domain_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
                         "reference_temperature_k": 293.15,
                         "applied_voltage_v": 0.0,
                         "region_conductivity_scales": [],
-                        "time_profile": []
+                        "electric_potential_signal_id": null
                     }),
                     fields,
                     "electro_thermal domain",
@@ -2612,7 +2451,7 @@ fn create_domain_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
                         "dynamic_viscosity_pa_s": 1.8e-5,
                         "inlet_velocity_m_per_s": 0.0,
                         "turbulence_intensity": 0.0,
-                        "time_profile": []
+                        "inlet_velocity_signal_id": null
                     }),
                     fields,
                     "cfd domain",
@@ -2974,23 +2813,25 @@ fn build_model_from_parts(
     builtin: &'static str,
     geometry: &GeometryAsset,
     model_id: String,
-    profile: AnalysisCreateModelProfile,
+    template: AnalysisModelTemplate,
     defaults: ModelDefaultsMode,
     frame: Option<CoordinateFrame>,
     materials: Vec<MaterialModel>,
     material_assignments: Vec<MaterialAssignment>,
     boundary_conditions: Vec<ModelConditionPayload>,
-    loads: Vec<LoadCase>,
+    signals: Vec<PhysicalSignal>,
+    excitations: Vec<ExcitationAction>,
+    excitation_cases: Vec<ExcitationCase>,
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<AnalysisInterface>,
 ) -> BuiltinResult<AnalysisModel> {
     let mut model = match defaults {
-        ModelDefaultsMode::ProfileScaffold => analysis_create_model_op(
+        ModelDefaultsMode::TemplateScaffold => analysis_create_model_op(
             geometry,
             AnalysisCreateModelIntentSpec {
                 model_id: model_id.clone(),
-                profile,
+                template,
             },
             OperationContext::new(None, None),
         )
@@ -3041,14 +2882,23 @@ fn build_model_from_parts(
             }
         }
     }
-    if !loads.is_empty() {
-        model.loads = loads
+    if !signals.is_empty() {
+        model.signals = signals;
+    }
+    if !excitations.is_empty() {
+        model.excitations = excitations
             .into_iter()
-            .map(|mut load| {
-                load.region_id = resolve_region_selector(builtin, &load.region_id, geometry)?;
-                Ok(load)
+            .map(|mut action| {
+                if let ExcitationTarget::Region(target) = &mut action.excitation_mut().target {
+                    target.region_id =
+                        resolve_region_selector(builtin, &target.region_id, geometry)?;
+                }
+                Ok(action)
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
+    }
+    if !excitation_cases.is_empty() {
+        model.excitation_cases = excitation_cases;
     }
     if !steps.is_empty() {
         model.sequence =
@@ -3134,7 +2984,6 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         excitation_cases: Vec::new(),
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
-        loads: Vec::new(),
         sequence: AnalysisSequence::from_steps(format!("{model_id}.sequence"), Vec::new()),
     }
 }
@@ -3230,16 +3079,6 @@ fn boundary_condition_to_object(condition: ModelConditionPayload) -> BuiltinResu
     )
 }
 
-fn load_case_to_object(load: LoadCase) -> BuiltinResult<Value> {
-    serializable_to_object(
-        LOAD_CASE_NAME,
-        &ERROR_INTERNAL,
-        FEA_LOAD_CASE_CLASS,
-        &load,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
-    )
-}
-
 fn step_to_object(step: ProcedureStep) -> BuiltinResult<Value> {
     serializable_to_object(
         STEP_NAME,
@@ -3319,8 +3158,23 @@ fn boundary_condition_vec_from_value(
     object_vec_from_value(builtin, value, FEA_BOUNDARY_CONDITION_CLASS)
 }
 
-fn load_case_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<LoadCase>> {
-    object_vec_from_value(builtin, value, FEA_LOAD_CASE_CLASS)
+fn typed_vec_from_value<T: DeserializeOwned>(
+    builtin: &'static str,
+    value: &Value,
+    label: &str,
+) -> BuiltinResult<Vec<T>> {
+    match value {
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .map(|item| json_deserialize(builtin, value_to_json(builtin, item)?, label))
+            .collect(),
+        _ => Ok(vec![json_deserialize(
+            builtin,
+            value_to_json(builtin, value)?,
+            label,
+        )?]),
+    }
 }
 
 fn step_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<ProcedureStep>> {
@@ -4334,35 +4188,6 @@ fn remove_optional_f64(
         .transpose()
 }
 
-fn remove_required_vector3(
-    fields: &mut serde_json::Map<String, serde_json::Value>,
-    builtin: &'static str,
-    key: &str,
-) -> BuiltinResult<[f64; 3]> {
-    let Some(value) = fields.remove(key) else {
-        return Err(builtin_error(
-            builtin,
-            &ERROR_INPUT,
-            format!("missing required vector option `{key}`"),
-        ));
-    };
-    let values: Vec<f64> = serde_json::from_value(value).map_err(|err| {
-        builtin_error(
-            builtin,
-            &ERROR_INPUT,
-            format!("invalid vector option `{key}`: {err}"),
-        )
-    })?;
-    if values.len() != 3 {
-        return Err(builtin_error(
-            builtin,
-            &ERROR_INPUT,
-            format!("vector option `{key}` must contain exactly 3 values"),
-        ));
-    }
-    Ok([values[0], values[1], values[2]])
-}
-
 fn move_known_fields(
     source: &mut serde_json::Map<String, serde_json::Value>,
     target: &mut serde_json::Map<String, serde_json::Value>,
@@ -4559,7 +4384,7 @@ fn one_based_usize_vec_from_value(
 
 fn parse_model_defaults_mode(text: &str) -> BuiltinResult<ModelDefaultsMode> {
     match normalize_token(text).as_str() {
-        "profilescaffold" | "scaffold" | "profile" => Ok(ModelDefaultsMode::ProfileScaffold),
+        "templatescaffold" | "scaffold" | "template" => Ok(ModelDefaultsMode::TemplateScaffold),
         "none" | "empty" => Ok(ModelDefaultsMode::None),
         other => Err(builtin_error(
             MODEL_NAME,
@@ -5161,31 +4986,31 @@ fn parse_scalar_enum_for_builtin<T: DeserializeOwned>(
     })
 }
 
-fn resolve_study_profile_and_run_kind(
+fn resolve_study_template_and_run_kind(
     options: &StudyConstructorOptions,
-) -> BuiltinResult<(AnalysisCreateModelProfile, AnalysisRunKind)> {
-    let profile = options.profile.ok_or_else(|| {
+) -> BuiltinResult<(AnalysisModelTemplate, AnalysisRunKind)> {
+    let template = options.template.ok_or_else(|| {
         builtin_error(
             STUDY_NAME,
             &ERROR_INPUT,
-            "fea.study requires Profile; choose a physics profile from fea.capabilities().physicsProfiles",
+            "fea.study requires Template; choose a model template from fea.capabilities().modelTemplates",
         )
     })?;
-    let run_kind = profile.derived_run_kind();
+    let run_kind = template.derived_run_kind();
     if let Some(explicit_run_kind) = options.run_kind {
         if explicit_run_kind != run_kind {
             return Err(builtin_error(
                 STUDY_NAME,
                 &ERROR_INPUT,
                 format!(
-                    "explicit solver {} does not match Profile {}; omit RunKind or choose a matching Profile",
+                    "explicit solver {} does not match Template {}; omit RunKind or choose a matching Template",
                     explicit_run_kind.as_snake_case(),
-                    profile.as_snake_case()
+                    template.as_snake_case()
                 ),
             ));
         }
     }
-    Ok((profile, run_kind))
+    Ok((template, run_kind))
 }
 
 fn ensure_fea_classes_registered() {
@@ -5231,7 +5056,6 @@ fn ensure_fea_classes_registered() {
             FEA_MATERIAL_CLASS,
             FEA_MATERIAL_ASSIGNMENT_CLASS,
             FEA_BOUNDARY_CONDITION_CLASS,
-            FEA_LOAD_CASE_CLASS,
             FEA_STEP_CLASS,
             FEA_DOMAIN_CLASS,
             FEA_INTERFACE_CLASS,
@@ -5421,17 +5245,17 @@ mod tests {
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 
+    fn static_sequence_json(document_id: &str) -> String {
+        serde_json::to_string(&AnalysisSequence::from_steps(
+            format!("{document_id}.sequence"),
+            vec![ProcedureStep::structural_static("static")],
+        ))
+        .expect("canonical static sequence should serialize")
+    }
+
     fn cell(values: Vec<Value>) -> Value {
         let cols = values.len().max(1);
         Value::Cell(CellArray::new(values, 1, cols).expect("cell should build"))
-    }
-
-    fn force_vector() -> Value {
-        Value::Tensor(Tensor::new_2d(vec![0.0, -1000.0, 0.0], 1, 3).expect("tensor should build"))
-    }
-
-    fn moment_vector() -> Value {
-        Value::Tensor(Tensor::new_2d(vec![10.0, 20.0, 30.0], 1, 3).expect("tensor should build"))
     }
 
     fn boundary_payload(value: Value) -> ModelConditionPayload {
@@ -5442,6 +5266,93 @@ mod tests {
             panic!("expected boundary condition JSON payload");
         };
         serde_json::from_str(payload).expect("boundary condition payload should decode")
+    }
+
+    #[test]
+    fn study_options_accept_canonical_signal_excitation_and_case_values() {
+        let signal_id = runmat_analysis_core::SignalId("tip_force.signal".into());
+        let case_id = runmat_analysis_core::ExcitationCaseId("tip_force.case".into());
+        let excitation_id = runmat_analysis_core::ExcitationId("tip_force".into());
+        let signal = runmat_analysis_core::PhysicalSignal::Force(runmat_analysis_core::Signal {
+            signal_id: signal_id.clone(),
+            shape: runmat_analysis_core::SignalShape::Vector3,
+            frame: Some(CoordinateFrame::Global),
+            representation: runmat_analysis_core::SignalRepresentation::Constant(
+                runmat_analysis_core::SignalValue::Vector3(
+                    [0.0, -1_000.0, 0.0].map(runmat_analysis_core::Force::new),
+                ),
+            ),
+            precision: runmat_analysis_core::SignalPrecision::Real64,
+            evidence: runmat_analysis_core::SignalApproximationEvidence {
+                max_absolute_error: None,
+                max_relative_error: None,
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+            provenance: runmat_analysis_core::SignalProvenance::Authored,
+        });
+        let excitation = runmat_analysis_core::ExcitationAction::Force(
+            runmat_analysis_core::AnalysisExcitation {
+                excitation_id: excitation_id.clone(),
+                case_id: case_id.clone(),
+                target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
+                frame: CoordinateFrame::Global,
+                direction: None,
+                distribution: runmat_analysis_core::ExcitationDistribution::PreserveResultant,
+                kinematics: runmat_analysis_core::ExcitationKinematics::FixedFrame,
+                signal_id,
+                active_step_ids: vec!["static".into()],
+                combination_group: None,
+                projection: runmat_analysis_core::ProjectionRequirement {
+                    preserve_resultant: true,
+                    preserve_moment: false,
+                    relative_tolerance: 1.0e-9,
+                },
+            },
+        );
+        let case = runmat_analysis_core::ExcitationCase {
+            case_id,
+            action_ids: vec![excitation_id],
+            activation: runmat_analysis_core::ExcitationCaseActivation::Always,
+        };
+        let signal_value = serializable_to_object(
+            STUDY_NAME,
+            &ERROR_INTERNAL,
+            "fea.Signal",
+            &signal,
+            Some(FEA_PAYLOAD_JSON_PROPERTY),
+        )
+        .expect("canonical signal should convert to a RunMat object");
+        let excitation_value = serializable_to_object(
+            STUDY_NAME,
+            &ERROR_INTERNAL,
+            "fea.Excitation",
+            &excitation,
+            Some(FEA_PAYLOAD_JSON_PROPERTY),
+        )
+        .expect("canonical excitation should convert to a RunMat object");
+        let case_value = serializable_to_object(
+            STUDY_NAME,
+            &ERROR_INTERNAL,
+            "fea.ExcitationCase",
+            &case,
+            Some(FEA_PAYLOAD_JSON_PROPERTY),
+        )
+        .expect("canonical excitation case should convert to a RunMat object");
+
+        let options = StudyConstructorOptions::parse(&[
+            Value::String("Signals".into()),
+            signal_value,
+            Value::String("Excitations".into()),
+            excitation_value,
+            Value::String("ExcitationCases".into()),
+            case_value,
+        ])
+        .expect("canonical authored components should parse");
+
+        assert_eq!(options.signals.len(), 1);
+        assert_eq!(options.excitations.len(), 1);
+        assert_eq!(options.excitation_cases.len(), 1);
     }
 
     fn object_payload<T: DeserializeOwned>(value: &Value) -> T {
@@ -5826,19 +5737,6 @@ mod tests {
             };
             assert_eq!(contact.friction_coefficient, expected);
 
-            let load = block_on(fea_load_case_builtin(vec![
-                Value::String("pressure".into()),
-                Value::String("face".into()),
-                Value::String("pressure".into()),
-                Value::String("MagnitudePa".into()),
-                Value::Int(integer.clone()),
-            ]))
-            .expect("load integer field");
-            let load: LoadCase = object_payload(&load);
-            assert!(
-                matches!(load.kind, LoadKind::Pressure { magnitude_pa } if magnitude_pa == expected)
-            );
-
             let material = block_on(fea_material_builtin(vec![
                 Value::String("material".into()),
                 Value::String("YoungsModulusPa".into()),
@@ -5955,13 +5853,6 @@ mod tests {
                 Value::String("left".into()),
                 Value::String("right".into()),
                 Value::String("FrictionCoefficient".into()),
-                resident(),
-            ])),
-            block_on(fea_load_case_builtin(vec![
-                Value::String("pressure".into()),
-                Value::String("face".into()),
-                Value::String("pressure".into()),
-                Value::String("MagnitudePa".into()),
                 resident(),
             ])),
             block_on(fea_material_builtin(vec![
@@ -6136,7 +6027,7 @@ mod tests {
     }
 
     #[test]
-    fn fea_study_requires_profile() {
+    fn fea_study_requires_template() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
@@ -6146,16 +6037,16 @@ mod tests {
         .expect("geometry should load");
 
         let err = block_on(fea_study_builtin(vec![
-            Value::String("missing_profile".to_string()),
+            Value::String("missing_template".to_string()),
             geometry,
         ]))
-        .expect_err("missing profile should fail");
+        .expect_err("missing template should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
-        assert!(err.message().contains("fea.study requires Profile"));
+        assert!(err.message().contains("fea.study requires Template"));
     }
 
     #[test]
-    fn fea_model_requires_profile() {
+    fn fea_model_requires_template() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
@@ -6165,12 +6056,12 @@ mod tests {
         .expect("geometry should load");
 
         let err = block_on(fea_model_builtin(vec![
-            Value::String("missing_profile_model".to_string()),
+            Value::String("missing_template_model".to_string()),
             geometry,
         ]))
-        .expect_err("missing profile should fail");
+        .expect_err("missing template should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
-        assert!(err.message().contains("fea.model requires Profile"));
+        assert!(err.message().contains("fea.model requires Template"));
     }
 
     #[test]
@@ -6181,7 +6072,8 @@ mod tests {
         let fea_path = tmp.path().join("bracket.fea");
         std::fs::write(
             &fea_path,
-            r#"
+            format!(
+                r#"
 version: 1
 kind: study
 id: bracket_static
@@ -6189,10 +6081,13 @@ geometry:
   path: part.stl
   units: meter
 model:
-  profile: linear_static_structural
+  template: linear_static_structural
+sequence: {}
 run:
   backend: cpu
 "#,
+                static_sequence_json("bracket_static")
+            ),
         )
         .expect("FEA fixture should write");
 
@@ -6223,59 +6118,6 @@ run:
         };
         assert_eq!(plan_object.class_name, FEA_PLAN_CLASS);
         assert!(plan_object.properties.contains_key("operation_sequence"));
-    }
-
-    #[test]
-    fn fea_load_case_accepts_moment_and_torque_alias() {
-        for kind in ["moment", "torque"] {
-            let load = block_on(fea_load_case_builtin(vec![
-                Value::String(format!("tip_{kind}")),
-                Value::String("tip_node".to_string()),
-                Value::String(kind.to_string()),
-                Value::String("Vector".to_string()),
-                moment_vector(),
-            ]))
-            .expect("moment load should build");
-            assert_object_class(&load, FEA_LOAD_CASE_CLASS);
-
-            let Value::Object(object) = load else {
-                panic!("expected load object");
-            };
-            let Some(Value::String(payload)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY)
-            else {
-                panic!("expected load JSON payload");
-            };
-            let decoded: LoadCase =
-                serde_json::from_str(payload).expect("load payload should decode");
-            assert_eq!(decoded.load_id, format!("tip_{kind}"));
-            assert_eq!(decoded.region_id, "tip_node");
-            assert!(matches!(
-                decoded.kind,
-                LoadKind::Moment {
-                    mx: 10.0,
-                    my: 20.0,
-                    mz: 30.0
-                }
-            ));
-        }
-    }
-
-    #[test]
-    fn fea_load_case_doc_keywords_include_moment_and_torque() {
-        let doc = runmat_builtins::builtin_docs()
-            .into_iter()
-            .find(|doc| doc.name == "fea.loadCase")
-            .expect("fea.loadCase doc metadata should be registered");
-        let keywords = doc
-            .keywords
-            .expect("fea.loadCase should advertise keywords");
-        let keyword_set = keywords
-            .split(',')
-            .map(str::trim)
-            .collect::<std::collections::BTreeSet<_>>();
-
-        assert!(keyword_set.contains("moment"));
-        assert!(keyword_set.contains("torque"));
     }
 
     #[test]
@@ -6313,7 +6155,10 @@ run:
         assert_eq!(values.target.region_id, "tip_node");
         assert_eq!(values.values.len(), 3);
         assert_eq!(
-            values.values[0].value.constant().map(|value| value.radians),
+            values.values[0]
+                .value
+                .study_constant(&[])
+                .map(|value| value.radians),
             Some(0.1)
         );
     }
@@ -6342,7 +6187,7 @@ run:
             rotation
                 .values
                 .iter()
-                .map(|value| value.value.constant().expect("constant").radians)
+                .map(|value| value.value.study_constant(&[]).expect("constant").radians)
                 .collect::<Vec<_>>(),
             vec![1.0, 2.0, 3.0]
         );
@@ -6393,7 +6238,9 @@ run:
             panic!("expected thermal convection")
         };
         assert_eq!(
-            ambient_temperature.constant().map(|value| value.kelvin),
+            ambient_temperature
+                .study_constant(&[])
+                .map(|value| value.kelvin),
             Some(9.0)
         );
         assert_eq!(coefficient.watts_per_square_meter_kelvin, 10.0);
@@ -6426,7 +6273,9 @@ run:
                 panic!("expected thermal heat-flux boundary")
             };
             assert_eq!(
-                value.constant().map(|value| value.watts_per_square_meter),
+                value
+                    .study_constant(&[])
+                    .map(|value| value.watts_per_square_meter),
                 Some(expected)
             );
         }
@@ -6501,16 +6350,6 @@ run:
         .expect("boundary condition should build");
         assert_object_class(&fixed, FEA_BOUNDARY_CONDITION_CLASS);
 
-        let load = block_on(fea_load_case_builtin(vec![
-            Value::String("tip_force".to_string()),
-            Value::String(region_id.clone()),
-            Value::String("force".to_string()),
-            Value::String("Vector".to_string()),
-            force_vector(),
-        ]))
-        .expect("load case should build");
-        assert_object_class(&load, FEA_LOAD_CASE_CLASS);
-
         let step = block_on(fea_step_builtin(vec![
             Value::String("static_step".to_string()),
             Value::String("structural".to_string()),
@@ -6542,7 +6381,7 @@ run:
             geometry.clone(),
             Value::String("Defaults".to_string()),
             Value::String("none".to_string()),
-            Value::String("Profile".to_string()),
+            Value::String("Template".to_string()),
             Value::String("linear_static_structural".to_string()),
             Value::String("Materials".to_string()),
             cell(vec![material]),
@@ -6550,8 +6389,6 @@ run:
             cell(vec![assignment]),
             Value::String("BoundaryConditions".to_string()),
             cell(vec![fixed]),
-            Value::String("Loads".to_string()),
-            cell(vec![load]),
             Value::String("Steps".to_string()),
             cell(vec![step]),
             Value::String("Domains".to_string()),
@@ -6587,7 +6424,7 @@ run:
         let study = block_on(fea_study_builtin(vec![
             Value::String("bracket_static".to_string()),
             geometry,
-            Value::String("Profile".to_string()),
+            Value::String("Template".to_string()),
             Value::String("linear_static_structural".to_string()),
             Value::String("Backend".to_string()),
             Value::String("cpu".to_string()),
@@ -6800,7 +6637,8 @@ run:
         let fea_path = tmp.path().join("plot.fea");
         std::fs::write(
             &fea_path,
-            r#"
+            format!(
+                r#"
 version: 1
 kind: study
 id: synthetic_plot
@@ -6808,10 +6646,13 @@ geometry:
   path: part.stl
   units: meter
 model:
-  profile: linear_static_structural
+  template: linear_static_structural
+sequence: {}
 run:
   backend: cpu
 "#,
+                static_sequence_json("synthetic_plot")
+            ),
         )
         .expect("FEA fixture should write");
         let study = block_on(fea_load_builtin(fea_path.to_string_lossy().to_string()))

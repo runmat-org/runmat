@@ -7,24 +7,18 @@ use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, signature_help_at, CompatMode,
 };
 
-const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 9] = [
+const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 8] = [
     "fea.compare",
     "fea.domain",
     "fea.field",
     "fea.interface",
-    "fea.loadCase",
     "fea.material",
     "fea.materialAssignment",
     "fea.model",
     "fea.plan",
 ];
 
-const FEA_INTEGER_CONSTRUCTORS: [&str; 4] = [
-    "fea.domain",
-    "fea.interface",
-    "fea.loadCase",
-    "fea.material",
-];
+const FEA_INTEGER_CONSTRUCTORS: [&str; 3] = ["fea.domain", "fea.interface", "fea.material"];
 
 const FEA_INTEGER_INAPPLICABLE: [&str; 5] = [
     "fea.compare",
@@ -64,10 +58,6 @@ fn fea_modeling_and_postprocessing_descriptors_are_visible_to_signature_help() {
         (
             "interface",
             "out = fea.interface(\"contact\", \"left\", \"right\");",
-        ),
-        (
-            "loadCase",
-            "out = fea.loadCase(\"load\", \"face\", \"pressure\", \"MagnitudePa\", 1);",
         ),
         (
             "material",

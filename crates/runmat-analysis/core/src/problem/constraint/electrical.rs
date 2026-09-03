@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{visit_pair, visit_pair_ref, PairedConstraint};
 use crate::problem::{
+    prescribed_value::PrescribedValue,
     quantity::{ElectricCurrent, ElectricPotential},
-    schedule::ValueSchedule,
     target::RegionTarget,
 };
 
@@ -19,7 +19,7 @@ pub struct ElectricalConstraint {
 pub enum ElectricalConstraintKind {
     PrescribedPotential {
         target: RegionTarget,
-        value: ValueSchedule<ElectricPotential>,
+        value: PrescribedValue<ElectricPotential>,
     },
     Equipotential {
         target: RegionTarget,
@@ -29,7 +29,7 @@ pub enum ElectricalConstraintKind {
     },
     IntegralCurrent {
         target: RegionTarget,
-        value: ValueSchedule<ElectricCurrent>,
+        value: PrescribedValue<ElectricCurrent>,
     },
     Periodic(PairedConstraint),
     PotentialReference {

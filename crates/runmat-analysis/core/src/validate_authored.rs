@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::{
     AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisModel,
     AnalysisValidationError, BoundaryOperator, ConnectorKind, CoordinateFrame, EntityDimension,
-    ExpectedTopology, FluidConstraintKind, MagneticConstraintKind, PairingPolicy,
+    ExpectedTopology, FluidConstraintKind, MagneticConstraintKind, PairingPolicy, PhysicalSignal,
     StructuralConstraintKind, ThermalConstraintKind,
 };
 
@@ -11,10 +11,11 @@ pub(crate) fn validate_authored_model(
     model: &AnalysisModel,
 ) -> Result<(), AnalysisValidationError> {
     validate_frame(&model.frame)?;
-    validate_constraints(&model.constraints)?;
-    validate_boundaries(&model.boundaries)?;
-    validate_connectors(&model.connectors)?;
     crate::validate_signals::validate_signals(&model.signals)?;
+    crate::validate_domains::validate_domains(model)?;
+    validate_constraints(&model.constraints, &model.signals)?;
+    validate_boundaries(&model.boundaries, &model.signals)?;
+    validate_connectors(&model.connectors)?;
     crate::validate_excitations::validate_model_excitations(model)?;
     crate::validate_sequence::validate_sequence(model)?;
     Ok(())
@@ -66,7 +67,10 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a.into_iter().zip(b).map(|(lhs, rhs)| lhs * rhs).sum()
 }
 
-fn validate_constraints(values: &[AnalysisConstraint]) -> Result<(), AnalysisValidationError> {
+fn validate_constraints(
+    values: &[AnalysisConstraint],
+    signals: &[PhysicalSignal],
+) -> Result<(), AnalysisValidationError> {
     let mut ids = HashSet::new();
     for constraint in values {
         let id = constraint.constraint_id();
@@ -83,12 +87,15 @@ fn validate_constraints(values: &[AnalysisConstraint]) -> Result<(), AnalysisVal
                 detail,
             });
         }
-        validate_constraint_values(constraint)?;
+        validate_constraint_values(constraint, signals)?;
     }
     Ok(())
 }
 
-fn validate_constraint_values(value: &AnalysisConstraint) -> Result<(), AnalysisValidationError> {
+fn validate_constraint_values(
+    value: &AnalysisConstraint,
+    signals: &[PhysicalSignal],
+) -> Result<(), AnalysisValidationError> {
     let invalid = match value {
         AnalysisConstraint::Structural(value) => match &value.kind {
             StructuralConstraintKind::PrescribedTranslations(values) => {
@@ -97,7 +104,7 @@ fn validate_constraint_values(value: &AnalysisConstraint) -> Result<(), Analysis
                     || values
                         .values
                         .iter()
-                        .any(|entry| !entry.value.is_well_formed())
+                        .any(|entry| !entry.value.is_well_formed(signals))
             }
             StructuralConstraintKind::PrescribedRotations(values) => {
                 values.values.is_empty()
@@ -105,9 +112,11 @@ fn validate_constraint_values(value: &AnalysisConstraint) -> Result<(), Analysis
                     || values
                         .values
                         .iter()
-                        .any(|entry| !entry.value.is_well_formed())
+                        .any(|entry| !entry.value.is_well_formed(signals))
             }
-            StructuralConstraintKind::NormalDisplacement { value, .. } => !value.is_well_formed(),
+            StructuralConstraintKind::NormalDisplacement { value, .. } => {
+                !value.is_well_formed(signals)
+            }
             StructuralConstraintKind::RigidCoupling(value)
             | StructuralConstraintKind::DistributingCoupling(value) => {
                 value.reference_point.reference_point_id.trim().is_empty()
@@ -127,35 +136,35 @@ fn validate_constraint_values(value: &AnalysisConstraint) -> Result<(), Analysis
             _ => false,
         },
         AnalysisConstraint::Thermal(value) => match &value.kind {
-            ThermalConstraintKind::Prescribed { value, .. } => !value.is_well_formed(),
+            ThermalConstraintKind::Prescribed { value, .. } => !value.is_well_formed(signals),
             ThermalConstraintKind::Periodic(pair) | ThermalConstraintKind::Tie(pair) => {
                 !pairing_is_valid(&pair.pairing)
             }
             ThermalConstraintKind::AffineJump {
                 pair,
                 temperature_jump,
-            } => !pairing_is_valid(&pair.pairing) || !temperature_jump.is_well_formed(),
+            } => !pairing_is_valid(&pair.pairing) || !temperature_jump.is_well_formed(signals),
         },
         AnalysisConstraint::Electrical(value) => match &value.kind {
             crate::ElectricalConstraintKind::PrescribedPotential { value, .. } => {
-                !value.is_well_formed()
+                !value.is_well_formed(signals)
             }
             crate::ElectricalConstraintKind::IntegralCurrent { value, .. } => {
-                !value.is_well_formed()
+                !value.is_well_formed(signals)
             }
             crate::ElectricalConstraintKind::Periodic(pair) => !pairing_is_valid(&pair.pairing),
             _ => false,
         },
         AnalysisConstraint::Magnetic(value) => match &value.kind {
             MagneticConstraintKind::PrescribedVectorPotential { value, .. } => {
-                !value.is_well_formed()
+                !value.is_well_formed(signals)
             }
             MagneticConstraintKind::Periodic(pair) => !pairing_is_valid(&pair.pairing),
             _ => false,
         },
         AnalysisConstraint::Acoustic(value) => match &value.kind {
             crate::AcousticConstraintKind::PrescribedPressure { value, .. } => {
-                !value.is_well_formed()
+                !value.is_well_formed(signals)
             }
             crate::AcousticConstraintKind::Periodic(pair) => !pairing_is_valid(&pair.pairing),
         },
@@ -163,8 +172,8 @@ fn validate_constraint_values(value: &AnalysisConstraint) -> Result<(), Analysis
             FluidConstraintKind::PrescribedVelocity { value, .. }
             | FluidConstraintKind::MovingWall {
                 velocity: value, ..
-            } => !value.is_well_formed(),
-            FluidConstraintKind::PressureReference { value, .. } => !value.is_well_formed(),
+            } => !value.is_well_formed(signals),
+            FluidConstraintKind::PressureReference { value, .. } => !value.is_well_formed(signals),
             FluidConstraintKind::Periodic(pair) => !pairing_is_valid(&pair.pairing),
             _ => false,
         },
@@ -172,14 +181,17 @@ fn validate_constraint_values(value: &AnalysisConstraint) -> Result<(), Analysis
     if invalid {
         Err(AnalysisValidationError::InvalidConstraint {
             constraint_id: value.constraint_id().to_string(),
-            detail: "values, schedules, pairing, or degrees of freedom are invalid".to_string(),
+            detail: "prescribed values, pairing, or degrees of freedom are invalid".to_string(),
         })
     } else {
         Ok(())
     }
 }
 
-fn validate_boundaries(values: &[AnalysisBoundary]) -> Result<(), AnalysisValidationError> {
+fn validate_boundaries(
+    values: &[AnalysisBoundary],
+    signals: &[PhysicalSignal],
+) -> Result<(), AnalysisValidationError> {
     let mut ids = HashSet::new();
     for boundary in values {
         validate_id(&boundary.boundary_id, "boundary", &mut ids)?;
@@ -191,26 +203,26 @@ fn validate_boundaries(values: &[AnalysisBoundary]) -> Result<(), AnalysisValida
         })?;
         let valid = match &boundary.operator {
             BoundaryOperator::StructuralPressure { value }
-            | BoundaryOperator::FluidOutletPressure { value } => value.is_well_formed(),
-            BoundaryOperator::ThermalHeatFlux { value } => value.is_well_formed(),
+            | BoundaryOperator::FluidOutletPressure { value } => value.is_well_formed(signals),
+            BoundaryOperator::ThermalHeatFlux { value } => value.is_well_formed(signals),
             BoundaryOperator::ThermalConvection {
                 ambient_temperature,
                 coefficient,
             } => {
-                ambient_temperature.is_well_formed()
+                ambient_temperature.is_well_formed(signals)
                     && coefficient.is_finite()
                     && coefficient.watts_per_square_meter_kelvin >= 0.0
             }
             BoundaryOperator::AcousticImpedance { impedance } => {
                 impedance.is_finite() && impedance.pascal_seconds_per_meter > 0.0
             }
-            BoundaryOperator::FluidInletVelocity { value } => value.is_well_formed(),
+            BoundaryOperator::FluidInletVelocity { value } => value.is_well_formed(signals),
             _ => true,
         };
         if !valid {
             return Err(AnalysisValidationError::InvalidBoundary {
                 boundary_id: boundary.boundary_id.clone(),
-                detail: "operator values or schedule are invalid".to_string(),
+                detail: "boundary operator or prescribed value is invalid".to_string(),
             });
         }
     }

@@ -19,12 +19,12 @@ pub struct AnalysisValidateResult {
 #[serde(deny_unknown_fields)]
 pub struct AnalysisCreateModelIntentSpec {
     pub model_id: String,
-    pub profile: AnalysisCreateModelProfile,
+    pub template: AnalysisModelTemplate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AnalysisCreateModelProfile {
+pub enum AnalysisModelTemplate {
     LinearStaticStructural,
     ThermoMechanicalCoupled,
     ElectroThermalCoupled,
@@ -41,276 +41,276 @@ pub enum AnalysisCreateModelProfile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AnalysisPhysicsProfileCatalogEntry {
-    pub profile: AnalysisCreateModelProfile,
+pub struct AnalysisModelTemplateCatalogEntry {
+    pub template: AnalysisModelTemplate,
     pub label: &'static str,
     pub family: &'static str,
     pub target: &'static str,
     pub value: &'static str,
-    pub default_outputs: &'static [AnalysisPhysicsProfileDefaultOutput],
+    pub default_outputs: &'static [AnalysisModelTemplateDefaultObservation],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AnalysisPhysicsProfileDefaultOutput {
+pub struct AnalysisModelTemplateDefaultObservation {
     pub field: &'static str,
     pub location: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AnalysisRuntimePhysicsProfileCatalogEntry {
-    pub profile: AnalysisCreateModelProfile,
+pub struct AnalysisRuntimeModelTemplateCatalogEntry {
+    pub template: AnalysisModelTemplate,
     pub label: String,
     pub family: String,
     pub target: String,
     pub value: String,
-    pub default_outputs: Vec<AnalysisRuntimePhysicsProfileDefaultOutput>,
+    pub default_outputs: Vec<AnalysisRuntimeModelTemplateDefaultObservation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AnalysisRuntimePhysicsProfileDefaultOutput {
+pub struct AnalysisRuntimeModelTemplateDefaultObservation {
     pub field: String,
     pub location: String,
 }
 
-pub const ANALYSIS_PHYSICS_PROFILE_CATALOG: &[AnalysisPhysicsProfileCatalogEntry] = &[
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::LinearStaticStructural,
+pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] = &[
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::LinearStaticStructural,
         label: "Linear static structural",
         family: "structural",
         target: "solid mechanics",
         value: "static stress and displacement",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.displacement",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.von_mises",
                 location: "elements",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::ThermoMechanicalCoupled,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::ThermoMechanicalCoupled,
         label: "Thermo-mechanical",
         family: "coupled physics",
         target: "coupled solid mechanics and heat transfer",
         value: "coupled temperature, stress, and displacement",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "thermal.temperature",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.displacement",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.von_mises",
                 location: "elements",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::ElectroThermalCoupled,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::ElectroThermalCoupled,
         label: "Electro-thermal",
         family: "coupled physics",
         target: "coupled electromagnetics and heat transfer",
         value: "resistive heating, temperature, and electrical fields",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "electro_thermal.temperature",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "electro_thermal.joule_heat",
                 location: "elements",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "electro_thermal.electric_potential",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "electro_thermal.current_density",
                 location: "elements",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::ThermalStandalone,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::ThermalStandalone,
         label: "Thermal",
         family: "thermal",
         target: "heat transfer",
         value: "temperature and heat flux",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "thermal.temperature",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "thermal.heat_flux",
                 location: "elements",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::ModalStructural,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::ModalStructural,
         label: "Modal structural",
         family: "modal",
         target: "solid mechanics",
         value: "natural frequencies and modes",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.mode_shapes",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.natural_frequencies",
                 location: "modes",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::AcousticHarmonic,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::AcousticHarmonic,
         label: "Acoustic harmonic",
         family: "acoustic",
         target: "acoustics",
         value: "frequency-domain pressure",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "acoustic.pressure",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "acoustic.sound_pressure_level",
                 location: "nodes",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::TransientStructural,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::TransientStructural,
         label: "Transient structural",
         family: "structural",
         target: "solid mechanics",
         value: "time response",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.displacement",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.von_mises",
                 location: "elements",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::NonlinearStructural,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::NonlinearStructural,
         label: "Nonlinear structural",
         family: "structural",
         target: "solid mechanics",
         value: "large deformation or nonlinear material",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.displacement",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.von_mises",
                 location: "elements",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::ElectromagneticStatic,
         label: "Electromagnetic",
         family: "electromagnetic",
         target: "electromagnetics",
         value: "electric and magnetic fields",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "em.electric_field",
                 location: "elements",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "em.magnetic_flux_density",
                 location: "elements",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::CfdSteadyState,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::CfdSteadyState,
         label: "CFD steady state",
         family: "CFD",
         target: "fluid flow",
         value: "steady flow fields",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "fluid.velocity",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "fluid.pressure",
                 location: "nodes",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::CfdTransient,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::CfdTransient,
         label: "CFD transient",
         family: "CFD",
         target: "fluid flow",
         value: "time-dependent flow fields",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "fluid.velocity",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "fluid.pressure",
                 location: "nodes",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::ChtCoupled,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::ChtCoupled,
         label: "Conjugate heat transfer",
         family: "coupled physics",
         target: "coupled fluid and solid heat transfer",
         value: "fluid and solid heat transfer",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "thermal.temperature",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "fluid.velocity",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "fluid.pressure",
                 location: "nodes",
             },
         ],
     },
-    AnalysisPhysicsProfileCatalogEntry {
-        profile: AnalysisCreateModelProfile::FsiCoupled,
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::FsiCoupled,
         label: "Fluid-structure interaction",
         family: "coupled physics",
         target: "coupled fluid and structural response",
         value: "fluid loads and structural response",
         default_outputs: &[
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.displacement",
                 location: "nodes",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "structural.von_mises",
                 location: "elements",
             },
-            AnalysisPhysicsProfileDefaultOutput {
+            AnalysisModelTemplateDefaultObservation {
                 field: "fluid.pressure",
                 location: "nodes",
             },
@@ -318,12 +318,11 @@ pub const ANALYSIS_PHYSICS_PROFILE_CATALOG: &[AnalysisPhysicsProfileCatalogEntry
     },
 ];
 
-pub fn analysis_runtime_physics_profile_catalog() -> Vec<AnalysisRuntimePhysicsProfileCatalogEntry>
-{
-    ANALYSIS_PHYSICS_PROFILE_CATALOG
+pub fn analysis_runtime_model_template_catalog() -> Vec<AnalysisRuntimeModelTemplateCatalogEntry> {
+    ANALYSIS_MODEL_TEMPLATE_CATALOG
         .iter()
-        .map(|entry| AnalysisRuntimePhysicsProfileCatalogEntry {
-            profile: entry.profile,
+        .map(|entry| AnalysisRuntimeModelTemplateCatalogEntry {
+            template: entry.template,
             label: entry.label.to_string(),
             family: entry.family.to_string(),
             target: entry.target.to_string(),
@@ -331,7 +330,7 @@ pub fn analysis_runtime_physics_profile_catalog() -> Vec<AnalysisRuntimePhysicsP
             default_outputs: entry
                 .default_outputs
                 .iter()
-                .map(|output| AnalysisRuntimePhysicsProfileDefaultOutput {
+                .map(|output| AnalysisRuntimeModelTemplateDefaultObservation {
                     field: output.field.to_string(),
                     location: output.location.to_string(),
                 })
@@ -371,12 +370,6 @@ pub struct ThermoRegionTemperatureDelta {
     pub temperature_delta_k: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ThermoTimeProfilePoint {
-    pub normalized_time: f64,
-    pub scale: f64,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThermoFieldInterpolationMode {
@@ -407,19 +400,13 @@ pub struct ThermoMechanicalCouplingOptions {
     #[serde(default)]
     pub region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,
     #[serde(default)]
-    pub time_profile: Vec<ThermoTimeProfilePoint>,
+    pub sampled_time_profile: Vec<runmat_analysis_fea::SolverSampledScalePoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ElectroRegionConductivityScale {
     pub region_id: String,
     pub conductivity_scale: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ElectroTimeProfilePoint {
-    pub normalized_time: f64,
-    pub current_scale: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -432,7 +419,7 @@ pub struct ElectroThermalCouplingOptions {
     #[serde(default)]
     pub region_conductivity_scales: Vec<ElectroRegionConductivityScale>,
     #[serde(default)]
-    pub time_profile: Vec<ElectroTimeProfilePoint>,
+    pub sampled_time_profile: Vec<runmat_analysis_fea::SolverSampledScalePoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1282,7 +1269,7 @@ pub struct AnalysisRuntimeCapabilities {
     pub supported_document_extensions: Vec<String>,
     pub supported_geometry_extensions: Vec<String>,
     #[serde(default)]
-    pub physics_profiles: Vec<AnalysisRuntimePhysicsProfileCatalogEntry>,
+    pub model_templates: Vec<AnalysisRuntimeModelTemplateCatalogEntry>,
     pub supports_check: bool,
     pub supports_run: bool,
     pub supports_results: bool,
@@ -1371,7 +1358,7 @@ pub struct AnalysisRunDatasetPayload {
     pub study: AnalysisRunDatasetStudyRef,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub analysis_profile: Option<AnalysisCreateModelProfile>,
+    pub model_template: Option<AnalysisModelTemplate>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub physics_family: Option<String>,
@@ -2236,7 +2223,7 @@ pub struct AnalysisStudyAuthoringIntent {
     pub model_id: Option<String>,
     pub geometry: GeometryAsset,
     pub mesh_summary: AnalysisMeshSummary,
-    pub profile: AnalysisCreateModelProfile,
+    pub template: AnalysisModelTemplate,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
     #[serde(default)]
@@ -2331,7 +2318,7 @@ pub struct AnalysisStudyPlanData {
 pub struct AnalysisStudyRunData {
     pub study_id: String,
     pub model_id: String,
-    pub model_profile: AnalysisCreateModelProfile,
+    pub model_template: AnalysisModelTemplate,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
     #[serde(default)]
@@ -2461,58 +2448,59 @@ pub enum AnalysisRunKind {
     Electromagnetic,
 }
 
-impl AnalysisCreateModelProfile {
+impl AnalysisModelTemplate {
     pub fn from_snake_case(value: &str) -> Option<Self> {
         serde_json::from_value(JsonValue::String(value.trim().to_ascii_lowercase())).ok()
     }
 
     pub fn as_snake_case(self) -> &'static str {
         match self {
-            AnalysisCreateModelProfile::LinearStaticStructural => "linear_static_structural",
-            AnalysisCreateModelProfile::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
-            AnalysisCreateModelProfile::ElectroThermalCoupled => "electro_thermal_coupled",
-            AnalysisCreateModelProfile::ThermalStandalone => "thermal_standalone",
-            AnalysisCreateModelProfile::ModalStructural => "modal_structural",
-            AnalysisCreateModelProfile::AcousticHarmonic => "acoustic_harmonic",
-            AnalysisCreateModelProfile::TransientStructural => "transient_structural",
-            AnalysisCreateModelProfile::NonlinearStructural => "nonlinear_structural",
-            AnalysisCreateModelProfile::ElectromagneticStatic => "electromagnetic_static",
-            AnalysisCreateModelProfile::CfdSteadyState => "cfd_steady_state",
-            AnalysisCreateModelProfile::CfdTransient => "cfd_transient",
-            AnalysisCreateModelProfile::ChtCoupled => "cht_coupled",
-            AnalysisCreateModelProfile::FsiCoupled => "fsi_coupled",
+            AnalysisModelTemplate::LinearStaticStructural => "linear_static_structural",
+            AnalysisModelTemplate::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
+            AnalysisModelTemplate::ElectroThermalCoupled => "electro_thermal_coupled",
+            AnalysisModelTemplate::ThermalStandalone => "thermal_standalone",
+            AnalysisModelTemplate::ModalStructural => "modal_structural",
+            AnalysisModelTemplate::AcousticHarmonic => "acoustic_harmonic",
+            AnalysisModelTemplate::TransientStructural => "transient_structural",
+            AnalysisModelTemplate::NonlinearStructural => "nonlinear_structural",
+            AnalysisModelTemplate::ElectromagneticStatic => "electromagnetic_static",
+            AnalysisModelTemplate::CfdSteadyState => "cfd_steady_state",
+            AnalysisModelTemplate::CfdTransient => "cfd_transient",
+            AnalysisModelTemplate::ChtCoupled => "cht_coupled",
+            AnalysisModelTemplate::FsiCoupled => "fsi_coupled",
         }
     }
 
-    pub fn catalog_entry(self) -> &'static AnalysisPhysicsProfileCatalogEntry {
-        ANALYSIS_PHYSICS_PROFILE_CATALOG
+    pub fn catalog_entry(self) -> &'static AnalysisModelTemplateCatalogEntry {
+        ANALYSIS_MODEL_TEMPLATE_CATALOG
             .iter()
-            .find(|entry| entry.profile == self)
-            .expect("analysis profile catalog must contain every profile variant")
+            .find(|entry| entry.template == self)
+            .expect("analysis template catalog must contain every template variant")
     }
 
     pub fn derived_run_kind(self) -> AnalysisRunKind {
         debug_assert!(
-            ANALYSIS_PHYSICS_PROFILE_CATALOG
+            ANALYSIS_MODEL_TEMPLATE_CATALOG
                 .iter()
-                .any(|entry| entry.profile == self),
-            "analysis profile catalog is missing {:?}",
+                .any(|entry| entry.template == self),
+            "analysis template catalog is missing {:?}",
             self
         );
         match self {
-            AnalysisCreateModelProfile::LinearStaticStructural => AnalysisRunKind::LinearStatic,
-            AnalysisCreateModelProfile::ThermoMechanicalCoupled => AnalysisRunKind::Transient,
-            AnalysisCreateModelProfile::ElectroThermalCoupled => AnalysisRunKind::Transient,
-            AnalysisCreateModelProfile::ThermalStandalone => AnalysisRunKind::Thermal,
-            AnalysisCreateModelProfile::ModalStructural => AnalysisRunKind::Modal,
-            AnalysisCreateModelProfile::AcousticHarmonic => AnalysisRunKind::Acoustic,
-            AnalysisCreateModelProfile::TransientStructural => AnalysisRunKind::Transient,
-            AnalysisCreateModelProfile::NonlinearStructural => AnalysisRunKind::Nonlinear,
-            AnalysisCreateModelProfile::ElectromagneticStatic => AnalysisRunKind::Electromagnetic,
-            AnalysisCreateModelProfile::CfdSteadyState
-            | AnalysisCreateModelProfile::CfdTransient => AnalysisRunKind::Cfd,
-            AnalysisCreateModelProfile::ChtCoupled => AnalysisRunKind::Cht,
-            AnalysisCreateModelProfile::FsiCoupled => AnalysisRunKind::Fsi,
+            AnalysisModelTemplate::LinearStaticStructural => AnalysisRunKind::LinearStatic,
+            AnalysisModelTemplate::ThermoMechanicalCoupled => AnalysisRunKind::Transient,
+            AnalysisModelTemplate::ElectroThermalCoupled => AnalysisRunKind::Transient,
+            AnalysisModelTemplate::ThermalStandalone => AnalysisRunKind::Thermal,
+            AnalysisModelTemplate::ModalStructural => AnalysisRunKind::Modal,
+            AnalysisModelTemplate::AcousticHarmonic => AnalysisRunKind::Acoustic,
+            AnalysisModelTemplate::TransientStructural => AnalysisRunKind::Transient,
+            AnalysisModelTemplate::NonlinearStructural => AnalysisRunKind::Nonlinear,
+            AnalysisModelTemplate::ElectromagneticStatic => AnalysisRunKind::Electromagnetic,
+            AnalysisModelTemplate::CfdSteadyState | AnalysisModelTemplate::CfdTransient => {
+                AnalysisRunKind::Cfd
+            }
+            AnalysisModelTemplate::ChtCoupled => AnalysisRunKind::Cht,
+            AnalysisModelTemplate::FsiCoupled => AnalysisRunKind::Fsi,
         }
     }
 }
@@ -2806,49 +2794,49 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn physics_profile_catalog_covers_every_supported_profile_once() {
+    fn model_template_catalog_covers_every_supported_profile_once() {
         let expected_profiles = [
-            AnalysisCreateModelProfile::LinearStaticStructural,
-            AnalysisCreateModelProfile::ThermoMechanicalCoupled,
-            AnalysisCreateModelProfile::ElectroThermalCoupled,
-            AnalysisCreateModelProfile::ThermalStandalone,
-            AnalysisCreateModelProfile::ModalStructural,
-            AnalysisCreateModelProfile::AcousticHarmonic,
-            AnalysisCreateModelProfile::TransientStructural,
-            AnalysisCreateModelProfile::NonlinearStructural,
-            AnalysisCreateModelProfile::ElectromagneticStatic,
-            AnalysisCreateModelProfile::CfdSteadyState,
-            AnalysisCreateModelProfile::CfdTransient,
-            AnalysisCreateModelProfile::ChtCoupled,
-            AnalysisCreateModelProfile::FsiCoupled,
+            AnalysisModelTemplate::LinearStaticStructural,
+            AnalysisModelTemplate::ThermoMechanicalCoupled,
+            AnalysisModelTemplate::ElectroThermalCoupled,
+            AnalysisModelTemplate::ThermalStandalone,
+            AnalysisModelTemplate::ModalStructural,
+            AnalysisModelTemplate::AcousticHarmonic,
+            AnalysisModelTemplate::TransientStructural,
+            AnalysisModelTemplate::NonlinearStructural,
+            AnalysisModelTemplate::ElectromagneticStatic,
+            AnalysisModelTemplate::CfdSteadyState,
+            AnalysisModelTemplate::CfdTransient,
+            AnalysisModelTemplate::ChtCoupled,
+            AnalysisModelTemplate::FsiCoupled,
         ];
 
         assert_eq!(
-            ANALYSIS_PHYSICS_PROFILE_CATALOG.len(),
+            ANALYSIS_MODEL_TEMPLATE_CATALOG.len(),
             expected_profiles.len()
         );
 
         let mut seen = HashSet::new();
-        for entry in ANALYSIS_PHYSICS_PROFILE_CATALOG {
-            let serialized_profile = serde_json::to_value(entry.profile)
-                .expect("profile should serialize")
+        for entry in ANALYSIS_MODEL_TEMPLATE_CATALOG {
+            let serialized_profile = serde_json::to_value(entry.template)
+                .expect("template should serialize")
                 .as_str()
-                .expect("profile should serialize as string")
+                .expect("template should serialize as string")
                 .to_string();
             assert!(
-                expected_profiles.contains(&entry.profile),
-                "catalog contains unsupported profile {:?}",
-                entry.profile
+                expected_profiles.contains(&entry.template),
+                "catalog contains unsupported template {:?}",
+                entry.template
             );
-            assert_eq!(entry.profile.as_snake_case(), serialized_profile);
+            assert_eq!(entry.template.as_snake_case(), serialized_profile);
             assert_eq!(
-                AnalysisCreateModelProfile::from_snake_case(entry.profile.as_snake_case()),
-                Some(entry.profile)
+                AnalysisModelTemplate::from_snake_case(entry.template.as_snake_case()),
+                Some(entry.template)
             );
             assert!(
-                seen.insert(entry.profile as u8),
-                "catalog contains duplicate profile {:?}",
-                entry.profile
+                seen.insert(entry.template as u8),
+                "catalog contains duplicate template {:?}",
+                entry.template
             );
             assert!(!entry.label.trim().is_empty());
             assert!(!entry.family.trim().is_empty());
@@ -2856,8 +2844,8 @@ mod tests {
             assert!(!entry.value.trim().is_empty());
             assert!(
                 !entry.default_outputs.is_empty(),
-                "catalog profile {:?} needs at least one default output",
-                entry.profile
+                "catalog template {:?} needs at least one default output",
+                entry.template
             );
             for output in entry.default_outputs {
                 assert!(!output.field.trim().is_empty());
@@ -2887,13 +2875,13 @@ mod tests {
     }
 
     #[test]
-    fn runtime_physics_profile_catalog_exposes_full_family_set() {
-        let runtime_catalog = analysis_runtime_physics_profile_catalog();
+    fn runtime_model_template_catalog_exposes_full_family_set() {
+        let runtime_catalog = analysis_runtime_model_template_catalog();
 
         assert_eq!(
             runtime_catalog.len(),
-            ANALYSIS_PHYSICS_PROFILE_CATALOG.len(),
-            "runtime profile catalog must serialize every supported physics profile"
+            ANALYSIS_MODEL_TEMPLATE_CATALOG.len(),
+            "runtime template catalog must serialize every supported model template"
         );
 
         let families: HashSet<&str> = runtime_catalog
@@ -2911,7 +2899,7 @@ mod tests {
         ] {
             assert!(
                 families.contains(family),
-                "runtime profile catalog is missing {family}"
+                "runtime template catalog is missing {family}"
             );
         }
 

@@ -4,6 +4,7 @@ pub mod adaptation;
 pub mod assembly;
 pub mod contracts;
 pub mod diagnostics;
+pub(crate) mod excitation;
 pub mod fixtures;
 pub mod operator;
 pub mod parity;

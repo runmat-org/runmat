@@ -26,8 +26,8 @@ use runmat_runtime::analysis::{
     analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
     analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
     analysis_validate, AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisCreateModelIntentSpec, AnalysisElectromagneticRunOptions, AnalysisFsiRunOptions,
+    AnalysisModalRunOptions, AnalysisModelTemplate, AnalysisNonlinearRunOptions,
     AnalysisResultsQuery, AnalysisRunOptions, AnalysisThermalRunOptions,
     AnalysisTransientRunOptions, FallbackEvent, FallbackReason, FallbackStage, PrecisionMode,
     PreconditionerMode, QualityPolicy,
@@ -347,7 +347,7 @@ fn synthesized_nonlinear_model() -> AnalysisModel {
         &geometry.data,
         AnalysisCreateModelIntentSpec {
             model_id: "nonlinear_created_fixture_model".to_string(),
-            profile: AnalysisCreateModelProfile::NonlinearStructural,
+            template: AnalysisModelTemplate::NonlinearStructural,
         },
         OperationContext::new(Some("trace-create-model-nonlinear".to_string()), None),
     )

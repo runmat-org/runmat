@@ -35,7 +35,7 @@ pub fn severity(context: Option<&FeaThermoMechanicalContext>) -> f64 {
 
 pub fn sample_time_profile(
     context: Option<&FeaThermoMechanicalContext>,
-    normalized_time: f64,
+    normalized_coordinate: f64,
 ) -> TimeProfileSample {
     let Some(context) = context else {
         return TimeProfileSample {
@@ -44,16 +44,16 @@ pub fn sample_time_profile(
             clamped: false,
         };
     };
-    if context.time_profile.is_empty() {
+    if context.sampled_time_profile.is_empty() {
         return TimeProfileSample {
             scale: 1.0,
             extrapolated: false,
             clamped: false,
         };
     }
-    let mut points = context.time_profile.clone();
-    points.sort_by(|a, b| a.normalized_time.total_cmp(&b.normalized_time));
-    let t = normalized_time.clamp(0.0, 1.0);
+    let mut points = context.sampled_time_profile.clone();
+    points.sort_by(|a, b| a.normalized_coordinate.total_cmp(&b.normalized_coordinate));
+    let t = normalized_coordinate.clamp(0.0, 1.0);
 
     let interpolation = context
         .field_source
@@ -61,12 +61,12 @@ pub fn sample_time_profile(
         .and_then(|source| source.interpolation_mode)
         .unwrap_or(FeaThermoFieldInterpolationMode::Linear);
 
-    if t <= points[0].normalized_time {
+    if t <= points[0].normalized_coordinate {
         let raw = points[0].scale;
         let scale = raw.clamp(0.2, 2.0);
         return TimeProfileSample {
             scale,
-            extrapolated: t < points[0].normalized_time,
+            extrapolated: t < points[0].normalized_coordinate,
             clamped: (scale - raw).abs() > 0.0,
         };
     }
@@ -74,11 +74,13 @@ pub fn sample_time_profile(
     for pair in points.windows(2) {
         let a = &pair[0];
         let b = &pair[1];
-        if t >= a.normalized_time && t <= b.normalized_time {
+        if t >= a.normalized_coordinate && t <= b.normalized_coordinate {
             let raw = match interpolation {
                 FeaThermoFieldInterpolationMode::Linear => {
-                    let span = (b.normalized_time - a.normalized_time).abs().max(1.0e-9);
-                    let alpha = (t - a.normalized_time) / span;
+                    let span = (b.normalized_coordinate - a.normalized_coordinate)
+                        .abs()
+                        .max(1.0e-9);
+                    let alpha = (t - a.normalized_coordinate) / span;
                     a.scale + (b.scale - a.scale) * alpha
                 }
                 FeaThermoFieldInterpolationMode::Step => a.scale,
@@ -96,7 +98,10 @@ pub fn sample_time_profile(
     let scale = raw.clamp(0.2, 2.0);
     TimeProfileSample {
         scale,
-        extrapolated: t > points.last().map(|p| p.normalized_time).unwrap_or(1.0),
+        extrapolated: t > points
+            .last()
+            .map(|p| p.normalized_coordinate)
+            .unwrap_or(1.0),
         clamped: (scale - raw).abs() > 0.0,
     }
 }
@@ -105,12 +110,12 @@ pub fn temporal_profile_variation(context: Option<&FeaThermoMechanicalContext>) 
     let Some(context) = context else {
         return 0.0;
     };
-    if context.time_profile.len() < 2 {
+    if context.sampled_time_profile.len() < 2 {
         return 0.0;
     }
     let mut min_scale = f64::INFINITY;
     let mut max_scale = -f64::INFINITY;
-    for point in &context.time_profile {
+    for point in &context.sampled_time_profile {
         min_scale = min_scale.min(point.scale);
         max_scale = max_scale.max(point.scale);
     }
@@ -148,6 +153,37 @@ pub fn nonlinear_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn realized_solver_profile_interpolates_and_reports_extrapolation() {
+        let context = FeaThermoMechanicalContext {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 40.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            sampled_time_profile: vec![
+                crate::SolverSampledScalePoint {
+                    normalized_coordinate: 0.25,
+                    scale: 0.5,
+                },
+                crate::SolverSampledScalePoint {
+                    normalized_coordinate: 1.0,
+                    scale: 1.25,
+                },
+            ],
+        };
+
+        let midpoint = sample_time_profile(Some(&context), 0.5);
+        assert!((midpoint.scale - 0.75).abs() < 1.0e-12);
+        assert!(!midpoint.extrapolated);
+        assert!(!midpoint.clamped);
+
+        let before_profile = sample_time_profile(Some(&context), 0.0);
+        assert_eq!(before_profile.scale, 0.5);
+        assert!(before_profile.extrapolated);
+    }
 
     #[test]
     fn thermo_policies_remain_bounded() {

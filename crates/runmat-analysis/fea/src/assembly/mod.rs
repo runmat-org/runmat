@@ -7,7 +7,7 @@ mod solver_solid_boundary;
 use std::{collections::BTreeMap, fmt};
 
 use runmat_analysis_core::{
-    AnalysisModel, BeamSectionModel, LoadKind, ShellSectionModel, StructuralConstraintKind,
+    AnalysisModel, BeamSectionModel, ShellSectionModel, StructuralConstraintKind,
     StructuralElementKind, StructuralModel, StructuralRotationDof, StructuralTranslationDof,
 };
 use runmat_meshing_core::SolverMeshArtifact;
@@ -30,6 +30,7 @@ use self::{
     solver_solid_boundary::apply_solver_mesh_structural_regions,
 };
 
+use crate::excitation::{realize_model_excitations, RealizedExcitationKind, RealizedExcitations};
 use crate::operator::{CsrMatrix, OperatorSystem};
 use crate::physics::coupling::thermo_mechanical;
 use crate::{FeaElectroThermalContext, FeaThermoMechanicalContext};
@@ -49,6 +50,8 @@ pub struct AssemblySummary {
     pub structural_moment_load_count: usize,
     #[serde(default)]
     pub structural_direct_rotational_moment_load_count: usize,
+    #[serde(default)]
+    pub structural_requested_moment_norm_n_m: f64,
     #[serde(default)]
     pub structural_wrench_lowering: Vec<WrenchLoweringSummary>,
     #[serde(default)]
@@ -77,6 +80,7 @@ pub struct AssemblySummary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearAssemblyError {
+    ExcitationRealization(String),
     SolidStiffness(SolverSolidAssemblyError),
     SolverMeshRegionMapping(SolverMeshRegionMappingError),
 }
@@ -84,6 +88,7 @@ pub enum LinearAssemblyError {
 impl fmt::Display for LinearAssemblyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            LinearAssemblyError::ExcitationRealization(err) => write!(f, "{err}"),
             LinearAssemblyError::SolidStiffness(err) => {
                 write!(f, "solid stiffness assembly failed: {err:?}")
             }
@@ -257,13 +262,15 @@ fn assemble_linear_system_impl(
     electro_thermal_context: Option<FeaElectroThermalContext>,
     strict_solver_mesh_stiffness: bool,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
+    let excitations = realize_model_excitations(model)
+        .map_err(|error| LinearAssemblyError::ExcitationRealization(error.to_string()))?;
     if solver_mesh.is_none() {
-        if let Some(summary) = assemble_beam_system(model) {
+        if let Some(summary) = assemble_beam_system(model, &excitations) {
             return Ok(summary);
         }
     }
 
-    let base_dof_count = (model.loads.len() * 3).max(3);
+    let base_dof_count = (excitations.len() * 3).max(3);
     let solid_topology = solver_mesh
         .as_ref()
         .and_then(|mesh| solver_solid_topology(mesh, base_dof_count).ok());
@@ -340,65 +347,69 @@ fn assemble_linear_system_impl(
     }
 
     let mut rhs = vec![0.0; dof_count];
-    for (i, load) in model.loads.iter().enumerate() {
+    for (i, load) in excitations.iter().enumerate() {
         let base = (i * 3) % dof_count;
         match &load.kind {
-            runmat_analysis_core::LoadKind::Force { fx, fy, fz } => {
-                rhs[base] += *fx;
+            RealizedExcitationKind::Force(value) => {
+                let [fx, fy, fz] = value.real;
+                rhs[base] += fx;
                 if base + 1 < dof_count {
-                    rhs[base + 1] += *fy;
+                    rhs[base + 1] += fy;
                 }
                 if base + 2 < dof_count {
-                    rhs[base + 2] += *fz;
+                    rhs[base + 2] += fz;
                 }
             }
-            runmat_analysis_core::LoadKind::Moment { .. } => {}
-            runmat_analysis_core::LoadKind::Wrench { fx, fy, fz, .. } => {
-                rhs[base] += *fx;
+            RealizedExcitationKind::Moment(_) => {}
+            RealizedExcitationKind::Wrench { force, .. } => {
+                let [fx, fy, fz] = force.real;
+                rhs[base] += fx;
                 if base + 1 < dof_count {
-                    rhs[base + 1] += *fy;
+                    rhs[base + 1] += fy;
                 }
                 if base + 2 < dof_count {
-                    rhs[base + 2] += *fz;
+                    rhs[base + 2] += fz;
                 }
             }
-            runmat_analysis_core::LoadKind::Pressure { magnitude_pa } => {
-                rhs[base] += magnitude_pa * 1.0e-3;
+            RealizedExcitationKind::Pressure(value) => {
+                rhs[base] += value.real * 1.0e-3;
                 if base + 1 < dof_count {
-                    rhs[base + 1] -= magnitude_pa * 1.0e-3;
+                    rhs[base + 1] -= value.real * 1.0e-3;
                 }
             }
-            runmat_analysis_core::LoadKind::BodyForce { gx, gy, gz } => {
-                rhs[base] += *gx;
+            RealizedExcitationKind::BodyForce(value) => {
+                let [gx, gy, gz] = value.real;
+                rhs[base] += gx;
                 if base + 1 < dof_count {
-                    rhs[base + 1] += *gy;
+                    rhs[base + 1] += gy;
                 }
                 if base + 2 < dof_count {
-                    rhs[base + 2] += *gz;
+                    rhs[base + 2] += gz;
                 }
             }
-            runmat_analysis_core::LoadKind::CurrentDensity { jx, jy, jz, .. } => {
-                rhs[base] += *jx * 1.0e-3;
+            RealizedExcitationKind::CurrentDensity(value) => {
+                let [jx, jy, jz] = value.real;
+                rhs[base] += jx * 1.0e-3;
                 if base + 1 < dof_count {
-                    rhs[base + 1] += *jy * 1.0e-3;
+                    rhs[base + 1] += jy * 1.0e-3;
                 }
                 if base + 2 < dof_count {
-                    rhs[base + 2] += *jz * 1.0e-3;
+                    rhs[base + 2] += jz * 1.0e-3;
                 }
             }
-            runmat_analysis_core::LoadKind::CoilCurrent { current_a, .. } => {
-                rhs[base] += *current_a * 1.0e-2;
+            RealizedExcitationKind::ElectricCurrent(value) => {
+                rhs[base] += value.real * 1.0e-2;
             }
-            runmat_analysis_core::LoadKind::HeatSource { .. } => {}
+            _ => {}
         }
     }
 
     let structural_dof_layout = StructuralDofLayout::legacy_translational_rows(dof_count);
-    let structural_moment_load_count = model
-        .loads
+    let structural_moment_load_count = excitations
         .iter()
-        .filter(|load| matches!(load.kind, runmat_analysis_core::LoadKind::Moment { .. }))
+        .filter(|load| matches!(load.kind, RealizedExcitationKind::Moment(_)))
         .count();
+    let structural_requested_moment_norm_n_m = requested_moment_norm(&excitations);
     let structural_direct_rotational_moment_load_count =
         if structural_dof_layout.has_rotational_dofs() {
             structural_moment_load_count
@@ -418,6 +429,7 @@ fn assemble_linear_system_impl(
     if let (Some(mesh), Some(_)) = (solver_mesh.as_ref(), solid_topology.as_ref()) {
         structural_wrench_lowering = apply_solver_mesh_structural_regions(
             model,
+            &excitations,
             mesh,
             &structural_dof_layout,
             &mut constrained,
@@ -545,18 +557,18 @@ fn assemble_linear_system_impl(
 
     if let Some(context) = electro_thermal_context {
         if context.enabled {
-            let temporal_variation = if context.time_profile.len() < 2 {
+            let temporal_variation = if context.sampled_time_profile.len() < 2 {
                 0.0
             } else {
                 let min_scale = context
-                    .time_profile
+                    .sampled_time_profile
                     .iter()
-                    .map(|point| point.current_scale)
+                    .map(|point| point.scale)
                     .fold(f64::INFINITY, f64::min);
                 let max_scale = context
-                    .time_profile
+                    .sampled_time_profile
                     .iter()
-                    .map(|point| point.current_scale)
+                    .map(|point| point.scale)
                     .fold(-f64::INFINITY, f64::max);
                 ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
             };
@@ -650,6 +662,7 @@ fn assemble_linear_system_impl(
         structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
         structural_moment_load_count,
         structural_direct_rotational_moment_load_count,
+        structural_requested_moment_norm_n_m,
         structural_wrench_lowering,
         structural_rotational_constraint_count: 0,
         structural_beam_element_count: 0,
@@ -663,7 +676,7 @@ fn assemble_linear_system_impl(
         structural_beam_recovery: Vec::new(),
         structural_shell_recovery: Vec::new(),
         constrained_dof_count,
-        load_count: model.loads.len(),
+        load_count: excitations.len(),
         structural_material,
         thermo_mechanical,
         electro_thermal,
@@ -730,7 +743,7 @@ fn electro_thermal_fingerprint(
         temporal_profile_variation.to_bits(),
         dof_count as u64,
         context.region_conductivity_scales.len() as u64,
-        context.time_profile.len() as u64,
+        context.sampled_time_profile.len() as u64,
     ] {
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211);
@@ -738,7 +751,10 @@ fn electro_thermal_fingerprint(
     hash
 }
 
-fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
+fn assemble_beam_system(
+    model: &AnalysisModel,
+    excitations: &RealizedExcitations,
+) -> Option<AssemblySummary> {
     let structural = model.structural.as_ref()?;
     let beam_elements = structural
         .elements
@@ -867,14 +883,18 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
 
     let mut direct_rotational_moment_load_count = 0usize;
     let mut structural_wrench_lowering = Vec::new();
-    for load in &model.loads {
-        let target_nodes = structural_target_nodes(structural, &load.region_id);
+    for load in excitations.iter() {
+        let Some(region_id) = load.target.solver_region_id() else {
+            continue;
+        };
+        let target_nodes = structural_target_nodes(structural, region_id);
         if target_nodes.is_empty() {
             continue;
         }
         let scale = 1.0 / target_nodes.len() as f64;
         match load.kind {
-            LoadKind::Force { fx, fy, fz } => {
+            RealizedExcitationKind::Force(value) => {
+                let [fx, fy, fz] = value.real;
                 for node_index in target_nodes {
                     add_rhs(
                         &structural_dof_layout,
@@ -899,7 +919,8 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
                     );
                 }
             }
-            LoadKind::Moment { mx, my, mz } => {
+            RealizedExcitationKind::Moment(value) => {
+                let [mx, my, mz] = value.real;
                 direct_rotational_moment_load_count += 1;
                 for node_index in target_nodes {
                     add_rhs(
@@ -925,29 +946,23 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
                     );
                 }
             }
-            LoadKind::Wrench {
-                fx,
-                fy,
-                fz,
-                mx,
-                my,
-                mz,
-                px,
-                py,
-                pz,
+            RealizedExcitationKind::Wrench {
+                force,
+                moment,
+                point,
             } => {
                 let summary = add_wrench_rhs(
                     structural,
                     &structural_dof_layout,
                     &mut rhs,
                     &target_nodes,
-                    [fx, fy, fz],
-                    [mx, my, mz],
-                    [px, py, pz],
+                    force.real,
+                    moment.real,
+                    point.meters,
                 );
                 structural_wrench_lowering.push(WrenchLoweringSummary {
-                    load_id: load.load_id.clone(),
-                    region_id: load.region_id.clone(),
+                    load_id: load.excitation_id.0.clone(),
+                    region_id: region_id.to_string(),
                     ..summary
                 });
             }
@@ -981,7 +996,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
                 }
                 StructuralConstraintKind::PrescribedTranslations(values) => {
                     for prescribed in &values.values {
-                        let Some(value) = prescribed.value.constant() else {
+                        let Some(value) = prescribed.value.study_constant(&model.signals) else {
                             continue;
                         };
                         let kind = match prescribed.dof {
@@ -1001,7 +1016,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
                 }
                 StructuralConstraintKind::PrescribedRotations(values) => {
                     for prescribed in &values.values {
-                        let Some(value) = prescribed.value.constant() else {
+                        let Some(value) = prescribed.value.study_constant(&model.signals) else {
                             continue;
                         };
                         let kind = match prescribed.dof {
@@ -1053,12 +1068,12 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
         structural_translational_dof_count: structural_dof_layout.translational_dof_count(),
         structural_rotational_dof_count: structural_dof_layout.rotational_dof_count(),
         structural_rotation_node_count: structural_dof_layout.rotation_node_count(),
-        structural_moment_load_count: model
-            .loads
+        structural_moment_load_count: excitations
             .iter()
-            .filter(|load| matches!(load.kind, LoadKind::Moment { .. }))
+            .filter(|load| matches!(load.kind, RealizedExcitationKind::Moment(_)))
             .count(),
         structural_direct_rotational_moment_load_count: direct_rotational_moment_load_count,
+        structural_requested_moment_norm_n_m: requested_moment_norm(excitations),
         structural_wrench_lowering,
         structural_rotational_constraint_count: rotational_constraint_count,
         structural_beam_element_count: beam_elements.len(),
@@ -1069,7 +1084,7 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
         structural_beam_recovery,
         structural_shell_recovery,
         constrained_dof_count,
-        load_count: model.loads.len(),
+        load_count: excitations.len(),
         structural_material,
         thermo_mechanical: None,
         electro_thermal: None,
@@ -1085,6 +1100,30 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
             rhs,
         },
     })
+}
+
+fn requested_moment_norm(excitations: &RealizedExcitations) -> f64 {
+    let moment = excitations.iter().fold([0.0_f64; 3], |mut total, entry| {
+        match entry.kind {
+            RealizedExcitationKind::Moment(value) => {
+                for (total, value) in total.iter_mut().zip(value.real) {
+                    *total += value;
+                }
+            }
+            RealizedExcitationKind::Wrench { moment, .. } => {
+                for (total, value) in total.iter_mut().zip(moment.real) {
+                    *total += value;
+                }
+            }
+            _ => {}
+        }
+        total
+    });
+    moment
+        .into_iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt()
 }
 
 fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSummary {
@@ -1799,7 +1838,10 @@ fn region_hash(region_id: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fixtures::{fixture_model, FixtureId};
+    use crate::fixtures::{
+        fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind,
+        FixtureId,
+    };
     use runmat_meshing_core::{
         ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, StableDigest,
     };
@@ -1973,15 +2015,14 @@ mod tests {
     fn solver_mesh_boundary_regions_drive_solid_loads_and_constraints() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.constraints = vec![fixed_constraint("root")];
-        model.loads = vec![runmat_analysis_core::LoadCase {
-            load_id: "load_tip".to_string(),
-            region_id: "tip".to_string(),
-            kind: LoadKind::Force {
-                fx: 0.0,
-                fy: -12.0,
-                fz: 0.0,
-            },
-        }];
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "load_tip".into(),
+                region_id: "tip".into(),
+                kind: FixtureExcitationKind::Force([0.0, -12.0, 0.0]),
+            }],
+        );
         let mut mesh = tetrahedron4_mesh();
         set_boundary_regions(&mut mesh, 0, &["root"]);
         set_boundary_regions(&mut mesh, 1, &["tip"]);
@@ -2000,15 +2041,14 @@ mod tests {
     fn strict_solver_mesh_assembly_rejects_unmapped_load_region() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.constraints = vec![fixed_constraint("root")];
-        model.loads = vec![runmat_analysis_core::LoadCase {
-            load_id: "load_tip".to_string(),
-            region_id: "missing_tip".to_string(),
-            kind: LoadKind::Force {
-                fx: 0.0,
-                fy: -12.0,
-                fz: 0.0,
-            },
-        }];
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "load_tip".into(),
+                region_id: "missing_tip".into(),
+                kind: FixtureExcitationKind::Force([0.0, -12.0, 0.0]),
+            }],
+        );
         let mut mesh = tetrahedron4_mesh();
         clear_boundary_regions(&mut mesh);
         set_boundary_regions(&mut mesh, 0, &["root"]);
@@ -2032,15 +2072,14 @@ mod tests {
     fn strict_solver_mesh_assembly_rejects_unmapped_constraint_region() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.constraints = vec![fixed_constraint("missing_root")];
-        model.loads = vec![runmat_analysis_core::LoadCase {
-            load_id: "load_tip".to_string(),
-            region_id: "tip".to_string(),
-            kind: LoadKind::Force {
-                fx: 0.0,
-                fy: -12.0,
-                fz: 0.0,
-            },
-        }];
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "load_tip".into(),
+                region_id: "tip".into(),
+                kind: FixtureExcitationKind::Force([0.0, -12.0, 0.0]),
+            }],
+        );
         let mut mesh = tetrahedron4_mesh();
         clear_boundary_regions(&mut mesh);
         set_boundary_regions(&mut mesh, 0, &["tip"]);
@@ -2064,11 +2103,14 @@ mod tests {
     fn solver_mesh_boundary_regions_integrate_pressure_loads() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.constraints = Vec::new();
-        model.loads = vec![runmat_analysis_core::LoadCase {
-            load_id: "pressure_tip".to_string(),
-            region_id: "tip".to_string(),
-            kind: LoadKind::Pressure { magnitude_pa: 12.0 },
-        }];
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "pressure_tip".into(),
+                region_id: "tip".into(),
+                kind: FixtureExcitationKind::Pressure(12.0),
+            }],
+        );
         let mut mesh = tetrahedron4_mesh();
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
@@ -2084,21 +2126,18 @@ mod tests {
     fn solver_mesh_boundary_regions_lower_wrench_moments() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.constraints = Vec::new();
-        model.loads = vec![runmat_analysis_core::LoadCase {
-            load_id: "wrench_tip".to_string(),
-            region_id: "tip".to_string(),
-            kind: LoadKind::Wrench {
-                fx: 0.0,
-                fy: 0.0,
-                fz: 0.0,
-                mx: 0.0,
-                my: 6.0,
-                mz: 0.0,
-                px: 0.0,
-                py: 0.0,
-                pz: 0.0,
-            },
-        }];
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "wrench_tip".into(),
+                region_id: "tip".into(),
+                kind: FixtureExcitationKind::Wrench {
+                    force: [0.0, 0.0, 0.0],
+                    moment: [0.0, 6.0, 0.0],
+                    point_m: [0.0, 0.0, 0.0],
+                },
+            }],
+        );
         let mut mesh = tetrahedron4_mesh();
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);

@@ -9,14 +9,13 @@ pub mod problem {
     pub mod excitation;
     pub mod initial_condition;
     pub mod interfaces;
-    pub mod loads;
     pub mod material_assignment;
     pub mod materials;
     pub mod model;
+    pub mod prescribed_value;
     pub mod quantity;
     pub mod reference_point;
     pub mod response_spectrum;
-    pub mod schedule;
     pub mod signal;
     pub mod structure;
     pub mod target;
@@ -26,6 +25,7 @@ pub mod study;
 pub mod validate;
 mod validate_accuracy;
 mod validate_authored;
+mod validate_domains;
 mod validate_excitations;
 mod validate_outputs;
 mod validate_sequence;
@@ -44,10 +44,9 @@ pub use problem::constraint::{
 };
 pub use problem::coordinate_frame::{AxialFrame, CartesianFrame, CoordinateFrame, SphericalFrame};
 pub use problem::domains::{
-    CfdDomain, CfdSolveFamily, CfdTimeProfilePoint, ElectroRegionConductivityScale,
-    ElectroThermalDomain, ElectroTimeProfilePoint, ElectromagneticDomain,
-    ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
-    ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
+    CfdDomain, CfdSolveFamily, ElectroRegionConductivityScale, ElectroThermalDomain,
+    ElectromagneticDomain, ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
+    ThermoRegionTemperatureDelta,
 };
 pub use problem::excitation::{
     AnalysisExcitation, Direction, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
@@ -62,13 +61,13 @@ pub use problem::interfaces::{
     AnalysisInterface, AnalysisInterfaceKind, ConjugateHeatTransferInterfaceModel,
     ContactInterfaceModel, FluidStructureInterfaceModel,
 };
-pub use problem::loads::{LoadCase, LoadKind};
 pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
 pub use problem::materials::{
     ConductivityFrequencyPoint, MaterialAcousticModel, MaterialElectricalModel,
     MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
 };
 pub use problem::model::{AnalysisModel, AnalysisModelId};
+pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{
     Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, Damping, Displacement,
     ElectricCharge, ElectricChargeDensity, ElectricCurrent, ElectricCurrentDensity,
@@ -82,10 +81,6 @@ pub use problem::response_spectrum::{
     ResponseSpectrumId, ShockResponseSpectrumMethod, SpectrumAbscissa, SpectrumConstruction,
     SpectrumDamping, SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
     SpectrumInterpolation, SpectrumResponse,
-};
-pub use problem::schedule::{
-    FieldArtifactValue, ScheduleExtrapolation, ScheduleInterpolation, StepValue,
-    StudyParameterValue, TabulatedSchedule, ValueSchedule,
 };
 pub use problem::signal::{
     BreakpointSide, GeneratorArgument, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance,
@@ -173,20 +168,48 @@ mod tests {
             })],
             boundaries: Vec::new(),
             connectors: Vec::new(),
-            signals: Vec::new(),
-            excitations: Vec::new(),
-            excitation_cases: Vec::new(),
+            signals: vec![PhysicalSignal::Force(Signal {
+                signal_id: SignalId("tip_force_signal".to_string()),
+                shape: SignalShape::Vector3,
+                frame: Some(CoordinateFrame::Global),
+                representation: SignalRepresentation::Constant(SignalValue::Vector3([
+                    Force::new(0.0),
+                    Force::new(-1000.0),
+                    Force::new(0.0),
+                ])),
+                precision: SignalPrecision::Real64,
+                evidence: SignalApproximationEvidence {
+                    max_absolute_error: None,
+                    max_relative_error: None,
+                    derivative_max_absolute_error: None,
+                    sample_count: 1,
+                },
+                provenance: SignalProvenance::Authored,
+            })],
+            excitations: vec![ExcitationAction::Force(AnalysisExcitation {
+                excitation_id: ExcitationId("tip_force".to_string()),
+                case_id: ExcitationCaseId("primary_case".to_string()),
+                target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
+                frame: CoordinateFrame::Global,
+                direction: None,
+                distribution: ExcitationDistribution::PreserveResultant,
+                kinematics: ExcitationKinematics::FixedFrame,
+                signal_id: SignalId("tip_force_signal".to_string()),
+                active_step_ids: Vec::new(),
+                combination_group: None,
+                projection: ProjectionRequirement {
+                    preserve_resultant: true,
+                    preserve_moment: false,
+                    relative_tolerance: 1.0e-10,
+                },
+            })],
+            excitation_cases: vec![ExcitationCase {
+                case_id: ExcitationCaseId("primary_case".to_string()),
+                action_ids: vec![ExcitationId("tip_force".to_string())],
+                activation: ExcitationCaseActivation::Always,
+            }],
             initial_conditions: Vec::new(),
             response_spectra: Vec::new(),
-            loads: vec![LoadCase {
-                load_id: "load_tip".to_string(),
-                region_id: "tip".to_string(),
-                kind: LoadKind::Force {
-                    fx: 0.0,
-                    fy: -1000.0,
-                    fz: 0.0,
-                },
-            }],
             sequence: AnalysisSequence::from_steps(
                 "analysis_sequence",
                 vec![ProcedureStep::structural_static("step_static")],
@@ -195,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_material_bc_load_validation_failures() {
+    fn missing_material_and_condition_validation_failures() {
         let mut model = valid_model();
         model.materials.clear();
         assert_eq!(
@@ -208,83 +231,6 @@ mod tests {
         assert_eq!(
             validate_model(&model).expect_err("expected boundary condition validation failure"),
             AnalysisValidationError::MissingConstraintsOrBoundaries
-        );
-
-        let mut model = valid_model();
-        model.loads.clear();
-        assert_eq!(
-            validate_model(&model).expect_err("expected load validation failure"),
-            AnalysisValidationError::MissingLoads
-        );
-    }
-
-    #[test]
-    fn invalid_moment_vectors_fail_validation() {
-        let mut model = valid_model();
-        model.loads[0].kind = LoadKind::Moment {
-            mx: f64::NAN,
-            my: 0.0,
-            mz: 1.0,
-        };
-        assert_eq!(
-            validate_model(&model).expect_err("expected nonfinite moment validation failure"),
-            AnalysisValidationError::InvalidMomentVector {
-                load_id: "load_tip".to_string()
-            }
-        );
-
-        let mut model = valid_model();
-        model.loads[0].kind = LoadKind::Moment {
-            mx: 0.0,
-            my: 0.0,
-            mz: 0.0,
-        };
-        assert_eq!(
-            validate_model(&model).expect_err("expected zero moment validation failure"),
-            AnalysisValidationError::ZeroMomentVector {
-                load_id: "load_tip".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn invalid_wrench_vectors_fail_validation() {
-        let mut model = valid_model();
-        model.loads[0].kind = LoadKind::Wrench {
-            fx: 0.0,
-            fy: 1.0,
-            fz: 0.0,
-            mx: f64::INFINITY,
-            my: 0.0,
-            mz: 0.0,
-            px: 0.0,
-            py: 0.0,
-            pz: 0.0,
-        };
-        assert_eq!(
-            validate_model(&model).expect_err("expected nonfinite wrench validation failure"),
-            AnalysisValidationError::InvalidWrench {
-                load_id: "load_tip".to_string()
-            }
-        );
-
-        let mut model = valid_model();
-        model.loads[0].kind = LoadKind::Wrench {
-            fx: 0.0,
-            fy: 0.0,
-            fz: 0.0,
-            mx: 0.0,
-            my: 0.0,
-            mz: 0.0,
-            px: 0.0,
-            py: 0.0,
-            pz: 0.0,
-        };
-        assert_eq!(
-            validate_model(&model).expect_err("expected zero wrench validation failure"),
-            AnalysisValidationError::ZeroWrench {
-                load_id: "load_tip".to_string()
-            }
         );
     }
 
@@ -329,54 +275,6 @@ mod tests {
     }
 
     #[test]
-    fn moment_load_kind_serializes_as_snake_case() {
-        let load = LoadCase {
-            load_id: "tip_moment".to_string(),
-            region_id: "tip".to_string(),
-            kind: LoadKind::Moment {
-                mx: 1.0,
-                my: 2.0,
-                mz: 3.0,
-            },
-        };
-
-        let json = serde_json::to_value(&load).expect("load should serialize");
-        assert_eq!(json["kind"]["moment"]["mx"], 1.0);
-        assert_eq!(json["kind"]["moment"]["my"], 2.0);
-        assert_eq!(json["kind"]["moment"]["mz"], 3.0);
-
-        let decoded: LoadCase = serde_json::from_value(json).expect("load should deserialize");
-        assert_eq!(decoded, load);
-    }
-
-    #[test]
-    fn wrench_load_kind_serializes_as_snake_case() {
-        let load = LoadCase {
-            load_id: "tip_wrench".to_string(),
-            region_id: "tip".to_string(),
-            kind: LoadKind::Wrench {
-                fx: 1.0,
-                fy: 2.0,
-                fz: 3.0,
-                mx: 4.0,
-                my: 5.0,
-                mz: 6.0,
-                px: 0.1,
-                py: 0.2,
-                pz: 0.3,
-            },
-        };
-
-        let json = serde_json::to_value(&load).expect("load should serialize");
-        assert_eq!(json["kind"]["wrench"]["fx"], 1.0);
-        assert_eq!(json["kind"]["wrench"]["mz"], 6.0);
-        assert_eq!(json["kind"]["wrench"]["pz"], 0.3);
-
-        let decoded: LoadCase = serde_json::from_value(json).expect("load should deserialize");
-        assert_eq!(decoded, load);
-    }
-
-    #[test]
     fn prescribed_rotation_constraint_serializes_as_snake_case() {
         let constraint = AnalysisConstraint::Structural(StructuralConstraint {
             constraint_id: "root_rotation".to_string(),
@@ -385,7 +283,7 @@ mod tests {
                 target: RegionTarget::boundary("root"),
                 values: vec![RotationDofValue {
                     dof: StructuralRotationDof::Rz,
-                    value: ValueSchedule::Constant(Rotation::new(0.125)),
+                    value: PrescribedValue::Constant(Rotation::new(0.125)),
                 }],
             }),
         });
@@ -513,11 +411,11 @@ mod tests {
                 values: vec![
                     TranslationDofValue {
                         dof: StructuralTranslationDof::Ux,
-                        value: ValueSchedule::Constant(Displacement::new(0.0)),
+                        value: PrescribedValue::Constant(Displacement::new(0.0)),
                     },
                     TranslationDofValue {
                         dof: StructuralTranslationDof::Ux,
-                        value: ValueSchedule::Constant(Displacement::new(1.0)),
+                        value: PrescribedValue::Constant(Displacement::new(1.0)),
                     },
                 ],
             }),
@@ -530,22 +428,13 @@ mod tests {
     }
 
     #[test]
-    fn malformed_schedule_is_rejected() {
+    fn unknown_prescribed_signal_is_rejected() {
         let mut model = valid_model();
         model.constraints = vec![AnalysisConstraint::Thermal(ThermalConstraint {
             constraint_id: "temperature".to_string(),
             kind: ThermalConstraintKind::Prescribed {
                 target: RegionTarget::boundary("root"),
-                value: ValueSchedule::TimeHistory(TabulatedSchedule {
-                    abscissa: vec![0.0, 1.0, 0.5],
-                    values: vec![
-                        Temperature::new(293.15),
-                        Temperature::new(300.0),
-                        Temperature::new(310.0),
-                    ],
-                    interpolation: ScheduleInterpolation::Linear,
-                    extrapolation: ScheduleExtrapolation::Reject,
-                }),
+                value: PrescribedValue::Signal(SignalId("missing_temperature".to_string())),
             },
         })];
 
@@ -591,7 +480,7 @@ mod tests {
             boundary_id: "convection".to_string(),
             target: RegionTarget::boundary("root"),
             operator: BoundaryOperator::ThermalConvection {
-                ambient_temperature: ValueSchedule::Constant(Temperature::new(293.15)),
+                ambient_temperature: PrescribedValue::Constant(Temperature::new(293.15)),
                 coefficient: HeatTransferCoefficient::new(-1.0),
             },
         }];
