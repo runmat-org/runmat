@@ -15,6 +15,22 @@ pub enum NumericDType {
 }
 
 impl NumericDType {
+    pub const fn integer_class(self) -> Option<runmat_types::IntegerClass> {
+        use runmat_types::IntegerClass;
+
+        match self {
+            Self::F64 | Self::F32 => None,
+            Self::I8 => Some(IntegerClass::Int8),
+            Self::I16 => Some(IntegerClass::Int16),
+            Self::I32 => Some(IntegerClass::Int32),
+            Self::I64 => Some(IntegerClass::Int64),
+            Self::U8 => Some(IntegerClass::UInt8),
+            Self::U16 => Some(IntegerClass::UInt16),
+            Self::U32 => Some(IntegerClass::UInt32),
+            Self::U64 => Some(IntegerClass::UInt64),
+        }
+    }
+
     pub fn class_identity(self) -> runmat_types::ClassIdentity {
         use runmat_types::standard;
 
@@ -59,6 +75,23 @@ impl NumericDType {
             NumericDType::U16 => 2,
             NumericDType::U32 => 4,
             NumericDType::U64 => 8,
+        }
+    }
+}
+
+impl From<runmat_types::IntegerClass> for NumericDType {
+    fn from(class: runmat_types::IntegerClass) -> Self {
+        use runmat_types::IntegerClass;
+
+        match class {
+            IntegerClass::Int8 => Self::I8,
+            IntegerClass::Int16 => Self::I16,
+            IntegerClass::Int32 => Self::I32,
+            IntegerClass::Int64 => Self::I64,
+            IntegerClass::UInt8 => Self::U8,
+            IntegerClass::UInt16 => Self::U16,
+            IntegerClass::UInt32 => Self::U32,
+            IntegerClass::UInt64 => Self::U64,
         }
     }
 }

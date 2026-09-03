@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum IntegerLiteralClass {
+pub enum IntegerClass {
     Int8,
     Int16,
     Int32,
@@ -12,8 +12,8 @@ pub enum IntegerLiteralClass {
     UInt64,
 }
 
-impl IntegerLiteralClass {
-    pub fn bit_width(self) -> usize {
+impl IntegerClass {
+    pub const fn bit_width(self) -> u32 {
         match self {
             Self::Int8 | Self::UInt8 => 8,
             Self::Int16 | Self::UInt16 => 16,
@@ -34,13 +34,47 @@ impl IntegerLiteralClass {
             Self::UInt64 => "uint64",
         }
     }
+
+    pub fn from_class_name(name: &str) -> Option<Self> {
+        crate::NumericClass::from_class_name(name)?.integer_class()
+    }
+
+    pub const fn is_signed(self) -> bool {
+        matches!(self, Self::Int8 | Self::Int16 | Self::Int32 | Self::Int64)
+    }
+
+    pub const fn bit_mask(self) -> u64 {
+        match self.bit_width() {
+            64 => u64::MAX,
+            width => (1_u64 << width) - 1,
+        }
+    }
+
+    pub const fn range(self) -> (i128, i128) {
+        match self {
+            Self::Int8 => (i8::MIN as i128, i8::MAX as i128),
+            Self::Int16 => (i16::MIN as i128, i16::MAX as i128),
+            Self::Int32 => (i32::MIN as i128, i32::MAX as i128),
+            Self::Int64 => (i64::MIN as i128, i64::MAX as i128),
+            Self::UInt8 => (0, u8::MAX as i128),
+            Self::UInt16 => (0, u16::MAX as i128),
+            Self::UInt32 => (0, u32::MAX as i128),
+            Self::UInt64 => (0, u64::MAX as i128),
+        }
+    }
 }
+
+/// Backward-compatible source name for the class carried by a typed integer literal.
+///
+/// Integer class identity is shared beyond parsing; new code should use
+/// [`IntegerClass`] directly.
+pub type IntegerLiteralClass = IntegerClass;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct IntegerLiteral {
     text: String,
     bits: u64,
-    class: IntegerLiteralClass,
+    class: IntegerClass,
 }
 
 impl IntegerLiteral {
@@ -55,14 +89,14 @@ impl IntegerLiteral {
             };
 
         let suffixes = [
-            ("u64", IntegerLiteralClass::UInt64),
-            ("s64", IntegerLiteralClass::Int64),
-            ("u32", IntegerLiteralClass::UInt32),
-            ("s32", IntegerLiteralClass::Int32),
-            ("u16", IntegerLiteralClass::UInt16),
-            ("s16", IntegerLiteralClass::Int16),
-            ("u8", IntegerLiteralClass::UInt8),
-            ("s8", IntegerLiteralClass::Int8),
+            ("u64", IntegerClass::UInt64),
+            ("s64", IntegerClass::Int64),
+            ("u32", IntegerClass::UInt32),
+            ("s32", IntegerClass::Int32),
+            ("u16", IntegerClass::UInt16),
+            ("s16", IntegerClass::Int16),
+            ("u8", IntegerClass::UInt8),
+            ("s8", IntegerClass::Int8),
         ];
         let (digits, explicit_class) = suffixes
             .iter()
@@ -82,7 +116,7 @@ impl IntegerLiteral {
         }
 
         let max_digits = explicit_class
-            .map(IntegerLiteralClass::bit_width)
+            .map(|class| class.bit_width() as usize)
             .unwrap_or(64);
         let max_digits = if radix == 16 {
             max_digits.div_ceil(4)
@@ -102,13 +136,13 @@ impl IntegerLiteral {
             .map_err(|_| format!("{kind} literal has too many digits"))?;
         let class = explicit_class.unwrap_or_else(|| {
             if u8::try_from(bits).is_ok() {
-                IntegerLiteralClass::UInt8
+                IntegerClass::UInt8
             } else if u16::try_from(bits).is_ok() {
-                IntegerLiteralClass::UInt16
+                IntegerClass::UInt16
             } else if u32::try_from(bits).is_ok() {
-                IntegerLiteralClass::UInt32
+                IntegerClass::UInt32
             } else {
-                IntegerLiteralClass::UInt64
+                IntegerClass::UInt64
             }
         });
 
@@ -127,14 +161,28 @@ impl IntegerLiteral {
         self.bits
     }
 
-    pub fn class(&self) -> IntegerLiteralClass {
+    pub fn class(&self) -> IntegerClass {
         self.class
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{IntegerLiteral, IntegerLiteralClass};
+    use super::{IntegerClass, IntegerLiteral, IntegerLiteralClass};
+
+    #[test]
+    fn integer_class_is_shared_with_literal_compatibility_name() {
+        let compatibility_name: IntegerLiteralClass = IntegerClass::UInt64;
+        assert_eq!(compatibility_name, IntegerClass::UInt64);
+        assert_eq!(
+            IntegerClass::from_class_name("UINT64"),
+            Some(compatibility_name)
+        );
+        assert_eq!(compatibility_name.bit_width(), 64);
+        assert_eq!(compatibility_name.bit_mask(), u64::MAX);
+        assert_eq!(compatibility_name.range(), (0, u64::MAX as i128));
+        assert!(!compatibility_name.is_signed());
+    }
 
     #[test]
     fn parses_exact_classes_and_bit_patterns() {

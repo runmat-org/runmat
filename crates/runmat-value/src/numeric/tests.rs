@@ -125,6 +125,10 @@ mod integer_storage_tests {
             let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
             assert_eq!(tensor.numeric_dtype(), dtype);
             assert_eq!(
+                tensor.integer_storage().unwrap().integer_class(),
+                dtype.integer_class().unwrap()
+            );
+            assert_eq!(
                 tensor.numeric_dtype().class_name(),
                 tensor.integer_storage().unwrap().class_name()
             );

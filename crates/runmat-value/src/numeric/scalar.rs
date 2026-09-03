@@ -109,6 +109,12 @@ impl IntValue {
         self.numeric_dtype().class_name()
     }
 
+    pub fn integer_class(&self) -> runmat_types::IntegerClass {
+        self.numeric_dtype()
+            .integer_class()
+            .expect("IntValue always has an integer dtype")
+    }
+
     pub fn numeric_dtype(&self) -> NumericDType {
         match self {
             IntValue::I8(_) => NumericDType::I8,
@@ -160,17 +166,17 @@ impl IntValue {
 
 impl From<&runmat_types::IntegerLiteral> for IntValue {
     fn from(literal: &runmat_types::IntegerLiteral) -> Self {
-        use runmat_types::IntegerLiteralClass;
+        use runmat_types::IntegerClass;
 
         match literal.class() {
-            IntegerLiteralClass::Int8 => Self::I8(literal.bits() as i8),
-            IntegerLiteralClass::Int16 => Self::I16(literal.bits() as i16),
-            IntegerLiteralClass::Int32 => Self::I32(literal.bits() as i32),
-            IntegerLiteralClass::Int64 => Self::I64(literal.bits() as i64),
-            IntegerLiteralClass::UInt8 => Self::U8(literal.bits() as u8),
-            IntegerLiteralClass::UInt16 => Self::U16(literal.bits() as u16),
-            IntegerLiteralClass::UInt32 => Self::U32(literal.bits() as u32),
-            IntegerLiteralClass::UInt64 => Self::U64(literal.bits()),
+            IntegerClass::Int8 => Self::I8(literal.bits() as i8),
+            IntegerClass::Int16 => Self::I16(literal.bits() as i16),
+            IntegerClass::Int32 => Self::I32(literal.bits() as i32),
+            IntegerClass::Int64 => Self::I64(literal.bits() as i64),
+            IntegerClass::UInt8 => Self::U8(literal.bits() as u8),
+            IntegerClass::UInt16 => Self::U16(literal.bits() as u16),
+            IntegerClass::UInt32 => Self::U32(literal.bits() as u32),
+            IntegerClass::UInt64 => Self::U64(literal.bits()),
         }
     }
 }
