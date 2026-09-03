@@ -309,6 +309,55 @@ for (const forbidden of [
   }
 }
 
+const angleConversionBoundaries = new Map([
+  ["crates/runmat-builtins/src/catalog/inference/math/angle_conversion/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/inference/math/angle_conversion/unary.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/math/angle_conversion/tests.rs", 128],
+  ["crates/runmat-builtins/src/catalog/entries/math/trigonometry/angle_conversion/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/math/trigonometry/angle_conversion/deg2rad/mod.rs", 192],
+  ["crates/runmat-builtins/src/catalog/entries/math/trigonometry/angle_conversion/deg2rad/documentation.rs", 192],
+  ["crates/runmat-builtins/src/catalog/entries/math/trigonometry/angle_conversion/rad2deg/mod.rs", 192],
+  ["crates/runmat-builtins/src/catalog/entries/math/trigonometry/angle_conversion/rad2deg/documentation.rs", 192],
+  ["crates/runmat-runtime/src/builtins/math/trigonometry/angle_conversion/mod.rs", 32],
+  ["crates/runmat-runtime/src/builtins/math/trigonometry/angle_conversion/execute.rs", 224],
+  ["crates/runmat-runtime/src/builtins/math/trigonometry/angle_conversion/deg2rad.rs", 320],
+  ["crates/runmat-runtime/src/builtins/math/trigonometry/angle_conversion/rad2deg.rs", 320],
+]);
+for (const [sourcePath, ceiling] of angleConversionBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its angle-conversion boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+for (const sourcePath of [
+  "docs/builtins/reference/deg2rad.json",
+  "docs/builtins/reference/rad2deg.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/deg2rad.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/rad2deg.json",
+  "crates/runmat-runtime/src/builtins/math/trigonometry/deg2rad.rs",
+  "crates/runmat-runtime/src/builtins/math/trigonometry/rad2deg.rs",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete deg2rad documentation debt and must not return`);
+  }
+}
+const angleConversionExecution = read(
+  "crates/runmat-runtime/src/builtins/math/trigonometry/angle_conversion/execute.rs"
+);
+for (const identity of ["deg2rad", "rad2deg"]) {
+  if (angleConversionExecution.includes(`\"${identity}\"`)) {
+    fail(`angle-conversion execution derives behavior from the ${identity} identity`);
+  }
+}
+for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/builtins/math/trigonometry/angle_conversion")) {
+  if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)) {
+    fail(`${sourcePath} duplicates catalog-owned angle-conversion metadata`);
+  }
+}
+
 const logicalReductionBoundaries = new Map([
   ["crates/runmat-runtime/src/builtins/math/reduction/logical/mod.rs", 128],
   ["crates/runmat-runtime/src/builtins/math/reduction/logical/arguments.rs", 192],

@@ -195,6 +195,7 @@ pub enum StatsRandomInferenceRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum MathInferenceRule {
     Abs,
+    AngleConversion(AngleConversionInferenceRule),
     Atan2,
     Bitwise(BitwiseInferenceRule),
     Discrete(DiscreteInferenceRule),
@@ -224,6 +225,12 @@ pub enum MathInferenceRule {
     DegreeTrigonometric(DegreeTrigonometricFunction),
     InverseTrigonometric(InverseTrigonometricFunction),
     InverseHyperbolic(InverseHyperbolicFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum AngleConversionInferenceRule {
+    DegreesToRadians,
+    RadiansToDegrees,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
