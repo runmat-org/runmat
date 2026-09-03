@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
-use runmat_accelerate_api::HostTensorView;
+use runmat_accelerate_api::{GpuHandleProvenance, HostTensorView};
 use runmat_value::{ComplexTensor, IntValue, IntegerStorage, LogicalArray, SparseTensor};
 
 fn call(value: Value) -> BuiltinResult<Value> {
@@ -247,8 +247,16 @@ fn gammaln_gpu_provider_roundtrip() {
             data: tensor.as_f64_slice().expect("double input"),
             shape: &tensor.shape,
         };
-        let handle = provider.upload(&view).expect("upload");
+        let mut handle = provider.upload(&view).expect("upload");
+        runmat_accelerate_api::set_handle_provenance(&mut handle, GpuHandleProvenance::Explicit);
         let result = call(Value::GpuTensor(handle)).expect("gammaln");
+        let Value::GpuTensor(output) = &result else {
+            panic!("expected resident gammaln output, got {result:?}");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_provenance(output),
+            Some(GpuHandleProvenance::Explicit)
+        );
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 5]);
         for (got, input) in gathered

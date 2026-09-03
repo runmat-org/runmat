@@ -24,7 +24,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Accelerated and distributed execution",
         paragraphs: &[
-            "For real floating provider input, RunMat first proves the nonnegative domain with the input's exact owner. It then accepts a native `unary_gammaln` result only when shape, real storage, precision, owner, device, class metadata, provenance, and non-aliasing satisfy the contract.",
+            "For real floating provider input, RunMat first proves the nonnegative domain with the input's exact owner. It validates a native `unary_gammaln` result's shape, real storage, precision, owner, device, class metadata, and non-aliasing, then restores the input's residency intent.",
             "A typed unsupported proof or unary hook enters exact-owner gather, host evaluation, and protected restoration. Other provider failures and malformed outputs remain visible. Integer and logical provider inputs use the authoritative host path before returning resident double output. Distributed arrays use partition-local unary mapping.",
         ],
     },
@@ -56,14 +56,14 @@ const LINKS: &[BuiltinDocumentationLink] = &[
     BuiltinDocumentationLink { label: "log", target: BuiltinDocumentationLinkTarget::Builtin("log") },
     BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
     BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
-    BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gammaln.rs") },
+    BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gammaln/mod.rs") },
 ];
 const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
-    implementation: &[BuiltinDocumentationLink { label: "Real log-gamma runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gammaln.rs") }],
+    implementation: &[BuiltinDocumentationLink { label: "Real log-gamma runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gammaln/mod.rs") }],
     verification: &[
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Values, domain, classes, shapes, extensions, and rejection boundaries", location: "crates/runmat-runtime/src/builtins/math/elementwise/gammaln/tests.rs" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Exact-owner fallback and resident double restoration", location: "crates/runmat-runtime/src/builtins/math/elementwise/gammaln/tests.rs" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::WgpuTest, label: "Actual WGPU domain proof and direct-execution parity", location: "crates/runmat-runtime/src/builtins/math/elementwise/gammaln/tests.rs::gammaln_wgpu_matches_cpu_elementwise" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Values, domain, classes, shapes, extensions, and rejection boundaries", location: "crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gammaln/tests.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Exact-owner fallback, resident double restoration, and explicit residency intent", location: "crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gammaln/tests.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::WgpuTest, label: "Actual WGPU domain proof and direct-execution parity", location: "crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gammaln/tests.rs" },
     ],
     notes: &[],
 };

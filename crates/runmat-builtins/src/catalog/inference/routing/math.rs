@@ -15,12 +15,13 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::ErrorFunction(rule) => {
             super::super::math::error_functions::infer(rule, request, entry)
         }
+        MathInferenceRule::GammaFunction(rule) => {
+            super::super::math::gamma_functions::infer(rule, request, entry)
+        }
         MathInferenceRule::IntegerDivide => {
             super::super::math::integer_division::infer(request, entry)
         }
         MathInferenceRule::Hypot => super::super::math_binary::infer_hypot(request, entry),
-        MathInferenceRule::Gamma => super::super::math_special::infer_gamma(request, entry),
-        MathInferenceRule::GammaLn => super::super::math_special::infer_gammaln(request, entry),
         MathInferenceRule::PhaseAngle => {
             super::super::math_components::infer_phase_angle(request, entry)
         }

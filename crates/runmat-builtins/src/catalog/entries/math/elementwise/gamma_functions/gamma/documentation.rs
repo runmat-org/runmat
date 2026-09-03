@@ -24,7 +24,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Accelerated and distributed execution",
         paragraphs: &[
-            "A real floating provider input can use its owner's `unary_gamma` hook. RunMat accepts the result only when shape, real storage, precision, owner, device, provenance, and non-aliasing satisfy the contract. Only a typed unsupported result enters host fallback; provider failures and malformed outputs remain visible.",
+            "A real floating provider input can use its owner's `unary_gamma` hook. RunMat validates shape, real storage, precision, owner, device, and non-aliasing, then restores the input's residency intent on the result. Only a typed unsupported result enters host fallback; provider failures and malformed outputs remain visible.",
             "Fallback gathers through the exact owner, evaluates the same host algorithm, and restores the result to that owner with the original precision and residency intent. Distributed arrays use the declared partition-local unary mapping.",
         ],
     },
@@ -82,14 +82,14 @@ const LINKS: &[BuiltinDocumentationLink] = &[
     BuiltinDocumentationLink { label: "gammaln", target: BuiltinDocumentationLinkTarget::Builtin("gammaln") },
     BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
     BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
-    BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs") },
+    BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gamma/mod.rs") },
 ];
 const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
-    implementation: &[BuiltinDocumentationLink { label: "Real gamma runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs") }],
+    implementation: &[BuiltinDocumentationLink { label: "Real gamma runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gamma/mod.rs") }],
     verification: &[
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Real values, poles, shapes, classes, errors, and rejection boundaries", location: "crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs::tests" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Exact-owner fallback preserves class, shape, and residency", location: "crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs::tests::gpu_provider_roundtrip_preserves_residency" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::WgpuTest, label: "Actual WGPU direct-execution parity", location: "crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs::tests::wgpu_gamma_matches_host_for_real_inputs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Real values, poles, shapes, classes, errors, and rejection boundaries", location: "crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gamma/tests.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Exact-owner fallback preserves class, shape, residency, and explicit intent", location: "crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gamma/tests.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::WgpuTest, label: "Actual WGPU direct-execution parity", location: "crates/runmat-runtime/src/builtins/math/elementwise/gamma_functions/gamma/tests.rs" },
     ],
     notes: &[],
 };

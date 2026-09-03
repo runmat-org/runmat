@@ -1,8 +1,8 @@
-//! Shared execution mechanics for real unary error functions.
+//! Shared execution mechanics for resident real-unary functions.
 //!
 //! Builtin identities own their public errors, numerical kernels, and provider
 //! hooks. This module owns the family invariant for resident real floating-point
-//! inputs so ownership and output validation do not drift as the family grows.
+//! inputs so ownership and output validation do not drift across families.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
 use runmat_value::Tensor;

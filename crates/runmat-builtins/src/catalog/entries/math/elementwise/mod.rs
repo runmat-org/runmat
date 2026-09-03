@@ -2,8 +2,7 @@ mod complex_components;
 mod error_functions;
 mod exponentials;
 mod floating_conversions;
-mod gamma;
-mod gammaln;
+mod gamma_functions;
 mod hypot;
 mod logarithms;
 mod magnitude_phase_sign;
@@ -16,8 +15,7 @@ pub use complex_components::*;
 pub use error_functions::*;
 pub use exponentials::*;
 pub use floating_conversions::*;
-pub use gamma::*;
-pub use gammaln::*;
+pub use gamma_functions::*;
 pub use hypot::*;
 pub use logarithms::*;
 pub use magnitude_phase_sign::*;
@@ -30,8 +28,7 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     error_functions::ENTRIES,
     exponentials::ENTRIES,
     floating_conversions::ENTRIES,
-    gamma::ENTRIES,
-    gammaln::ENTRIES,
+    gamma_functions::ENTRIES,
     hypot::ENTRIES,
     logarithms::ENTRIES,
     magnitude_phase_sign::ENTRIES,
