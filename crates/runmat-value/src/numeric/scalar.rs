@@ -13,6 +13,23 @@ pub enum IntValue {
 }
 
 impl IntValue {
+    /// Returns the exact signed representation of any fixed-width integer.
+    ///
+    /// `i128` contains the full range of every `IntValue` variant, including
+    /// `uint64`, so this conversion never saturates or rounds.
+    pub fn to_i128(&self) -> i128 {
+        match self {
+            IntValue::I8(value) => *value as i128,
+            IntValue::I16(value) => *value as i128,
+            IntValue::I32(value) => *value as i128,
+            IntValue::I64(value) => *value as i128,
+            IntValue::U8(value) => *value as i128,
+            IntValue::U16(value) => *value as i128,
+            IntValue::U32(value) => *value as i128,
+            IntValue::U64(value) => *value as i128,
+        }
+    }
+
     pub fn to_i64(&self) -> i64 {
         match self {
             IntValue::I8(v) => *v as i64,
