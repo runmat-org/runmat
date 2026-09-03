@@ -13,18 +13,14 @@ pub(super) fn infer(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallI
     };
 
     match entry.placement.distributed {
-        BuiltinDistributedPolicy::MapUnary => {
-            super::super::distributed_semantics::infer_distributed_map(entry, request, distributed)
+        BuiltinDistributedPolicy::MapUnary | BuiltinDistributedPolicy::MapUnaryConstrained(_) => {
+            super::super::distributed::infer_distributed_map(entry, request, distributed)
         }
         BuiltinDistributedPolicy::ScalarLikePrototype => {
-            super::super::distributed_semantics::infer_distributed_scalar_like(
-                entry,
-                request,
-                distributed,
-            )
+            super::super::distributed::infer_distributed_scalar_like(entry, request, distributed)
         }
         BuiltinDistributedPolicy::MaterializeArguments => {
-            super::super::distributed_semantics::infer_partition_local_call(entry, request)
+            super::super::distributed::infer_partition_local_call(entry, request)
         }
         BuiltinDistributedPolicy::Unsupported | BuiltinDistributedPolicy::InspectHandles => {
             super::infer_local(entry, request)

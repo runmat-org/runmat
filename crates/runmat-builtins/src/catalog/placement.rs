@@ -1,3 +1,4 @@
+use runmat_types::NumericClass;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -43,9 +44,28 @@ pub enum BuiltinDistributedPolicy {
     InspectHandles,
     MaterializeArguments,
     MapUnary,
+    /// Apply an elementwise unary builtin to each partition after validating
+    /// placement-specific limits that are narrower than its host contract.
+    MapUnaryConstrained(BuiltinDistributedMapContract),
     /// Construct a distributed scalar whose class, complexity, sparsity, and
     /// distribution owner are selected by a distributed `like` prototype.
     ScalarLikePrototype,
+}
+
+/// Additional admission rules for partition-local unary execution.
+///
+/// The builtin's inference rule remains authoritative for its ordinary input
+/// contract. This descriptor records only restrictions introduced by the
+/// distributed execution surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BuiltinDistributedMapContract {
+    pub numeric_classes: &'static [NumericClass],
+}
+
+impl BuiltinDistributedMapContract {
+    pub const fn numeric_classes(numeric_classes: &'static [NumericClass]) -> Self {
+        Self { numeric_classes }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

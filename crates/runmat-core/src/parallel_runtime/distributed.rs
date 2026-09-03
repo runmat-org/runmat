@@ -238,7 +238,11 @@ impl RuntimeDistributedService for CoreDistributedService {
         {
             return invoke_scalar_like_prototype(Rc::clone(&self.store), request, entry);
         }
-        if entry.placement.distributed != runmat_builtins::BuiltinDistributedPolicy::MapUnary {
+        if !matches!(
+            entry.placement.distributed,
+            runmat_builtins::BuiltinDistributedPolicy::MapUnary
+                | runmat_builtins::BuiltinDistributedPolicy::MapUnaryConstrained(_)
+        ) {
             return Box::pin(async {
                 Err(error(
                     "distributed builtin request is not admitted for partition-local execution",

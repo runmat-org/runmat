@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::elementwise::resident_real_unary;
+use crate::builtins::math::resident_real_unary;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const PI: f64 = std::f64::consts::PI;

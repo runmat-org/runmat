@@ -489,7 +489,7 @@ const errorFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/error_functions/real_unary.rs", 224],
   ["crates/runmat-builtins/src/catalog/entries/math/elementwise/error_functions/mod.rs", 32],
   ["crates/runmat-runtime/src/builtins/math/elementwise/error_functions/mod.rs", 32],
-  ["crates/runmat-runtime/src/builtins/math/elementwise/resident_real_unary.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/resident_real_unary.rs", 160],
 ]);
 for (const identity of ["erf", "erfcinv"]) {
   errorFunctionBoundaries.set(
@@ -581,6 +581,68 @@ for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/
   }
   if (/\.to_string\(\)\.contains\(\s*"unary_(?:gamma|gammaln) not supported"/.test(text)) {
     fail(`${sourcePath} interprets provider capability from error text; use the typed provider result`);
+  }
+}
+
+const distributedInferenceBoundaries = new Map([
+  ["crates/runmat-builtins/src/catalog/inference/distributed/mod.rs", 64],
+  ["crates/runmat-builtins/src/catalog/inference/distributed/admission.rs", 96],
+  ["crates/runmat-builtins/src/catalog/inference/distributed/mapping.rs", 96],
+]);
+for (const [sourcePath, ceiling] of distributedInferenceBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its distributed inference boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/inference/distributed_semantics.rs"))) {
+  fail("the monolithic distributed_semantics.rs inference module must not return");
+}
+
+const factorialBoundaries = new Map([
+  ["crates/runmat-builtins/src/catalog/entries/math/discrete/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/math/discrete/factorial/mod.rs", 224],
+  ["crates/runmat-builtins/src/catalog/entries/math/discrete/factorial/documentation.rs", 320],
+  ["crates/runmat-builtins/src/catalog/inference/math/discrete/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/inference/math/discrete/factorial.rs", 192],
+  ["crates/runmat-builtins/src/catalog/inference/math/discrete/factorial_tests.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/math/discrete/distributed_tests.rs", 96],
+  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/mod.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/arguments.rs", 192],
+  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/evaluation.rs", 128],
+  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/integer.rs", 128],
+  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/provider.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/spec.rs", 64],
+  ["crates/runmat-runtime/src/builtins/math/discrete/factorial/tests.rs", 512],
+]);
+for (const [sourcePath, ceiling] of factorialBoundaries) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its factorial identity boundary ` +
+      `(found ${lines} lines; maximum ${ceiling})`
+    );
+  }
+}
+for (const sourcePath of [
+  "crates/runmat-runtime/src/builtins/math/elementwise/factorial.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/factorial",
+  "docs/builtins/reference/factorial.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/factorial.json",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete factorial identity or documentation debt and must not return`);
+  }
+}
+for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/builtins/math/discrete/factorial")) {
+  if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)) {
+    fail(`${sourcePath} duplicates catalog-owned factorial metadata`);
+  }
+  if (/\.to_string\(\)\.contains\(|\.message\(\)\.contains\([^)]*(?:unsupported|factorial)/.test(text)) {
+    fail(`${sourcePath} selects factorial behavior from error text; use typed runtime policy`);
   }
 }
 

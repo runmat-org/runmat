@@ -1,4 +1,4 @@
-//! Shared execution mechanics for resident real-unary functions.
+//! Shared execution mechanics for resident real-unary functions across math families.
 //!
 //! Builtin identities own their public errors, numerical kernels, and provider
 //! hooks. This module owns the family invariant for resident real floating-point

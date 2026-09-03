@@ -4,7 +4,7 @@ use runmat_types::{CallInference, CallRequest};
 mod acceleration_semantics;
 mod aggregate_semantics;
 mod array;
-mod distributed_semantics;
+mod distributed;
 mod introspection_semantics;
 mod logical;
 mod math;
@@ -33,7 +33,7 @@ mod stats_random;
 mod support;
 mod unary_logical_scalar;
 
-pub use distributed_semantics::infer_partition_local_call;
+pub use distributed::infer_partition_local_call;
 pub(super) use support::{
     argument_error, default_double_scalar, finish_fixed, literal_text, numeric_kind,
     preserved_binary_residency, unavailable_rule,
