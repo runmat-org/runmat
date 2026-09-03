@@ -1,11 +1,10 @@
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
-    BeamElementModel, BeamSectionModel, CoordinateFrame, Displacement, EvidenceConfidence,
-    LoadCase, LoadKind, MaterialAssignment, MaterialMechanicalModel, MaterialModel,
-    MaterialThermalModel, PrescribedTranslations, RegionTarget, ShellElementModel,
-    ShellSectionModel, StructuralConstraint, StructuralConstraintKind, StructuralElement,
-    StructuralElementKind, StructuralModel, StructuralNode, StructuralTranslationDof,
-    TranslationDofValue, ValueSchedule,
+    AnalysisConstraint, AnalysisModel, AnalysisModelId, AnalysisSequence, BeamElementModel,
+    BeamSectionModel, CoordinateFrame, Displacement, EvidenceConfidence, LoadCase, LoadKind,
+    MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    PrescribedTranslations, ProcedureStep, RegionTarget, ShellElementModel, ShellSectionModel,
+    StructuralConstraint, StructuralConstraintKind, StructuralElement, StructuralElementKind,
+    StructuralModel, StructuralNode, StructuralTranslationDof, TranslationDofValue, ValueSchedule,
 };
 use runmat_geometry_core::UnitSystem;
 
@@ -178,10 +177,10 @@ fn cantilever_linear_static() -> AnalysisModel {
                 fz: 0.0,
             },
         }],
-        steps: vec![AnalysisStep {
-            step_id: "static_1".to_string(),
-            kind: AnalysisStepKind::Static,
-        }],
+        sequence: AnalysisSequence::from_steps(
+            "cantilever_sequence",
+            vec![ProcedureStep::structural_static("static_1")],
+        ),
     }
 }
 
@@ -460,20 +459,16 @@ fn structural_beam_reference_model(
 fn modal_large_fixture() -> AnalysisModel {
     let mut model = cantilever_large_load_sweep();
     model.model_id = AnalysisModelId("modal_large_fixture".to_string());
-    model.steps = vec![AnalysisStep {
-        step_id: "modal_large_1".to_string(),
-        kind: AnalysisStepKind::Modal,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_modal("modal_large_1".to_string())];
     model
 }
 
 fn transient_long_fixture() -> AnalysisModel {
     let mut model = cantilever_load_sweep();
     model.model_id = AnalysisModelId("transient_long_fixture".to_string());
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_long_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_long_1".to_string(),
+    )];
     model
 }
 
@@ -499,20 +494,18 @@ fn transient_shock_fixture() -> AnalysisModel {
             }
         })
         .collect();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_shock_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_shock_1".to_string(),
+    )];
     model
 }
 
 fn nonlinear_assembly_fixture() -> AnalysisModel {
     let mut model = transient_shock_fixture();
     model.model_id = AnalysisModelId("nonlinear_assembly_fixture".to_string());
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_assembly_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_assembly_1".to_string(),
+    )];
     model
 }
 
@@ -538,10 +531,9 @@ fn nonlinear_assembly_stress_fixture() -> AnalysisModel {
             }
         })
         .collect();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_stress_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_stress_1".to_string(),
+    )];
     model
 }
 
@@ -613,10 +605,9 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
             }
         })
         .collect();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_softening_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_softening_1".to_string(),
+    )];
     model
 }
 
@@ -662,10 +653,9 @@ fn nonlinear_load_path_mix_fixture() -> AnalysisModel {
             }
         })
         .collect();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_mix_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_mix_1".to_string(),
+    )];
     model
 }
 
@@ -811,10 +801,9 @@ fn thermo_mechanical_kickoff_fixture() -> AnalysisModel {
             }
         })
         .collect();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermo_mech_transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "thermo_mech_transient_1".to_string(),
+    )];
     model
 }
 
@@ -855,10 +844,9 @@ fn thermo_gradient_benign_fixture() -> AnalysisModel {
             }
         })
         .collect();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermo_grad_benign_transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "thermo_grad_benign_transient_1".to_string(),
+    )];
     model
 }
 
@@ -899,10 +887,9 @@ fn thermo_gradient_pathological_fixture() -> AnalysisModel {
             }
         })
         .collect();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermo_grad_pathological_transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "thermo_grad_pathological_transient_1".to_string(),
+    )];
     model
 }
 

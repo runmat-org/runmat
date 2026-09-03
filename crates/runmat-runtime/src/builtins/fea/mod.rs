@@ -1,13 +1,13 @@
 use runmat_analysis_core::{
     AnalysisBoundary, AnalysisConstraint, AnalysisField, AnalysisFieldValues, AnalysisInterface,
-    AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
+    AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisProcedure, AnalysisSequence,
     BoundaryOperator, CfdDomain, CoordinateFrame, Displacement, ElectroThermalDomain,
     ElectromagneticDomain, EvidenceConfidence, FluidConstraint, FluidConstraintKind, HeatFlux,
     HeatTransferCoefficient, LoadCase, LoadKind, MagneticConstraint, MagneticConstraintKind,
     MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
-    MaterialModel, MaterialPlasticModel, MaterialThermalModel, PrescribedRotations,
-    PrescribedTranslations, Pressure, RegionTarget, Rotation, RotationDofValue,
-    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
+    MaterialModel, MaterialPlasticModel, MaterialThermalModel, PhysicsFamily, PrescribedRotations,
+    PrescribedTranslations, Pressure, ProcedureStep, RegionTarget, Rotation, RotationDofValue,
+    SolutionSpace, SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
     StructuralRotationDof, StructuralTranslationDof, Temperature, ThermalConstraint,
     ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue, ValueSchedule, Velocity,
 };
@@ -1563,7 +1563,7 @@ struct StudyConstructorOptions {
     material_assignments: Vec<MaterialAssignment>,
     boundary_conditions: Vec<ModelConditionPayload>,
     loads: Vec<LoadCase>,
-    steps: Vec<AnalysisStep>,
+    steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<AnalysisInterface>,
     run_options: Option<RunOptionsPayload>,
@@ -1768,7 +1768,7 @@ struct ModelConstructorOptions {
     material_assignments: Vec<MaterialAssignment>,
     boundary_conditions: Vec<ModelConditionPayload>,
     loads: Vec<LoadCase>,
-    steps: Vec<AnalysisStep>,
+    steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<AnalysisInterface>,
 }
@@ -2465,17 +2465,68 @@ fn create_load_case_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn create_step_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() != 2 {
+    if args.len() != 4 {
         return Err(builtin_error(
             STEP_NAME,
             &ERROR_INPUT,
-            "fea.step requires exactly id and kind arguments",
+            "fea.step requires id, physics family, procedure, and solution space",
         ));
     }
     let step_id = scalar_string(&args[0], STEP_NAME, &ERROR_INPUT)?;
-    let kind_text = scalar_string(&args[1], STEP_NAME, &ERROR_INPUT)?;
-    let kind = parse_scalar_enum::<AnalysisStepKind>(&kind_text, "AnalysisStepKind")?;
-    step_to_object(AnalysisStep { step_id, kind })
+    let family_text = scalar_string(&args[1], STEP_NAME, &ERROR_INPUT)?;
+    let procedure_text = scalar_string(&args[2], STEP_NAME, &ERROR_INPUT)?;
+    let solution_space_text = scalar_string(&args[3], STEP_NAME, &ERROR_INPUT)?;
+    let family = parse_scalar_enum::<PhysicsFamily>(&family_text, "PhysicsFamily")?;
+    let procedure = parse_scalar_enum::<AnalysisProcedure>(&procedure_text, "AnalysisProcedure")?;
+    let solution_space = parse_scalar_enum::<SolutionSpace>(&solution_space_text, "SolutionSpace")?;
+    let mut step = default_procedure_step(step_id, family, procedure)?;
+    step.solution_space = solution_space;
+    step_to_object(step)
+}
+
+fn default_procedure_step(
+    step_id: String,
+    family: PhysicsFamily,
+    procedure: AnalysisProcedure,
+) -> BuiltinResult<ProcedureStep> {
+    let step = match (family, procedure) {
+        (PhysicsFamily::Structural, AnalysisProcedure::Static) => {
+            ProcedureStep::structural_static(step_id)
+        }
+        (PhysicsFamily::Structural, AnalysisProcedure::ModalExtraction) => {
+            ProcedureStep::structural_modal(step_id)
+        }
+        (PhysicsFamily::Structural, AnalysisProcedure::TransientResponse) => {
+            ProcedureStep::structural_transient(step_id)
+        }
+        (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear) => {
+            ProcedureStep::structural_nonlinear(step_id)
+        }
+        (PhysicsFamily::Thermal, AnalysisProcedure::Static) => {
+            ProcedureStep::thermal_static(step_id)
+        }
+        (PhysicsFamily::Electromagnetic, AnalysisProcedure::Static) => {
+            ProcedureStep::electromagnetic_static(step_id)
+        }
+        (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse) => {
+            ProcedureStep::acoustic_harmonic(step_id)
+        }
+        (PhysicsFamily::Fluid, AnalysisProcedure::Static) => ProcedureStep::fluid_static(step_id),
+        (PhysicsFamily::Fluid, AnalysisProcedure::TransientResponse) => {
+            ProcedureStep::fluid_transient(step_id)
+        }
+        (PhysicsFamily::Coupled(family), procedure) => {
+            ProcedureStep::coupled(step_id, family, procedure)
+        }
+        _ => {
+            return Err(builtin_error(
+                STEP_NAME,
+                &ERROR_INPUT,
+                "unsupported physics-family and procedure combination",
+            ))
+        }
+    };
+    Ok(step)
 }
 
 fn create_domain_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -2930,7 +2981,7 @@ fn build_model_from_parts(
     material_assignments: Vec<MaterialAssignment>,
     boundary_conditions: Vec<ModelConditionPayload>,
     loads: Vec<LoadCase>,
-    steps: Vec<AnalysisStep>,
+    steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<AnalysisInterface>,
 ) -> BuiltinResult<AnalysisModel> {
@@ -3000,7 +3051,8 @@ fn build_model_from_parts(
             .collect::<BuiltinResult<Vec<_>>>()?;
     }
     if !steps.is_empty() {
-        model.steps = steps;
+        model.sequence =
+            AnalysisSequence::from_steps(format!("{}.sequence", model.model_id.0), steps);
     }
     for domain in domains {
         match domain.kind.as_str() {
@@ -3061,7 +3113,7 @@ fn build_model_from_parts(
 
 fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
     AnalysisModel {
-        model_id: AnalysisModelId(model_id),
+        model_id: AnalysisModelId(model_id.clone()),
         geometry_id: geometry.geometry_id.clone(),
         geometry_revision: geometry.revision,
         units: geometry.units,
@@ -3083,7 +3135,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
         loads: Vec::new(),
-        steps: Vec::new(),
+        sequence: AnalysisSequence::from_steps(format!("{model_id}.sequence"), Vec::new()),
     }
 }
 
@@ -3188,7 +3240,7 @@ fn load_case_to_object(load: LoadCase) -> BuiltinResult<Value> {
     )
 }
 
-fn step_to_object(step: AnalysisStep) -> BuiltinResult<Value> {
+fn step_to_object(step: ProcedureStep) -> BuiltinResult<Value> {
     serializable_to_object(
         STEP_NAME,
         &ERROR_INTERNAL,
@@ -3271,7 +3323,7 @@ fn load_case_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResu
     object_vec_from_value(builtin, value, FEA_LOAD_CASE_CLASS)
 }
 
-fn step_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<AnalysisStep>> {
+fn step_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<ProcedureStep>> {
     object_vec_from_value(builtin, value, FEA_STEP_CLASS)
 }
 
@@ -6461,7 +6513,9 @@ run:
 
         let step = block_on(fea_step_builtin(vec![
             Value::String("static_step".to_string()),
+            Value::String("structural".to_string()),
             Value::String("static".to_string()),
+            Value::String("direct".to_string()),
         ]))
         .expect("analysis step should build");
         assert_object_class(&step, FEA_STEP_CLASS);

@@ -900,7 +900,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
             max_solver_host_sync_count: Some(64),
             min_solver_device_apply_k_ratio: Some(0.0),
-            expected_solver_backend: Some("runtime_tensor"),
+            expected_solver_backend: Some("cpu_reference"),
             modal_mode_count: None,
             transient_step_count: None,
             max_modal_orthogonality_offdiag: None,
@@ -2036,10 +2036,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             description: "standalone thermal profile fixture on cpu with heat-balance diagnostics",
             model: || {
                 let mut model = fixture_model(FixtureId::ThermoRampSmooth);
-                model.steps = vec![runmat_analysis_core::AnalysisStep {
-                    step_id: "thermal_1".to_string(),
-                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-                }];
+                model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_static("thermal_1".to_string())];
                 model
             },
             run_kind: AnalysisRunKind::Thermal,
@@ -2067,10 +2064,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             description: "standalone thermal profile fixture with provider-backed acceleration",
             model: || {
                 let mut model = fixture_model(FixtureId::ThermoRampSmooth);
-                model.steps = vec![runmat_analysis_core::AnalysisStep {
-                    step_id: "thermal_1".to_string(),
-                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-                }];
+                model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_static("thermal_1".to_string())];
                 model
             },
             run_kind: AnalysisRunKind::Thermal,
@@ -2082,7 +2076,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::HostFallback),
             max_solver_host_sync_count: Some(32),
             min_solver_device_apply_k_ratio: Some(0.0),
-            expected_solver_backend: Some("runtime_tensor"),
+            expected_solver_backend: Some("cpu_reference"),
             modal_mode_count: None,
             transient_step_count: Some(12),
             max_modal_orthogonality_offdiag: None,
@@ -2098,10 +2092,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             description: "standalone thermal profile fixture with no-provider host fallback",
             model: || {
                 let mut model = fixture_model(FixtureId::ThermoRampSmooth);
-                model.steps = vec![runmat_analysis_core::AnalysisStep {
-                    step_id: "thermal_1".to_string(),
-                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-                }];
+                model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_static("thermal_1".to_string())];
                 model
             },
             run_kind: AnalysisRunKind::Thermal,
@@ -2116,7 +2107,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::HostFallback),
             max_solver_host_sync_count: Some(0),
             min_solver_device_apply_k_ratio: Some(0.0),
-            expected_solver_backend: Some("runtime_tensor"),
+            expected_solver_backend: Some("cpu_reference"),
             modal_mode_count: None,
             transient_step_count: Some(12),
             max_modal_orthogonality_offdiag: None,
@@ -2132,10 +2123,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             description: "standalone thermal fixture rejects invalid thermal material values",
             model: || {
                 let mut model = fixture_model(FixtureId::ThermoRampSmooth);
-                model.steps = vec![runmat_analysis_core::AnalysisStep {
-                    step_id: "thermal_invalid_material".to_string(),
-                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-                }];
+                model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_static("thermal_invalid_material".to_string())];
                 model
             },
             run_kind: AnalysisRunKind::Thermal,
@@ -2163,10 +2151,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             description: "standalone thermal fixture rejects invalid heat-source values",
             model: || {
                 let mut model = fixture_model(FixtureId::ThermoRampSmooth);
-                model.steps = vec![runmat_analysis_core::AnalysisStep {
-                    step_id: "thermal_invalid_source".to_string(),
-                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-                }];
+                model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_static("thermal_invalid_source".to_string())];
                 model
             },
             run_kind: AnalysisRunKind::Thermal,
@@ -2194,14 +2179,11 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             description: "standalone thermal fixture rejects invalid thermal boundary values",
             model: || {
                 let mut model = fixture_model(FixtureId::ThermoRampSmooth);
-                model.steps = vec![runmat_analysis_core::AnalysisStep {
-                    step_id: "thermal_invalid_boundary".to_string(),
-                    kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-                }];
+                model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_static("thermal_invalid_boundary".to_string())];
                 model
             },
             run_kind: AnalysisRunKind::Thermal,
-            expect_validate_error: None,
+            expect_validate_error: Some("RM.FEA.VALIDATE.INVALID_BOUNDARY"),
             expect_run_error: Some("RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY"),
             expected_publishable: None,
             parity_tolerance: None,

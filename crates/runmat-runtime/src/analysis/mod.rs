@@ -9,11 +9,11 @@ use chrono::Utc;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisBoundary, AnalysisConstraint, AnalysisField,
     AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisProcedure, AnalysisRunIdentity,
-    AnalysisStep, AnalysisStepKind, AnalysisValidationError, BoundaryOperator, CoordinateFrame,
+    AnalysisSequence, AnalysisValidationError, BoundaryOperator, CoordinateFrame,
     CoupledPhysicsFamily, EvidenceConfidence, FluidConstraint, FluidConstraintKind,
     FormulationImplementation, LoadCase, LoadKind, MagneticConstraint, MagneticConstraintKind,
     MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    PhysicsFamily, Pressure, RegionTarget, SolutionSpace, StructuralConstraint,
+    PhysicsFamily, Pressure, ProcedureStep, RegionTarget, SolutionSpace, StructuralConstraint,
     StructuralConstraintKind, ValueSchedule, Velocity,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
@@ -313,7 +313,7 @@ fn map_fea_run_error(
             op_version,
             context,
             OperationErrorSpec {
-                error_code: "RM.FEA.RUN_LINEAR_STATIC.ASSEMBLY_FAILED",
+                error_code: assembly_error_code(operation),
                 error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
@@ -324,6 +324,18 @@ fn map_fea_run_error(
                 ("geometry_id".to_string(), model.geometry_id.clone()),
             ]),
         ),
+    }
+}
+
+fn assembly_error_code(operation: &str) -> &'static str {
+    match operation {
+        ANALYSIS_RUN_MODAL_OPERATION => "RM.FEA.RUN_MODAL.ASSEMBLY_FAILED",
+        ANALYSIS_RUN_CHT_OPERATION => "RM.FEA.RUN_CHT.ASSEMBLY_FAILED",
+        ANALYSIS_RUN_THERMAL_OPERATION => "RM.FEA.RUN_THERMAL.ASSEMBLY_FAILED",
+        ANALYSIS_RUN_TRANSIENT_OPERATION => "RM.FEA.RUN_TRANSIENT.ASSEMBLY_FAILED",
+        ANALYSIS_RUN_NONLINEAR_OPERATION => "RM.FEA.RUN_NONLINEAR.ASSEMBLY_FAILED",
+        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION => "RM.FEA.RUN_ELECTROMAGNETIC.ASSEMBLY_FAILED",
+        _ => "RM.FEA.RUN_LINEAR_STATIC.ASSEMBLY_FAILED",
     }
 }
 
@@ -558,10 +570,9 @@ pub fn analysis_create_model_op(
                     fz: 0.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_static".to_string(),
-                kind: AnalysisStepKind::Static,
-            }],
+            vec![ProcedureStep::structural_static(
+                "step_default_static".to_string(),
+            )],
         ),
         AnalysisCreateModelProfile::ThermoMechanicalCoupled => (
             fixed_condition("bc_default_fixed", fixed_region_id),
@@ -574,10 +585,11 @@ pub fn analysis_create_model_op(
                     fz: 0.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_thermo_mech".to_string(),
-                kind: AnalysisStepKind::Transient,
-            }],
+            vec![ProcedureStep::coupled(
+                "step_default_thermo_mech",
+                CoupledPhysicsFamily::Thermomechanical,
+                AnalysisProcedure::TransientResponse,
+            )],
         ),
         AnalysisCreateModelProfile::ElectroThermalCoupled => (
             magnetic_ground_condition("bc_default_electro_thermal_ground", fixed_region_id),
@@ -590,10 +602,11 @@ pub fn analysis_create_model_op(
                     amplitude_scale: 1.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_electro_thermal".to_string(),
-                kind: AnalysisStepKind::Transient,
-            }],
+            vec![ProcedureStep::coupled(
+                "step_default_electro_thermal",
+                CoupledPhysicsFamily::Electrothermal,
+                AnalysisProcedure::TransientResponse,
+            )],
         ),
         AnalysisCreateModelProfile::ThermalStandalone => (
             fixed_condition("bc_default_fixed", fixed_region_id),
@@ -606,10 +619,9 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_thermal".to_string(),
-                kind: AnalysisStepKind::Thermal,
-            }],
+            vec![ProcedureStep::thermal_static(
+                "step_default_thermal".to_string(),
+            )],
         ),
         AnalysisCreateModelProfile::ModalStructural => (
             fixed_condition("bc_default_fixed", fixed_region_id),
@@ -622,10 +634,9 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_modal".to_string(),
-                kind: AnalysisStepKind::Modal,
-            }],
+            vec![ProcedureStep::structural_modal(
+                "step_default_modal".to_string(),
+            )],
         ),
         AnalysisCreateModelProfile::AcousticHarmonic => (
             acoustic_rigid_condition("bc_default_acoustic_rigid_wall", fixed_region_id),
@@ -634,10 +645,9 @@ pub fn analysis_create_model_op(
                 region_id: load_region_id,
                 kind: LoadKind::Pressure { magnitude_pa: 1.0 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_acoustic_harmonic".to_string(),
-                kind: AnalysisStepKind::Modal,
-            }],
+            vec![ProcedureStep::acoustic_harmonic(
+                "step_default_acoustic_harmonic",
+            )],
         ),
         AnalysisCreateModelProfile::TransientStructural => (
             fixed_condition("bc_default_fixed", fixed_region_id),
@@ -650,10 +660,9 @@ pub fn analysis_create_model_op(
                     fz: 0.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_transient".to_string(),
-                kind: AnalysisStepKind::Transient,
-            }],
+            vec![ProcedureStep::structural_transient(
+                "step_default_transient".to_string(),
+            )],
         ),
         AnalysisCreateModelProfile::NonlinearStructural => (
             fixed_condition("bc_default_fixed", fixed_region_id),
@@ -666,10 +675,9 @@ pub fn analysis_create_model_op(
                     fz: 0.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_nonlinear".to_string(),
-                kind: AnalysisStepKind::Nonlinear,
-            }],
+            vec![ProcedureStep::structural_nonlinear(
+                "step_default_nonlinear".to_string(),
+            )],
         ),
         AnalysisCreateModelProfile::ElectromagneticStatic => (
             magnetic_ground_condition("bc_default_em_ground", fixed_region_id),
@@ -682,10 +690,9 @@ pub fn analysis_create_model_op(
                     amplitude_scale: 1.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_electromagnetic".to_string(),
-                kind: AnalysisStepKind::Electromagnetic,
-            }],
+            vec![ProcedureStep::electromagnetic_static(
+                "step_default_electromagnetic".to_string(),
+            )],
         ),
         AnalysisCreateModelProfile::CfdSteadyState => (
             fixed_condition("bc_default_fixed", fixed_region_id),
@@ -698,10 +705,7 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_cfd".to_string(),
-                kind: AnalysisStepKind::Cfd,
-            }],
+            vec![ProcedureStep::fluid_static("step_default_cfd".to_string())],
         ),
         AnalysisCreateModelProfile::CfdTransient => (
             fixed_condition("bc_default_fixed", fixed_region_id),
@@ -714,10 +718,7 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            vec![AnalysisStep {
-                step_id: "step_default_cfd_transient".to_string(),
-                kind: AnalysisStepKind::Cfd,
-            }],
+            vec![ProcedureStep::fluid_transient("step_default_cfd_transient")],
         ),
         AnalysisCreateModelProfile::ChtCoupled => (
             fixed_condition("bc_default_fixed", fixed_region_id),
@@ -730,16 +731,11 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            vec![
-                AnalysisStep {
-                    step_id: "step_default_cht_flow".to_string(),
-                    kind: AnalysisStepKind::Cfd,
-                },
-                AnalysisStep {
-                    step_id: "step_default_cht_thermal".to_string(),
-                    kind: AnalysisStepKind::Thermal,
-                },
-            ],
+            vec![ProcedureStep::coupled(
+                "step_default_cht",
+                CoupledPhysicsFamily::ConjugateHeatTransfer,
+                AnalysisProcedure::TransientResponse,
+            )],
         ),
         AnalysisCreateModelProfile::FsiCoupled => (
             fixed_condition("bc_default_fixed", fixed_region_id),
@@ -752,16 +748,11 @@ pub fn analysis_create_model_op(
                     fz: 0.0,
                 },
             },
-            vec![
-                AnalysisStep {
-                    step_id: "step_default_fsi_structure".to_string(),
-                    kind: AnalysisStepKind::Transient,
-                },
-                AnalysisStep {
-                    step_id: "step_default_fsi_flow".to_string(),
-                    kind: AnalysisStepKind::Cfd,
-                },
-            ],
+            vec![ProcedureStep::coupled(
+                "step_default_fsi",
+                CoupledPhysicsFamily::FluidStructureInteraction,
+                AnalysisProcedure::TransientResponse,
+            )],
         ),
     };
 
@@ -978,7 +969,7 @@ pub fn analysis_create_model_op(
     }
 
     let model = AnalysisModel {
-        model_id: AnalysisModelId(intent.model_id),
+        model_id: AnalysisModelId(intent.model_id.clone()),
         geometry_id: geometry.geometry_id.clone(),
         geometry_revision: geometry.revision,
         units: geometry.units,
@@ -1000,7 +991,10 @@ pub fn analysis_create_model_op(
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
         loads: vec![default_load],
-        steps: default_steps,
+        sequence: AnalysisSequence::from_steps(
+            format!("{}.sequence", intent.model_id),
+            default_steps,
+        ),
     };
 
     validate_model_against_geometry(&model, geometry.units, &CoordinateFrame::Global).map_err(
@@ -1911,10 +1905,10 @@ pub fn analysis_run_modal_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_modal_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Modal);
+    let has_modal_step = model.sequence.steps.iter().any(|step| {
+        step.family == PhysicsFamily::Structural
+            && step.procedure == AnalysisProcedure::ModalExtraction
+    });
     if !has_modal_step {
         return Err(operation_error(
             ANALYSIS_RUN_MODAL_OPERATION,
@@ -2250,11 +2244,11 @@ pub fn analysis_run_acoustic_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_modal_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Modal);
-    if !has_modal_step {
+    let has_acoustic_harmonic_step = model.sequence.steps.iter().any(|step| {
+        step.family == PhysicsFamily::Acoustic
+            && step.procedure == AnalysisProcedure::HarmonicResponse
+    });
+    if !has_acoustic_harmonic_step {
         return Err(operation_error(
             ANALYSIS_RUN_ACOUSTIC_OPERATION,
             ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
@@ -5891,9 +5885,10 @@ pub fn analysis_run_cfd_with_options_op(
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
     let has_cfd_step = model
+        .sequence
         .steps
         .iter()
-        .any(|step| step.kind == AnalysisStepKind::Cfd);
+        .any(|step| step.family == PhysicsFamily::Fluid);
     if !has_cfd_step {
         return Err(operation_error(
             ANALYSIS_RUN_CFD_OPERATION,
@@ -6367,11 +6362,10 @@ pub fn analysis_run_cht_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_cfd_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Cfd);
-    if !has_cfd_step {
+    let has_cht_step = model.sequence.steps.iter().any(|step| {
+        step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+    });
+    if !has_cht_step {
         return Err(operation_error(
             ANALYSIS_RUN_CHT_OPERATION,
             ANALYSIS_RUN_CHT_OP_VERSION,
@@ -6382,29 +6376,7 @@ pub fn analysis_run_cht_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "FEA model must include at least one cfd step for fea.run_cht",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
-        ));
-    }
-    let has_thermal_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Thermal);
-    if !has_thermal_step {
-        return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_MODEL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "FEA model must include at least one thermal step for fea.run_cht",
+            "FEA model must include a conjugate-heat-transfer procedure for fea.run_cht",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -7034,11 +7006,11 @@ pub fn analysis_run_fsi_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_cfd_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Cfd);
-    if !has_cfd_step {
+    let has_fsi_step = model.sequence.steps.iter().any(|step| {
+        step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
+            && step.procedure == AnalysisProcedure::TransientResponse
+    });
+    if !has_fsi_step {
         return Err(operation_error(
             ANALYSIS_RUN_FSI_OPERATION,
             ANALYSIS_RUN_FSI_OP_VERSION,
@@ -7049,29 +7021,7 @@ pub fn analysis_run_fsi_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "FEA model must include at least one cfd step for fea.run_fsi",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
-        ));
-    }
-    let has_transient_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Transient);
-    if !has_transient_step {
-        return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_MODEL",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "FEA model must include at least one transient step for fea.run_fsi",
+            "FEA model must include a transient fluid-structure-interaction procedure for fea.run_fsi",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -7446,13 +7396,13 @@ pub fn analysis_run_fsi_with_options_op(
         code: "FEA_FSI_COUPLING".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
-            "step_count={} time_step_s={} structural_step_count={} cfd_profile_point_count={} authored_interface_count={} interface_node_count={} interface_face_count={} max_linear_iters={} tolerance={}",
+            "step_count={} time_step_s={} fsi_procedure_count={} cfd_profile_point_count={} authored_interface_count={} interface_node_count={} interface_face_count={} max_linear_iters={} tolerance={}",
             options.step_count,
             options.time_step_s,
             model
-                .steps
+                .sequence.steps
                 .iter()
-                .filter(|step| step.kind == AnalysisStepKind::Transient)
+                .filter(|step| step.procedure == AnalysisProcedure::TransientResponse)
                 .count(),
             cfd_domain.time_profile.len(),
             model.interfaces.len(),
@@ -7617,10 +7567,9 @@ pub fn analysis_run_thermal_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_thermal_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Thermal);
+    let has_thermal_step = model.sequence.steps.iter().any(|step| {
+        step.family == PhysicsFamily::Thermal && step.procedure == AnalysisProcedure::Static
+    });
     if !has_thermal_step {
         return Err(operation_error(
             ANALYSIS_RUN_THERMAL_OPERATION,
@@ -7991,10 +7940,15 @@ pub fn analysis_run_transient_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_transient_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Transient);
+    let has_transient_step = model.sequence.steps.iter().any(|step| {
+        step.procedure == AnalysisProcedure::TransientResponse
+            && matches!(
+                step.family,
+                PhysicsFamily::Structural
+                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal)
+            )
+    });
     if !has_transient_step {
         return Err(operation_error(
             ANALYSIS_RUN_TRANSIENT_OPERATION,
@@ -8462,10 +8416,15 @@ pub fn analysis_run_nonlinear_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_nonlinear_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Nonlinear);
+    let has_nonlinear_step = model.sequence.steps.iter().any(|step| {
+        step.procedure == AnalysisProcedure::Nonlinear
+            && matches!(
+                step.family,
+                PhysicsFamily::Structural
+                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal)
+            )
+    });
     if !has_nonlinear_step {
         return Err(operation_error(
             ANALYSIS_RUN_NONLINEAR_OPERATION,
@@ -9716,10 +9675,13 @@ pub fn analysis_run_electromagnetic_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_electromagnetic_step = model
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Electromagnetic);
+    let has_electromagnetic_step = model.sequence.steps.iter().any(|step| {
+        step.family == PhysicsFamily::Electromagnetic
+            && matches!(
+                step.procedure,
+                AnalysisProcedure::Static | AnalysisProcedure::HarmonicResponse
+            )
+    });
     if !has_electromagnetic_step {
         return Err(operation_error(
             ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
@@ -15188,6 +15150,63 @@ fn map_validate_error(
             format!("response spectrum `{spectrum_id}` is invalid: {detail}"),
             BTreeMap::from([
                 ("spectrum_id".to_string(), spectrum_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidSequence {
+            sequence_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_SEQUENCE",
+            format!("analysis sequence `{sequence_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("sequence_id".to_string(), sequence_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidProcedureStep { step_id, detail } => (
+            "RM.FEA.VALIDATE.INVALID_PROCEDURE_STEP",
+            format!("procedure step `{step_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("step_id".to_string(), step_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidStateTransition {
+            transition_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_STATE_TRANSITION",
+            format!("state transition `{transition_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("transition_id".to_string(), transition_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidObservation {
+            observation_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_OBSERVATION",
+            format!("observation `{observation_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("observation_id".to_string(), observation_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidMonitor { monitor_id, detail } => (
+            "RM.FEA.VALIDATE.INVALID_MONITOR",
+            format!("monitor `{monitor_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("monitor_id".to_string(), monitor_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidAccuracyPlan { plan_id, detail } => (
+            "RM.FEA.VALIDATE.INVALID_ACCURACY_PLAN",
+            format!("accuracy plan `{plan_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("plan_id".to_string(), plan_id),
                 ("detail".to_string(), detail),
             ]),
         ),

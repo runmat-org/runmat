@@ -2254,8 +2254,8 @@ fn run_identity_label(identity: &AnalysisRunIdentity) -> String {
 mod tests {
     use super::*;
     use runmat_analysis_core::{
-        AnalysisConstraint, AnalysisModelId, AnalysisStep, AnalysisStepKind, CoordinateFrame,
-        LoadCase, RegionTarget, StructuralConstraint, StructuralConstraintKind,
+        AnalysisConstraint, AnalysisModelId, AnalysisSequence, CoordinateFrame, LoadCase,
+        ProcedureStep, RegionTarget, StructuralConstraint, StructuralConstraintKind,
     };
 
     fn simple_run_result(
@@ -2398,10 +2398,10 @@ mod tests {
                     },
                 },
             ],
-            steps: vec![AnalysisStep {
-                step_id: "static_step".to_string(),
-                kind: AnalysisStepKind::Static,
-            }],
+            sequence: AnalysisSequence::from_steps(
+                "figure_sequence",
+                vec![ProcedureStep::structural_static("static_step")],
+            ),
         }
     }
 

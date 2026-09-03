@@ -63,6 +63,26 @@ pub enum AnalysisValidationError {
         "ANALYSIS_VALIDATION_INVALID_RESPONSE_SPECTRUM: response spectrum `{spectrum_id}` is invalid: {detail}"
     )]
     InvalidResponseSpectrum { spectrum_id: String, detail: String },
+    #[error("ANALYSIS_VALIDATION_INVALID_SEQUENCE: sequence `{sequence_id}` is invalid: {detail}")]
+    InvalidSequence { sequence_id: String, detail: String },
+    #[error("ANALYSIS_VALIDATION_INVALID_PROCEDURE_STEP: procedure step `{step_id}` is invalid: {detail}")]
+    InvalidProcedureStep { step_id: String, detail: String },
+    #[error("ANALYSIS_VALIDATION_INVALID_STATE_TRANSITION: state transition `{transition_id}` is invalid: {detail}")]
+    InvalidStateTransition {
+        transition_id: String,
+        detail: String,
+    },
+    #[error("ANALYSIS_VALIDATION_INVALID_OBSERVATION: observation `{observation_id}` is invalid: {detail}")]
+    InvalidObservation {
+        observation_id: String,
+        detail: String,
+    },
+    #[error("ANALYSIS_VALIDATION_INVALID_MONITOR: monitor `{monitor_id}` is invalid: {detail}")]
+    InvalidMonitor { monitor_id: String, detail: String },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_ACCURACY_PLAN: accuracy plan `{plan_id}` is invalid: {detail}"
+    )]
+    InvalidAccuracyPlan { plan_id: String, detail: String },
     #[error(
         "ANALYSIS_VALIDATION_INVALID_MOMENT: moment load {load_id} must have finite components"
     )]

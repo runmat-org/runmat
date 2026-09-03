@@ -1,0 +1,442 @@
+use crate::{
+    AnalysisModel, AnalysisProcedure, AnalysisValidationError, ComplexRepresentation,
+    CoordinateFrame, CoupledPhysicsFamily, ExcitationTarget, FieldLocation, ObservationComponent,
+    ObservationQuantity, ObservationRequest, ObservationSpec, ObservationTarget,
+    ObservationValueShape, PhysicsFamily, ProcedureStep, RecoveryPolicy, SeriesReduction,
+    SignConvention, SignalPrecision, SpatialReduction,
+};
+
+use super::{invalid_observation, observation_error};
+
+pub(super) fn validate_spec(
+    model: &AnalysisModel,
+    step: &ProcedureStep,
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    validate_quantity_family(step, request, spec.quantity)?;
+    validate_shape(request, spec)?;
+    validate_target(model, request, &spec.target)?;
+    crate::validate_authored::validate_frame(&spec.frame)
+        .map_err(|_| invalid_observation(request, "coordinate frame is invalid"))?;
+    validate_component(request, spec)?;
+    validate_sign(request, spec)?;
+    validate_complex(step, request, spec)?;
+    validate_recovery(request, spec)?;
+    super::sampling::validate_sampling(step, request, &spec.sampling)?;
+    super::sampling::validate_reduction(request, spec)?;
+    super::sampling::validate_storage(request, spec)
+}
+
+fn validate_quantity_family(
+    step: &ProcedureStep,
+    request: &ObservationRequest,
+    quantity: ObservationQuantity,
+) -> Result<(), AnalysisValidationError> {
+    let supported = quantity_supported(step, quantity);
+    if supported {
+        Ok(())
+    } else {
+        observation_error(
+            request,
+            "quantity is not produced by the step's physics family",
+        )
+    }
+}
+
+pub(crate) fn quantity_supported(step: &ProcedureStep, quantity: ObservationQuantity) -> bool {
+    (match step.family {
+        PhysicsFamily::Structural => is_structural(quantity),
+        PhysicsFamily::Thermal => is_thermal(quantity),
+        PhysicsFamily::Electromagnetic => is_electromagnetic(quantity),
+        PhysicsFamily::Acoustic => is_acoustic(quantity),
+        PhysicsFamily::Fluid => is_fluid(quantity),
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical) => {
+            is_structural(quantity) || is_thermal(quantity)
+        }
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal) => {
+            is_electromagnetic(quantity) || is_thermal(quantity)
+        }
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => {
+            is_fluid(quantity) || is_thermal(quantity)
+        }
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) => {
+            is_fluid(quantity) || is_structural(quantity)
+        }
+    }) || is_universal(quantity)
+}
+
+fn is_structural(quantity: ObservationQuantity) -> bool {
+    matches!(
+        quantity,
+        ObservationQuantity::Displacement
+            | ObservationQuantity::Rotation
+            | ObservationQuantity::Velocity
+            | ObservationQuantity::Acceleration
+            | ObservationQuantity::Strain
+            | ObservationQuantity::Stress
+            | ObservationQuantity::ReactionForce
+            | ObservationQuantity::ReactionMoment
+            | ObservationQuantity::StrainEnergy
+            | ObservationQuantity::ContactGap
+            | ObservationQuantity::ContactPressure
+            | ObservationQuantity::ModalFrequency
+            | ObservationQuantity::ModalParticipation
+            | ObservationQuantity::Eigenvalue
+    )
+}
+
+fn is_thermal(quantity: ObservationQuantity) -> bool {
+    matches!(
+        quantity,
+        ObservationQuantity::Temperature
+            | ObservationQuantity::TemperatureGradient
+            | ObservationQuantity::HeatFlux
+            | ObservationQuantity::HeatRate
+    )
+}
+
+fn is_electromagnetic(quantity: ObservationQuantity) -> bool {
+    matches!(
+        quantity,
+        ObservationQuantity::ElectricPotential
+            | ObservationQuantity::ElectricField
+            | ObservationQuantity::ElectricCurrent
+            | ObservationQuantity::ElectricCurrentDensity
+            | ObservationQuantity::ElectricCharge
+            | ObservationQuantity::MagneticVectorPotential
+            | ObservationQuantity::MagneticFluxDensity
+            | ObservationQuantity::MagneticFieldIntensity
+            | ObservationQuantity::HeatRate
+    )
+}
+
+fn is_acoustic(quantity: ObservationQuantity) -> bool {
+    matches!(
+        quantity,
+        ObservationQuantity::AcousticPressure
+            | ObservationQuantity::AcousticParticleVelocity
+            | ObservationQuantity::SoundPressureLevel
+    )
+}
+
+fn is_fluid(quantity: ObservationQuantity) -> bool {
+    matches!(
+        quantity,
+        ObservationQuantity::FluidPressure
+            | ObservationQuantity::FluidVelocity
+            | ObservationQuantity::Vorticity
+            | ObservationQuantity::MassFlowRate
+            | ObservationQuantity::WallShearStress
+            | ObservationQuantity::HeatRate
+    )
+}
+
+fn is_universal(quantity: ObservationQuantity) -> bool {
+    matches!(
+        quantity,
+        ObservationQuantity::Residual
+            | ObservationQuantity::Balance
+            | ObservationQuantity::ConstraintViolation
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CanonicalShape {
+    Scalar,
+    Vector,
+    SymmetricTensor,
+}
+
+fn canonical_shape(quantity: ObservationQuantity) -> CanonicalShape {
+    match quantity {
+        ObservationQuantity::Displacement
+        | ObservationQuantity::Rotation
+        | ObservationQuantity::Velocity
+        | ObservationQuantity::Acceleration
+        | ObservationQuantity::ReactionForce
+        | ObservationQuantity::ReactionMoment
+        | ObservationQuantity::TemperatureGradient
+        | ObservationQuantity::HeatFlux
+        | ObservationQuantity::ElectricField
+        | ObservationQuantity::ElectricCurrentDensity
+        | ObservationQuantity::MagneticVectorPotential
+        | ObservationQuantity::MagneticFluxDensity
+        | ObservationQuantity::MagneticFieldIntensity
+        | ObservationQuantity::AcousticParticleVelocity
+        | ObservationQuantity::FluidVelocity
+        | ObservationQuantity::Vorticity
+        | ObservationQuantity::WallShearStress => CanonicalShape::Vector,
+        ObservationQuantity::Strain | ObservationQuantity::Stress => {
+            CanonicalShape::SymmetricTensor
+        }
+        _ => CanonicalShape::Scalar,
+    }
+}
+
+fn validate_shape(
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    if let ObservationValueShape::Tensor { extents } = &spec.value_shape {
+        if extents.is_empty()
+            || extents.contains(&0)
+            || extents
+                .iter()
+                .try_fold(1usize, |total, extent| total.checked_mul(*extent))
+                .is_none()
+        {
+            return observation_error(
+                request,
+                "tensor extents must be nonempty, nonzero, and representable",
+            );
+        }
+    }
+    let valid = match (canonical_shape(spec.quantity), &spec.value_shape) {
+        (CanonicalShape::Scalar, ObservationValueShape::Scalar) => true,
+        (CanonicalShape::Vector, ObservationValueShape::Vector3) => true,
+        (CanonicalShape::Vector, ObservationValueShape::Tensor { extents }) => extents == &[3],
+        (CanonicalShape::SymmetricTensor, ObservationValueShape::SymmetricTensor3) => true,
+        (CanonicalShape::SymmetricTensor, ObservationValueShape::Tensor { extents }) => {
+            extents == &[3, 3]
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        observation_error(request, "value shape does not match the requested quantity")
+    }
+}
+
+fn validate_target(
+    model: &AnalysisModel,
+    request: &ObservationRequest,
+    target: &ObservationTarget,
+) -> Result<(), AnalysisValidationError> {
+    let valid = match target {
+        ObservationTarget::Spatial(ExcitationTarget::Region(region)) => {
+            !region.region_id.trim().is_empty()
+        }
+        ObservationTarget::Spatial(ExcitationTarget::ReferencePoint(point)) => {
+            !point.reference_point_id.trim().is_empty() && point.position.is_finite()
+        }
+        ObservationTarget::Spatial(ExcitationTarget::Port { port_id }) => {
+            !port_id.trim().is_empty()
+        }
+        ObservationTarget::Spatial(ExcitationTarget::Interface { interface_id }) => model
+            .interfaces
+            .iter()
+            .any(|interface| interface.interface_id == *interface_id),
+        ObservationTarget::Spatial(ExcitationTarget::WholeModel)
+        | ObservationTarget::WholeModel => true,
+        ObservationTarget::Point { position } => position.is_finite(),
+        ObservationTarget::Path { positions } => {
+            positions.len() >= 2 && positions.iter().all(|position| position.is_finite())
+        }
+        ObservationTarget::Connector { connector_id } => model
+            .connectors
+            .iter()
+            .any(|connector| connector.connector_id == *connector_id),
+        ObservationTarget::Constraint { constraint_id } => model
+            .constraints
+            .iter()
+            .any(|constraint| constraint.constraint_id() == constraint_id),
+    };
+    if valid {
+        Ok(())
+    } else {
+        observation_error(
+            request,
+            "target is invalid or does not resolve in the analysis model",
+        )
+    }
+}
+
+fn validate_component(
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    use ObservationComponent as C;
+    let boundary_component = matches!(spec.component, C::Normal | C::Tangent1 | C::Tangent2);
+    if boundary_component && !matches!(&spec.frame, CoordinateFrame::BoundaryNormalTangent) {
+        return observation_error(
+            request,
+            "normal and tangent components require the boundary-normal/tangent frame",
+        );
+    }
+    let valid = match canonical_shape(spec.quantity) {
+        CanonicalShape::Scalar => matches!(spec.component, C::All),
+        CanonicalShape::Vector => matches!(
+            spec.component,
+            C::All | C::X | C::Y | C::Z | C::Normal | C::Tangent1 | C::Tangent2 | C::Magnitude
+        ),
+        CanonicalShape::SymmetricTensor => matches!(
+            spec.component,
+            C::All
+                | C::Normal
+                | C::Tangent1
+                | C::Tangent2
+                | C::Trace
+                | C::Hydrostatic
+                | C::Deviatoric
+                | C::VonMises
+                | C::MaximumPrincipal
+                | C::MinimumPrincipal
+        ),
+    };
+    if valid {
+        Ok(())
+    } else {
+        observation_error(
+            request,
+            "component is incompatible with the quantity's value shape",
+        )
+    }
+}
+
+fn validate_sign(
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    let valid = match spec.sign_convention {
+        SignConvention::Native => true,
+        SignConvention::TensionPositive | SignConvention::CompressionPositive => matches!(
+            spec.quantity,
+            ObservationQuantity::Strain
+                | ObservationQuantity::Stress
+                | ObservationQuantity::ContactPressure
+        ),
+        SignConvention::OutwardPositive | SignConvention::InwardPositive => matches!(
+            spec.quantity,
+            ObservationQuantity::HeatFlux
+                | ObservationQuantity::HeatRate
+                | ObservationQuantity::ElectricCurrent
+                | ObservationQuantity::ElectricCurrentDensity
+                | ObservationQuantity::MassFlowRate
+                | ObservationQuantity::AcousticParticleVelocity
+                | ObservationQuantity::FluidVelocity
+        ),
+    };
+    if valid {
+        Ok(())
+    } else {
+        observation_error(
+            request,
+            "sign convention is not meaningful for this quantity",
+        )
+    }
+}
+
+fn validate_complex(
+    step: &ProcedureStep,
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    let complex_procedure = matches!(
+        step.procedure,
+        AnalysisProcedure::HarmonicResponse
+            | AnalysisProcedure::PrestressedHarmonicResponse
+            | AnalysisProcedure::RandomResponse
+    );
+    if !matches!(spec.complex_representation, ComplexRepresentation::Real) && !complex_procedure {
+        return observation_error(
+            request,
+            "complex representation requires a complex procedure",
+        );
+    }
+    let complex_storage = matches!(
+        spec.storage.precision,
+        SignalPrecision::Complex64 | SignalPrecision::Complex128
+    );
+    if matches!(spec.complex_representation, ComplexRepresentation::Complex) != complex_storage {
+        return observation_error(
+            request,
+            "storage precision must be complex exactly when the representation is complex",
+        );
+    }
+    Ok(())
+}
+
+fn validate_recovery(
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    if spec.source_location == spec.output_location {
+        return if matches!(spec.recovery, RecoveryPolicy::Native) {
+            Ok(())
+        } else {
+            observation_error(
+                request,
+                "recovery must be native when source and output locations match",
+            )
+        };
+    }
+    let valid = match spec.recovery {
+        RecoveryPolicy::Native => false,
+        RecoveryPolicy::Extrapolate | RecoveryPolicy::VolumeWeightedAverage => matches!(
+            spec.source_location,
+            FieldLocation::IntegrationPoint | FieldLocation::Element | FieldLocation::Cell
+        ),
+        RecoveryPolicy::AreaWeightedAverage => matches!(
+            spec.source_location,
+            FieldLocation::Face | FieldLocation::Interface
+        ),
+        RecoveryPolicy::ConservativeProjection => true,
+        RecoveryPolicy::ShapeFunctionInterpolation => matches!(
+            spec.source_location,
+            FieldLocation::Node | FieldLocation::Element | FieldLocation::IntegrationPoint
+        ),
+    };
+    if valid {
+        Ok(())
+    } else {
+        observation_error(
+            request,
+            "recovery policy is incompatible with the location transfer",
+        )
+    }
+}
+
+pub(super) fn is_scalar_result(spec: &ObservationSpec) -> bool {
+    canonical_shape(spec.quantity) == CanonicalShape::Scalar
+        || !matches!(
+            spec.component,
+            ObservationComponent::All | ObservationComponent::Deviatoric
+        )
+        || spec.reduction.as_ref().is_some_and(|reduction| {
+            !matches!(reduction.spatial, SpatialReduction::None)
+                || !matches!(
+                    reduction.series,
+                    SeriesReduction::None | SeriesReduction::Envelope
+                )
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ObservationQuantity, ProcedureStep};
+
+    use super::quantity_supported;
+
+    #[test]
+    fn quantity_support_follows_physics_family() {
+        let structural = ProcedureStep::structural_static("structural");
+        assert!(quantity_supported(&structural, ObservationQuantity::Stress));
+        assert!(!quantity_supported(
+            &structural,
+            ObservationQuantity::Temperature
+        ));
+        assert!(quantity_supported(
+            &structural,
+            ObservationQuantity::Residual
+        ));
+
+        let thermal = ProcedureStep::thermal_static("thermal");
+        assert!(quantity_supported(&thermal, ObservationQuantity::HeatFlux));
+        assert!(!quantity_supported(
+            &thermal,
+            ObservationQuantity::Displacement
+        ));
+    }
+}

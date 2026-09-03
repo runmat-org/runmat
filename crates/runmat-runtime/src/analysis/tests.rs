@@ -12,12 +12,12 @@ use runmat_accelerate_api::{
 };
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure,
-    AnalysisStep, AnalysisStepKind, BeamElementModel, BeamSectionModel, CfdSolveFamily,
+    AnalysisSequence, BeamElementModel, BeamSectionModel, CfdSolveFamily,
     ConductivityFrequencyPoint, CoordinateFrame, CoupledPhysicsFamily, ElectromagneticDomain,
     EvidenceConfidence, FormulationImplementation, LoadCase, LoadKind, MaterialAssignment,
     MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    PhysicsFamily, SolutionSpace, StructuralElement, StructuralElementKind, StructuralModel,
-    StructuralNode,
+    PhysicsFamily, ProcedureStep, SolutionSpace, StructuralElement, StructuralElementKind,
+    StructuralModel, StructuralNode,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
@@ -250,10 +250,10 @@ fn sample_model() -> AnalysisModel {
                 fz: 0.0,
             },
         }],
-        steps: vec![AnalysisStep {
-            step_id: "step_static".to_string(),
-            kind: AnalysisStepKind::Static,
-        }],
+        sequence: AnalysisSequence::from_steps(
+            "sample_sequence",
+            vec![ProcedureStep::structural_static("step_static")],
+        ),
     }
 }
 
@@ -333,16 +333,14 @@ fn sample_moment_load(load_id: &str) -> LoadCase {
 
 fn sample_cht_model() -> AnalysisModel {
     let mut model = sample_solid_model();
-    model.steps = vec![
-        AnalysisStep {
-            step_id: "cht_flow".to_string(),
-            kind: AnalysisStepKind::Cfd,
-        },
-        AnalysisStep {
-            step_id: "cht_thermal".to_string(),
-            kind: AnalysisStepKind::Thermal,
-        },
-    ];
+    model.sequence = AnalysisSequence::from_steps(
+        "cht_sequence",
+        vec![ProcedureStep::coupled(
+            "cht",
+            CoupledPhysicsFamily::ConjugateHeatTransfer,
+            AnalysisProcedure::TransientResponse,
+        )],
+    );
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
     set_model_thermo_coupling(
         &mut model,
@@ -374,16 +372,14 @@ fn sample_cht_model() -> AnalysisModel {
 
 fn sample_fsi_model() -> AnalysisModel {
     let mut model = sample_model();
-    model.steps = vec![
-        AnalysisStep {
-            step_id: "fsi_structure".to_string(),
-            kind: AnalysisStepKind::Transient,
-        },
-        AnalysisStep {
-            step_id: "fsi_flow".to_string(),
-            kind: AnalysisStepKind::Cfd,
-        },
-    ];
+    model.sequence = AnalysisSequence::from_steps(
+        "fsi_sequence",
+        vec![ProcedureStep::coupled(
+            "fsi",
+            CoupledPhysicsFamily::FluidStructureInteraction,
+            AnalysisProcedure::TransientResponse,
+        )],
+    );
     model.cfd = Some(runmat_analysis_core::CfdDomain {
         enabled: true,
         solve_family: CfdSolveFamily::Transient,
@@ -915,7 +911,7 @@ studies:
     assert_eq!(model.material_assignments[0].region_id, "region_1");
     assert_eq!(model.constraints.len(), 1);
     assert_eq!(model.loads.len(), 1);
-    assert_eq!(model.steps.len(), 1);
+    assert_eq!(model.sequence.steps.len(), 1);
 }
 
 #[test]
@@ -1265,8 +1261,11 @@ fn analysis_create_model_returns_v1_envelope() {
     assert!(!envelope.data.materials.is_empty());
     assert!(!envelope.data.constraints.is_empty() || !envelope.data.boundaries.is_empty());
     assert!(!envelope.data.loads.is_empty());
-    assert!(!envelope.data.steps.is_empty());
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Static);
+    assert!(!envelope.data.sequence.steps.is_empty());
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::Static
+    );
 }
 
 #[test]
@@ -1363,7 +1362,10 @@ fn analysis_create_model_supports_nonlinear_profile_template() {
     .expect("nonlinear profile should be supported");
 
     assert_eq!(envelope.data.model_id.0, "nonlinear_model");
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Nonlinear);
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::Nonlinear
+    );
     assert_eq!(
         envelope.data.loads[0].load_id,
         "load_default_nonlinear_force"
@@ -1385,7 +1387,10 @@ fn analysis_create_model_supports_transient_profile_template() {
     .expect("transient profile should be supported");
 
     assert_eq!(envelope.data.model_id.0, "transient_model");
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Transient);
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::TransientResponse
+    );
     assert_eq!(
         envelope.data.loads[0].load_id,
         "load_default_transient_force"
@@ -1407,7 +1412,14 @@ fn analysis_create_model_supports_modal_profile_template() {
     .expect("modal profile should be supported");
 
     assert_eq!(envelope.data.model_id.0, "modal_model");
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Modal);
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::ModalExtraction
+    );
+    assert_eq!(
+        envelope.data.sequence.steps[0].family,
+        PhysicsFamily::Structural
+    );
     assert_eq!(envelope.data.loads[0].load_id, "load_default_modal_seed");
 }
 
@@ -1426,7 +1438,14 @@ fn analysis_create_model_supports_acoustic_harmonic_profile_template() {
     .expect("acoustic harmonic profile should be supported");
 
     assert_eq!(envelope.data.model_id.0, "acoustic_harmonic_model");
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Modal);
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::HarmonicResponse
+    );
+    assert_eq!(
+        envelope.data.sequence.steps[0].family,
+        PhysicsFamily::Acoustic
+    );
     assert_eq!(
         envelope.data.loads[0].load_id,
         "load_default_acoustic_harmonic_seed"
@@ -1448,8 +1467,8 @@ fn analysis_create_model_supports_electromagnetic_profile_template() {
     .expect("electromagnetic profile model creation should succeed");
 
     assert_eq!(
-        envelope.data.steps[0].kind,
-        AnalysisStepKind::Electromagnetic
+        envelope.data.sequence.steps[0].family,
+        PhysicsFamily::Electromagnetic
     );
     let domain = envelope
         .data
@@ -1478,7 +1497,10 @@ fn analysis_create_model_supports_electro_thermal_profile_template() {
     )
     .expect("electro-thermal profile model creation should succeed");
 
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Transient);
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::TransientResponse
+    );
     assert!(
         matches!(&envelope.data.constraints[0], runmat_analysis_core::AnalysisConstraint::Magnetic(value) if matches!(value.kind, runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround { .. }))
     );
@@ -1516,7 +1538,7 @@ fn analysis_create_model_supports_cfd_steady_profile_template() {
     )
     .expect("cfd steady profile should be supported");
 
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Cfd);
+    assert_eq!(envelope.data.sequence.steps[0].family, PhysicsFamily::Fluid);
     let cfd = envelope
         .data
         .cfd
@@ -1540,7 +1562,7 @@ fn analysis_create_model_supports_cfd_transient_profile_template() {
     )
     .expect("cfd transient profile should be supported");
 
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Cfd);
+    assert_eq!(envelope.data.sequence.steps[0].family, PhysicsFamily::Fluid);
     let cfd = envelope
         .data
         .cfd
@@ -1566,17 +1588,15 @@ fn analysis_create_model_supports_cht_coupled_profile_template() {
     )
     .expect("cht coupled profile should be supported");
 
-    assert_eq!(envelope.data.steps.len(), 2);
-    assert!(envelope
-        .data
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Cfd));
-    assert!(envelope
-        .data
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Thermal));
+    assert_eq!(envelope.data.sequence.steps.len(), 1);
+    assert_eq!(
+        envelope.data.sequence.steps[0].family,
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+    );
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::TransientResponse
+    );
     let cfd = envelope
         .data
         .cfd
@@ -1608,17 +1628,15 @@ fn analysis_create_model_supports_fsi_coupled_profile_template() {
     )
     .expect("fsi coupled profile should be supported");
 
-    assert_eq!(envelope.data.steps.len(), 2);
-    assert!(envelope
-        .data
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Transient));
-    assert!(envelope
-        .data
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Cfd));
+    assert_eq!(envelope.data.sequence.steps.len(), 1);
+    assert_eq!(
+        envelope.data.sequence.steps[0].family,
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
+    );
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::TransientResponse
+    );
     assert_eq!(envelope.data.loads[0].load_id, "load_default_fsi_seed");
     let cfd = envelope
         .data
@@ -2171,10 +2189,10 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
     );
     assert_eq!(model.loads[0].region_id, "coil");
     assert!(matches!(model.loads[0].kind, LoadKind::CoilCurrent { .. }));
-    assert!(matches!(
-        model.steps[0].kind,
-        AnalysisStepKind::Electromagnetic
-    ));
+    assert_eq!(
+        model.sequence.steps[0].family,
+        PhysicsFamily::Electromagnetic
+    );
     assert_eq!(
         authored
             .data
@@ -3817,10 +3835,9 @@ fn analysis_results_compare_reports_typed_deltas() {
     storage::reset_artifact_store_for_tests();
 
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     let baseline = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -3864,10 +3881,9 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
     storage::reset_artifact_store_for_tests();
 
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     for _ in 0..4 {
         let _ = analysis_run_nonlinear_op(
             &model,
@@ -3968,10 +3984,7 @@ fn analysis_trends_classifies_cfd_runs_separately() {
     storage::reset_artifact_store_for_tests();
 
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "cfd_1".to_string(),
-        kind: AnalysisStepKind::Cfd,
-    }];
+    model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
     for _ in 0..3 {
         let _ = analysis_run_cfd_op(
@@ -4098,10 +4111,9 @@ fn analysis_trends_classifies_fsi_runs_separately() {
 fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -4213,10 +4225,9 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
 fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_invalid_electro_voltage".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_invalid_electro_voltage".to_string(),
+    )];
     set_model_electro_coupling(
         &mut model,
         ElectroThermalCouplingOptions {
@@ -4251,10 +4262,9 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
 fn analysis_run_transient_rejects_invalid_electro_thermal_conductivity_scale() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_invalid_electro_conductivity".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_invalid_electro_conductivity".to_string(),
+    )];
     set_model_electro_coupling(
         &mut model,
         ElectroThermalCouplingOptions {
@@ -4292,10 +4302,9 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_conductivity_scale() {
 fn analysis_run_transient_rejects_unmapped_electro_thermal_region() {
     let _guard = analysis_test_guard();
     let mut model = sample_model_with_material_assignment_mismatch();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_unmapped_electro_region".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_unmapped_electro_region".to_string(),
+    )];
     set_model_electro_coupling(
         &mut model,
         ElectroThermalCouplingOptions {
@@ -4333,10 +4342,9 @@ fn analysis_run_transient_rejects_unmapped_electro_thermal_region() {
 fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -4456,10 +4464,9 @@ fn analysis_trends_ignore_noncanonical_artifacts() {
     .expect("configure filesystem artifact store");
 
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     let run = analysis_run_nonlinear_op(
         &model,
         ComputeBackend::Cpu,
@@ -4644,10 +4651,9 @@ fn analysis_results_by_run_id_rejects_unwrapped_artifacts() {
     .expect("configure filesystem artifact store");
 
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     let run = analysis_run_nonlinear_op(
         &model,
         ComputeBackend::Cpu,
@@ -4701,10 +4707,9 @@ fn analysis_results_by_run_id_rejects_unknown_artifact_schema() {
     .expect("configure filesystem artifact store");
 
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     let run = analysis_run_nonlinear_op(
         &model,
         ComputeBackend::Cpu,
@@ -4750,7 +4755,7 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
     .expect("configure filesystem artifact store");
 
     let mut cfd_model = sample_model();
-    cfd_model.steps[0].kind = AnalysisStepKind::Cfd;
+    cfd_model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     cfd_model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
     let cfd = analysis_run_cfd_op(
         &cfd_model,
@@ -4788,10 +4793,9 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
     )
     .expect("acoustic run should succeed");
     let mut thermal_model = sample_model();
-    thermal_model.steps = vec![AnalysisStep {
-        step_id: "thermal_op_version".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
+    thermal_model.sequence.steps = vec![ProcedureStep::thermal_static(
+        "thermal_op_version".to_string(),
+    )];
     set_model_thermo_coupling(
         &mut thermal_model,
         ThermoMechanicalCouplingOptions {
@@ -4860,10 +4864,9 @@ fn analysis_artifact_retention_prunes_old_runs_per_kind() {
     std::env::remove_var("RUNMAT_FEA_ARTIFACT_MAX_RUNS");
 
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     let mut run_ids = Vec::new();
     for _ in 0..5 {
         let run = analysis_run_nonlinear_op(
@@ -4908,10 +4911,9 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
     .expect("configure filesystem artifact store");
 
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     let run = analysis_run_nonlinear_op(
         &model,
         ComputeBackend::Cpu,
@@ -5319,7 +5321,7 @@ fn analysis_run_modal_rejects_models_without_modal_step() {
 }
 
 #[test]
-fn analysis_run_acoustic_rejects_models_without_modal_step() {
+fn analysis_run_acoustic_rejects_models_without_acoustic_harmonic_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
     let err = analysis_run_acoustic_op(
@@ -5469,7 +5471,7 @@ fn analysis_run_cfd_rejects_models_without_cfd_step() {
 fn analysis_run_cfd_rejects_model_without_cfd_domain() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     let err = analysis_run_cfd_op(
         &model,
         ComputeBackend::Cpu,
@@ -5486,7 +5488,7 @@ fn analysis_run_cfd_rejects_model_without_cfd_domain() {
 fn analysis_run_cfd_rejects_disabled_cfd_domain() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, false));
     let err = analysis_run_cfd_op(
         &model,
@@ -5504,7 +5506,7 @@ fn analysis_run_cfd_rejects_disabled_cfd_domain() {
 fn analysis_run_cfd_rejects_moment_loads() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
     model.loads = vec![sample_moment_load("cfd_moment")];
 
@@ -5540,10 +5542,9 @@ fn analysis_run_thermal_rejects_models_without_thermal_step() {
 fn analysis_run_thermal_rejects_invalid_thermal_material_values() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_invalid_material".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
+    model.sequence.steps = vec![ProcedureStep::thermal_static(
+        "thermal_invalid_material".to_string(),
+    )];
     model.materials[0].thermal.conductivity_w_per_mk = 0.0;
 
     let err = analysis_run_thermal_op(
@@ -5563,10 +5564,9 @@ fn analysis_run_thermal_rejects_invalid_thermal_material_values() {
 fn analysis_run_thermal_rejects_invalid_heat_source_values() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_invalid_source".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
+    model.sequence.steps = vec![ProcedureStep::thermal_static(
+        "thermal_invalid_source".to_string(),
+    )];
     model.loads = vec![LoadCase {
         load_id: "load_invalid_heat_source".to_string(),
         region_id: "thermal_core".to_string(),
@@ -5589,10 +5589,7 @@ fn analysis_run_thermal_rejects_invalid_heat_source_values() {
 fn analysis_run_thermal_rejects_moment_loads() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_moment".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
+    model.sequence.steps = vec![ProcedureStep::thermal_static("thermal_moment".to_string())];
     model.loads = vec![sample_moment_load("thermal_moment")];
 
     let err = analysis_run_thermal_op(
@@ -5609,10 +5606,9 @@ fn analysis_run_thermal_rejects_moment_loads() {
 fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_invalid_boundary".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
+    model.sequence.steps = vec![ProcedureStep::thermal_static(
+        "thermal_invalid_boundary".to_string(),
+    )];
     model.constraints.clear();
     model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
         boundary_id: "bc_invalid_convection".to_string(),
@@ -5639,13 +5635,10 @@ fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
 }
 
 #[test]
-fn analysis_run_cht_rejects_models_without_cfd_step() {
+fn analysis_run_cht_rejects_uncoupled_thermal_step() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_1".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
+    model.sequence.steps = vec![ProcedureStep::thermal_static("thermal_1".to_string())];
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -5664,7 +5657,7 @@ fn analysis_run_cht_rejects_models_without_cfd_step() {
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect_err("cht run should fail for missing cfd step");
+    .expect_err("cht run should reject an uncoupled thermal step");
 
     assert_eq!(err.operation, "fea.run_cht");
     assert_eq!(err.op_version, "fea.run_cht/v1");
@@ -5672,20 +5665,17 @@ fn analysis_run_cht_rejects_models_without_cfd_step() {
 }
 
 #[test]
-fn analysis_run_cht_rejects_models_without_thermal_step() {
+fn analysis_run_cht_rejects_uncoupled_fluid_step() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "cfd_1".to_string(),
-        kind: AnalysisStepKind::Cfd,
-    }];
+    model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
     let err = analysis_run_cht_op(
         &model,
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect_err("cht run should fail for missing thermal step");
+    .expect_err("cht run should reject an uncoupled fluid step");
 
     assert_eq!(err.operation, "fea.run_cht");
     assert_eq!(err.op_version, "fea.run_cht/v1");
@@ -5805,20 +5795,17 @@ fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
 }
 
 #[test]
-fn analysis_run_fsi_rejects_models_without_transient_step() {
+fn analysis_run_fsi_rejects_uncoupled_fluid_step() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "cfd_1".to_string(),
-        kind: AnalysisStepKind::Cfd,
-    }];
+    model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
     let err = analysis_run_fsi_op(
         &model,
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect_err("fsi run should fail for missing transient step");
+    .expect_err("fsi run should reject an uncoupled fluid step");
 
     assert_eq!(err.operation, "fea.run_fsi");
     assert_eq!(err.op_version, "fea.run_fsi/v1");
@@ -5980,7 +5967,7 @@ fn configure_valid_em_authoring(model: &mut AnalysisModel) {
 #[test]
 fn analysis_run_electromagnetic_rejects_missing_electrical_material() {
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.sequence.steps[0] = ProcedureStep::electromagnetic_static("electromagnetic_test");
     configure_valid_em_authoring(&mut model);
     for material in &mut model.materials {
         material.electrical = None;
@@ -6001,7 +5988,7 @@ fn analysis_run_electromagnetic_rejects_missing_electrical_material() {
 #[test]
 fn analysis_run_electromagnetic_rejects_missing_current_source() {
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.sequence.steps[0] = ProcedureStep::electromagnetic_static("electromagnetic_test");
     configure_valid_em_authoring(&mut model);
     model.loads = vec![LoadCase {
         load_id: "structural_force".to_string(),
@@ -6028,7 +6015,7 @@ fn analysis_run_electromagnetic_rejects_missing_current_source() {
 #[test]
 fn analysis_run_electromagnetic_rejects_moment_loads() {
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.sequence.steps[0] = ProcedureStep::electromagnetic_static("electromagnetic_test");
     configure_valid_em_authoring(&mut model);
     model.loads = vec![sample_moment_load("em_moment")];
 
@@ -6047,7 +6034,7 @@ fn analysis_run_electromagnetic_rejects_moment_loads() {
 #[test]
 fn analysis_run_electromagnetic_rejects_missing_em_boundary() {
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.sequence.steps[0] = ProcedureStep::electromagnetic_static("electromagnetic_test");
     configure_valid_em_authoring(&mut model);
     model.boundaries.clear();
     model.constraints = vec![fixed_constraint("structural_fixed", "em_region")];
@@ -6067,7 +6054,7 @@ fn analysis_run_electromagnetic_rejects_missing_em_boundary() {
 #[test]
 fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.sequence.steps[0] = ProcedureStep::electromagnetic_static("electromagnetic_test");
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: 293.15,
         conductivity_s_per_m: 5.8e7,
@@ -6336,7 +6323,7 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
 #[test]
 fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.sequence.steps[0] = ProcedureStep::electromagnetic_static("electromagnetic_test");
     model.materials[0].electrical = Some(MaterialElectricalModel {
         reference_temperature_k: 293.15,
         conductivity_s_per_m: 5.8e7,
@@ -6419,7 +6406,7 @@ fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
 fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.sequence.steps[0] = ProcedureStep::electromagnetic_static("electromagnetic_test");
     model.electromagnetic = Some(ElectromagneticDomain {
         enabled: true,
         reference_frequency_hz: 60.0,
@@ -6447,10 +6434,7 @@ fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
 fn analysis_run_thermal_returns_temperature_payload() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_1".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
+    model.sequence.steps = vec![ProcedureStep::thermal_static("thermal_1".to_string())];
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -6622,10 +6606,7 @@ fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
 fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_1".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
+    model.sequence.steps = vec![ProcedureStep::thermal_static("thermal_1".to_string())];
     model.materials.push(MaterialModel {
         material_id: "mat_poly_high_k".to_string(),
         name: "High K Composite".to_string(),
@@ -6716,10 +6697,9 @@ fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
 fn analysis_run_nonlinear_returns_native_nonlinear_result() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     let envelope = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -6851,10 +6831,9 @@ fn analysis_run_nonlinear_exposes_beam_rotation_snapshots() {
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
     );
-    model.steps = vec![AnalysisStep {
-        step_id: "beam_moment_nonlinear".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "beam_moment_nonlinear".to_string(),
+    )];
 
     let envelope = analysis_run_nonlinear_with_options_op(
         &model,
@@ -6902,10 +6881,9 @@ fn analysis_run_nonlinear_exposes_beam_rotation_snapshots() {
 fn analysis_run_nonlinear_strict_rejects_iteration_cap_exhaustion() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
 
     let envelope = analysis_run_nonlinear_with_options_op(
         &model,
@@ -6933,10 +6911,9 @@ fn analysis_run_nonlinear_strict_rejects_iteration_cap_exhaustion() {
 fn nonlinear_quality_policy_diverges_for_increment_failures() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
 
     let run_with_policy = |quality_policy| {
         analysis_run_nonlinear_with_options_op(
@@ -6981,10 +6958,9 @@ fn nonlinear_quality_policy_diverges_for_increment_failures() {
 fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     for material in &mut model.materials {
         material.thermal.expansion_coefficient_per_k = 1.0e-3;
     }
@@ -7067,10 +7043,9 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
 fn nonlinear_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_threshold() {
     let _guard = analysis_test_guard();
     let mut model = sample_model_with_material_assignment_mismatch();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -7108,10 +7083,9 @@ fn nonlinear_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_
 fn analysis_results_query_can_exclude_nonlinear_payload() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     let run = analysis_run_nonlinear_op(
         &model,
         ComputeBackend::Cpu,
@@ -7220,10 +7194,9 @@ fn nonlinear_results_deserialize_with_missing_new_fields() {
 fn analysis_run_transient_returns_native_transient_result() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
 
     let envelope = analysis_run_transient_op(
         &model,
@@ -7352,10 +7325,9 @@ fn analysis_run_transient_exposes_beam_rotational_snapshots() {
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
     );
-    model.steps = vec![AnalysisStep {
-        step_id: "beam_moment_transient".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "beam_moment_transient".to_string(),
+    )];
 
     let envelope = analysis_run_transient_op(
         &model,
@@ -7420,7 +7392,7 @@ fn analysis_run_transient_exposes_beam_rotational_snapshots() {
 fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     model.boundaries.clear();
     model.constraints = sample_cfd_constraints(4.25);
     model
@@ -7596,7 +7568,7 @@ fn analysis_run_cfd_projects_the_canonical_solver_mesh_into_flow_topology() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cfd-solver-mesh");
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     model.boundaries.clear();
     model.constraints = sample_cfd_constraints(4.25);
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
@@ -7657,7 +7629,7 @@ fn canonical_boundary_faces_define_complete_tetrahedral_interface_connectivity()
 fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
     model.boundaries.clear();
     model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Fluid(
@@ -8066,10 +8038,9 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
 fn analysis_run_transient_with_options_controls_timeline() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
 
     let envelope = analysis_run_transient_with_options_op(
         &model,
@@ -8114,10 +8085,9 @@ fn analysis_run_transient_with_options_controls_timeline() {
 fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -8164,10 +8134,9 @@ fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
 fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -8202,10 +8171,9 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
 fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     set_model_plasticity(
         &mut model,
         PlasticityConstitutiveOptions {
@@ -8231,10 +8199,9 @@ fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
 fn analysis_run_nonlinear_rejects_invalid_contact_interface_options() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     set_model_contact(
         &mut model,
         ContactInterfaceOptions {
@@ -8260,10 +8227,9 @@ fn analysis_run_nonlinear_rejects_invalid_contact_interface_options() {
 fn analysis_run_transient_can_resolve_thermo_field_artifact() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
 
     let root = temp_artifact_root("transient-thermo-resolve").join("thermo-fields");
     let _root_guard = scoped_thermo_field_artifact_root(&root);
@@ -8341,10 +8307,9 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
 fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
 
     let root = temp_artifact_root("transient-thermo-missing").join("thermo-fields");
     let _root_guard = scoped_thermo_field_artifact_root(&root);
@@ -8380,10 +8345,9 @@ fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
 fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
     let _guard = analysis_test_guard();
     let mut model = sample_model_with_material_assignment_mismatch();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
 
     let root = temp_artifact_root("transient-thermo-inline-parity").join("thermo-fields");
     let _root_guard = scoped_thermo_field_artifact_root(&root);
@@ -8514,10 +8478,9 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
 fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     for material in &mut model.materials {
         material.thermal.expansion_coefficient_per_k = 1.0e-3;
     }
@@ -8602,10 +8565,9 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
 fn transient_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_threshold() {
     let _guard = analysis_test_guard();
     let mut model = sample_model_with_material_assignment_mismatch();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
@@ -8645,10 +8607,9 @@ fn transient_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_
 fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     set_model_plasticity(
         &mut model,
         PlasticityConstitutiveOptions {
@@ -8689,10 +8650,9 @@ fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
 fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     set_model_contact(
         &mut model,
         ContactInterfaceOptions {
@@ -9129,10 +9089,9 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
 fn analysis_results_include_transient_payload_for_transient_runs() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     let run = analysis_run_transient_op(
         &model,
         ComputeBackend::Cpu,
@@ -9265,10 +9224,9 @@ fn analysis_generate_study_run_mesh_figure_uses_solver_topology_for_em_run() {
 fn analysis_results_query_can_exclude_transient_payload() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     let run = analysis_run_transient_op(
         &model,
         ComputeBackend::Cpu,
@@ -9307,10 +9265,9 @@ fn analysis_results_query_can_exclude_transient_payload() {
 fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     let run = analysis_run_transient_op(
         &model,
         ComputeBackend::Cpu,

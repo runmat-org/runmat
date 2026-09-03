@@ -17,6 +17,7 @@ pub(crate) fn validate_model_excitations(
         .map(|signal| (signal.signal_id(), signal))
         .collect::<HashMap<_, _>>();
     let steps = model
+        .sequence
         .steps
         .iter()
         .map(|step| step.step_id.as_str())

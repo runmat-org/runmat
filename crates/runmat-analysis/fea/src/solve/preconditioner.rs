@@ -177,9 +177,9 @@ pub fn build_spd_preconditioner(
 #[cfg(test)]
 mod tests {
     use runmat_analysis_core::{
-        AnalysisConstraint, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
-        CoordinateFrame, LoadCase, LoadKind, MaterialMechanicalModel, MaterialModel,
-        MaterialThermalModel, RegionTarget, StructuralConstraint, StructuralConstraintKind,
+        AnalysisConstraint, AnalysisModel, AnalysisModelId, AnalysisSequence, CoordinateFrame,
+        LoadCase, LoadKind, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+        ProcedureStep, RegionTarget, StructuralConstraint, StructuralConstraintKind,
     };
     use runmat_geometry_core::UnitSystem;
 
@@ -241,10 +241,10 @@ mod tests {
                     fz: 0.0,
                 },
             }],
-            steps: vec![AnalysisStep {
-                step_id: "s1".to_string(),
-                kind: AnalysisStepKind::Static,
-            }],
+            sequence: AnalysisSequence::from_steps(
+                "preconditioner_test_sequence",
+                vec![ProcedureStep::structural_static("s1")],
+            ),
         }
     }
 

@@ -3,17 +3,17 @@ use std::path::{Path, PathBuf};
 
 use runmat_analysis_core::{
     AnalysisBoundary, AnalysisConstraint, AnalysisInterface, AnalysisModel, AnalysisModelId,
-    AnalysisStep, BeamElementModel, BeamSectionModel, BoundaryOperator, CfdDomain, CoordinateFrame,
-    Displacement, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence, FluidConstraint,
-    FluidConstraintKind, HeatFlux, HeatTransferCoefficient, LoadCase, LoadKind, MagneticConstraint,
-    MagneticConstraintKind, MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
-    PrescribedRotations, PrescribedTranslations, Pressure, RegionTarget, Rotation,
-    RotationDofValue, ShellElementModel, ShellSectionModel, SpecificAcousticImpedance,
-    StructuralConstraint, StructuralConstraintKind, StructuralElement, StructuralElementKind,
-    StructuralModel, StructuralNode, StructuralRotationDof, StructuralTranslationDof, Temperature,
-    ThermalConstraint, ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue,
-    ValueSchedule, Velocity,
+    AnalysisSequence, BeamElementModel, BeamSectionModel, BoundaryOperator, CfdDomain,
+    CoordinateFrame, Displacement, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence,
+    FluidConstraint, FluidConstraintKind, HeatFlux, HeatTransferCoefficient, LoadCase, LoadKind,
+    MagneticConstraint, MagneticConstraintKind, MaterialAcousticModel, MaterialAssignment,
+    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
+    MaterialThermalModel, PrescribedRotations, PrescribedTranslations, Pressure, ProcedureStep,
+    RegionTarget, Rotation, RotationDofValue, ShellElementModel, ShellSectionModel,
+    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind, StructuralElement,
+    StructuralElementKind, StructuralModel, StructuralNode, StructuralRotationDof,
+    StructuralTranslationDof, Temperature, ThermalConstraint, ThermalConstraintKind,
+    ThermoMechanicalDomain, TranslationDofValue, ValueSchedule, Velocity,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
@@ -365,7 +365,33 @@ enum FeaLoadType {
 #[serde(deny_unknown_fields)]
 struct FeaStepDocument {
     id: String,
-    kind: runmat_analysis_core::AnalysisStepKind,
+    kind: FeaStepKind,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FeaStepKind {
+    Static,
+    Modal,
+    Transient,
+    Thermal,
+    Nonlinear,
+    Electromagnetic,
+    Cfd,
+}
+
+impl FeaStepDocument {
+    fn resolve(&self) -> ProcedureStep {
+        match self.kind {
+            FeaStepKind::Static => ProcedureStep::structural_static(&self.id),
+            FeaStepKind::Modal => ProcedureStep::structural_modal(&self.id),
+            FeaStepKind::Transient => ProcedureStep::structural_transient(&self.id),
+            FeaStepKind::Thermal => ProcedureStep::thermal_static(&self.id),
+            FeaStepKind::Nonlinear => ProcedureStep::structural_nonlinear(&self.id),
+            FeaStepKind::Electromagnetic => ProcedureStep::electromagnetic_static(&self.id),
+            FeaStepKind::Cfd => ProcedureStep::fluid_static(&self.id),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -643,14 +669,10 @@ fn resolve_model(
             .collect::<Result<Vec<_>, _>>()?;
     }
     if !study.steps.is_empty() {
-        model.steps = study
-            .steps
-            .iter()
-            .map(|step| AnalysisStep {
-                step_id: step.id.clone(),
-                kind: step.kind.clone(),
-            })
-            .collect();
+        model.sequence = AnalysisSequence::from_steps(
+            format!("{}.sequence", model.model_id.0),
+            study.steps.iter().map(FeaStepDocument::resolve).collect(),
+        );
     }
     if study.domains.thermo_mechanical.is_some() {
         model.thermo_mechanical = study.domains.thermo_mechanical.clone();
@@ -1154,7 +1176,7 @@ fn parse_options<T: DeserializeOwned>(
 
 fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
     AnalysisModel {
-        model_id: AnalysisModelId(model_id),
+        model_id: AnalysisModelId(model_id.clone()),
         geometry_id: geometry.geometry_id.clone(),
         geometry_revision: geometry.revision,
         units: geometry.units,
@@ -1176,7 +1198,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         initial_conditions: Vec::new(),
         response_spectra: Vec::new(),
         loads: Vec::new(),
-        steps: Vec::new(),
+        sequence: AnalysisSequence::from_steps(format!("{model_id}.sequence"), Vec::new()),
     }
 }
 

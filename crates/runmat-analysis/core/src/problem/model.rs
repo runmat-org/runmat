@@ -15,9 +15,9 @@ use super::{
     materials::MaterialModel,
     response_spectrum::ResponseSpectrum,
     signal::PhysicalSignal,
-    steps::AnalysisStep,
     structure::StructuralModel,
 };
+use crate::AnalysisSequence;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisModelId(pub String);
@@ -56,5 +56,5 @@ pub struct AnalysisModel {
     pub initial_conditions: Vec<InitialCondition>,
     pub response_spectra: Vec<ResponseSpectrum>,
     pub loads: Vec<LoadCase>,
-    pub steps: Vec<AnalysisStep>,
+    pub sequence: AnalysisSequence,
 }

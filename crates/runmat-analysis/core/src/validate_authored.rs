@@ -16,6 +16,7 @@ pub(crate) fn validate_authored_model(
     validate_connectors(&model.connectors)?;
     crate::validate_signals::validate_signals(&model.signals)?;
     crate::validate_excitations::validate_model_excitations(model)?;
+    crate::validate_sequence::validate_sequence(model)?;
     Ok(())
 }
 

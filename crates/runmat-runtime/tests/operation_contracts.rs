@@ -383,8 +383,8 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     assert_eq!(modal.operation, "fea.create_model");
     assert_eq!(modal.op_version, "fea.create_model/v1");
     assert_eq!(
-        modal.data.steps[0].kind,
-        runmat_analysis_core::AnalysisStepKind::Modal
+        modal.data.sequence.steps[0].procedure,
+        runmat_analysis_core::AnalysisProcedure::ModalExtraction
     );
 
     let acoustic = analysis_create_model_op(
@@ -399,8 +399,8 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     assert_eq!(acoustic.operation, "fea.create_model");
     assert_eq!(acoustic.op_version, "fea.create_model/v1");
     assert_eq!(
-        acoustic.data.steps[0].kind,
-        runmat_analysis_core::AnalysisStepKind::Modal
+        acoustic.data.sequence.steps[0].procedure,
+        runmat_analysis_core::AnalysisProcedure::HarmonicResponse
     );
 
     let transient = analysis_create_model_op(
@@ -415,8 +415,8 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     assert_eq!(transient.operation, "fea.create_model");
     assert_eq!(transient.op_version, "fea.create_model/v1");
     assert_eq!(
-        transient.data.steps[0].kind,
-        runmat_analysis_core::AnalysisStepKind::Transient
+        transient.data.sequence.steps[0].procedure,
+        runmat_analysis_core::AnalysisProcedure::TransientResponse
     );
 
     let nonlinear = analysis_create_model_op(
@@ -431,8 +431,8 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     assert_eq!(nonlinear.operation, "fea.create_model");
     assert_eq!(nonlinear.op_version, "fea.create_model/v1");
     assert_eq!(
-        nonlinear.data.steps[0].kind,
-        runmat_analysis_core::AnalysisStepKind::Nonlinear
+        nonlinear.data.sequence.steps[0].procedure,
+        runmat_analysis_core::AnalysisProcedure::Nonlinear
     );
 
     let electromagnetic = analysis_create_model_op(
@@ -450,8 +450,8 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     assert_eq!(electromagnetic.operation, "fea.create_model");
     assert_eq!(electromagnetic.op_version, "fea.create_model/v1");
     assert_eq!(
-        electromagnetic.data.steps[0].kind,
-        runmat_analysis_core::AnalysisStepKind::Electromagnetic
+        electromagnetic.data.sequence.steps[0].family,
+        runmat_analysis_core::PhysicsFamily::Electromagnetic
     );
     let electromagnetic_domain = electromagnetic
         .data
@@ -477,8 +477,10 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     assert_eq!(electro_thermal.operation, "fea.create_model");
     assert_eq!(electro_thermal.op_version, "fea.create_model/v1");
     assert_eq!(
-        electro_thermal.data.steps[0].kind,
-        runmat_analysis_core::AnalysisStepKind::Transient
+        electro_thermal.data.sequence.steps[0].family,
+        runmat_analysis_core::PhysicsFamily::Coupled(
+            runmat_analysis_core::CoupledPhysicsFamily::Electrothermal
+        )
     );
     assert!(electro_thermal.data.electro_thermal.is_some());
 }
@@ -1241,10 +1243,9 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
 #[test]
 fn analysis_run_cfd_contract_shapes_cell_and_boundary_fields() {
     let mut model = contract_linear_static_model();
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "cfd_steady".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-    }];
+    model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(
+        "cfd_steady".to_string(),
+    )];
     model.cfd = Some(runmat_analysis_core::CfdDomain {
         enabled: true,
         solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
@@ -1387,10 +1388,9 @@ fn analysis_run_cht_contract_shapes_coupled_interface_fields() {
 #[test]
 fn analysis_run_transient_contract_is_v1_and_typed() {
     let mut model = contract_linear_static_model();
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
 
     let envelope = analysis_run_transient_op(
         &model,
@@ -1442,16 +1442,14 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
 #[test]
 fn analysis_run_fsi_contract_is_v1_and_typed() {
     let mut model = contract_linear_static_model();
-    model.steps = vec![
-        runmat_analysis_core::AnalysisStep {
-            step_id: "fsi_structure".to_string(),
-            kind: runmat_analysis_core::AnalysisStepKind::Transient,
-        },
-        runmat_analysis_core::AnalysisStep {
-            step_id: "fsi_flow".to_string(),
-            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-        },
-    ];
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "fsi_sequence",
+        vec![runmat_analysis_core::ProcedureStep::coupled(
+            "fsi",
+            runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
+            runmat_analysis_core::AnalysisProcedure::TransientResponse,
+        )],
+    );
     model.cfd = Some(runmat_analysis_core::CfdDomain {
         enabled: true,
         solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
@@ -1536,10 +1534,9 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
     );
 
     let mut invalid_model = model.clone();
-    invalid_model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "fsi_flow_only".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-    }];
+    invalid_model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(
+        "fsi_flow_only".to_string(),
+    )];
     let invalid = analysis_run_fsi_op(
         &invalid_model,
         ComputeBackend::Cpu,
@@ -1554,10 +1551,9 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
 #[test]
 fn analysis_run_transient_thermo_field_reference_errors_are_typed() {
     let mut model = contract_linear_static_model();
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
         enabled: true,
         reference_temperature_k: 293.15,
@@ -1697,7 +1693,8 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
 #[test]
 fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     let mut model = contract_linear_static_model();
-    model.steps[0].kind = runmat_analysis_core::AnalysisStepKind::Electromagnetic;
+    model.sequence.steps[0] =
+        runmat_analysis_core::ProcedureStep::electromagnetic_static("electromagnetic");
     model.materials[0].electrical = Some(MaterialElectricalModel::default());
     let region_id = model.constraints[0]
         .target()
@@ -1851,7 +1848,8 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
 #[test]
 fn electromagnetic_contract_snapshot_matches_expected_shape() {
     let mut model = contract_linear_static_model();
-    model.steps[0].kind = runmat_analysis_core::AnalysisStepKind::Electromagnetic;
+    model.sequence.steps[0] =
+        runmat_analysis_core::ProcedureStep::electromagnetic_static("electromagnetic");
     model.materials[0].electrical = Some(MaterialElectricalModel::default());
     let region_id = model.constraints[0]
         .target()
@@ -2150,10 +2148,9 @@ fn analysis_trends_contract_is_v1_and_typed() {
 #[test]
 fn analysis_run_transient_with_options_contract_controls_execution_window() {
     let mut model = contract_linear_static_model();
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
 
     let envelope = analysis_run_transient_with_options_op(
         &model,
@@ -2498,10 +2495,9 @@ fn analysis_results_modal_query_controls_are_typed() {
 #[test]
 fn analysis_results_transient_query_controls_are_typed() {
     let mut model = contract_linear_static_model();
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     let transient_run = analysis_run_transient_op(
         &model,
         ComputeBackend::Cpu,

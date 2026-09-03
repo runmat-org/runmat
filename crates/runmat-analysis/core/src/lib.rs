@@ -18,15 +18,17 @@ pub mod problem {
     pub mod response_spectrum;
     pub mod schedule;
     pub mod signal;
-    pub mod steps;
     pub mod structure;
     pub mod target;
 }
 pub mod field;
 pub mod study;
 pub mod validate;
+mod validate_accuracy;
 mod validate_authored;
 mod validate_excitations;
+mod validate_outputs;
+mod validate_sequence;
 mod validate_signals;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
@@ -93,13 +95,35 @@ pub use problem::signal::{
     SignalPrecision, SignalProvenance, SignalRepresentation, SignalSamplingPolicy, SignalShape,
     SignalValue, StandardWaveform, StandardWaveformKind, TabulatedSignal,
 };
-pub use problem::steps::{AnalysisStep, AnalysisStepKind};
 pub use problem::structure::{
     BeamElementModel, BeamSectionModel, ShellElementModel, ShellSectionModel, StructuralElement,
     StructuralElementKind, StructuralModel, StructuralNode,
 };
 pub use problem::target::{
     EntityDimension, ExpectedTopology, RegionTarget, ResolvedTopologyTarget, TargetCardinality,
+};
+pub use study::accuracy::{
+    AccuracyContribution, AccuracyCriterion, AccuracyLimitAction, AccuracyMeasure, AccuracyPlan,
+    AccuracyPlanId, AccuracyReport, AccuracyResourceCeiling, AccuracyStatus, AccuracyTarget,
+    AccuracyTolerance, ErrorContributionKind, NumericalEquivalencePolicy, RequiredAccuracyEvidence,
+    UnavailableEvidencePolicy,
+};
+pub use study::output::{
+    ComplexRepresentation, CompressionPolicy, DiagnosticKind, DiagnosticObservation,
+    ExtremaTiePolicy, FieldLocation, MonitorCadence, MonitorObservation, MonitorStopCondition,
+    ObservationComponent, ObservationCostEstimate, ObservationEvent, ObservationId,
+    ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationSpec,
+    ObservationStoragePolicy, ObservationTarget, ObservationThreshold, ObservationValueShape,
+    PartialAccessPolicy, RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy,
+    SeriesReduction, SignConvention, SpatialReduction,
+};
+pub use study::sequence::{
+    ActivationLifecycle, AnalysisSequence, IndependentDomain, InitialStateConflictPolicy,
+    ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RestartPolicy, SequenceBranch,
+    SequenceBranchId, SequenceDependency, SequenceDependencyReason, StateCompleteness, StateId,
+    StateInput, StateKind, StateOutput, StatePersistence, StateSource, StateTransition,
+    StateTransitionMethod, StateUse, StepObjectActivation, StepObjectRef, TopologyTransitionPolicy,
+    TransitionId,
 };
 pub use study::{
     AnalysisProcedure, AnalysisRunIdentity, CoupledPhysicsFamily, ExecutionFallbackPolicy,
@@ -163,10 +187,10 @@ mod tests {
                     fz: 0.0,
                 },
             }],
-            steps: vec![AnalysisStep {
-                step_id: "step_static".to_string(),
-                kind: AnalysisStepKind::Static,
-            }],
+            sequence: AnalysisSequence::from_steps(
+                "analysis_sequence",
+                vec![ProcedureStep::structural_static("step_static")],
+            ),
         }
     }
 

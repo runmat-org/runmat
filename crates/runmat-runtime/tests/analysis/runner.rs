@@ -974,10 +974,9 @@ fn authored_cfd_boundaries_for_fixture(
 
 fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     if spec_id.starts_with("acoustic_harmonic_") {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_acoustic_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Modal,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::acoustic_harmonic(
+            format!("step_acoustic_{}", spec_id),
+        )];
         for material in &mut model.materials {
             material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
                 density_kg_per_m3: 1.225,
@@ -1056,10 +1055,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.cfd = None;
     }
     if spec_id.starts_with("thermal_standalone_ramp_") {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_thermal_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_static(
+            format!("step_thermal_{}", spec_id),
+        )];
         model.constraints = vec![thermal_temperature(
             format!("bc_thermal_temperature_{spec_id}"),
             "thermal_hot_wall",
@@ -1129,10 +1127,10 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.cfd = None;
     }
     if spec_id.starts_with("cfd_steady_") {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_cfd_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(format!(
+            "step_cfd_{}",
+            spec_id
+        ))];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -1149,10 +1147,10 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         });
     }
     if spec_id.starts_with("cfd_transient_") {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_cfd_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(format!(
+            "step_cfd_{}",
+            spec_id
+        ))];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -1178,10 +1176,10 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         });
     }
     if spec_id == "cfd_invalid_domain_options" || spec_id == "cfd_invalid_boundary_conditions" {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_cfd_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(format!(
+            "step_cfd_{}",
+            spec_id
+        ))];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -1211,16 +1209,14 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         });
     }
     if spec_id.starts_with("cht_coupled_") {
-        model.steps = vec![
-            runmat_analysis_core::AnalysisStep {
-                step_id: format!("step_cht_flow_{}", spec_id),
-                kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-            },
-            runmat_analysis_core::AnalysisStep {
-                step_id: format!("step_cht_thermal_{}", spec_id),
-                kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-            },
-        ];
+        model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+            format!("sequence_{spec_id}"),
+            vec![runmat_analysis_core::ProcedureStep::coupled(
+                format!("step_cht_{spec_id}"),
+                runmat_analysis_core::CoupledPhysicsFamily::ConjugateHeatTransfer,
+                runmat_analysis_core::AnalysisProcedure::TransientResponse,
+            )],
+        );
         model.electro_thermal = None;
         model.interfaces.clear();
         model.cfd = Some(runmat_analysis_core::CfdDomain {
@@ -1325,16 +1321,14 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         }
     }
     if spec_id.starts_with("fsi_coupled_") {
-        model.steps = vec![
-            runmat_analysis_core::AnalysisStep {
-                step_id: format!("step_fsi_structure_{}", spec_id),
-                kind: runmat_analysis_core::AnalysisStepKind::Transient,
-            },
-            runmat_analysis_core::AnalysisStep {
-                step_id: format!("step_fsi_flow_{}", spec_id),
-                kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-            },
-        ];
+        model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+            format!("sequence_{spec_id}"),
+            vec![runmat_analysis_core::ProcedureStep::coupled(
+                format!("step_fsi_{spec_id}"),
+                runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
+                runmat_analysis_core::AnalysisProcedure::TransientResponse,
+            )],
+        );
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -1421,10 +1415,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     }
 
     if let Some(profile) = electromagnetic_profile_for_fixture(spec_id) {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_em_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Electromagnetic,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::electromagnetic_static(
+            format!("step_em_{}", spec_id),
+        )];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -3313,12 +3306,12 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_heat_balance_residual_ratio",
-        "FEA_THERMAL_HEAT_BALANCE",
+        "thermal_standalone_energy_storage_consistency_residual_ratio",
+        "FEA_THERMAL_ENERGY_STORAGE_CONSISTENCY",
         diagnostic_metric(
             run,
-            "FEA_THERMAL_HEAT_BALANCE",
-            "heat_balance_residual_ratio",
+            "FEA_THERMAL_ENERGY_STORAGE_CONSISTENCY",
+            "storage_consistency_residual_ratio",
         ),
         Some(0.0),
         Some(0.25),
@@ -4337,6 +4330,24 @@ fn write_fixture_solver_mesh_artifact(
     mesh.geometry.source_digest = StableDigest::from_bytes(source_hasher.finalize().into());
     mesh.geometry.geometry_revision = u64::from(model.geometry_revision);
 
+    if model.materials.len() > 1 {
+        let assigned_region = model
+            .material_assignments
+            .first()
+            .ok_or_else(|| "multi-material fixture requires a material assignment".to_string())?
+            .region_id
+            .clone();
+        let region_identity = PersistentEntityId {
+            kind: PersistentEntityKind::Region,
+            source_topology_id: assigned_region.clone(),
+            assembly_path: vec!["root".to_owned()],
+        };
+        for element in &mut mesh.topology.volume_elements {
+            element.region_id = region_identity.clone();
+        }
+        mesh.topology.regions[0].region_id = region_identity;
+    }
+
     let mut boundary_regions = std::collections::BTreeSet::new();
     for constraint in &model.constraints {
         constraint.visit_targets(|target| {
@@ -4595,8 +4606,8 @@ pub(super) fn run_fixture(
             Ok(value) => value,
             Err(err) => {
                 failures.push(format!(
-                    "unexpected CPU run failure for fixture {}: {}",
-                    spec.id, err.error_code
+                    "unexpected CPU run failure for fixture {}: {}: {}",
+                    spec.id, err.error_code, err.message
                 ));
                 return FixtureRunRecord {
                     fixture_id: spec.id.to_string(),
@@ -6687,12 +6698,12 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "fsi_structural_step_count",
+                "fsi_procedure_count",
                 "FEA_FSI_COUPLING",
                 diagnostic_metric(
                     &cpu_envelope.data,
                     "FEA_FSI_COUPLING",
-                    "structural_step_count",
+                    "fsi_procedure_count",
                 ),
                 Some(1.0),
                 Some(1.0),

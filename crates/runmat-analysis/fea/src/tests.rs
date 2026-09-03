@@ -48,7 +48,7 @@ fn fixed_constraint(id: &str, region: &str) -> runmat_analysis_core::AnalysisCon
         },
     )
 }
-use runmat_analysis_core::{ElectromagneticDomain, MaterialElectricalModel};
+use runmat_analysis_core::{ElectromagneticDomain, MaterialElectricalModel, ProcedureStep};
 use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
@@ -934,10 +934,7 @@ fn electromagnetic_pipeline_rejects_moment_loads_before_domain_validation() {
 #[test]
 fn modal_solver_emits_modes_for_modal_step_fixture() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "modal_1".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Modal,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_modal("modal_1".to_string())];
     let result = crate::run_modal(&model, ComputeBackend::Cpu).expect("modal solve should succeed");
 
     assert!(!result.frequencies_hz.is_empty());
@@ -1001,10 +998,9 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
 #[test]
 fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
     let result =
         crate::run_transient(&model, ComputeBackend::Cpu).expect("transient solve should succeed");
 
@@ -1084,10 +1080,9 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
 #[test]
 fn transient_beam_moment_emits_rotational_snapshots() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "beam_moment_transient".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "beam_moment_transient".to_string(),
+    )];
     let result =
         crate::run_transient(&model, ComputeBackend::Cpu).expect("transient beam solve should run");
 
@@ -1494,10 +1489,9 @@ fn electro_thermal_transient_emits_coupled_fields() {
 #[test]
 fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
     let mut model = fixture_model(FixtureId::TransientShock);
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     let result =
         crate::run_nonlinear(&model, ComputeBackend::Cpu).expect("nonlinear solve should succeed");
 
@@ -1612,10 +1606,9 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
 #[test]
 fn nonlinear_beam_moment_emits_rotation_snapshots() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    model.steps = vec![runmat_analysis_core::AnalysisStep {
-        step_id: "beam_moment_nonlinear".to_string(),
-        kind: runmat_analysis_core::AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "beam_moment_nonlinear".to_string(),
+    )];
     let result = crate::run_nonlinear(&model, ComputeBackend::Cpu)
         .expect("nonlinear beam moment solve should succeed");
 

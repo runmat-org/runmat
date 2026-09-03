@@ -1,0 +1,421 @@
+use std::collections::HashSet;
+
+use crate::{
+    AnalysisProcedure, AnalysisValidationError, CoupledPhysicsFamily, IndependentDomain,
+    InitialStateConflictPolicy, PhysicsFamily, ProcedureStep, SolutionSpace, StateCompleteness,
+    StateKind, StatePersistence, StateSource, StateUse,
+};
+
+use super::step_error;
+
+pub(super) fn validate(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
+    validate_family_procedure(step)?;
+    validate_solution_space(step)?;
+    validate_independent_domain(step)?;
+    validate_state_declarations(step)?;
+    validate_required_inputs(step)
+}
+
+fn validate_family_procedure(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
+    let supported = match step.family {
+        PhysicsFamily::Structural => true,
+        PhysicsFamily::Thermal | PhysicsFamily::Fluid => matches!(
+            step.procedure,
+            AnalysisProcedure::Static
+                | AnalysisProcedure::TransientResponse
+                | AnalysisProcedure::Nonlinear
+                | AnalysisProcedure::Adaptive
+        ),
+        PhysicsFamily::Electromagnetic => matches!(
+            step.procedure,
+            AnalysisProcedure::Static
+                | AnalysisProcedure::TransientResponse
+                | AnalysisProcedure::HarmonicResponse
+                | AnalysisProcedure::Nonlinear
+                | AnalysisProcedure::Adaptive
+        ),
+        PhysicsFamily::Acoustic => matches!(
+            step.procedure,
+            AnalysisProcedure::TransientResponse
+                | AnalysisProcedure::HarmonicResponse
+                | AnalysisProcedure::ModalExtraction
+                | AnalysisProcedure::Adaptive
+        ),
+        PhysicsFamily::Coupled(family) => coupled_procedure_is_supported(family, step.procedure),
+    };
+    if supported {
+        Ok(())
+    } else {
+        Err(step_error(
+            step,
+            format!(
+                "procedure {:?} is not defined for physics family {:?}",
+                step.procedure, step.family
+            ),
+        ))
+    }
+}
+
+fn coupled_procedure_is_supported(
+    family: CoupledPhysicsFamily,
+    procedure: AnalysisProcedure,
+) -> bool {
+    match family {
+        CoupledPhysicsFamily::Thermomechanical
+        | CoupledPhysicsFamily::Electrothermal
+        | CoupledPhysicsFamily::ConjugateHeatTransfer => matches!(
+            procedure,
+            AnalysisProcedure::Static
+                | AnalysisProcedure::TransientResponse
+                | AnalysisProcedure::Nonlinear
+                | AnalysisProcedure::Adaptive
+        ),
+        CoupledPhysicsFamily::FluidStructureInteraction => matches!(
+            procedure,
+            AnalysisProcedure::TransientResponse
+                | AnalysisProcedure::Nonlinear
+                | AnalysisProcedure::Adaptive
+        ),
+    }
+}
+
+fn validate_solution_space(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
+    let modal_reduced = step.solution_space == SolutionSpace::ModalReduced;
+    let accepts_modal = step.family == PhysicsFamily::Structural
+        && matches!(
+            step.procedure,
+            AnalysisProcedure::TransientResponse
+                | AnalysisProcedure::HarmonicResponse
+                | AnalysisProcedure::PrestressedHarmonicResponse
+                | AnalysisProcedure::ModalResponseSpectrum
+                | AnalysisProcedure::RandomResponse
+        );
+    let requires_modal = matches!(
+        step.procedure,
+        AnalysisProcedure::ModalResponseSpectrum | AnalysisProcedure::RandomResponse
+    );
+    if (modal_reduced && !accepts_modal) || (requires_modal && !modal_reduced) {
+        Err(step_error(
+            step,
+            format!(
+                "solution space {:?} is incompatible with procedure {:?} for {:?}",
+                step.solution_space, step.procedure, step.family
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_independent_domain(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
+    let domain_matches = match step.procedure {
+        AnalysisProcedure::Static => matches!(step.independent_domain, IndependentDomain::Static),
+        AnalysisProcedure::ModalExtraction
+        | AnalysisProcedure::PrestressedModalExtraction
+        | AnalysisProcedure::EigenvalueBuckling => {
+            matches!(
+                step.independent_domain,
+                IndependentDomain::Eigenvalue { .. }
+            )
+        }
+        AnalysisProcedure::TransientResponse => {
+            matches!(
+                step.independent_domain,
+                IndependentDomain::TimeSeconds { .. }
+            )
+        }
+        AnalysisProcedure::HarmonicResponse
+        | AnalysisProcedure::PrestressedHarmonicResponse
+        | AnalysisProcedure::RandomResponse => {
+            matches!(
+                step.independent_domain,
+                IndependentDomain::FrequencyHertz(_)
+            )
+        }
+        AnalysisProcedure::ModalResponseSpectrum => {
+            matches!(
+                step.independent_domain,
+                IndependentDomain::StudyParameter { .. }
+            )
+        }
+        AnalysisProcedure::Nonlinear => matches!(
+            step.independent_domain,
+            IndependentDomain::LoadFactor { .. } | IndependentDomain::TimeSeconds { .. }
+        ),
+        AnalysisProcedure::Adaptive => !matches!(
+            step.independent_domain,
+            IndependentDomain::Eigenvalue { .. }
+        ),
+    };
+    if !domain_matches {
+        return Err(step_error(
+            step,
+            format!(
+                "independent domain {:?} is incompatible with procedure {:?}",
+                step.independent_domain, step.procedure
+            ),
+        ));
+    }
+
+    let valid = match &step.independent_domain {
+        IndependentDomain::Static => true,
+        IndependentDomain::TimeSeconds { origin, start, end } => {
+            origin.is_finite()
+                && start.is_finite()
+                && end.is_finite()
+                && start >= origin
+                && end > start
+        }
+        IndependentDomain::FrequencyHertz(values) => {
+            !values.is_empty()
+                && values
+                    .iter()
+                    .all(|value| value.is_finite() && *value >= 0.0)
+                && strictly_increasing(values)
+        }
+        IndependentDomain::LoadFactor { start, end } => {
+            start.is_finite() && end.is_finite() && end > start
+        }
+        IndependentDomain::Eigenvalue { requested_count } => *requested_count > 0,
+        IndependentDomain::StudyParameter {
+            parameter_id,
+            canonical_values,
+        } => {
+            !parameter_id.trim().is_empty()
+                && !canonical_values.is_empty()
+                && canonical_values.iter().all(|value| value.is_finite())
+                && strictly_increasing(canonical_values)
+        }
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(step_error(
+            step,
+            "independent domain must be finite, non-empty, and strictly ordered",
+        ))
+    }
+}
+
+fn strictly_increasing(values: &[f64]) -> bool {
+    values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+fn validate_state_declarations(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
+    let mut input_ids = HashSet::new();
+    for input in &step.state_inputs {
+        if input.input_id.trim().is_empty() || !input_ids.insert(input.input_id.as_str()) {
+            return Err(step_error(
+                step,
+                "state input ids must be non-empty and unique",
+            ));
+        }
+        if matches!(input.source, StateSource::InitialConditions)
+            && input.conflict != InitialStateConflictPolicy::Reject
+        {
+            return Err(step_error(
+                step,
+                format!(
+                    "initial-condition input `{}` cannot declare an upstream conflict override",
+                    input.input_id
+                ),
+            ));
+        }
+        if !state_use_accepts_kind(input.use_as, input.required_kind) {
+            return Err(step_error(
+                step,
+                format!(
+                    "state input `{}` cannot use {:?} state as {:?}",
+                    input.input_id, input.required_kind, input.use_as
+                ),
+            ));
+        }
+        if !family_can_consume_state(step.family, input.required_kind) {
+            return Err(step_error(
+                step,
+                format!(
+                    "physics family {:?} cannot consume {:?} state",
+                    step.family, input.required_kind
+                ),
+            ));
+        }
+    }
+
+    if step.state_outputs.is_empty() {
+        return Err(step_error(
+            step,
+            "step must publish at least one typed state",
+        ));
+    }
+    let mut output_ids = HashSet::new();
+    for output in &step.state_outputs {
+        let id = output.state_id.0.as_str();
+        if id.trim().is_empty() || !output_ids.insert(id) {
+            return Err(step_error(
+                step,
+                "state output ids must be non-empty and unique",
+            ));
+        }
+        if output.completeness == StateCompleteness::Complete
+            && output.persistence == StatePersistence::CheckpointOnly
+        {
+            return Err(step_error(
+                step,
+                format!("complete state `{id}` cannot be checkpoint-only"),
+            ));
+        }
+        if output.completeness == StateCompleteness::Checkpoint
+            && output.persistence != StatePersistence::CheckpointOnly
+        {
+            return Err(step_error(
+                step,
+                format!("checkpoint state `{id}` must be checkpoint-only"),
+            ));
+        }
+        if !family_can_publish_state(step.family, output.kind) {
+            return Err(step_error(
+                step,
+                format!(
+                    "physics family {:?} cannot publish {:?} state",
+                    step.family, output.kind
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_required_inputs(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
+    let requires_prestress = matches!(
+        step.procedure,
+        AnalysisProcedure::PrestressedModalExtraction
+            | AnalysisProcedure::EigenvalueBuckling
+            | AnalysisProcedure::PrestressedHarmonicResponse
+    );
+    if requires_prestress
+        && !step
+            .state_inputs
+            .iter()
+            .any(|input| input.use_as == StateUse::Prestress)
+    {
+        return Err(step_error(
+            step,
+            "procedure requires an explicit prestress state input",
+        ));
+    }
+    let requires_basis = step.solution_space == SolutionSpace::ModalReduced;
+    if requires_basis
+        && !step
+            .state_inputs
+            .iter()
+            .any(|input| input.use_as == StateUse::ModalBasis)
+    {
+        return Err(step_error(
+            step,
+            "modal-reduced procedure requires a modal-basis state input",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn family_can_consume_state(family: PhysicsFamily, kind: StateKind) -> bool {
+    family_can_publish_state(family, kind)
+        || matches!(
+            (family, kind),
+            (PhysicsFamily::Structural, StateKind::Thermal)
+                | (PhysicsFamily::Structural, StateKind::CoupledInterface)
+                | (PhysicsFamily::Thermal, StateKind::ElectromagneticStatic)
+                | (PhysicsFamily::Thermal, StateKind::ElectromagneticComplex)
+                | (PhysicsFamily::Thermal, StateKind::Fluid)
+                | (PhysicsFamily::Thermal, StateKind::CoupledInterface)
+                | (PhysicsFamily::Fluid, StateKind::CoupledInterface)
+        )
+}
+
+fn family_can_publish_state(family: PhysicsFamily, kind: StateKind) -> bool {
+    match family {
+        PhysicsFamily::Structural => matches!(
+            kind,
+            StateKind::StructuralPrimary
+                | StateKind::StructuralKinematics
+                | StateKind::StructuralStressStrain
+                | StateKind::GeometricStiffness
+                | StateKind::MaterialHistory
+                | StateKind::ContactHistory
+                | StateKind::ModalBasis
+                | StateKind::Integrator
+                | StateKind::MovingMesh
+        ),
+        PhysicsFamily::Thermal => matches!(kind, StateKind::Thermal | StateKind::Integrator),
+        PhysicsFamily::Electromagnetic => matches!(
+            kind,
+            StateKind::ElectromagneticStatic
+                | StateKind::ElectromagneticComplex
+                | StateKind::Integrator
+        ),
+        PhysicsFamily::Acoustic => {
+            matches!(kind, StateKind::AcousticComplex | StateKind::Integrator)
+        }
+        PhysicsFamily::Fluid => matches!(
+            kind,
+            StateKind::Fluid | StateKind::MovingMesh | StateKind::Integrator
+        ),
+        PhysicsFamily::Coupled(coupled) => match coupled {
+            CoupledPhysicsFamily::Thermomechanical => matches!(
+                kind,
+                StateKind::StructuralPrimary
+                    | StateKind::StructuralKinematics
+                    | StateKind::StructuralStressStrain
+                    | StateKind::GeometricStiffness
+                    | StateKind::MaterialHistory
+                    | StateKind::ContactHistory
+                    | StateKind::Thermal
+                    | StateKind::CoupledInterface
+                    | StateKind::Integrator
+            ),
+            CoupledPhysicsFamily::Electrothermal => matches!(
+                kind,
+                StateKind::Thermal
+                    | StateKind::ElectromagneticStatic
+                    | StateKind::ElectromagneticComplex
+                    | StateKind::CoupledInterface
+                    | StateKind::Integrator
+            ),
+            CoupledPhysicsFamily::ConjugateHeatTransfer => matches!(
+                kind,
+                StateKind::Thermal
+                    | StateKind::Fluid
+                    | StateKind::CoupledInterface
+                    | StateKind::Integrator
+            ),
+            CoupledPhysicsFamily::FluidStructureInteraction => matches!(
+                kind,
+                StateKind::StructuralPrimary
+                    | StateKind::StructuralKinematics
+                    | StateKind::StructuralStressStrain
+                    | StateKind::Fluid
+                    | StateKind::MovingMesh
+                    | StateKind::CoupledInterface
+                    | StateKind::Integrator
+            ),
+        },
+    }
+}
+
+fn state_use_accepts_kind(use_as: StateUse, kind: StateKind) -> bool {
+    match use_as {
+        StateUse::Prestress => matches!(
+            kind,
+            StateKind::StructuralPrimary
+                | StateKind::StructuralStressStrain
+                | StateKind::GeometricStiffness
+                | StateKind::Thermal
+        ),
+        StateUse::ModalBasis => kind == StateKind::ModalBasis,
+        StateUse::CoupledInterface => kind == StateKind::CoupledInterface,
+        StateUse::PhysicalInitialState
+        | StateUse::LinearizationPoint
+        | StateUse::InitialGuess
+        | StateUse::Restart => true,
+    }
+}
