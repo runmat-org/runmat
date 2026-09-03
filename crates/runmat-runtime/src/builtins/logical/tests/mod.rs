@@ -2,6 +2,8 @@
 
 pub mod allfinite;
 mod classification;
+pub mod iscell;
+pub mod iscellstr;
 pub mod isfinite;
 pub mod isgpuarray;
 pub mod isinf;

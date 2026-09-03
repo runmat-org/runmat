@@ -34,6 +34,7 @@ define_metadata_predicate_entry!(
     documentation: ISNUMERIC_DOCUMENTATION,
     input_description: "Value whose numeric storage class is queried.",
     output_description: "Logical scalar that is true exactly when the input uses a numeric class.",
+    distributed: crate::BuiltinDistributedPolicy::InspectHandles,
     integer_capabilities: &INTEGER_CAPABILITIES,
     integer_audit: None
 );

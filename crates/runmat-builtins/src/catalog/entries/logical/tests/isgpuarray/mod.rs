@@ -34,6 +34,7 @@ define_metadata_predicate_entry!(
     documentation: ISGPUARRAY_DOCUMENTATION,
     input_description: "Value whose explicit gpuArray identity is queried.",
     output_description: "Logical scalar that is true exactly for an explicit gpuArray value.",
+    distributed: crate::BuiltinDistributedPolicy::InspectHandles,
     integer_capabilities: &INTEGER_CAPABILITIES,
     integer_audit: None
 );

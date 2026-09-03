@@ -38,14 +38,24 @@ impl MetadataBoundary {
     }
 
     fn classify_resident(&self, handle: &GpuTensorHandle) -> BuiltinResult<bool> {
-        if self.predicate == MetadataPredicate::GpuArray {
-            return Ok(runmat_accelerate_api::handle_is_explicit(handle));
+        match self.predicate {
+            MetadataPredicate::GpuArray => {
+                return Ok(runmat_accelerate_api::handle_is_explicit(handle));
+            }
+            MetadataPredicate::Cell | MetadataPredicate::CellString => return Ok(false),
+            MetadataPredicate::Logical
+            | MetadataPredicate::Numeric
+            | MetadataPredicate::Real
+            | MetadataPredicate::Sparse => {}
         }
         validate_resident_numeric_metadata(handle).map_err(|detail| self.internal(detail))?;
         let storage = runmat_accelerate_api::handle_storage(handle);
         let logical = runmat_accelerate_api::handle_is_logical(handle);
         Ok(match self.predicate {
             MetadataPredicate::GpuArray => unreachable!("handled before metadata validation"),
+            MetadataPredicate::Cell | MetadataPredicate::CellString => {
+                unreachable!("handled before metadata validation")
+            }
             MetadataPredicate::Logical => logical,
             MetadataPredicate::Numeric => !logical,
             MetadataPredicate::Real => storage == GpuTensorStorage::Real,
@@ -55,6 +65,18 @@ impl MetadataBoundary {
 
     fn classify_host(&self, value: &Value) -> bool {
         match self.predicate {
+            MetadataPredicate::Cell => match value {
+                Value::Cell(_) => true,
+                Value::Distributed(handle) => fact_is_cell(&handle.value),
+                _ => false,
+            },
+            MetadataPredicate::CellString => match value {
+                Value::Cell(cell) => cell
+                    .data
+                    .iter()
+                    .all(|element| matches!(element, Value::CharArray(_))),
+                _ => false,
+            },
             MetadataPredicate::GpuArray => false,
             MetadataPredicate::Logical => match value {
                 Value::Bool(_) | Value::LogicalArray(_) => true,
@@ -171,6 +193,10 @@ pub(super) fn validate_resident_numeric_metadata(handle: &GpuTensorHandle) -> Re
 
 fn fact_is_logical(value: &ValueFact) -> bool {
     matches!(value.kind, ValueKindFact::Logical)
+}
+
+fn fact_is_cell(value: &ValueFact) -> bool {
+    matches!(value.kind, ValueKindFact::Cell(_))
 }
 
 fn fact_is_numeric(value: &ValueFact) -> bool {

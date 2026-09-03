@@ -21,6 +21,7 @@ define_metadata_predicate_entry!(
     documentation: ISLOGICAL_DOCUMENTATION,
     input_description: "Value whose logical storage class is queried.",
     output_description: "Logical scalar that is true exactly when the input uses logical storage.",
+    distributed: crate::BuiltinDistributedPolicy::InspectHandles,
     integer_capabilities: &[],
     integer_audit: Some(&ISLOGICAL_INTEGER_AUDIT)
 );

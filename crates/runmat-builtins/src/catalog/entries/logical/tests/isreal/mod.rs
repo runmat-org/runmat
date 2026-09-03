@@ -34,6 +34,7 @@ define_metadata_predicate_entry!(
     documentation: ISREAL_DOCUMENTATION,
     input_description: "Value whose real or complex storage kind is queried.",
     output_description: "Logical scalar that is true when the input does not use complex storage.",
+    distributed: crate::BuiltinDistributedPolicy::InspectHandles,
     integer_capabilities: &INTEGER_CAPABILITIES,
     integer_audit: None
 );
