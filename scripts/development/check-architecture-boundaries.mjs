@@ -709,6 +709,53 @@ for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/
   }
 }
 
+const logicalPredicateRoots = [
+  "crates/runmat-builtins/src/catalog/entries/logical/tests",
+  "crates/runmat-runtime/src/builtins/logical/tests",
+];
+for (const sourceRoot of logicalPredicateRoots) {
+  for (const { path: sourcePath, text } of rustSources(sourceRoot)) {
+    const lines = text.split("\n").length;
+    const relativePath = sourcePath.slice(sourceRoot.length + 1);
+    const isCompositionRoot = relativePath === "mod.rs";
+    const isDocumentation = sourcePath.endsWith("/documentation.rs");
+    const isTest = sourcePath.endsWith("/tests.rs");
+    const isLegacyClassificationEngine = relativePath === "classification.rs";
+    const ceiling = isCompositionRoot
+      ? 64
+      : isDocumentation
+        ? 320
+        : isTest
+          ? 512
+          : isLegacyClassificationEngine
+            ? 448
+            : 256;
+    if (lines > ceiling) {
+      fail(
+        sourcePath + " exceeds its role-based logical-predicate boundary " +
+        "(found " + lines + " lines; maximum " + ceiling + ")"
+      );
+    }
+  }
+}
+for (const sourcePath of [
+  "crates/runmat-runtime/src/builtins/cells/core/iscell.rs",
+  "crates/runmat-runtime/src/builtins/cells/core/iscellstr.rs",
+  "docs/builtins/reference/iscell.json",
+  "docs/builtins/reference/iscellstr.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/iscell.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/iscellstr.json",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete logical-predicate identity or documentation debt and must not return`);
+  }
+}
+for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/builtins/logical/tests")) {
+  if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor|BuiltinIntegerAuditDescriptor)\s*=/.test(text)) {
+    fail(`${sourcePath} duplicates catalog-owned logical-predicate metadata`);
+  }
+}
+
 const legacyCatalogTestsPath = "crates/runmat-builtins/src/catalog/tests.rs";
 const legacyCatalogTestLines = read(legacyCatalogTestsPath).split("\n").length;
 if (legacyCatalogTestLines > 4561) {

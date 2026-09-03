@@ -100,6 +100,8 @@ impl RelationalOperator {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum MetadataPredicate {
+    Cell,
+    CellString,
     GpuArray,
     Logical,
     Numeric,

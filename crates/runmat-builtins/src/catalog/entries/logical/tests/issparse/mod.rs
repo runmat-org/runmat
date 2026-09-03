@@ -53,6 +53,7 @@ define_metadata_predicate_entry!(
     documentation: ISSPARSE_DOCUMENTATION,
     input_description: "Value whose dense or sparse storage kind is queried.",
     output_description: "Logical scalar that is true exactly when the input uses sparse storage.",
+    distributed: crate::BuiltinDistributedPolicy::InspectHandles,
     integer_capabilities: &INTEGER_CAPABILITIES,
     integer_audit: None
 );

@@ -141,6 +141,7 @@ macro_rules! define_metadata_predicate_entry {
         documentation: $documentation:expr,
         input_description: $input_description:literal,
         output_description: $output_description:literal,
+        distributed: $distributed:expr,
         integer_capabilities: $integer_capabilities:expr,
         integer_audit: $integer_audit:expr
     ) => {
@@ -211,7 +212,7 @@ macro_rules! define_metadata_predicate_entry {
                 accelerator: crate::BuiltinAcceleratorPolicy::Optional,
                 residency: crate::BuiltinResidencyPolicy::Host,
                 fusion: crate::BuiltinFusionPolicy::Boundary,
-                distributed: crate::BuiltinDistributedPolicy::InspectHandles,
+                distributed: $distributed,
             },
             link: crate::BuiltinLinkContract {
                 reachability: crate::BuiltinReachability::Always,
