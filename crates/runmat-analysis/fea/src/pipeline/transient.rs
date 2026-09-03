@@ -2,7 +2,7 @@ use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 
 use crate::assembly::{dofs::StructuralDofKind, AssemblySummary};
 use crate::{
-    assembly::try_assemble_linear_system,
+    assembly::{assemble_structural_system, StructuralFormulationRequirement},
     contracts::{
         fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
         fea_transient_angular_velocity_field_id, fea_transient_displacement_field_id,
@@ -67,11 +67,12 @@ pub fn run_transient_with_options(
         Some(1),
         Some(5),
     );
-    let summary = try_assemble_linear_system(
+    let summary = assemble_structural_system(
         model,
         options.solver_mesh.clone(),
         thermo_context,
         electro_context,
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     super::validate_rotational_dof_targets(model, &summary)?;

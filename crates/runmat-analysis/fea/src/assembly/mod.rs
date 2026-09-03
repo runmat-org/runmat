@@ -7,10 +7,12 @@ mod solver_solid_boundary;
 use std::{collections::BTreeMap, fmt};
 
 use runmat_analysis_core::{
-    AnalysisModel, BeamSectionModel, ShellSectionModel, StructuralConstraintKind,
-    StructuralElementKind, StructuralModel, StructuralRotationDof, StructuralTranslationDof,
+    AnalysisModel, BeamSectionModel, ExecutionFallbackPolicy, ShellSectionModel,
+    StructuralConstraintKind, StructuralElementKind, StructuralFormulationRealization,
+    StructuralModel, StructuralOperatorImplementation, StructuralRecoveryImplementation,
+    StructuralRotationDof, StructuralTranslationDof,
 };
-use runmat_meshing_core::SolverMeshArtifact;
+use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 use serde::{Deserialize, Serialize};
 
 use self::elements::solid::SolidMaterial;
@@ -18,11 +20,13 @@ use self::{
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     elements::beam::{
         global_stiffness_matrix as beam_global_stiffness_matrix, transformation_matrix,
-        BeamElementGeometry, BeamMaterial, BeamSection, BeamTransform12, BEAM_ELEMENT_DOF_COUNT,
+        BeamElementError, BeamElementGeometry, BeamMaterial, BeamSection, BeamTransform12,
+        BEAM_ELEMENT_DOF_COUNT,
     },
     elements::shell::{
-        global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementGeometry,
-        ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT, SHELL_NODE_DOF_COUNT,
+        global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementError,
+        ShellElementGeometry, ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT,
+        SHELL_NODE_DOF_COUNT,
     },
     solver_solid::{
         assemble_solver_solid_stiffness_csr, solver_solid_topology, SolverSolidAssemblyError,
@@ -70,6 +74,8 @@ pub struct AssemblySummary {
     pub structural_beam_recovery: Vec<BeamRecoveryElementSummary>,
     #[serde(default)]
     pub structural_shell_recovery: Vec<ShellRecoveryElementSummary>,
+    #[serde(default)]
+    pub structural_formulation: Option<StructuralFormulationRealization>,
     pub constrained_dof_count: usize,
     pub load_count: usize,
     pub structural_material: StructuralMaterialSummary,
@@ -81,6 +87,7 @@ pub struct AssemblySummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearAssemblyError {
     ExcitationRealization(String),
+    Structural(StructuralAssemblyError),
     SolidStiffness(SolverSolidAssemblyError),
     SolverMeshRegionMapping(SolverMeshRegionMappingError),
 }
@@ -89,6 +96,7 @@ impl fmt::Display for LinearAssemblyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LinearAssemblyError::ExcitationRealization(err) => write!(f, "{err}"),
+            LinearAssemblyError::Structural(err) => write!(f, "{err}"),
             LinearAssemblyError::SolidStiffness(err) => {
                 write!(f, "solid stiffness assembly failed: {err:?}")
             }
@@ -100,6 +108,116 @@ impl fmt::Display for LinearAssemblyError {
 }
 
 impl std::error::Error for LinearAssemblyError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructuralAssemblyError {
+    MissingDiscretization,
+    MixedSolidAndExplicit {
+        explicit_element_count: usize,
+    },
+    MixedExplicitDimensions {
+        beam_element_count: usize,
+        shell_element_count: usize,
+    },
+    MissingNodes,
+    DuplicateNodeId {
+        node_id: u32,
+    },
+    DuplicateElementId {
+        element_id: String,
+    },
+    UnknownNode {
+        element_id: String,
+        node_id: u32,
+    },
+    UnknownBeamSection {
+        element_id: String,
+        section_id: String,
+    },
+    UnknownShellSection {
+        element_id: String,
+        section_id: String,
+    },
+    BeamElement {
+        element_id: String,
+        error: BeamElementError,
+    },
+    ShellElement {
+        element_id: String,
+        error: ShellElementError,
+    },
+}
+
+impl fmt::Display for StructuralAssemblyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingDiscretization => write!(
+                f,
+                "structural analysis requires a canonical solid mesh or explicit beam/shell connectivity"
+            ),
+            Self::MixedSolidAndExplicit {
+                explicit_element_count,
+            } => write!(
+                f,
+                "solid and explicit beam/shell discretizations cannot be assembled together until typed coupling is implemented: explicit_element_count={explicit_element_count}"
+            ),
+            Self::MixedExplicitDimensions {
+                beam_element_count,
+                shell_element_count,
+            } => write!(
+                f,
+                "mixed beam and shell connectivity requires an explicit coupling formulation: beam_element_count={beam_element_count} shell_element_count={shell_element_count}"
+            ),
+            Self::MissingNodes => write!(
+                f,
+                "explicit structural connectivity requires at least one structural node"
+            ),
+            Self::DuplicateNodeId { node_id } => {
+                write!(f, "explicit structural node id is duplicated: node_id={node_id}")
+            }
+            Self::DuplicateElementId { element_id } => write!(
+                f,
+                "explicit structural element id is duplicated: element_id={element_id}"
+            ),
+            Self::UnknownNode {
+                element_id,
+                node_id,
+            } => write!(
+                f,
+                "explicit structural element references an unknown node: element_id={element_id} node_id={node_id}"
+            ),
+            Self::UnknownBeamSection {
+                element_id,
+                section_id,
+            } => write!(
+                f,
+                "beam element references an unknown section: element_id={element_id} section_id={section_id}"
+            ),
+            Self::UnknownShellSection {
+                element_id,
+                section_id,
+            } => write!(
+                f,
+                "shell element references an unknown section: element_id={element_id} section_id={section_id}"
+            ),
+            Self::BeamElement { element_id, error } => {
+                write!(f, "beam element assembly failed: element_id={element_id} error={error}")
+            }
+            Self::ShellElement { element_id, error } => {
+                write!(f, "shell element assembly failed: element_id={element_id} error={error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StructuralAssemblyError {}
+
+/// The structural formulation that an assembly caller is willing to admit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralFormulationRequirement {
+    PhysicalDiscretization,
+    ExperimentalSyntheticOperator,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverMeshRegionMappingError {
@@ -224,23 +342,10 @@ pub struct ElectroThermalAssemblySummary {
     pub coupling_fingerprint: u64,
 }
 
-pub fn assemble_linear_system(
-    model: &AnalysisModel,
-    solver_mesh: Option<SolverMeshArtifact>,
-    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    electro_thermal_context: Option<FeaElectroThermalContext>,
-) -> AssemblySummary {
-    assemble_linear_system_impl(
-        model,
-        solver_mesh,
-        thermo_mechanical_context,
-        electro_thermal_context,
-        false,
-    )
-    .expect("non-strict assembly should build operator topology")
-}
-
-pub fn try_assemble_linear_system(
+/// Internal reduced operator used by non-structural experimental pipelines.
+///
+/// Structural callers must use [`assemble_structural_system`] so synthetic admission is explicit.
+pub(crate) fn assemble_linear_system(
     model: &AnalysisModel,
     solver_mesh: Option<SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
@@ -251,7 +356,23 @@ pub fn try_assemble_linear_system(
         solver_mesh,
         thermo_mechanical_context,
         electro_thermal_context,
-        true,
+        None,
+    )
+}
+
+pub fn assemble_structural_system(
+    model: &AnalysisModel,
+    solver_mesh: Option<SolverMeshArtifact>,
+    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    electro_thermal_context: Option<FeaElectroThermalContext>,
+    requirement: StructuralFormulationRequirement,
+) -> Result<AssemblySummary, LinearAssemblyError> {
+    assemble_linear_system_impl(
+        model,
+        solver_mesh,
+        thermo_mechanical_context,
+        electro_thermal_context,
+        Some(requirement),
     )
 }
 
@@ -260,20 +381,41 @@ fn assemble_linear_system_impl(
     solver_mesh: Option<SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
-    strict_solver_mesh_stiffness: bool,
+    structural_requirement: Option<StructuralFormulationRequirement>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     let excitations = realize_model_excitations(model)
         .map_err(|error| LinearAssemblyError::ExcitationRealization(error.to_string()))?;
-    if solver_mesh.is_none() {
-        if let Some(summary) = assemble_beam_system(model, &excitations) {
-            return Ok(summary);
-        }
+
+    let explicit_element_count = model
+        .structural
+        .as_ref()
+        .map(|structural| structural.elements.len())
+        .unwrap_or(0);
+    if solver_mesh.is_some() && explicit_element_count > 0 {
+        return Err(LinearAssemblyError::Structural(
+            StructuralAssemblyError::MixedSolidAndExplicit {
+                explicit_element_count,
+            },
+        ));
+    }
+    if solver_mesh.is_none() && explicit_element_count > 0 {
+        return assemble_explicit_structural_system(model, &excitations)
+            .map_err(LinearAssemblyError::Structural);
+    }
+    if solver_mesh.is_none()
+        && structural_requirement == Some(StructuralFormulationRequirement::PhysicalDiscretization)
+    {
+        return Err(LinearAssemblyError::Structural(
+            StructuralAssemblyError::MissingDiscretization,
+        ));
     }
 
     let base_dof_count = (excitations.len() * 3).max(3);
     let solid_topology = solver_mesh
         .as_ref()
-        .and_then(|mesh| solver_solid_topology(mesh, base_dof_count).ok());
+        .map(|mesh| solver_solid_topology(mesh, base_dof_count))
+        .transpose()
+        .map_err(LinearAssemblyError::SolidStiffness)?;
     let dof_count = solid_topology
         .as_ref()
         .map(|topology| topology.dof_count)
@@ -434,7 +576,7 @@ fn assemble_linear_system_impl(
             &structural_dof_layout,
             &mut constrained,
             &mut rhs,
-            strict_solver_mesh_stiffness,
+            true,
         )
         .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
     }
@@ -620,21 +762,18 @@ fn assemble_linear_system_impl(
     }
 
     let stiffness_csr = match solver_mesh.as_ref() {
-        Some(mesh) => match assemble_solver_solid_stiffness_csr(
-            mesh,
-            (model.materials.len() == 1).then_some(SolidMaterial {
-                youngs_modulus_pa: structural_material.youngs_modulus_pa,
-                poisson_ratio: structural_material.poisson_ratio,
-            }),
-            &solid_materials_by_region(model),
-            base_dof_count,
-        ) {
-            Ok(dense) => Some(dense),
-            Err(err) if strict_solver_mesh_stiffness => {
-                return Err(LinearAssemblyError::SolidStiffness(err));
-            }
-            Err(_) => None,
-        },
+        Some(mesh) => Some(
+            assemble_solver_solid_stiffness_csr(
+                mesh,
+                (model.materials.len() == 1).then_some(SolidMaterial {
+                    youngs_modulus_pa: structural_material.youngs_modulus_pa,
+                    poisson_ratio: structural_material.poisson_ratio,
+                }),
+                &solid_materials_by_region(model),
+                base_dof_count,
+            )
+            .map_err(LinearAssemblyError::SolidStiffness)?,
+        ),
         None => None,
     };
     if let Some(csr) = stiffness_csr.as_ref() {
@@ -675,6 +814,36 @@ fn assemble_linear_system_impl(
         structural_dof_layout,
         structural_beam_recovery: Vec::new(),
         structural_shell_recovery: Vec::new(),
+        structural_formulation: solid_topology
+            .as_ref()
+            .map(|topology| {
+                let (operator, recovery) = match topology.order {
+                    ElementOrder::Tet4 => (
+                        StructuralOperatorImplementation::Tet4LinearElasticity,
+                        Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
+                    ),
+                    ElementOrder::Tet10 => (
+                        StructuralOperatorImplementation::Tet10LinearElasticity,
+                        None,
+                    ),
+                };
+                StructuralFormulationRealization::experimental(
+                    operator,
+                    recovery,
+                    ExecutionFallbackPolicy::Forbid,
+                )
+            })
+            .or_else(|| {
+                (structural_requirement
+                    == Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator))
+                .then(|| {
+                    StructuralFormulationRealization::experimental(
+                        StructuralOperatorImplementation::SyntheticDiagonalChain,
+                        None,
+                        ExecutionFallbackPolicy::AllowExperimental,
+                    )
+                })
+            }),
         constrained_dof_count,
         load_count: excitations.len(),
         structural_material,
@@ -751,11 +920,14 @@ fn electro_thermal_fingerprint(
     hash
 }
 
-fn assemble_beam_system(
+fn assemble_explicit_structural_system(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
-) -> Option<AssemblySummary> {
-    let structural = model.structural.as_ref()?;
+) -> Result<AssemblySummary, StructuralAssemblyError> {
+    let structural = model
+        .structural
+        .as_ref()
+        .ok_or(StructuralAssemblyError::MissingDiscretization)?;
     let beam_elements = structural
         .elements
         .iter()
@@ -766,8 +938,33 @@ fn assemble_beam_system(
         .iter()
         .filter(|element| matches!(element.kind, StructuralElementKind::Shell(_)))
         .collect::<Vec<_>>();
-    if (beam_elements.is_empty() && shell_elements.is_empty()) || structural.nodes.is_empty() {
-        return None;
+    if !beam_elements.is_empty() && !shell_elements.is_empty() {
+        return Err(StructuralAssemblyError::MixedExplicitDimensions {
+            beam_element_count: beam_elements.len(),
+            shell_element_count: shell_elements.len(),
+        });
+    }
+    if beam_elements.is_empty() && shell_elements.is_empty() {
+        return Err(StructuralAssemblyError::MissingDiscretization);
+    }
+    if structural.nodes.is_empty() {
+        return Err(StructuralAssemblyError::MissingNodes);
+    }
+    let mut node_ids = std::collections::BTreeSet::new();
+    for node in &structural.nodes {
+        if !node_ids.insert(node.node_id) {
+            return Err(StructuralAssemblyError::DuplicateNodeId {
+                node_id: node.node_id,
+            });
+        }
+    }
+    let mut element_ids = std::collections::BTreeSet::new();
+    for element in &structural.elements {
+        if !element_ids.insert(element.element_id.as_str()) {
+            return Err(StructuralAssemblyError::DuplicateElementId {
+                element_id: element.element_id.clone(),
+            });
+        }
     }
 
     let structural_material = structural_material_summary(model);
@@ -797,19 +994,49 @@ fn assemble_beam_system(
         let StructuralElementKind::Beam(beam) = &element.kind else {
             continue;
         };
-        let node_i_index = structural_node_index(structural, beam.node_ids[0])?;
-        let node_j_index = structural_node_index(structural, beam.node_ids[1])?;
-        let section = structural_beam_section(structural, &beam.section_id)?;
+        let node_i_index =
+            structural_node_index(structural, beam.node_ids[0]).ok_or_else(|| {
+                StructuralAssemblyError::UnknownNode {
+                    element_id: element.element_id.clone(),
+                    node_id: beam.node_ids[0],
+                }
+            })?;
+        let node_j_index =
+            structural_node_index(structural, beam.node_ids[1]).ok_or_else(|| {
+                StructuralAssemblyError::UnknownNode {
+                    element_id: element.element_id.clone(),
+                    node_id: beam.node_ids[1],
+                }
+            })?;
+        let section = structural_beam_section(structural, &beam.section_id).ok_or_else(|| {
+            StructuralAssemblyError::UnknownBeamSection {
+                element_id: element.element_id.clone(),
+                section_id: beam.section_id.clone(),
+            }
+        })?;
         let geometry = BeamElementGeometry {
             node_i_m: structural.nodes[node_i_index].coordinates_m,
             node_j_m: structural.nodes[node_j_index].coordinates_m,
             reference_axis: beam.reference_axis,
         };
-        let frame = geometry.local_frame().ok()?;
+        let frame =
+            geometry
+                .local_frame()
+                .map_err(|error| StructuralAssemblyError::BeamElement {
+                    element_id: element.element_id.clone(),
+                    error,
+                })?;
         let transform_global_to_local = transformation_matrix(frame);
-        let stiffness = beam_global_stiffness_matrix(section, beam_material, geometry).ok()?;
+        let stiffness =
+            beam_global_stiffness_matrix(section, beam_material, geometry).map_err(|error| {
+                StructuralAssemblyError::BeamElement {
+                    element_id: element.element_id.clone(),
+                    error,
+                }
+            })?;
         let element_dofs =
-            beam_element_dof_indices(&structural_dof_layout, node_i_index, node_j_index)?;
+            beam_element_dof_indices(&structural_dof_layout, node_i_index, node_j_index)
+                .expect("six-degree-of-freedom structural layout must address every beam node");
         for (local_row, &global_row) in element_dofs.iter().enumerate() {
             for (local_col, &global_col) in element_dofs.iter().enumerate() {
                 dense[global_row * dof_count + global_col] += stiffness[local_row][local_col];
@@ -841,12 +1068,21 @@ fn assemble_beam_system(
         let StructuralElementKind::Shell(shell) = &element.kind else {
             continue;
         };
-        let node_indices = [
-            structural_node_index(structural, shell.node_ids[0])?,
-            structural_node_index(structural, shell.node_ids[1])?,
-            structural_node_index(structural, shell.node_ids[2])?,
-        ];
-        let section = structural_shell_section(structural, &shell.section_id)?;
+        let mut node_indices = [0_usize; 3];
+        for (local, node_id) in shell.node_ids.iter().copied().enumerate() {
+            node_indices[local] = structural_node_index(structural, node_id).ok_or_else(|| {
+                StructuralAssemblyError::UnknownNode {
+                    element_id: element.element_id.clone(),
+                    node_id,
+                }
+            })?;
+        }
+        let section = structural_shell_section(structural, &shell.section_id).ok_or_else(|| {
+            StructuralAssemblyError::UnknownShellSection {
+                element_id: element.element_id.clone(),
+                section_id: shell.section_id.clone(),
+            }
+        })?;
         let geometry = ShellElementGeometry {
             nodes_m: [
                 structural.nodes[node_indices[0]].coordinates_m,
@@ -855,9 +1091,22 @@ fn assemble_beam_system(
             ],
             reference_axis: shell.reference_axis,
         };
-        let frame = geometry.local_frame().ok()?;
-        let stiffness = shell_global_stiffness_matrix(section, shell_material, geometry).ok()?;
-        let element_dofs = shell_element_dof_indices(&structural_dof_layout, node_indices)?;
+        let frame =
+            geometry
+                .local_frame()
+                .map_err(|error| StructuralAssemblyError::ShellElement {
+                    element_id: element.element_id.clone(),
+                    error,
+                })?;
+        let stiffness =
+            shell_global_stiffness_matrix(section, shell_material, geometry).map_err(|error| {
+                StructuralAssemblyError::ShellElement {
+                    element_id: element.element_id.clone(),
+                    error,
+                }
+            })?;
+        let element_dofs = shell_element_dof_indices(&structural_dof_layout, node_indices)
+            .expect("six-degree-of-freedom structural layout must address every shell node");
         for (local_row, &global_row) in element_dofs.iter().enumerate() {
             for (local_col, &global_col) in element_dofs.iter().enumerate() {
                 dense[global_row * dof_count + global_col] += stiffness[local_row][local_col];
@@ -1062,7 +1311,21 @@ fn assemble_beam_system(
         })
         .count();
 
-    Some(AssemblySummary {
+    let structural_formulation = if !beam_elements.is_empty() {
+        StructuralFormulationRealization::experimental(
+            StructuralOperatorImplementation::EulerBernoulliBeam3d,
+            Some(StructuralRecoveryImplementation::BeamSectionResultants),
+            ExecutionFallbackPolicy::Forbid,
+        )
+    } else {
+        StructuralFormulationRealization::experimental(
+            StructuralOperatorImplementation::PairSpringShellProxy,
+            Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
+            ExecutionFallbackPolicy::Forbid,
+        )
+    };
+
+    Ok(AssemblySummary {
         dof_count,
         structural_node_count: structural_dof_layout.node_count(),
         structural_translational_dof_count: structural_dof_layout.translational_dof_count(),
@@ -1083,6 +1346,7 @@ fn assemble_beam_system(
         structural_dof_layout,
         structural_beam_recovery,
         structural_shell_recovery,
+        structural_formulation: Some(structural_formulation),
         constrained_dof_count,
         load_count: excitations.len(),
         structural_material,
@@ -1842,6 +2106,7 @@ mod tests {
         fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind,
         FixtureId,
     };
+    use runmat_analysis_core::FormulationMaturity;
     use runmat_meshing_core::{
         ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, StableDigest,
     };
@@ -1860,8 +2125,11 @@ mod tests {
 
     #[test]
     fn solver_mesh_populates_sparse_solid_stiffness_operator() {
-        let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None);
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.excitations.clear();
+        model.constraints.clear();
+        let summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None)
+            .expect("valid Tet4 system should assemble");
 
         assert_eq!(summary.dof_count, 12);
         assert_eq!(summary.structural_solid_element_count, 1);
@@ -1906,7 +2174,7 @@ mod tests {
     }
 
     #[test]
-    fn solver_mesh_preempts_explicit_beam_topology() {
+    fn solver_mesh_rejects_uncoupled_explicit_beam_topology() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.structural = Some(runmat_analysis_core::StructuralModel {
             nodes: vec![
@@ -1943,18 +2211,22 @@ mod tests {
             shell_sections: Vec::new(),
         });
 
-        let summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None);
+        let error = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None)
+            .expect_err("an uncoupled solid-plus-beam model must be rejected");
 
-        assert_eq!(summary.structural_solid_element_count, 1);
-        assert_eq!(summary.structural_solid_recovery.len(), 1);
-        assert_eq!(summary.structural_beam_element_count, 0);
-        assert!(summary.operator.stiffness_csr.is_some());
-        assert!(summary.operator.stiffness_dense.is_none());
+        assert_eq!(
+            error,
+            LinearAssemblyError::Structural(StructuralAssemblyError::MixedSolidAndExplicit {
+                explicit_element_count: 1,
+            })
+        );
     }
 
     #[test]
     fn solver_mesh_material_regions_select_assigned_solid_materials() {
         let mut soft_model = fixture_model(FixtureId::CantileverLinearStatic);
+        soft_model.excitations.clear();
+        soft_model.constraints.clear();
         let mut hard = soft_model.materials[0].clone();
         hard.material_id = "mat_hard".to_string();
         hard.mechanical.youngs_modulus_pa = 200.0e9;
@@ -1982,8 +2254,10 @@ mod tests {
         let hard_mesh = soft_mesh.clone();
         assert_eq!(soft_mesh.canonical_digest, hard_mesh.canonical_digest);
 
-        let soft_summary = assemble_linear_system(&soft_model, Some(soft_mesh), None, None);
-        let hard_summary = assemble_linear_system(&hard_model, Some(hard_mesh), None, None);
+        let soft_summary = assemble_linear_system(&soft_model, Some(soft_mesh), None, None)
+            .expect("soft-material system should assemble");
+        let hard_summary = assemble_linear_system(&hard_model, Some(hard_mesh), None, None)
+            .expect("hard-material system should assemble");
 
         assert!(
             first_csr_diagonal(&soft_summary) < first_csr_diagonal(&hard_summary) * 0.2,
@@ -2004,11 +2278,33 @@ mod tests {
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
 
-        let err = try_assemble_linear_system(&model, Some(mesh), None, None).expect_err(
+        let err = assemble_linear_system(&model, Some(mesh), None, None).expect_err(
             "strict solver mesh assembly should reject inverted Tetrahedron4 stiffness",
         );
 
         assert!(matches!(err, LinearAssemblyError::SolidStiffness(_)));
+    }
+
+    #[test]
+    fn malformed_solid_connectivity_returns_a_typed_error() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.excitations.clear();
+        model.constraints.clear();
+
+        for node_ids in [vec![1, 2, 3], vec![1, 2, 3, 4, 1]] {
+            let mut mesh = tetrahedron4_mesh();
+            mesh.topology.volume_elements[0].node_ids = node_ids;
+
+            let error = assemble_structural_system(
+                &model,
+                Some(mesh),
+                None,
+                None,
+                StructuralFormulationRequirement::PhysicalDiscretization,
+            )
+            .expect_err("Tet4 connectivity must contain exactly four nodes");
+            assert!(matches!(error, LinearAssemblyError::SolidStiffness(_)));
+        }
     }
 
     #[test]
@@ -2028,7 +2324,8 @@ mod tests {
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
 
-        let summary = assemble_linear_system(&model, Some(mesh), None, None);
+        let summary = assemble_linear_system(&model, Some(mesh), None, None)
+            .expect("valid boundary regions should assemble");
 
         assert_eq!(summary.constrained_dof_count, 9);
         assert!(summary.operator.constrained[0]);
@@ -2054,7 +2351,7 @@ mod tests {
         set_boundary_regions(&mut mesh, 0, &["root"]);
         reseal(&mut mesh);
 
-        let err = try_assemble_linear_system(&model, Some(mesh), None, None)
+        let err = assemble_linear_system(&model, Some(mesh), None, None)
             .expect_err("strict solver mesh assembly should reject unmapped loads");
 
         assert!(matches!(
@@ -2085,7 +2382,7 @@ mod tests {
         set_boundary_regions(&mut mesh, 0, &["tip"]);
         reseal(&mut mesh);
 
-        let err = try_assemble_linear_system(&model, Some(mesh), None, None)
+        let err = assemble_linear_system(&model, Some(mesh), None, None)
             .expect_err("strict solver mesh assembly should reject unmapped constraints");
 
         assert!(matches!(
@@ -2115,7 +2412,8 @@ mod tests {
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
 
-        let summary = assemble_linear_system(&model, Some(mesh), None, None);
+        let summary = assemble_linear_system(&model, Some(mesh), None, None)
+            .expect("valid pressure boundary should assemble");
 
         assert_close(summary.operator.rhs[1], -2.0);
         assert_close(summary.operator.rhs[4], -2.0);
@@ -2142,7 +2440,8 @@ mod tests {
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
 
-        let summary = assemble_linear_system(&model, Some(mesh), None, None);
+        let summary = assemble_linear_system(&model, Some(mesh), None, None)
+            .expect("valid wrench boundary should assemble");
 
         assert_eq!(summary.structural_wrench_lowering.len(), 1);
         let lowering = &summary.structural_wrench_lowering[0];
@@ -2152,6 +2451,297 @@ mod tests {
         assert_close(lowering.applied_moment_at_point[1], 6.0);
         assert_close(lowering.moment_residual[1], 0.0);
         assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
+    }
+
+    #[test]
+    fn malformed_explicit_elements_return_typed_errors_without_synthetic_fallback() {
+        let base = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+
+        let mut unknown_node = base.clone();
+        let StructuralElementKind::Beam(beam) = &mut unknown_node
+            .structural
+            .as_mut()
+            .expect("fixture has structural topology")
+            .elements[0]
+            .kind
+        else {
+            panic!("fixture must contain a beam")
+        };
+        beam.node_ids[1] = u32::MAX;
+
+        let mut unknown_section = base.clone();
+        let StructuralElementKind::Beam(beam) = &mut unknown_section
+            .structural
+            .as_mut()
+            .expect("fixture has structural topology")
+            .elements[0]
+            .kind
+        else {
+            panic!("fixture must contain a beam")
+        };
+        beam.section_id = "missing_section".to_string();
+
+        let mut degenerate = base.clone();
+        let structural = degenerate
+            .structural
+            .as_mut()
+            .expect("fixture has structural topology");
+        structural.nodes[1].coordinates_m = structural.nodes[0].coordinates_m;
+
+        let shell_base = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+        let mut shell_unknown_node = shell_base.clone();
+        let StructuralElementKind::Shell(shell) = &mut shell_unknown_node
+            .structural
+            .as_mut()
+            .expect("fixture has structural topology")
+            .elements[0]
+            .kind
+        else {
+            panic!("fixture must contain a shell")
+        };
+        shell.node_ids[2] = u32::MAX - 1;
+
+        let mut shell_unknown_section = shell_base.clone();
+        let StructuralElementKind::Shell(shell) = &mut shell_unknown_section
+            .structural
+            .as_mut()
+            .expect("fixture has structural topology")
+            .elements[0]
+            .kind
+        else {
+            panic!("fixture must contain a shell")
+        };
+        shell.section_id = "missing_shell_section".to_string();
+
+        let mut shell_degenerate = shell_base.clone();
+        let structural = shell_degenerate
+            .structural
+            .as_mut()
+            .expect("fixture has structural topology");
+        structural.nodes[1].coordinates_m = structural.nodes[0].coordinates_m;
+        structural.nodes[2].coordinates_m = structural.nodes[0].coordinates_m;
+
+        let element_id = base
+            .structural
+            .as_ref()
+            .expect("fixture has structural topology")
+            .elements[0]
+            .element_id
+            .clone();
+        let shell_element_id = shell_base
+            .structural
+            .as_ref()
+            .expect("fixture has structural topology")
+            .elements[0]
+            .element_id
+            .clone();
+        let cases = [
+            (
+                "unknown node",
+                unknown_node,
+                StructuralAssemblyError::UnknownNode {
+                    element_id: element_id.clone(),
+                    node_id: u32::MAX,
+                },
+            ),
+            (
+                "unknown section",
+                unknown_section,
+                StructuralAssemblyError::UnknownBeamSection {
+                    element_id: element_id.clone(),
+                    section_id: "missing_section".to_string(),
+                },
+            ),
+            (
+                "degenerate geometry",
+                degenerate,
+                StructuralAssemblyError::BeamElement {
+                    element_id: element_id.clone(),
+                    error: BeamElementError::DegenerateLength,
+                },
+            ),
+            (
+                "unknown shell node",
+                shell_unknown_node,
+                StructuralAssemblyError::UnknownNode {
+                    element_id: shell_element_id.clone(),
+                    node_id: u32::MAX - 1,
+                },
+            ),
+            (
+                "unknown shell section",
+                shell_unknown_section,
+                StructuralAssemblyError::UnknownShellSection {
+                    element_id: shell_element_id.clone(),
+                    section_id: "missing_shell_section".to_string(),
+                },
+            ),
+            (
+                "degenerate shell geometry",
+                shell_degenerate,
+                StructuralAssemblyError::ShellElement {
+                    element_id: shell_element_id,
+                    error: ShellElementError::DegenerateArea,
+                },
+            ),
+        ];
+
+        for (name, model, expected) in cases {
+            let error = assemble_structural_system(
+                &model,
+                None,
+                None,
+                None,
+                StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            )
+            .expect_err(name);
+            assert_eq!(error, LinearAssemblyError::Structural(expected), "{name}");
+        }
+    }
+
+    #[test]
+    fn mixed_explicit_dimensions_are_rejected_without_partial_assembly() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        let shell_model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+        let structural = model
+            .structural
+            .as_mut()
+            .expect("beam fixture has structural topology");
+        let shell = shell_model
+            .structural
+            .expect("shell fixture has structural topology");
+        structural.elements.push(shell.elements[0].clone());
+        structural.shell_sections = shell.shell_sections;
+
+        let error = assemble_structural_system(
+            &model,
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .expect_err("mixed beam-shell topology must require a coupling formulation");
+
+        assert_eq!(
+            error,
+            LinearAssemblyError::Structural(StructuralAssemblyError::MixedExplicitDimensions {
+                beam_element_count: 1,
+                shell_element_count: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn physical_requirement_rejects_meshless_structural_assembly() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let error = assemble_structural_system(
+            &model,
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect_err("physical structural assembly must not synthesize an operator");
+
+        assert_eq!(
+            error,
+            LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
+        );
+    }
+
+    #[test]
+    fn structural_formulation_evidence_identifies_every_implemented_operator_exactly() {
+        let mut solid_model = fixture_model(FixtureId::CantileverLinearStatic);
+        solid_model.excitations.clear();
+        solid_model.constraints.clear();
+        let tet4 = assemble_structural_system(
+            &solid_model,
+            Some(crate::assembly::solver_solid::tests::artifact(
+                ElementOrder::Tet4,
+            )),
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("Tet4 assembly should succeed");
+        let tet10 = assemble_structural_system(
+            &solid_model,
+            Some(crate::assembly::solver_solid::tests::artifact(
+                ElementOrder::Tet10,
+            )),
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("Tet10 assembly should succeed");
+        let beam = assemble_structural_system(
+            &fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference),
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("beam assembly should succeed");
+        let shell = assemble_structural_system(
+            &fixture_model(FixtureId::StructuralShellPlateMomentReference),
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("shell assembly should succeed");
+        let synthetic = assemble_structural_system(
+            &fixture_model(FixtureId::CantileverLinearStatic),
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .expect("typed experimental admission should permit synthetic assembly");
+
+        let cases = [
+            (
+                tet4,
+                StructuralOperatorImplementation::Tet4LinearElasticity,
+                Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
+                ExecutionFallbackPolicy::Forbid,
+            ),
+            (
+                tet10,
+                StructuralOperatorImplementation::Tet10LinearElasticity,
+                None,
+                ExecutionFallbackPolicy::Forbid,
+            ),
+            (
+                beam,
+                StructuralOperatorImplementation::EulerBernoulliBeam3d,
+                Some(StructuralRecoveryImplementation::BeamSectionResultants),
+                ExecutionFallbackPolicy::Forbid,
+            ),
+            (
+                shell,
+                StructuralOperatorImplementation::PairSpringShellProxy,
+                Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
+                ExecutionFallbackPolicy::Forbid,
+            ),
+            (
+                synthetic,
+                StructuralOperatorImplementation::SyntheticDiagonalChain,
+                None,
+                ExecutionFallbackPolicy::AllowExperimental,
+            ),
+        ];
+
+        for (summary, operator, recovery, fallback_policy) in cases {
+            let realization = summary
+                .structural_formulation
+                .expect("structural assembly must record its exact realization");
+            assert_eq!(realization.operator, operator);
+            assert_eq!(realization.recovery, recovery);
+            assert_eq!(realization.maturity, FormulationMaturity::Experimental);
+            assert_eq!(realization.fallback_policy, fallback_policy);
+            assert_eq!(realization.validate(), Ok(()));
+        }
     }
 
     fn tetrahedron4_mesh() -> SolverMeshArtifact {

@@ -1,7 +1,7 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 
 use crate::{
-    assembly::try_assemble_linear_system,
+    assembly::{assemble_structural_system, StructuralFormulationRequirement},
     contracts::{
         fea_modal_mode_shape_field_id, ComputeBackend, FeaModalRunResult, FeaRunError,
         FeaRunResult, ModalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
@@ -56,11 +56,12 @@ pub fn run_modal_with_options(
         Some(1),
         Some(5),
     );
-    let summary = try_assemble_linear_system(
+    let summary = assemble_structural_system(
         model,
         options.solver_mesh,
         options.thermo_mechanical_context,
         options.electro_thermal_context,
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     super::validate_rotational_dof_targets(model, &summary)?;

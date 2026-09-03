@@ -8,4 +8,6 @@ pub mod sequence;
 pub use identity::{
     AnalysisProcedure, AnalysisRunIdentity, CoupledPhysicsFamily, ExecutionFallbackPolicy,
     FormulationImplementation, FormulationMaturity, PhysicsFamily, SolutionSpace,
+    StructuralFormulationRealization, StructuralOperatorImplementation,
+    StructuralRecoveryImplementation,
 };

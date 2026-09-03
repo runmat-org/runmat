@@ -435,6 +435,7 @@ mod tests {
             structural_dof_layout: Default::default(),
             structural_beam_recovery: Vec::new(),
             structural_shell_recovery: Vec::new(),
+            structural_formulation: None,
             constrained_dof_count: 0,
             load_count: 1,
             structural_material: StructuralMaterialSummary {

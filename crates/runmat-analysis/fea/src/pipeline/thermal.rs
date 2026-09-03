@@ -3,7 +3,7 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    assembly::{try_assemble_linear_system, AssemblySummary},
+    assembly::{assemble_linear_system, AssemblySummary},
     contracts::{
         fea_thermal_axis_boundary_heat_flux_summary_field_id,
         fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
@@ -83,7 +83,7 @@ pub fn run_thermal_with_options(
         Some(1),
         Some(5),
     );
-    let summary = try_assemble_linear_system(
+    let summary = assemble_linear_system(
         model,
         options.solver_mesh.clone(),
         Some(thermo_context.clone()),

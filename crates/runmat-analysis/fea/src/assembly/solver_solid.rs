@@ -23,9 +23,23 @@ pub struct SolverSolidTopology {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverSolidAssemblyError {
     InvalidArtifact(String),
-    UnknownElementNode { element_id: u64, node_id: u64 },
-    UnassignedRegion { element_id: u64, region_id: String },
-    ElementStiffness { element_id: u64, message: String },
+    InvalidElementNodeCount {
+        element_id: u64,
+        expected: usize,
+        actual: usize,
+    },
+    UnknownElementNode {
+        element_id: u64,
+        node_id: u64,
+    },
+    UnassignedRegion {
+        element_id: u64,
+        region_id: String,
+    },
+    ElementStiffness {
+        element_id: u64,
+        message: String,
+    },
 }
 
 pub fn solver_solid_topology(
@@ -109,6 +123,13 @@ fn element_geometry<const N: usize>(
     node_ids: &[u64],
     nodes: &NodeIndex,
 ) -> Result<([[f64; 3]; N], [usize; N]), SolverSolidAssemblyError> {
+    if node_ids.len() != N {
+        return Err(SolverSolidAssemblyError::InvalidElementNodeCount {
+            element_id,
+            expected: N,
+            actual: node_ids.len(),
+        });
+    }
     let mut coordinates = [[0.0; 3]; N];
     let mut offsets = [0; N];
     for (local, node_id) in node_ids.iter().copied().enumerate() {

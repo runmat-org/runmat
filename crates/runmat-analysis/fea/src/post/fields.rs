@@ -1064,8 +1064,11 @@ mod tests {
 
     #[test]
     fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
-        let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None);
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.excitations.clear();
+        model.constraints.clear();
+        let summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None)
+            .expect("valid Tet4 system should assemble");
         let solve = LinearSolveResult {
             iterations: 1,
             residual_norm: 0.0,
@@ -1111,8 +1114,11 @@ mod tests {
 
     #[test]
     fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
-        let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None);
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.excitations.clear();
+        model.constraints.clear();
+        let summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None)
+            .expect("valid Tet4 system should assemble");
         let solve = LinearSolveResult {
             iterations: 10,
             residual_norm: 1.0e-4,

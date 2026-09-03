@@ -187,7 +187,8 @@ mod tests {
 
     #[test]
     fn ilu0_preconditioner_is_buildable_and_finite() {
-        let summary = assemble_linear_system(&model(), None, None, None);
+        let summary = assemble_linear_system(&model(), None, None, None)
+            .expect("test system should assemble");
         let pc = build_spd_preconditioner(&summary, SpdPreconditionerKind::Ilu0);
         let z = pc.apply(&summary.operator.rhs);
         assert_eq!(z.len(), summary.dof_count);

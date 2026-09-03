@@ -69,6 +69,73 @@ pub enum FormulationImplementation {
     ReducedElectrothermal,
 }
 
+/// Exact structural operator assembled for a run.
+///
+/// These identities deliberately distinguish verified continuum implementations from reduced
+/// or proxy operators. They describe realized numerical work, not merely the requested physics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuralOperatorImplementation {
+    Tet4LinearElasticity,
+    Tet10LinearElasticity,
+    EulerBernoulliBeam3d,
+    PairSpringShellProxy,
+    SyntheticDiagonalChain,
+}
+
+/// Exact structural field-recovery implementation applied after a solve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuralRecoveryImplementation {
+    Tet4ConstantStrain,
+    BeamSectionResultants,
+    PairSpringShellDerivedResultants,
+}
+
+/// Assembly evidence carried alongside the operator that was actually produced.
+///
+/// `recovery` is absent when the implementation has no valid recovery path. In particular, the
+/// current Tet10 stiffness implementation must not be mistaken for completed Tet10 recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralFormulationRealization {
+    pub operator: StructuralOperatorImplementation,
+    pub recovery: Option<StructuralRecoveryImplementation>,
+    pub maturity: FormulationMaturity,
+    pub fallback_policy: ExecutionFallbackPolicy,
+}
+
+impl StructuralFormulationRealization {
+    pub const fn experimental(
+        operator: StructuralOperatorImplementation,
+        recovery: Option<StructuralRecoveryImplementation>,
+        fallback_policy: ExecutionFallbackPolicy,
+    ) -> Self {
+        Self {
+            operator,
+            recovery,
+            maturity: FormulationMaturity::Experimental,
+            fallback_policy,
+        }
+    }
+
+    pub fn validate(self) -> Result<(), &'static str> {
+        if self.operator == StructuralOperatorImplementation::SyntheticDiagonalChain
+            && self.fallback_policy != ExecutionFallbackPolicy::AllowExperimental
+        {
+            return Err(
+                "the synthetic structural operator requires explicit experimental admission",
+            );
+        }
+        if self.maturity == FormulationMaturity::Production {
+            return Err(
+                "the current structural formulation implementations have not qualified for production maturity",
+            );
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FormulationMaturity {
@@ -258,6 +325,77 @@ mod tests {
         assert_eq!(
             identity.validate(),
             Err("a production formulation must forbid execution fallback")
+        );
+    }
+
+    #[test]
+    fn exact_structural_realizations_distinguish_operators_and_recovery() {
+        let cases = [
+            (
+                StructuralOperatorImplementation::Tet4LinearElasticity,
+                Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
+            ),
+            (
+                StructuralOperatorImplementation::Tet10LinearElasticity,
+                None,
+            ),
+            (
+                StructuralOperatorImplementation::EulerBernoulliBeam3d,
+                Some(StructuralRecoveryImplementation::BeamSectionResultants),
+            ),
+            (
+                StructuralOperatorImplementation::PairSpringShellProxy,
+                Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
+            ),
+        ];
+
+        for (operator, recovery) in cases {
+            let realization = StructuralFormulationRealization::experimental(
+                operator,
+                recovery,
+                ExecutionFallbackPolicy::Forbid,
+            );
+            assert_eq!(realization.operator, operator);
+            assert_eq!(realization.recovery, recovery);
+            assert_eq!(realization.maturity, FormulationMaturity::Experimental);
+            assert_eq!(realization.validate(), Ok(()));
+        }
+    }
+
+    #[test]
+    fn synthetic_structural_operator_requires_experimental_fallback_admission() {
+        let rejected = StructuralFormulationRealization::experimental(
+            StructuralOperatorImplementation::SyntheticDiagonalChain,
+            None,
+            ExecutionFallbackPolicy::Forbid,
+        );
+        assert_eq!(
+            rejected.validate(),
+            Err("the synthetic structural operator requires explicit experimental admission")
+        );
+
+        let admitted = StructuralFormulationRealization::experimental(
+            StructuralOperatorImplementation::SyntheticDiagonalChain,
+            None,
+            ExecutionFallbackPolicy::AllowExperimental,
+        );
+        assert_eq!(admitted.validate(), Ok(()));
+    }
+
+    #[test]
+    fn structural_proxy_cannot_claim_production_maturity() {
+        let proxy = StructuralFormulationRealization {
+            operator: StructuralOperatorImplementation::PairSpringShellProxy,
+            recovery: Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
+            maturity: FormulationMaturity::Production,
+            fallback_policy: ExecutionFallbackPolicy::Forbid,
+        };
+
+        assert_eq!(
+            proxy.validate(),
+            Err(
+                "the current structural formulation implementations have not qualified for production maturity"
+            )
         );
     }
 }

@@ -35,7 +35,7 @@ pub struct ShellLocalFrame {
     pub area_m2: f64,
 }
 
-#[derive(Debug, Error, Clone, PartialEq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ShellElementError {
     #[error("shell element area must be positive and finite")]
     DegenerateArea,

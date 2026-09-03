@@ -123,6 +123,8 @@ pub use study::sequence::{
 pub use study::{
     AnalysisProcedure, AnalysisRunIdentity, CoupledPhysicsFamily, ExecutionFallbackPolicy,
     FormulationImplementation, FormulationMaturity, PhysicsFamily, SolutionSpace,
+    StructuralFormulationRealization, StructuralOperatorImplementation,
+    StructuralRecoveryImplementation,
 };
 pub use validate::{validate_model, validate_model_against_geometry, AnalysisValidationError};
 

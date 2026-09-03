@@ -329,7 +329,8 @@ fn prescribed_rotations_require_rotational_dofs() {
 #[test]
 fn canonical_constant_signal_drives_prescribed_translation_assembly() {
     let inline_model = fixture_model(FixtureId::TransientShock);
-    let inline = crate::assembly::assemble_linear_system(&inline_model, None, None, None);
+    let inline = crate::assembly::assemble_linear_system(&inline_model, None, None, None)
+        .expect("inline prescribed value should assemble");
 
     let mut signal_model = inline_model.clone();
     signal_model
@@ -370,7 +371,8 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
         }
     }
 
-    let referenced = crate::assembly::assemble_linear_system(&signal_model, None, None, None);
+    let referenced = crate::assembly::assemble_linear_system(&signal_model, None, None, None)
+        .expect("signal-backed prescribed value should assemble");
     assert_eq!(referenced.operator.constrained, inline.operator.constrained);
     assert_eq!(referenced.operator.rhs, inline.operator.rhs);
 }
@@ -387,7 +389,8 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
         }],
     );
 
-    let summary = crate::assembly::assemble_linear_system(&model, None, None, None);
+    let summary = crate::assembly::assemble_linear_system(&model, None, None, None)
+        .expect("synthetic test operator should assemble");
 
     assert_eq!(summary.dof_count, 3);
     assert_eq!(summary.structural_node_count, 1);
@@ -405,7 +408,8 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
 #[test]
 fn beam_assembly_uses_lumped_rotational_inertia() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let summary = crate::assembly::assemble_linear_system(&model, None, None, None);
+    let summary = crate::assembly::assemble_linear_system(&model, None, None, None)
+        .expect("beam operator should assemble");
     let layout = &summary.structural_dof_layout;
     let node = 0usize;
     let mass = &summary.operator.mass_diag;
