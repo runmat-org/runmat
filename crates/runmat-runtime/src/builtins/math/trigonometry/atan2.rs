@@ -856,16 +856,24 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(ct) => {
                 assert_eq!(ct.shape, gathered.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
-                    runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
-                };
+                let (absolute_tolerance, relative_tolerance) =
+                    test_support::gpu_transcendental_tolerances(
+                        runmat_accelerate_api::provider().unwrap().precision(),
+                    );
                 for (actual, expect) in gathered
                     .materialize_f64()
                     .iter()
                     .zip(ct.materialize_f64().iter())
                 {
-                    assert!((actual - expect).abs() < tol, "{actual} vs {expect}");
+                    assert!(
+                        test_support::floats_match(
+                            *actual,
+                            *expect,
+                            absolute_tolerance,
+                            relative_tolerance,
+                        ),
+                        "{actual} vs {expect}"
+                    );
                 }
                 let values = gathered.materialize_f64();
                 assert_eq!(values[0].to_bits(), 0.0f64.to_bits());

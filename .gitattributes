@@ -1,0 +1,13 @@
+# Exact CAD fixtures are byte-stable inputs. Preserve canonical line endings on
+# every checkout so parsing, mutation tests, and content identities agree across
+# Linux, macOS, and Windows.
+*.brep text eol=lf
+*.step text eol=lf
+
+# Canonical package fixtures are compared byte-for-byte with serializer output.
+# Keep their wire-format line endings stable on Windows checkouts as well.
+crates/runmat-package/tests/fixtures/*.lock text eol=lf
+
+# Native IR snapshots are the canonical, target-independent printer output.
+# Preserve the printer's LF format so byte-for-byte review tests are portable.
+*.native-ir text eol=lf

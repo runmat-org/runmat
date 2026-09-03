@@ -465,7 +465,8 @@ mod remote_test_support {
 
         fn resolve(&self, remote: &str) -> PathBuf {
             let mut segments: Vec<OsString> = Vec::new();
-            for component in Path::new(remote).components() {
+            let portable_path = remote.replace('\\', "/");
+            for component in Path::new(&portable_path).components() {
                 match component {
                     Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
                     Component::ParentDir => {
@@ -489,6 +490,20 @@ mod remote_test_support {
                 format!("/{}", relative.to_string_lossy().replace('\\', "/"))
             }
         }
+    }
+
+    #[test]
+    fn test_server_paths_remain_inside_the_temporary_root() {
+        let temp = tempdir().expect("tempdir");
+        let harness = Harness::new(temp.path().to_path_buf());
+        assert_eq!(
+            harness.resolve("/reports/../../outside.txt"),
+            harness.root.join("outside.txt")
+        );
+        assert_eq!(
+            harness.resolve("reports\\nested\\..\\result.txt"),
+            harness.root.join("reports").join("result.txt")
+        );
     }
 
     #[derive(Deserialize)]

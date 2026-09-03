@@ -3,10 +3,6 @@ struct TensorScalar {
     data: array<f64>,
 };
 
-struct TensorVec {
-    data: array<vec4<f64>>,
-};
-
 struct Params {
     batch_count: u32,
     height: u32,
@@ -27,8 +23,6 @@ struct Params {
 @group(0) @binding(0) var<storage, read> input_tensor: TensorScalar;
 @group(0) @binding(1) var<storage, read_write> output_tensor: TensorScalar;
 @group(0) @binding(2) var<uniform> params: Params;
-@group(0) @binding(3) var<storage, read> input_tensor_vec: TensorVec;
-@group(0) @binding(4) var<storage, read_write> output_tensor_vec: TensorVec;
 
 @compute @workgroup_size(1, 1, 1)
 fn main() {
@@ -43,10 +37,6 @@ fn main() {
 pub const IMAGE_NORMALIZE_STUB_SHADER_F32: &str = r#"
 struct TensorScalar {
     data: array<f32>,
-};
-
-struct TensorVec {
-    data: array<vec4<f32>>,
 };
 
 struct Params {
@@ -69,8 +59,6 @@ struct Params {
 @group(0) @binding(0) var<storage, read> input_tensor: TensorScalar;
 @group(0) @binding(1) var<storage, read_write> output_tensor: TensorScalar;
 @group(0) @binding(2) var<uniform> params: Params;
-@group(0) @binding(3) var<storage, read> input_tensor_vec: TensorVec;
-@group(0) @binding(4) var<storage, read_write> output_tensor_vec: TensorVec;
 
 @compute @workgroup_size(1, 1, 1)
 fn main() {

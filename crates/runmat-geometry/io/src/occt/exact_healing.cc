@@ -1,5 +1,5 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_healing.hxx"
+#include "exact_healing.hxx"
 
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>

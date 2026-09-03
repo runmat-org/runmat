@@ -331,12 +331,7 @@ impl WgpuProvider {
         );
 
         let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-sub2ind-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(error_size, "runmat-sub2ind-error-staging");
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -540,12 +535,7 @@ impl WgpuProvider {
         );
 
         let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-ind2sub-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(error_size, "runmat-ind2sub-error-staging");
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1118,12 +1108,7 @@ impl WgpuProvider {
         });
         self.queue
             .write_buffer(&count_storage, 0, bytemuck::cast_slice(&[0u32, 0u32]));
-        let count_staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-find-count-staging"),
-            size: 8,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let count_staging = self.create_readback_buffer(8, "runmat-find-count-staging");
 
         let params = crate::backend::wgpu::params::FindParams {
             len: total as u32,
@@ -1213,7 +1198,7 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
     use futures::executor::block_on;
     use runmat_accelerate_api::{
         HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, HostNumericDataView,
@@ -1252,7 +1237,7 @@ mod tests {
 
     #[test]
     fn wgpu_linear_gather_and_scatter_copy_complex_logical_elements() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let data = [1.0_f32, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
@@ -1290,7 +1275,7 @@ mod tests {
 
     #[test]
     fn wgpu_linear_gather_and_scatter_preserve_u64_words() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let values = [0_u64, 1_u64 << 63, u64::MAX];
@@ -1331,7 +1316,7 @@ mod tests {
 
     #[test]
     fn wgpu_linear_gather_and_scatter_preserve_all_native_integer_classes() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         macro_rules! check {
@@ -1380,7 +1365,7 @@ mod tests {
 
     #[test]
     fn wgpu_row_and_column_scatter_preserve_native_u64_words() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let matrix = provider

@@ -438,14 +438,6 @@ impl WgpuProvider {
                         binding: 2,
                         resource: uniform_buf.as_entire_binding(),
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
                 ];
                 let layout = &self.pipelines.image_normalize.layout;
                 let bind_group =

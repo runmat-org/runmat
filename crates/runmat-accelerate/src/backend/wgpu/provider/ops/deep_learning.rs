@@ -186,12 +186,7 @@ impl WgpuProvider {
             );
         }
         let error_size = std::mem::size_of::<u32>() as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-softmax-rows-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(error_size, "runmat-softmax-rows-error-staging");
         let mut encoder =
             self.device_ref()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -398,12 +393,7 @@ impl WgpuProvider {
         }
 
         let error_size = std::mem::size_of::<u32>() as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-crossentropy-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self.create_readback_buffer(error_size, "runmat-crossentropy-error-staging");
         let mut encoder =
             self.device_ref()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -696,12 +686,8 @@ impl WgpuProvider {
             }
 
             let error_size = std::mem::size_of::<u32>() as u64;
-            let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-adamupdate-error-staging"),
-                size: error_size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let staging =
+                self.create_readback_buffer(error_size, "runmat-adamupdate-error-staging");
             let mut encoder =
                 self.device_ref()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1281,7 +1267,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 
 #[cfg(test)]
 mod tests {
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::{
         AccelProvider, HostTensorView, ProviderAdamUpdateRequest, ProviderCrossentropyMode,
         ProviderCrossentropyRequest,
@@ -1289,7 +1275,7 @@ mod tests {
 
     #[test]
     fn adam_update_wgpu_returns_resident_outputs() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
 
@@ -1372,7 +1358,7 @@ mod tests {
 
     #[test]
     fn elu_wgpu_matches_cpu_branch_semantics() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let shape = [2usize, 2usize];
@@ -1403,7 +1389,7 @@ mod tests {
 
     #[test]
     fn softmax_rows_wgpu_is_stable_and_resident() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let shape = [2usize, 3usize];
@@ -1443,7 +1429,7 @@ mod tests {
 
     #[test]
     fn softmax_rows_wgpu_reports_invalid_normalization() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let shape = [1usize, 2usize];
@@ -1463,7 +1449,7 @@ mod tests {
 
     #[test]
     fn crossentropy_wgpu_returns_resident_loss_terms() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
 

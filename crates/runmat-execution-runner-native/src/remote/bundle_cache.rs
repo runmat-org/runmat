@@ -17,7 +17,11 @@ pub(super) fn store(cache: &Path, digest: Digest, bytes: &[u8]) -> NativeExecuti
         return validate_existing(&target, digest);
     }
 
-    let temporary = cache.join(format!(".{digest}.{}.tmp", uuid::Uuid::new_v4()));
+    let temporary = cache.join(format!(
+        ".{}.{}.tmp",
+        filesystem_digest(digest),
+        uuid::Uuid::new_v4()
+    ));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -55,7 +59,18 @@ pub(super) fn load(cache: &Path, digest: Digest) -> NativeExecutionResult<(Execu
 }
 
 fn path(cache: &Path, digest: Digest) -> PathBuf {
-    cache.join(format!("{digest}.rmbundle"))
+    cache.join(format!("{}.rmbundle", filesystem_digest(digest)))
+}
+
+fn filesystem_digest(digest: Digest) -> String {
+    // Digest's canonical display form includes `sha256:`, which is a protocol
+    // identity rather than a portable filename (Windows reserves `:`).
+    let mut encoded = String::with_capacity(digest.bytes().len() * 2);
+    for byte in digest.bytes() {
+        use std::fmt::Write as _;
+        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    encoded
 }
 
 fn validate_existing(target: &Path, digest: Digest) -> NativeExecutionResult<()> {
@@ -96,6 +111,14 @@ mod tests {
             bytes
         );
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+        let stored_path = path(directory.path(), digest);
+        let filename = stored_path.file_name().unwrap().to_str().unwrap();
+        assert_eq!(filename.len(), 64 + ".rmbundle".len());
+        assert!(filename
+            .strip_suffix(".rmbundle")
+            .unwrap()
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
 
         std::fs::write(path(directory.path(), digest), b"substituted").unwrap();
         assert!(store(directory.path(), digest, bytes).is_err());

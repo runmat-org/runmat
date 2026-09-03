@@ -105,18 +105,36 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 #[cfg(feature = "wgpu")]
 #[test]
-fn telemetry_records_chunked_matmul_activity() {
+fn chunked_matmul_accumulates_and_records_activity() {
     let _guard = telemetry_test_guard();
     let provider = register_provider();
     provider.reset_telemetry();
 
-    let m = 32usize;
-    let n = 32usize;
+    let m = 2usize;
+    let n = 2usize;
     let k = 131_072usize; // ensure chunked path (K_CHUNK_SWITCH = 65536)
 
-    let a = provider.zeros(&[m, k]).expect("zeros a");
-    let b = provider.zeros(&[k, n]).expect("zeros b");
+    let a_data = vec![1.0; m * k];
+    let b_data = vec![1.0; k * n];
+    let a = provider
+        .upload(&HostTensorView {
+            data: &a_data,
+            shape: &[m, k],
+        })
+        .expect("upload a");
+    let b = provider
+        .upload(&HostTensorView {
+            data: &b_data,
+            shape: &[k, n],
+        })
+        .expect("upload b");
     let c = block_on(provider.matmul(&a, &b)).expect("matmul");
+    let host_c = block_on(provider.download(&c)).expect("download chunked matmul result");
+
+    assert_eq!(host_c.shape, vec![m, n]);
+    for value in host_c.data {
+        assert_eq!(value, k as f64, "each K partition must be accumulated");
+    }
 
     let telemetry = provider.telemetry_snapshot();
     assert!(

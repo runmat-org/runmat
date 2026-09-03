@@ -73,7 +73,9 @@ pub fn link_standalone(
     let response = super::response::encode(&plan.response_tokens, plan.driver.family)?;
     std::fs::write(&response_path, response)
         .map_err(|error| AotError::io("write linker response file", &response_path, error))?;
-    let result = std::process::Command::new(&plan.driver.path)
+    let result = plan
+        .driver
+        .command()
         .arg(format!("@{}", response_path.display()))
         .output()
         .map_err(|error| AotError::io("invoke native linker", &plan.driver.path, error))?;

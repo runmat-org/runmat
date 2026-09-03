@@ -1901,13 +1901,13 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
 
     #[test]
     fn transpose_complex_interleaved_downloads_by_logical_element() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let data = vec![
@@ -1940,7 +1940,7 @@ mod tests {
 
     #[test]
     fn transpose_complex_interleaved_feeds_downstream_abs_in_transposed_order() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let data = vec![
@@ -1977,7 +1977,7 @@ mod tests {
 
     #[test]
     fn reshape_materializes_lazy_transpose_before_metadata_update() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -2010,7 +2010,7 @@ mod tests {
 
     #[test]
     fn permute_complex_interleaved_three_dimensional_stays_resident() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let data = vec![
@@ -2048,7 +2048,7 @@ mod tests {
             HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
         };
 
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let values = [u64::MAX, (1u64 << 63) + 17, (1u64 << 53) + 1, 19, 23, 29];
@@ -2099,7 +2099,7 @@ mod tests {
             HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
         };
 
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let values = [i64::MIN, -1, 0, i64::MAX, -2, 17];
@@ -2141,7 +2141,7 @@ mod tests {
             HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
         };
 
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let values = [u64::MAX, (1u64 << 63) + 17, (1u64 << 53) + 1];
@@ -2195,7 +2195,7 @@ mod tests {
             HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
         };
 
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let values = [u64::MAX, (1u64 << 63) + 17, (1u64 << 53) + 1, 19, 23, 29];

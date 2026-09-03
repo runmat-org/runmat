@@ -139,6 +139,9 @@ async fn read_payload_until_cancelled(
     limits: FrameLimits,
     cancelled: &AtomicBool,
 ) -> runmat_process_host::ProcessHostResult<Option<Vec<u8>>> {
+    // A framed read may span several pipe reads. Keep the same future alive
+    // while polling cancellation: recreating it after a timer tick discards
+    // bytes already consumed from the length-prefixed stream.
     let read = read_payload(reader, limits);
     tokio::pin!(read);
     loop {

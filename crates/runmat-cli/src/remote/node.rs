@@ -17,7 +17,7 @@ pub(super) async fn execute(args: NodeJoinArgs) -> Result<()> {
         NodeJoinCommand::Enroll { token } => {
             let config = config(&args, false)?;
             let control = Arc::new(HttpNodeControlPlane::new(config.server_url.clone())?);
-            let credential = runmat_node_agent::enrollment::enroll(
+            runmat_node_agent::enrollment::enroll(
                 control,
                 &CredentialStore::new(&config.state_directory),
                 token.clone(),
@@ -25,7 +25,7 @@ pub(super) async fn execute(args: NodeJoinArgs) -> Result<()> {
                 config.heartbeat_ttl.as_secs(),
             )
             .await?;
-            println!("enrolled node {}", credential.node_id);
+            println!("node enrolled");
             Ok(())
         }
         NodeJoinCommand::Run => run(config(&args, false)?).await,

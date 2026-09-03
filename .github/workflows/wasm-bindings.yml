@@ -72,16 +72,17 @@ concurrency:
 
 jobs:
   build-and-publish:
-    runs-on: ubuntu-latest-gpu
+    runs-on: warp-ubuntu-latest-x64-16x
     # Environment-scoped secrets (NPM_TOKEN) require the job to declare the
     # correct environment. Direct dev pushes use Dev; workflow_dispatch and
     # release.yml workflow_call can select Production via release_channel=prod.
     environment: ${{ inputs.release_channel == 'prod' && 'Production' || 'Dev' }}
     env:
       RUST_BACKTRACE: 1
+      CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: ${{ inputs.ref || github.ref_name }}
@@ -93,8 +94,18 @@ jobs:
             rust@1.90.0 + wasm32-unknown-unknown
             wasm-pack@0.14.0
 
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # The expensive WASM graph is primarily RunMat workspace crates, so
+          # retain those artifacts as well as third-party dependencies. Bump
+          # the namespace when changing cache policy because GitHub cache keys
+          # are immutable.
+          shared-key: wasm-bindings-workspace-v1
+          cache-workspace-crates: true
+
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
@@ -106,15 +117,25 @@ jobs:
           install-chromedriver: true
           install-dependencies: true
 
+      - name: Configure Chrome for WebDriver tests
+        shell: bash
+        env:
+          RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          config_path="${RUNNER_TEMP}/runmat-webdriver.json"
+          node -e '
+            const fs = require("node:fs");
+            const [binary, output] = process.argv.slice(1);
+            fs.writeFileSync(output, JSON.stringify({
+              "goog:chromeOptions": { binary }
+            }));
+          ' "${RUNMAT_CHROME_BIN}" "${config_path}"
+          echo "WASM_BINDGEN_TEST_WEBDRIVER_JSON=${config_path}" >> "${GITHUB_ENV}"
+
       - name: Install npm dependencies
         working-directory: bindings/ts
         run: npm ci
-
-      - name: Regenerate wasm builtin registry
-        run: scripts/regenerate-wasm-registry.sh
-
-      - name: Build wasm32 target
-        run: cargo build -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host
 
       - name: Run wasm headless tests
         env:

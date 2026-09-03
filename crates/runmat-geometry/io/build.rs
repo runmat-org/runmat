@@ -45,6 +45,7 @@ fn build_occt_backend() {
         .file("src/occt/exact_topology.cc")
         .file("src/occt/exact_evaluator.cc")
         .file("src/occt/exact_surface_evaluator.cc")
+        .include(".")
         .include(&occt_include)
         .std("c++17")
         .flag_if_supported("-Wno-deprecated-declarations")

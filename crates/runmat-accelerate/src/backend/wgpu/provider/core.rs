@@ -24,7 +24,7 @@ use crate::fusion::active_fusion;
 impl WgpuProvider {
     pub(super) async fn map_readback_bytes(
         &self,
-        staging: wgpu::Buffer,
+        staging: Arc<wgpu::Buffer>,
         size_bytes: u64,
         context: &str,
     ) -> Result<Vec<u8>> {
@@ -48,12 +48,13 @@ impl WgpuProvider {
         out.copy_from_slice(&data);
         drop(data);
         staging.unmap();
+        self.recycle_readback_buffer(size_bytes, staging);
         Ok(out)
     }
 
     pub(super) fn map_readback_bytes_sync(
         &self,
-        staging: wgpu::Buffer,
+        staging: Arc<wgpu::Buffer>,
         size_bytes: u64,
         context: &str,
     ) -> Result<Vec<u8>> {
@@ -68,6 +69,12 @@ impl WgpuProvider {
         }
     }
     pub(super) const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
+    // Keep enough reusable storage for common tensor shapes while reserving
+    // native resource capacity for pipelines, uniforms, and transient command
+    // buffers. This is deliberately conservative across software and integrated
+    // D3D12 adapters, whose resource ceilings can be substantially lower than
+    // those of discrete GPUs.
+    pub(super) const BUFFER_RESIDENCY_MAX_TOTAL: usize = 16;
     pub(super) const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
     pub(super) const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
     pub(super) const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
@@ -76,6 +83,72 @@ impl WgpuProvider {
     pub(crate) fn device_ref(&self) -> &wgpu::Device {
         self.device.as_ref()
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_buffer_count(&self) -> usize {
+        self.buffers.lock().expect("buffer mutex poisoned").len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_buffer_ptr(&self, handle: &GpuTensorHandle) -> Option<usize> {
+        self.buffers
+            .lock()
+            .ok()
+            .and_then(|buffers| buffers.get(&handle.buffer_id).cloned())
+            .map(|entry| Arc::as_ptr(&entry.buffer) as usize)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_pooled_buffer_counts(&self) -> (usize, usize) {
+        (
+            self.buffer_residency.pooled_count(),
+            self.buffer_residency.max_total(),
+        )
+    }
+
+    /// Close the logical session and return unaliased storage allocations to
+    /// the physical device pool.
+    ///
+    /// Buffer-backed caches are cleared first so their `Arc` references cannot
+    /// prevent reclamation. This is also invoked from `Drop`, making cleanup
+    /// independent of whether every caller explicitly freed every handle.
+    pub(super) fn recycle_session_buffers(&self) {
+        self.bind_group_cache.clear();
+        self.kernel_resources.clear();
+        if let Ok(mut cache) = self.pow2_of.lock() {
+            cache.clear();
+        }
+        if let Ok(mut cache) = self.moments_cache.lock() {
+            cache.clear();
+        }
+
+        let entries = self
+            .buffers
+            .lock()
+            .map(|mut buffers| buffers.drain().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for (buffer_id, entry) in entries {
+            let handle = GpuTensorHandle {
+                shape: entry.shape.clone(),
+                device_id: self.runtime_device_id,
+                buffer_id,
+                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
+                    entry.element_type,
+                    entry.storage,
+                ),
+            };
+            runmat_accelerate_api::clear_handle_metadata(&handle);
+
+            let poolable_by_size = entry.len > 0
+                && self.buffer_residency_max_poolable_bytes > 0
+                && entry.allocated_bytes <= self.buffer_residency_max_poolable_bytes;
+            if poolable_by_size && Arc::strong_count(&entry.buffer) == 1 {
+                self.buffer_residency
+                    .release(entry.usage, entry.allocated_bytes, entry.buffer);
+            }
+        }
+    }
+
     pub(crate) fn queue_ref(&self) -> &wgpu::Queue {
         self.queue.as_ref()
     }
@@ -269,6 +342,31 @@ impl WgpuProvider {
     pub(super) fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
         self.create_storage_buffer_for_usage(BufferUsageClass::Generic, len, label)
             .0
+    }
+
+    pub(super) fn create_storage_buffer_bytes(
+        &self,
+        size_bytes: u64,
+        label: &str,
+    ) -> Arc<wgpu::Buffer> {
+        self.buffer_residency
+            .acquire_storage_bytes(self.device_ref(), size_bytes, label)
+            .0
+    }
+
+    pub(super) fn create_readback_buffer(&self, size_bytes: u64, label: &str) -> Arc<wgpu::Buffer> {
+        self.buffer_residency
+            .acquire_readback(self.device_ref(), size_bytes, label)
+            .0
+    }
+
+    pub(super) fn recycle_readback_buffer(&self, size_bytes: u64, buffer: Arc<wgpu::Buffer>) {
+        let poolable_by_size = self.buffer_residency_max_poolable_bytes > 0
+            && size_bytes <= self.buffer_residency_max_poolable_bytes;
+        if poolable_by_size && Arc::strong_count(&buffer) == 1 {
+            self.buffer_residency
+                .release(BufferUsageClass::Readback, size_bytes, buffer);
+        }
     }
 
     /// Allocate a raw-word buffer used by exact integer kernels. Integer

@@ -205,31 +205,70 @@ return value;
 }
 
 fn inline_erfcinv_body(precision: NumericPrecision) -> String {
-    let ty = match precision {
-        NumericPrecision::F64 => "f64",
-        NumericPrecision::F32 => "f32",
+    // Some D3D12 drivers reject kernels that construct non-finite floating-point
+    // values in shader arithmetic. Construct their IEEE representations with
+    // typed bitcast helpers while preserving the floating-point storage ABI.
+    let (ty, positive_infinity, negative_infinity, nan) = match precision {
+        NumericPrecision::F64 => ("f64", "pos_inf_f64", "neg_inf_f64", "nan_f64"),
+        NumericPrecision::F32 => ("f32", "pos_inf_f32", "neg_inf_f32", "nan_f32"),
     };
     format!(
         r#"
-if a != a {{ return a; }}
-if a < {ty}(0.0) || a > {ty}(2.0) {{ return {ty}(0.0) / {ty}(0.0); }}
-if a == {ty}(0.0) {{ return {ty}(1.0) / {ty}(0.0); }}
-if a == {ty}(2.0) {{ return -{ty}(1.0) / {ty}(0.0); }}
-if a == {ty}(1.0) {{ return {ty}(0.0); }}
-let p = a * {ty}(0.5);
+var safe_a = {ty}(1.0);
+if a > {ty}(0.0) && a < {ty}(2.0) {{ safe_a = a; }}
+let p = safe_a * {ty}(0.5);
 var normal: {ty};
 if p < {ty}(0.02425) {{
     let q = sqrt(-{ty}(2.0) * log(p));
-    normal = ((((({ty}(-0.007784894002430293) * q + {ty}(-0.3223964580411365)) * q + {ty}(-2.400758277161838)) * q + {ty}(-2.549732539343734)) * q + {ty}(4.374664141464968)) * q + {ty}(2.938163982698783)) / (((({ty}(0.007784695709041462) * q + {ty}(0.3224671290700398)) * q + {ty}(2.445134137142996)) * q + {ty}(3.754408661907416)) * q + {ty}(1.0));
+    var numerator = {ty}(-0.007784894002430293);
+    numerator = numerator * q + {ty}(-0.3223964580411365);
+    numerator = numerator * q + {ty}(-2.400758277161838);
+    numerator = numerator * q + {ty}(-2.549732539343734);
+    numerator = numerator * q + {ty}(4.374664141464968);
+    numerator = numerator * q + {ty}(2.938163982698783);
+    var denominator = {ty}(0.007784695709041462);
+    denominator = denominator * q + {ty}(0.3224671290700398);
+    denominator = denominator * q + {ty}(2.445134137142996);
+    denominator = denominator * q + {ty}(3.754408661907416);
+    denominator = denominator * q + {ty}(1.0);
+    normal = numerator / denominator;
 }} else if p > {ty}(0.97575) {{
     let q = sqrt(-{ty}(2.0) * log({ty}(1.0) - p));
-    normal = -((((({ty}(-0.007784894002430293) * q + {ty}(-0.3223964580411365)) * q + {ty}(-2.400758277161838)) * q + {ty}(-2.549732539343734)) * q + {ty}(4.374664141464968)) * q + {ty}(2.938163982698783)) / (((({ty}(0.007784695709041462) * q + {ty}(0.3224671290700398)) * q + {ty}(2.445134137142996)) * q + {ty}(3.754408661907416)) * q + {ty}(1.0));
+    var numerator = {ty}(-0.007784894002430293);
+    numerator = numerator * q + {ty}(-0.3223964580411365);
+    numerator = numerator * q + {ty}(-2.400758277161838);
+    numerator = numerator * q + {ty}(-2.549732539343734);
+    numerator = numerator * q + {ty}(4.374664141464968);
+    numerator = numerator * q + {ty}(2.938163982698783);
+    var denominator = {ty}(0.007784695709041462);
+    denominator = denominator * q + {ty}(0.3224671290700398);
+    denominator = denominator * q + {ty}(2.445134137142996);
+    denominator = denominator * q + {ty}(3.754408661907416);
+    denominator = denominator * q + {ty}(1.0);
+    normal = -(numerator / denominator);
 }} else {{
     let q = p - {ty}(0.5);
     let r = q * q;
-    normal = ((((({ty}(-39.69683028665376) * r + {ty}(220.9460984245205)) * r + {ty}(-275.9285104469687)) * r + {ty}(138.3577518672690)) * r + {ty}(-30.66479806614716)) * r + {ty}(2.506628277459239)) * q / ((((({ty}(-54.47609879822406) * r + {ty}(161.5858368580409)) * r + {ty}(-155.6989798598866)) * r + {ty}(66.80131188771972)) * r + {ty}(-13.28068155288572)) * r + {ty}(1.0));
+    var numerator = {ty}(-39.69683028665376);
+    numerator = numerator * r + {ty}(220.9460984245205);
+    numerator = numerator * r + {ty}(-275.9285104469687);
+    numerator = numerator * r + {ty}(138.3577518672690);
+    numerator = numerator * r + {ty}(-30.66479806614716);
+    numerator = numerator * r + {ty}(2.506628277459239);
+    var denominator = {ty}(-54.47609879822406);
+    denominator = denominator * r + {ty}(161.5858368580409);
+    denominator = denominator * r + {ty}(-155.6989798598866);
+    denominator = denominator * r + {ty}(66.80131188771972);
+    denominator = denominator * r + {ty}(-13.28068155288572);
+    denominator = denominator * r + {ty}(1.0);
+    normal = (numerator * q) / denominator;
 }}
-return -normal * {ty}(0.7071067811865476);
+var result = -normal * {ty}(0.7071067811865476);
+if a != a {{ result = a; }}
+if a < {ty}(0.0) || a > {ty}(2.0) {{ result = {nan}(); }}
+if a == {ty}(0.0) {{ result = {positive_infinity}(); }}
+if a == {ty}(2.0) {{ result = {negative_infinity}(); }}
+return result;
 "#
     )
 }
@@ -247,8 +286,16 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
         .map(|offset| constants_start + offset)
         .expect("unary WGSL constants must precede expm1");
     let constants = &template[constants_start..constants_end];
-    let helper_names = if matches!(op, UnaryOpCode::Gammaln | UnaryOpCode::Erfcinv) {
-        &[][..]
+    let helper_names: &[&str] = if matches!(op, UnaryOpCode::Gammaln | UnaryOpCode::Erfcinv) {
+        match (op, precision) {
+            (UnaryOpCode::Erfcinv, NumericPrecision::F64) => {
+                &["pos_inf_f64", "neg_inf_f64", "nan_f64"]
+            }
+            (UnaryOpCode::Erfcinv, NumericPrecision::F32) => {
+                &["pos_inf_f32", "neg_inf_f32", "nan_f32"]
+            }
+            _ => &[],
+        }
     } else {
         unary_helper_names(op, precision)
     };
@@ -265,7 +312,7 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
         wgsl_switch_case(template, op)
     };
     format!(
-        "struct Tensor {{ data: array<{ty}> }};\nstruct Params {{ len: u32, offset: u32, _pad1: u32, _pad2: u32 }};\n{constants}\n@group(0) @binding(0) var<storage, read> A: Tensor;\n@group(0) @binding(1) var<storage, read_write> Out: Tensor;\n@group(0) @binding(2) var<uniform> params: Params;\n{helpers}\nfn apply(a: {ty}) -> {ty} {{ {case_body} }}\n@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let local = gid.x;\n    if local >= params.len {{ return; }}\n    let idx = params.offset + local;\n    Out.data[idx] = apply(A.data[idx]);\n}}\n"
+        "struct InputTensor {{ data: array<{ty}> }};\nstruct OutputTensor {{ data: array<{ty}> }};\nstruct Params {{ len: u32, offset: u32, _pad1: u32, _pad2: u32 }};\n{constants}\n@group(0) @binding(0) var<storage, read> A: InputTensor;\n@group(0) @binding(1) var<storage, read_write> Out: OutputTensor;\n@group(0) @binding(2) var<uniform> params: Params;\n{helpers}\nfn apply(a: {ty}) -> {ty} {{ {case_body} }}\n@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let local = gid.x;\n    if local >= params.len {{ return; }}\n    let idx = params.offset + local;\n    Out.data[idx] = apply(A.data[idx]);\n}}\n"
     )
 }
 
@@ -333,6 +380,23 @@ mod real_unary_tests {
         assert!(!shader.contains("fn lanczos_"));
         assert!(!shader.contains("fn erf_real"));
         assert!(!shader.contains("fn factorial_real"));
+    }
+
+    #[test]
+    fn erfcinv_shader_preserves_typed_storage_with_portable_ieee_values() {
+        let f32_shader = real_unary_shader(UnaryOpCode::Erfcinv, NumericPrecision::F32);
+        assert!(f32_shader.contains("struct OutputTensor { data: array<f32> }"));
+        assert!(f32_shader.contains("fn pos_inf_f32() -> f32"));
+        assert!(f32_shader.contains("fn neg_inf_f32() -> f32"));
+        assert!(f32_shader.contains("fn nan_f32() -> f32"));
+        assert!(f32_shader.find("let p = safe_a").unwrap() < f32_shader.find("if a != a").unwrap());
+
+        let f64_shader = real_unary_shader(UnaryOpCode::Erfcinv, NumericPrecision::F64);
+        assert!(f64_shader.contains("struct OutputTensor { data: array<f64> }"));
+        assert!(f64_shader.contains("fn pos_inf_f64() -> f64"));
+        assert!(f64_shader.contains("fn neg_inf_f64() -> f64"));
+        assert!(f64_shader.contains("fn nan_f64() -> f64"));
+        assert!(f64_shader.find("let p = safe_a").unwrap() < f64_shader.find("if a != a").unwrap());
     }
 }
 

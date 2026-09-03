@@ -11,6 +11,7 @@ Usage:
   scripts/runtime/test-wasm-regression-suite.sh <suite>
 
 Suites:
+  all               Run the complete required wasm regression suite
   symptom-closure   Run focused wasm symptom closure proofs (node + browser)
   replay-smoke      Run replay smoke browser tests
   runtime           Run runtime browser tests behind RUNMAT_WASM_INCLUDE_RUNTIME
@@ -33,6 +34,11 @@ resolve_chromedriver_args() {
 regenerate_wasm_registry() {
   echo "==> regenerating wasm builtin registry"
   "${REPO_ROOT}/scripts/regenerate-wasm-registry.sh"
+}
+
+check_core_wasm_compatibility() {
+  echo "==> cargo check runmat-core (wasm32 compatibility with OCCT wasm host)"
+  cargo check -p runmat-core --target wasm32-unknown-unknown --no-default-features --features occt-wasm-host
 }
 
 run_symptom_closure_suite() {
@@ -71,8 +77,21 @@ main() {
 
   regenerate_wasm_registry
 
+  if [[ "${suite}" == "all" ]]; then
+    check_core_wasm_compatibility
+  fi
+
   pushd "${REPO_ROOT}/crates/runmat-wasm" >/dev/null
   case "${suite}" in
+    all)
+      run_symptom_closure_suite
+      run_replay_smoke_suite
+      if [[ "${RUNMAT_WASM_INCLUDE_RUNTIME:-0}" == "1" ]]; then
+        run_runtime_suite
+      else
+        echo "==> skipping runmat-runtime (set RUNMAT_WASM_INCLUDE_RUNTIME=1 to attempt; requires gating I/O + ctor tests)"
+      fi
+      ;;
     symptom-closure)
       run_symptom_closure_suite
       ;;

@@ -1,6 +1,6 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/occt_bridge.hxx"
-#include "runmat-geometry-io/src/occt/exact_evaluator_internal.hxx"
+#include "occt_bridge.hxx"
+#include "exact_evaluator_internal.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepClass_FaceClassifier.hxx>

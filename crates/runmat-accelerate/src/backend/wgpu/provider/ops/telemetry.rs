@@ -252,7 +252,7 @@ impl WgpuProvider {
         let (bind_hits, bind_misses) = self.bind_group_cache.counters();
         let mut by_layout: Vec<runmat_accelerate_api::BindGroupLayoutTelemetry> = Vec::new();
         let per = self.bind_group_cache.per_layout_counters();
-        if let Ok(tags) = self.bind_group_layout_tags.lock() {
+        if let Ok(tags) = self.device_caches.bind_group_layout_tags.lock() {
             for (ptr, (h, m)) in per {
                 let tag = tags
                     .get(&ptr)

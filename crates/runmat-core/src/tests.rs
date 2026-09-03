@@ -218,7 +218,13 @@ fn outcome_named_upsert_value<'a>(
 }
 
 fn comparable_path_text(path: &str) -> String {
-    let mut text = path.replace('\\', "/");
+    let path = Path::new(path);
+    let canonical = std::fs::canonicalize(path).ok().or_else(|| {
+        let parent = std::fs::canonicalize(path.parent()?).ok()?;
+        Some(parent.join(path.file_name()?))
+    });
+    let comparable = canonical.as_deref().unwrap_or(path);
+    let mut text = comparable.to_string_lossy().replace('\\', "/");
     if let Some(stripped) = text.strip_prefix("//?/UNC/") {
         text = format!("//{stripped}");
     } else if let Some(stripped) = text.strip_prefix("//?/") {

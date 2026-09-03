@@ -1118,12 +1118,7 @@ impl WgpuProvider {
             }
 
             let error_size = std::mem::size_of::<u32>() as u64;
-            let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-cov2corr-error-staging"),
-                size: error_size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let staging = self.create_readback_buffer(error_size, "runmat-cov2corr-error-staging");
             let mut encoder =
                 self.device_ref()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1392,12 +1387,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 
 #[cfg(test)]
 mod covariance_conversion_tests {
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
 
     #[test]
     fn covariance_to_correlation_wgpu_returns_resident_outputs() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let covariance = provider
@@ -1430,7 +1425,7 @@ mod covariance_conversion_tests {
 
     #[test]
     fn covariance_to_correlation_wgpu_rejects_invalid_covariance() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let covariance = provider

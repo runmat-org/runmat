@@ -1,5 +1,5 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_xcaf_subshape_remap.hxx"
+#include "exact_xcaf_subshape_remap.hxx"
 
 #include <TCollection_AsciiString.hxx>
 #include <TDF_LabelSequence.hxx>

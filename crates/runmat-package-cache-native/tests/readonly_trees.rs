@@ -95,6 +95,7 @@ fn make_test_file_writable(path: &std::path::Path) {
 }
 
 #[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)] // Clears the Windows read-only attribute; it does not broaden ACLs.
 fn make_test_file_writable(path: &std::path::Path) {
     let mut permissions = std::fs::metadata(path).unwrap().permissions();
     permissions.set_readonly(false);

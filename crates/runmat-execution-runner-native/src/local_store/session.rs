@@ -34,6 +34,7 @@ fn session_io_error(error: std::io::Error) -> NativeExecutionError {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::fs;
 
     use super::prepare_session_root;
