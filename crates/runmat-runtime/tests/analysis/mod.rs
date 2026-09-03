@@ -9,7 +9,7 @@ use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, GpuTensorHandle,
     HostTensorOwned, HostTensorView, ThreadProviderGuard,
 };
-use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ReferenceFrame};
+use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;

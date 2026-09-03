@@ -1,0 +1,69 @@
+use serde::{Deserialize, Serialize};
+
+pub trait FiniteQuantity {
+    fn is_finite(&self) -> bool;
+}
+
+macro_rules! scalar_quantity {
+    ($name:ident, $field:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+        #[serde(deny_unknown_fields)]
+        pub struct $name {
+            pub $field: f64,
+        }
+
+        impl $name {
+            pub const fn new($field: f64) -> Self {
+                Self { $field }
+            }
+
+            pub fn is_finite(self) -> bool {
+                self.$field.is_finite()
+            }
+        }
+
+        impl FiniteQuantity for $name {
+            fn is_finite(&self) -> bool {
+                self.$field.is_finite()
+            }
+        }
+    };
+}
+
+scalar_quantity!(Length, meters);
+scalar_quantity!(Displacement, meters);
+scalar_quantity!(Rotation, radians);
+scalar_quantity!(Temperature, kelvin);
+scalar_quantity!(Pressure, pascals);
+scalar_quantity!(ElectricPotential, volts);
+scalar_quantity!(ElectricCurrent, amperes);
+scalar_quantity!(ElectricCharge, coulombs);
+scalar_quantity!(MagneticVectorPotential, webers_per_meter);
+scalar_quantity!(Velocity, meters_per_second);
+scalar_quantity!(HeatFlux, watts_per_square_meter);
+scalar_quantity!(HeatTransferCoefficient, watts_per_square_meter_kelvin);
+scalar_quantity!(SpecificAcousticImpedance, pascal_seconds_per_meter);
+scalar_quantity!(Stiffness, newtons_per_meter);
+scalar_quantity!(Damping, newton_seconds_per_meter);
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Position {
+    pub meters: [f64; 3],
+}
+
+impl Position {
+    pub const fn new(meters: [f64; 3]) -> Self {
+        Self { meters }
+    }
+
+    pub fn is_finite(self) -> bool {
+        self.meters.into_iter().all(f64::is_finite)
+    }
+}
+
+impl FiniteQuantity for Position {
+    fn is_finite(&self) -> bool {
+        self.meters.into_iter().all(f64::is_finite)
+    }
+}

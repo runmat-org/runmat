@@ -1,22 +1,40 @@
 //! Solver-agnostic analysis problem model and validation contracts.
 
 pub mod problem {
-    pub mod bc;
+    pub mod boundary;
+    pub mod connector;
+    pub mod constraint;
+    pub mod coordinate_frame;
     pub mod domains;
     pub mod interfaces;
     pub mod loads;
     pub mod material_assignment;
     pub mod materials;
     pub mod model;
+    pub mod quantity;
+    pub mod reference_point;
+    pub mod schedule;
     pub mod steps;
     pub mod structure;
+    pub mod target;
 }
 pub mod field;
 pub mod study;
 pub mod validate;
+mod validate_authored;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
-pub use problem::bc::{BoundaryCondition, BoundaryConditionKind};
+pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};
+pub use problem::connector::{AnalysisConnector, ConnectorKind};
+pub use problem::constraint::{
+    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, ElectricalConstraint,
+    ElectricalConstraintKind, FluidConstraint, FluidConstraintKind, MagneticConstraint,
+    MagneticConstraintKind, PairingPolicy, PrescribedRotations, PrescribedTranslations,
+    ReferencePointCoupling, RotationDofValue, StructuralConstraint, StructuralConstraintEquation,
+    StructuralConstraintEquationTerm, StructuralConstraintKind, StructuralRotationDof,
+    StructuralTranslationDof, ThermalConstraint, ThermalConstraintKind, TranslationDofValue,
+};
+pub use problem::coordinate_frame::{AxialFrame, CartesianFrame, CoordinateFrame, SphericalFrame};
 pub use problem::domains::{
     CfdDomain, CfdSolveFamily, CfdTimeProfilePoint, ElectroRegionConductivityScale,
     ElectroThermalDomain, ElectroTimeProfilePoint, ElectromagneticDomain,
@@ -33,11 +51,24 @@ pub use problem::materials::{
     ConductivityFrequencyPoint, MaterialAcousticModel, MaterialElectricalModel,
     MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
 };
-pub use problem::model::{AnalysisModel, AnalysisModelId, ReferenceFrame};
+pub use problem::model::{AnalysisModel, AnalysisModelId};
+pub use problem::quantity::{
+    Damping, Displacement, ElectricCharge, ElectricCurrent, ElectricPotential, HeatFlux,
+    HeatTransferCoefficient, Length, MagneticVectorPotential, Position, Pressure, Rotation,
+    SpecificAcousticImpedance, Stiffness, Temperature, Velocity,
+};
+pub use problem::reference_point::ReferencePoint;
+pub use problem::schedule::{
+    FieldArtifactValue, ScheduleExtrapolation, ScheduleInterpolation, StepValue,
+    StudyParameterValue, TabulatedSchedule, ValueSchedule,
+};
 pub use problem::steps::{AnalysisStep, AnalysisStepKind};
 pub use problem::structure::{
     BeamElementModel, BeamSectionModel, ShellElementModel, ShellSectionModel, StructuralElement,
     StructuralElementKind, StructuralModel, StructuralNode,
+};
+pub use problem::target::{
+    EntityDimension, ExpectedTopology, RegionTarget, ResolvedTopologyTarget, TargetCardinality,
 };
 pub use study::{
     AnalysisProcedure, AnalysisRunIdentity, CoupledPhysicsFamily, ExecutionFallbackPolicy,
@@ -57,7 +88,7 @@ mod tests {
             geometry_id: "geo:model_1".to_string(),
             geometry_revision: 1,
             units: UnitSystem::Meter,
-            frame: ReferenceFrame::Global,
+            frame: CoordinateFrame::Global,
             materials: vec![MaterialModel {
                 material_id: "mat_steel".to_string(),
                 name: "Steel".to_string(),
@@ -78,11 +109,15 @@ mod tests {
             electromagnetic: None,
             cfd: None,
             interfaces: Vec::new(),
-            boundary_conditions: vec![BoundaryCondition {
-                bc_id: "bc_fixed_root".to_string(),
-                region_id: "root".to_string(),
-                kind: BoundaryConditionKind::Fixed,
-            }],
+            constraints: vec![AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: "bc_fixed_root".to_string(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::Fixed {
+                    target: RegionTarget::boundary("root"),
+                },
+            })],
+            boundaries: Vec::new(),
+            connectors: Vec::new(),
             loads: vec![LoadCase {
                 load_id: "load_tip".to_string(),
                 region_id: "tip".to_string(),
@@ -109,10 +144,10 @@ mod tests {
         );
 
         let mut model = valid_model();
-        model.boundary_conditions.clear();
+        model.constraints.clear();
         assert_eq!(
             validate_model(&model).expect_err("expected boundary condition validation failure"),
-            AnalysisValidationError::MissingBoundaryConditions
+            AnalysisValidationError::MissingConstraintsOrBoundaries
         );
 
         let mut model = valid_model();
@@ -198,7 +233,7 @@ mod tests {
         let mut model = valid_model();
         model.units = UnitSystem::Inch;
         let err =
-            validate_model_against_geometry(&model, UnitSystem::Meter, &ReferenceFrame::Global)
+            validate_model_against_geometry(&model, UnitSystem::Meter, &CoordinateFrame::Global)
                 .expect_err("expected unit mismatch");
         assert!(matches!(
             err,
@@ -209,24 +244,27 @@ mod tests {
         ));
 
         let mut model = valid_model();
-        model.frame = ReferenceFrame::Local("fixture_frame".to_string());
+        model.frame = CoordinateFrame::Cartesian(CartesianFrame {
+            frame_id: "fixture_frame".to_string(),
+            origin: Position::new([0.0, 0.0, 0.0]),
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        });
         let err =
-            validate_model_against_geometry(&model, UnitSystem::Meter, &ReferenceFrame::Global)
+            validate_model_against_geometry(&model, UnitSystem::Meter, &CoordinateFrame::Global)
                 .expect_err("expected frame mismatch");
-        assert!(matches!(
-            err,
-            AnalysisValidationError::FrameMismatch {
-                model: ReferenceFrame::Local(_),
-                geometry: ReferenceFrame::Global
-            }
-        ));
+        let AnalysisValidationError::FrameMismatch { model, geometry } = err else {
+            panic!("expected typed frame mismatch");
+        };
+        assert!(matches!(*model, CoordinateFrame::Cartesian(_)));
+        assert_eq!(*geometry, CoordinateFrame::Global);
     }
 
     #[test]
     fn valid_model_is_accepted() {
         let model = valid_model();
         validate_model(&model).expect("model should be valid");
-        validate_model_against_geometry(&model, UnitSystem::Meter, &ReferenceFrame::Global)
+        validate_model_against_geometry(&model, UnitSystem::Meter, &CoordinateFrame::Global)
             .expect("model should match geometry context");
     }
 
@@ -279,25 +317,29 @@ mod tests {
     }
 
     #[test]
-    fn prescribed_rotation_bc_serializes_as_snake_case() {
-        let bc = BoundaryCondition {
-            bc_id: "root_rotation".to_string(),
-            region_id: "root".to_string(),
-            kind: BoundaryConditionKind::PrescribedRotation {
-                rx: 0.0,
-                ry: 0.0,
-                rz: 0.125,
-            },
-        };
+    fn prescribed_rotation_constraint_serializes_as_snake_case() {
+        let constraint = AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "root_rotation".to_string(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::PrescribedRotations(PrescribedRotations {
+                target: RegionTarget::boundary("root"),
+                values: vec![RotationDofValue {
+                    dof: StructuralRotationDof::Rz,
+                    value: ValueSchedule::Constant(Rotation::new(0.125)),
+                }],
+            }),
+        });
 
-        let json = serde_json::to_value(&bc).expect("bc should serialize");
-        assert_eq!(json["kind"]["prescribed_rotation"]["rx"], 0.0);
-        assert_eq!(json["kind"]["prescribed_rotation"]["ry"], 0.0);
-        assert_eq!(json["kind"]["prescribed_rotation"]["rz"], 0.125);
+        let json = serde_json::to_value(&constraint).expect("constraint should serialize");
+        assert_eq!(
+            json["structural"]["kind"]["prescribed_rotations"]["values"][0]["value"]["constant"]
+                ["radians"],
+            0.125
+        );
 
-        let decoded: BoundaryCondition =
-            serde_json::from_value(json).expect("bc should deserialize");
-        assert_eq!(decoded, bc);
+        let decoded: AnalysisConstraint =
+            serde_json::from_value(json).expect("constraint should deserialize");
+        assert_eq!(decoded, constraint);
     }
 
     #[test]
@@ -398,5 +440,104 @@ mod tests {
     fn electrical_model_defaults_frequency_response() {
         let electrical = MaterialElectricalModel::default();
         assert!(electrical.conductivity_frequency_response.is_empty());
+    }
+
+    #[test]
+    fn duplicate_structural_dofs_are_rejected() {
+        let mut model = valid_model();
+        model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "duplicate_ux".to_string(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::PrescribedTranslations(PrescribedTranslations {
+                target: RegionTarget::boundary("root"),
+                values: vec![
+                    TranslationDofValue {
+                        dof: StructuralTranslationDof::Ux,
+                        value: ValueSchedule::Constant(Displacement::new(0.0)),
+                    },
+                    TranslationDofValue {
+                        dof: StructuralTranslationDof::Ux,
+                        value: ValueSchedule::Constant(Displacement::new(1.0)),
+                    },
+                ],
+            }),
+        })];
+
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidConstraint { .. })
+        ));
+    }
+
+    #[test]
+    fn malformed_schedule_is_rejected() {
+        let mut model = valid_model();
+        model.constraints = vec![AnalysisConstraint::Thermal(ThermalConstraint {
+            constraint_id: "temperature".to_string(),
+            kind: ThermalConstraintKind::Prescribed {
+                target: RegionTarget::boundary("root"),
+                value: ValueSchedule::TimeHistory(TabulatedSchedule {
+                    abscissa: vec![0.0, 1.0, 0.5],
+                    values: vec![
+                        Temperature::new(293.15),
+                        Temperature::new(300.0),
+                        Temperature::new(310.0),
+                    ],
+                    interpolation: ScheduleInterpolation::Linear,
+                    extrapolation: ScheduleExtrapolation::Reject,
+                }),
+            },
+        })];
+
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidConstraint { .. })
+        ));
+    }
+
+    #[test]
+    fn incompatible_target_topology_is_rejected() {
+        let mut model = valid_model();
+        let AnalysisConstraint::Structural(constraint) = &mut model.constraints[0] else {
+            panic!("expected structural constraint")
+        };
+        let StructuralConstraintKind::Fixed { target } = &mut constraint.kind else {
+            panic!("expected fixed constraint")
+        };
+        target.entity_dimension = EntityDimension::Volume;
+
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidTarget { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_frame_and_boundary_coefficients_are_rejected() {
+        let mut model = valid_model();
+        model.frame = CoordinateFrame::Cartesian(CartesianFrame {
+            frame_id: "parallel_axes".to_string(),
+            origin: Position::new([0.0, 0.0, 0.0]),
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [2.0, 0.0, 0.0],
+        });
+        assert_eq!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidFrame)
+        );
+
+        let mut model = valid_model();
+        model.boundaries = vec![AnalysisBoundary {
+            boundary_id: "convection".to_string(),
+            target: RegionTarget::boundary("root"),
+            operator: BoundaryOperator::ThermalConvection {
+                ambient_temperature: ValueSchedule::Constant(Temperature::new(293.15)),
+                coefficient: HeatTransferCoefficient::new(-1.0),
+            },
+        }];
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidBoundary { .. })
+        ));
     }
 }

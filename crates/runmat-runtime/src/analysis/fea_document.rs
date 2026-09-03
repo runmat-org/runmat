@@ -2,13 +2,18 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use runmat_analysis_core::{
-    AnalysisInterface, AnalysisModel, AnalysisModelId, AnalysisStep, BeamElementModel,
-    BeamSectionModel, BoundaryCondition, BoundaryConditionKind, CfdDomain, ElectroThermalDomain,
-    ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind, MaterialAcousticModel,
-    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialPlasticModel, MaterialThermalModel, ReferenceFrame, ShellElementModel,
-    ShellSectionModel, StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
-    ThermoMechanicalDomain,
+    AnalysisBoundary, AnalysisConstraint, AnalysisInterface, AnalysisModel, AnalysisModelId,
+    AnalysisStep, BeamElementModel, BeamSectionModel, BoundaryOperator, CfdDomain, CoordinateFrame,
+    Displacement, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence, FluidConstraint,
+    FluidConstraintKind, HeatFlux, HeatTransferCoefficient, LoadCase, LoadKind, MagneticConstraint,
+    MagneticConstraintKind, MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel,
+    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
+    PrescribedRotations, PrescribedTranslations, Pressure, RegionTarget, Rotation,
+    RotationDofValue, ShellElementModel, ShellSectionModel, SpecificAcousticImpedance,
+    StructuralConstraint, StructuralConstraintKind, StructuralElement, StructuralElementKind,
+    StructuralModel, StructuralNode, StructuralRotationDof, StructuralTranslationDof, Temperature,
+    ThermalConstraint, ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue,
+    ValueSchedule, Velocity,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
@@ -114,7 +119,7 @@ struct FeaModelDocument {
     id: Option<String>,
     profile: AnalysisCreateModelProfile,
     #[serde(default)]
-    frame: Option<ReferenceFrame>,
+    frame: Option<CoordinateFrame>,
     #[serde(default)]
     defaults: FeaModelDefaultsMode,
 }
@@ -292,12 +297,7 @@ struct FeaBoundaryConditionDocument {
     pressure_pa: Option<f64>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum FeaBoundaryConditionKindDocument {
-    Native(BoundaryConditionKind),
-    Named(FeaBoundaryConditionType),
-}
+type FeaBoundaryConditionKindDocument = FeaBoundaryConditionType;
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -626,11 +626,14 @@ fn resolve_model(
         model.structural = Some(resolve_structural_model(study, geometry)?);
     }
     if !study.boundary_conditions.is_empty() {
-        model.boundary_conditions = study
-            .boundary_conditions
-            .iter()
-            .map(|bc| resolve_boundary_condition(bc, geometry, &study.regions))
-            .collect::<Result<Vec<_>, _>>()?;
+        model.constraints.clear();
+        model.boundaries.clear();
+        for bc in &study.boundary_conditions {
+            match resolve_boundary_condition(bc, geometry, &study.regions)? {
+                ResolvedCondition::Constraint(value) => model.constraints.push(value),
+                ResolvedCondition::Boundary(value) => model.boundaries.push(value),
+            }
+        }
     }
     if !study.loads.is_empty() {
         model.loads = study
@@ -803,86 +806,203 @@ fn resolve_shell_section(
     })
 }
 
+enum ResolvedCondition {
+    Constraint(AnalysisConstraint),
+    Boundary(AnalysisBoundary),
+}
+
 fn resolve_boundary_condition(
     bc: &FeaBoundaryConditionDocument,
     geometry: &GeometryAsset,
     aliases: &BTreeMap<String, FeaRegionDocument>,
-) -> Result<BoundaryCondition, String> {
-    let kind = match &bc.kind {
-        FeaBoundaryConditionKindDocument::Native(kind) => kind.clone(),
-        FeaBoundaryConditionKindDocument::Named(kind) => {
-            resolve_boundary_condition_kind(bc, *kind)?
-        }
-    };
-    Ok(BoundaryCondition {
-        bc_id: bc.id.clone(),
-        region_id: resolve_region_ref(&bc.region, geometry, aliases)?,
-        kind,
-    })
+) -> Result<ResolvedCondition, String> {
+    let target = RegionTarget::authored(resolve_region_ref(&bc.region, geometry, aliases)?);
+    resolve_boundary_condition_kind(bc, bc.kind, target)
 }
 
 fn resolve_boundary_condition_kind(
     bc: &FeaBoundaryConditionDocument,
     kind: FeaBoundaryConditionType,
-) -> Result<BoundaryConditionKind, String> {
+    target: RegionTarget,
+) -> Result<ResolvedCondition, String> {
     Ok(match kind {
-        FeaBoundaryConditionType::Fixed => BoundaryConditionKind::Fixed,
+        FeaBoundaryConditionType::Fixed => {
+            ResolvedCondition::Constraint(AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: bc.id.clone(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::Fixed { target },
+            }))
+        }
         FeaBoundaryConditionType::PrescribedDisplacement => {
-            BoundaryConditionKind::PrescribedDisplacement
+            ResolvedCondition::Constraint(AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: bc.id.clone(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::PrescribedTranslations(PrescribedTranslations {
+                    target,
+                    values: [
+                        StructuralTranslationDof::Ux,
+                        StructuralTranslationDof::Uy,
+                        StructuralTranslationDof::Uz,
+                    ]
+                    .into_iter()
+                    .map(|dof| TranslationDofValue {
+                        dof,
+                        value: ValueSchedule::Constant(Displacement::new(0.0)),
+                    })
+                    .collect(),
+                }),
+            }))
         }
-        FeaBoundaryConditionType::PrescribedRotation => BoundaryConditionKind::PrescribedRotation {
-            rx: required_f64(bc.rx, "boundary.prescribed_rotation.rx")?,
-            ry: required_f64(bc.ry, "boundary.prescribed_rotation.ry")?,
-            rz: required_f64(bc.rz, "boundary.prescribed_rotation.rz")?,
-        },
-        FeaBoundaryConditionType::MagneticInsulation => BoundaryConditionKind::MagneticInsulation,
+        FeaBoundaryConditionType::PrescribedRotation => {
+            ResolvedCondition::Constraint(AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: bc.id.clone(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::PrescribedRotations(PrescribedRotations {
+                    target,
+                    values: [
+                        (
+                            StructuralRotationDof::Rx,
+                            required_f64(bc.rx, "boundary.prescribed_rotation.rx")?,
+                        ),
+                        (
+                            StructuralRotationDof::Ry,
+                            required_f64(bc.ry, "boundary.prescribed_rotation.ry")?,
+                        ),
+                        (
+                            StructuralRotationDof::Rz,
+                            required_f64(bc.rz, "boundary.prescribed_rotation.rz")?,
+                        ),
+                    ]
+                    .into_iter()
+                    .map(|(dof, value)| RotationDofValue {
+                        dof,
+                        value: ValueSchedule::Constant(Rotation::new(value)),
+                    })
+                    .collect(),
+                }),
+            }))
+        }
+        FeaBoundaryConditionType::MagneticInsulation => {
+            ResolvedCondition::Boundary(AnalysisBoundary {
+                boundary_id: bc.id.clone(),
+                target,
+                operator: BoundaryOperator::MagneticInsulation,
+            })
+        }
         FeaBoundaryConditionType::VectorPotentialGround => {
-            BoundaryConditionKind::VectorPotentialGround
+            ResolvedCondition::Constraint(AnalysisConstraint::Magnetic(MagneticConstraint {
+                constraint_id: bc.id.clone(),
+                kind: MagneticConstraintKind::VectorPotentialGround { target },
+            }))
         }
-        FeaBoundaryConditionType::AcousticRigidWall => BoundaryConditionKind::AcousticRigidWall,
-        FeaBoundaryConditionType::AcousticRadiation => BoundaryConditionKind::AcousticRadiation,
-        FeaBoundaryConditionType::AcousticImpedance => BoundaryConditionKind::AcousticImpedance {
-            specific_impedance_pa_s_per_m: required_f64(
-                bc.specific_impedance_pa_s_per_m,
-                "boundary.acoustic_impedance.specific_impedance_pa_s_per_m",
-            )?,
-        },
+        FeaBoundaryConditionType::AcousticRigidWall => {
+            ResolvedCondition::Boundary(AnalysisBoundary {
+                boundary_id: bc.id.clone(),
+                target,
+                operator: BoundaryOperator::AcousticRigidWall,
+            })
+        }
+        FeaBoundaryConditionType::AcousticRadiation => {
+            ResolvedCondition::Boundary(AnalysisBoundary {
+                boundary_id: bc.id.clone(),
+                target,
+                operator: BoundaryOperator::AcousticRadiation,
+            })
+        }
+        FeaBoundaryConditionType::AcousticImpedance => {
+            ResolvedCondition::Boundary(AnalysisBoundary {
+                boundary_id: bc.id.clone(),
+                target,
+                operator: BoundaryOperator::AcousticImpedance {
+                    impedance: SpecificAcousticImpedance::new(required_f64(
+                        bc.specific_impedance_pa_s_per_m,
+                        "boundary.acoustic_impedance.specific_impedance_pa_s_per_m",
+                    )?),
+                },
+            })
+        }
         FeaBoundaryConditionType::ThermalPrescribedTemperature => {
-            BoundaryConditionKind::ThermalPrescribedTemperature {
-                temperature_k: required_f64(
-                    bc.temperature_k,
-                    "boundary.thermal_prescribed_temperature.temperature_k",
-                )?,
-            }
+            ResolvedCondition::Constraint(AnalysisConstraint::Thermal(ThermalConstraint {
+                constraint_id: bc.id.clone(),
+                kind: ThermalConstraintKind::Prescribed {
+                    target,
+                    value: ValueSchedule::Constant(Temperature::new(required_f64(
+                        bc.temperature_k,
+                        "boundary.thermal_prescribed_temperature.temperature_k",
+                    )?)),
+                },
+            }))
         }
-        FeaBoundaryConditionType::ThermalHeatFlux => BoundaryConditionKind::ThermalHeatFlux {
-            heat_flux_w_per_m2: required_f64(
-                bc.heat_flux_w_per_m2,
-                "boundary.thermal_heat_flux.heat_flux_w_per_m2",
-            )?,
-        },
-        FeaBoundaryConditionType::ThermalConvection => BoundaryConditionKind::ThermalConvection {
-            ambient_temperature_k: required_f64(
-                bc.ambient_temperature_k,
-                "boundary.thermal_convection.ambient_temperature_k",
-            )?,
-            coefficient_w_per_m2k: required_f64(
-                bc.coefficient_w_per_m2k,
-                "boundary.thermal_convection.coefficient_w_per_m2k",
-            )?,
-        },
-        FeaBoundaryConditionType::CfdInletVelocity => BoundaryConditionKind::CfdInletVelocity {
-            velocity_m_per_s: required_f64(
-                bc.velocity_m_per_s,
-                "boundary.cfd_inlet_velocity.velocity_m_per_s",
-            )?,
-        },
-        FeaBoundaryConditionType::CfdOutletPressure => BoundaryConditionKind::CfdOutletPressure {
-            pressure_pa: required_f64(bc.pressure_pa, "boundary.cfd_outlet_pressure.pressure_pa")?,
-        },
-        FeaBoundaryConditionType::CfdNoSlipWall => BoundaryConditionKind::CfdNoSlipWall,
-        FeaBoundaryConditionType::CfdSlipWall => BoundaryConditionKind::CfdSlipWall,
-        FeaBoundaryConditionType::CfdSymmetry => BoundaryConditionKind::CfdSymmetry,
+        FeaBoundaryConditionType::ThermalHeatFlux => {
+            ResolvedCondition::Boundary(AnalysisBoundary {
+                boundary_id: bc.id.clone(),
+                target,
+                operator: BoundaryOperator::ThermalHeatFlux {
+                    value: ValueSchedule::Constant(HeatFlux::new(required_f64(
+                        bc.heat_flux_w_per_m2,
+                        "boundary.thermal_heat_flux.heat_flux_w_per_m2",
+                    )?)),
+                },
+            })
+        }
+        FeaBoundaryConditionType::ThermalConvection => {
+            ResolvedCondition::Boundary(AnalysisBoundary {
+                boundary_id: bc.id.clone(),
+                target,
+                operator: BoundaryOperator::ThermalConvection {
+                    ambient_temperature: ValueSchedule::Constant(Temperature::new(required_f64(
+                        bc.ambient_temperature_k,
+                        "boundary.thermal_convection.ambient_temperature_k",
+                    )?)),
+                    coefficient: HeatTransferCoefficient::new(required_f64(
+                        bc.coefficient_w_per_m2k,
+                        "boundary.thermal_convection.coefficient_w_per_m2k",
+                    )?),
+                },
+            })
+        }
+        FeaBoundaryConditionType::CfdInletVelocity => {
+            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc.id.clone(),
+                kind: FluidConstraintKind::PrescribedVelocity {
+                    target,
+                    value: ValueSchedule::Constant(Velocity::new(required_f64(
+                        bc.velocity_m_per_s,
+                        "boundary.cfd_inlet_velocity.velocity_m_per_s",
+                    )?)),
+                },
+            }))
+        }
+        FeaBoundaryConditionType::CfdOutletPressure => {
+            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc.id.clone(),
+                kind: FluidConstraintKind::PressureReference {
+                    target,
+                    value: ValueSchedule::Constant(Pressure::new(required_f64(
+                        bc.pressure_pa,
+                        "boundary.cfd_outlet_pressure.pressure_pa",
+                    )?)),
+                },
+            }))
+        }
+        FeaBoundaryConditionType::CfdNoSlipWall => {
+            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc.id.clone(),
+                kind: FluidConstraintKind::NoSlipWall { target },
+            }))
+        }
+        FeaBoundaryConditionType::CfdSlipWall => {
+            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc.id.clone(),
+                kind: FluidConstraintKind::SlipWall { target },
+            }))
+        }
+        FeaBoundaryConditionType::CfdSymmetry => {
+            ResolvedCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc.id.clone(),
+                kind: FluidConstraintKind::Symmetry { target },
+            }))
+        }
     })
 }
 
@@ -1038,7 +1158,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         geometry_id: geometry.geometry_id.clone(),
         geometry_revision: geometry.revision,
         units: geometry.units,
-        frame: ReferenceFrame::Global,
+        frame: CoordinateFrame::Global,
         materials: Vec::new(),
         material_assignments: Vec::new(),
         structural: None,
@@ -1047,7 +1167,9 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         electromagnetic: None,
         cfd: None,
         interfaces: Vec::new(),
-        boundary_conditions: Vec::new(),
+        constraints: Vec::new(),
+        boundaries: Vec::new(),
+        connectors: Vec::new(),
         loads: Vec::new(),
         steps: Vec::new(),
     }

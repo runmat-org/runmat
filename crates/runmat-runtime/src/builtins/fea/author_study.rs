@@ -460,7 +460,10 @@ mod tests {
             serde_json::from_str(payload).expect("authored study should decode");
         let model = decoded.model.expect("authored study should include model");
         assert_eq!(model.material_assignments[0].region_id, "solid");
-        assert_eq!(model.boundary_conditions[0].region_id, "root");
+        assert_eq!(
+            model.constraints[0].target().expect("target").region_id,
+            "root"
+        );
         assert_eq!(model.loads[0].region_id, "tip");
 
         let validation =
@@ -554,7 +557,10 @@ mod tests {
             serde_json::from_str(payload).expect("authored study should decode");
         let model = decoded.model.expect("authored study should include model");
         assert_eq!(model.material_assignments[0].region_id, "solid");
-        assert_eq!(model.boundary_conditions[0].region_id, "tip");
+        assert_eq!(
+            model.constraints[0].target().expect("target").region_id,
+            "tip"
+        );
         assert_eq!(model.loads[0].region_id, "root");
         let runmat_analysis_core::LoadKind::Force { fx, fy, fz } = model.loads[0].kind else {
             panic!("diagram-authored study should use a force load");
@@ -592,7 +598,10 @@ mod tests {
             .as_ref()
             .expect("minimal authored study should include a model");
         assert_eq!(model.material_assignments[0].region_id, "solid");
-        assert_eq!(model.boundary_conditions[0].region_id, "root");
+        assert_eq!(
+            model.constraints[0].target().expect("target").region_id,
+            "root"
+        );
         assert_eq!(model.loads[0].region_id, "tip");
         let runmat_analysis_core::LoadKind::Force { fx, fy, fz } = model.loads[0].kind else {
             panic!("minimal authored study should default to a force load");

@@ -1,7 +1,7 @@
 use glam::{Vec3, Vec4};
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, AnalysisRunIdentity,
-    BoundaryConditionKind, CoupledPhysicsFamily, LoadKind, PhysicsFamily,
+    CoupledPhysicsFamily, LoadKind, PhysicsFamily,
 };
 use runmat_analysis_fea::contracts::{
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
@@ -478,14 +478,23 @@ fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegio
             pressure_sign_for_kind(&load.kind),
         );
     }
-    for boundary_condition in &model.boundary_conditions {
-        if !boundary_condition_kind_uses_boundary_region(&boundary_condition.kind) {
-            continue;
+    for constraint in &model.constraints {
+        if let Some(target) = constraint.target() {
+            push_authored_boundary_region(
+                &mut regions,
+                &target.region_id,
+                "constraint",
+                Vec4::new(0.18, 0.78, 0.48, 1.0),
+                None,
+                None,
+            );
         }
+    }
+    for boundary in &model.boundaries {
         push_authored_boundary_region(
             &mut regions,
-            &boundary_condition.region_id,
-            "constraint",
+            &boundary.target.region_id,
+            "boundary",
             Vec4::new(0.18, 0.78, 0.48, 1.0),
             None,
             None,
@@ -526,10 +535,6 @@ fn load_kind_requires_boundary_region(kind: &LoadKind) -> bool {
             | LoadKind::Wrench { .. }
             | LoadKind::Pressure { .. }
     )
-}
-
-fn boundary_condition_kind_uses_boundary_region(_kind: &BoundaryConditionKind) -> bool {
-    true
 }
 
 fn load_vector_for_kind(kind: &LoadKind) -> Option<Vec3> {
@@ -2230,8 +2235,8 @@ fn run_identity_label(identity: &AnalysisRunIdentity) -> String {
 mod tests {
     use super::*;
     use runmat_analysis_core::{
-        AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition, LoadCase,
-        ReferenceFrame,
+        AnalysisConstraint, AnalysisModelId, AnalysisStep, AnalysisStepKind, CoordinateFrame,
+        LoadCase, RegionTarget, StructuralConstraint, StructuralConstraintKind,
     };
 
     fn simple_run_result(
@@ -2331,7 +2336,7 @@ mod tests {
             geometry_id: "geometry".to_string(),
             geometry_revision: 1,
             units: runmat_geometry_core::UnitSystem::Meter,
-            frame: ReferenceFrame::Global,
+            frame: CoordinateFrame::Global,
             materials: Vec::new(),
             material_assignments: Vec::new(),
             structural: None,
@@ -2340,11 +2345,15 @@ mod tests {
             electromagnetic: None,
             cfd: None,
             interfaces: Vec::new(),
-            boundary_conditions: vec![BoundaryCondition {
-                bc_id: "fixed_bc".to_string(),
-                region_id: "fixed".to_string(),
-                kind: BoundaryConditionKind::Fixed,
-            }],
+            constraints: vec![AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: "fixed_bc".to_string(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::Fixed {
+                    target: RegionTarget::boundary("fixed"),
+                },
+            })],
+            boundaries: Vec::new(),
+            connectors: Vec::new(),
             loads: vec![
                 LoadCase {
                     load_id: "force_load".to_string(),
@@ -2374,7 +2383,7 @@ mod tests {
 
     fn simple_pressure_region_model() -> AnalysisModel {
         let mut model = simple_boundary_region_model();
-        model.boundary_conditions.clear();
+        model.constraints.clear();
         model.loads = vec![LoadCase {
             load_id: "pressure_load".to_string(),
             region_id: "pressurized".to_string(),
@@ -2385,7 +2394,7 @@ mod tests {
 
     fn simple_moment_region_model() -> AnalysisModel {
         let mut model = simple_boundary_region_model();
-        model.boundary_conditions.clear();
+        model.constraints.clear();
         model.loads = vec![LoadCase {
             load_id: "axis_load".to_string(),
             region_id: "axis_region".to_string(),
@@ -2400,7 +2409,7 @@ mod tests {
 
     fn simple_wrench_moment_region_model() -> AnalysisModel {
         let mut model = simple_boundary_region_model();
-        model.boundary_conditions.clear();
+        model.constraints.clear();
         model.loads = vec![LoadCase {
             load_id: "wrench_axis_load".to_string(),
             region_id: "wrench_axis_region".to_string(),

@@ -1,10 +1,15 @@
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, AnalysisInterface, AnalysisInterfaceKind, AnalysisModel,
-    AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition, BoundaryConditionKind,
-    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind,
+    AnalysisBoundary, AnalysisConstraint, AnalysisField, AnalysisFieldValues, AnalysisInterface,
+    AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
+    BoundaryOperator, CfdDomain, CoordinateFrame, Displacement, ElectroThermalDomain,
+    ElectromagneticDomain, EvidenceConfidence, FluidConstraint, FluidConstraintKind, HeatFlux,
+    HeatTransferCoefficient, LoadCase, LoadKind, MagneticConstraint, MagneticConstraintKind,
     MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
-    MaterialModel, MaterialPlasticModel, MaterialThermalModel, ReferenceFrame,
-    ThermoMechanicalDomain,
+    MaterialModel, MaterialPlasticModel, MaterialThermalModel, PrescribedRotations,
+    PrescribedTranslations, Pressure, RegionTarget, Rotation, RotationDofValue,
+    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
+    StructuralRotationDof, StructuralTranslationDof, Temperature, ThermalConstraint,
+    ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue, ValueSchedule, Velocity,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
@@ -1526,6 +1531,13 @@ struct DomainPayload {
     data: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ModelConditionPayload {
+    Constraint(AnalysisConstraint),
+    Boundary(AnalysisBoundary),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelDefaultsMode {
     ProfileScaffold,
@@ -1545,11 +1557,11 @@ struct StudyConstructorOptions {
     backend: Option<ComputeBackend>,
     model_id: Option<String>,
     model: Option<AnalysisModel>,
-    frame: Option<ReferenceFrame>,
+    frame: Option<CoordinateFrame>,
     model_defaults: ModelDefaultsMode,
     materials: Vec<MaterialModel>,
     material_assignments: Vec<MaterialAssignment>,
-    boundary_conditions: Vec<BoundaryCondition>,
+    boundary_conditions: Vec<ModelConditionPayload>,
     loads: Vec<LoadCase>,
     steps: Vec<AnalysisStep>,
     domains: Vec<DomainPayload>,
@@ -1750,11 +1762,11 @@ impl StudyConstructorOptions {
 #[derive(Debug, Default)]
 struct ModelConstructorOptions {
     profile: Option<AnalysisCreateModelProfile>,
-    frame: Option<ReferenceFrame>,
+    frame: Option<CoordinateFrame>,
     defaults: ModelDefaultsMode,
     materials: Vec<MaterialModel>,
     material_assignments: Vec<MaterialAssignment>,
-    boundary_conditions: Vec<BoundaryCondition>,
+    boundary_conditions: Vec<ModelConditionPayload>,
     loads: Vec<LoadCase>,
     steps: Vec<AnalysisStep>,
     domains: Vec<DomainPayload>,
@@ -2102,52 +2114,182 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
     let region_id = scalar_string(&args[1], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
     let kind_text = scalar_string(&args[2], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
     let mut fields = boundary_fields_from_name_values(&args[3..])?;
-    let kind = match normalize_token(&kind_text).as_str() {
-        "prescribedrotation" => BoundaryConditionKind::PrescribedRotation {
-            rx: remove_required_boundary_f64(&mut fields, "rx")?,
-            ry: remove_required_boundary_f64(&mut fields, "ry")?,
-            rz: remove_required_boundary_f64(&mut fields, "rz")?,
-        },
-        "acousticimpedance" => BoundaryConditionKind::AcousticImpedance {
-            specific_impedance_pa_s_per_m: remove_required_boundary_f64(
-                &mut fields,
-                "specific_impedance_pa_s_per_m",
-            )?,
-        },
-        "thermalprescribedtemperature" => BoundaryConditionKind::ThermalPrescribedTemperature {
-            temperature_k: remove_required_boundary_f64(&mut fields, "temperature_k")?,
-        },
-        "thermalheatflux" => BoundaryConditionKind::ThermalHeatFlux {
-            heat_flux_w_per_m2: remove_required_boundary_f64(&mut fields, "heat_flux_w_per_m2")?,
-        },
-        "thermalconvection" => BoundaryConditionKind::ThermalConvection {
-            ambient_temperature_k: remove_required_boundary_f64(
-                &mut fields,
-                "ambient_temperature_k",
-            )?,
-            coefficient_w_per_m2k: remove_required_boundary_f64(
-                &mut fields,
-                "coefficient_w_per_m2k",
-            )?,
-        },
-        "cfdinletvelocity" => BoundaryConditionKind::CfdInletVelocity {
-            velocity_m_per_s: remove_required_boundary_f64(&mut fields, "velocity_m_per_s")?,
-        },
-        "cfdoutletpressure" => BoundaryConditionKind::CfdOutletPressure {
-            pressure_pa: remove_required_boundary_f64(&mut fields, "pressure_pa")?,
-        },
-        _ => parse_scalar_enum_for_builtin::<BoundaryConditionKind>(
-            BOUNDARY_CONDITION_NAME,
-            &kind_text,
-            "BoundaryConditionKind",
-        )?,
+    let target = RegionTarget::boundary(region_id);
+    let condition = match normalize_token(&kind_text).as_str() {
+        "fixed" => ModelConditionPayload::Constraint(AnalysisConstraint::Structural(
+            StructuralConstraint {
+                constraint_id: bc_id,
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::Fixed { target },
+            },
+        )),
+        "prescribeddisplacement" => ModelConditionPayload::Constraint(
+            AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: bc_id,
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::PrescribedTranslations(PrescribedTranslations {
+                    target,
+                    values: [
+                        StructuralTranslationDof::Ux,
+                        StructuralTranslationDof::Uy,
+                        StructuralTranslationDof::Uz,
+                    ]
+                    .into_iter()
+                    .map(|dof| TranslationDofValue {
+                        dof,
+                        value: ValueSchedule::Constant(Displacement::new(0.0)),
+                    })
+                    .collect(),
+                }),
+            }),
+        ),
+        "prescribedrotation" => ModelConditionPayload::Constraint(AnalysisConstraint::Structural(
+            StructuralConstraint {
+                constraint_id: bc_id,
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::PrescribedRotations(PrescribedRotations {
+                    target,
+                    values: [
+                        (
+                            StructuralRotationDof::Rx,
+                            remove_required_boundary_f64(&mut fields, "rx")?,
+                        ),
+                        (
+                            StructuralRotationDof::Ry,
+                            remove_required_boundary_f64(&mut fields, "ry")?,
+                        ),
+                        (
+                            StructuralRotationDof::Rz,
+                            remove_required_boundary_f64(&mut fields, "rz")?,
+                        ),
+                    ]
+                    .into_iter()
+                    .map(|(dof, value)| RotationDofValue {
+                        dof,
+                        value: ValueSchedule::Constant(Rotation::new(value)),
+                    })
+                    .collect(),
+                }),
+            },
+        )),
+        "magneticinsulation" => ModelConditionPayload::Boundary(AnalysisBoundary {
+            boundary_id: bc_id,
+            target,
+            operator: BoundaryOperator::MagneticInsulation,
+        }),
+        "vectorpotentialground" => {
+            ModelConditionPayload::Constraint(AnalysisConstraint::Magnetic(MagneticConstraint {
+                constraint_id: bc_id,
+                kind: MagneticConstraintKind::VectorPotentialGround { target },
+            }))
+        }
+        "acousticrigidwall" => ModelConditionPayload::Boundary(AnalysisBoundary {
+            boundary_id: bc_id,
+            target,
+            operator: BoundaryOperator::AcousticRigidWall,
+        }),
+        "acousticradiation" => ModelConditionPayload::Boundary(AnalysisBoundary {
+            boundary_id: bc_id,
+            target,
+            operator: BoundaryOperator::AcousticRadiation,
+        }),
+        "acousticimpedance" => ModelConditionPayload::Boundary(AnalysisBoundary {
+            boundary_id: bc_id,
+            target,
+            operator: BoundaryOperator::AcousticImpedance {
+                impedance: SpecificAcousticImpedance::new(remove_required_boundary_f64(
+                    &mut fields,
+                    "specific_impedance_pa_s_per_m",
+                )?),
+            },
+        }),
+        "thermalprescribedtemperature" => {
+            ModelConditionPayload::Constraint(AnalysisConstraint::Thermal(ThermalConstraint {
+                constraint_id: bc_id,
+                kind: ThermalConstraintKind::Prescribed {
+                    target,
+                    value: ValueSchedule::Constant(Temperature::new(remove_required_boundary_f64(
+                        &mut fields,
+                        "temperature_k",
+                    )?)),
+                },
+            }))
+        }
+        "thermalheatflux" => ModelConditionPayload::Boundary(AnalysisBoundary {
+            boundary_id: bc_id,
+            target,
+            operator: BoundaryOperator::ThermalHeatFlux {
+                value: ValueSchedule::Constant(HeatFlux::new(remove_required_boundary_f64(
+                    &mut fields,
+                    "heat_flux_w_per_m2",
+                )?)),
+            },
+        }),
+        "thermalconvection" => ModelConditionPayload::Boundary(AnalysisBoundary {
+            boundary_id: bc_id,
+            target,
+            operator: BoundaryOperator::ThermalConvection {
+                ambient_temperature: ValueSchedule::Constant(Temperature::new(
+                    remove_required_boundary_f64(&mut fields, "ambient_temperature_k")?,
+                )),
+                coefficient: HeatTransferCoefficient::new(remove_required_boundary_f64(
+                    &mut fields,
+                    "coefficient_w_per_m2k",
+                )?),
+            },
+        }),
+        "cfdinletvelocity" => {
+            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc_id,
+                kind: FluidConstraintKind::PrescribedVelocity {
+                    target,
+                    value: ValueSchedule::Constant(Velocity::new(remove_required_boundary_f64(
+                        &mut fields,
+                        "velocity_m_per_s",
+                    )?)),
+                },
+            }))
+        }
+        "cfdoutletpressure" => {
+            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc_id,
+                kind: FluidConstraintKind::PressureReference {
+                    target,
+                    value: ValueSchedule::Constant(Pressure::new(remove_required_boundary_f64(
+                        &mut fields,
+                        "pressure_pa",
+                    )?)),
+                },
+            }))
+        }
+        "cfdnoslipwall" => {
+            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc_id,
+                kind: FluidConstraintKind::NoSlipWall { target },
+            }))
+        }
+        "cfdslipwall" => {
+            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc_id,
+                kind: FluidConstraintKind::SlipWall { target },
+            }))
+        }
+        "cfdsymmetry" => {
+            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                constraint_id: bc_id,
+                kind: FluidConstraintKind::Symmetry { target },
+            }))
+        }
+        _ => {
+            return Err(builtin_error(
+                BOUNDARY_CONDITION_NAME,
+                &ERROR_INPUT,
+                format!("unsupported boundary condition kind `{kind_text}`"),
+            ))
+        }
     };
     reject_unknown_boundary_fields(fields)?;
-    boundary_condition_to_object(BoundaryCondition {
-        bc_id,
-        region_id,
-        kind,
-    })
+    boundary_condition_to_object(condition)
 }
 
 fn boundary_fields_from_name_values(args: &[Value]) -> BuiltinResult<HashMap<String, &Value>> {
@@ -2783,10 +2925,10 @@ fn build_model_from_parts(
     model_id: String,
     profile: AnalysisCreateModelProfile,
     defaults: ModelDefaultsMode,
-    frame: Option<ReferenceFrame>,
+    frame: Option<CoordinateFrame>,
     materials: Vec<MaterialModel>,
     material_assignments: Vec<MaterialAssignment>,
-    boundary_conditions: Vec<BoundaryCondition>,
+    boundary_conditions: Vec<ModelConditionPayload>,
     loads: Vec<LoadCase>,
     steps: Vec<AnalysisStep>,
     domains: Vec<DomainPayload>,
@@ -2823,13 +2965,30 @@ fn build_model_from_parts(
             .collect::<BuiltinResult<Vec<_>>>()?;
     }
     if !boundary_conditions.is_empty() {
-        model.boundary_conditions = boundary_conditions
-            .into_iter()
-            .map(|mut bc| {
-                bc.region_id = resolve_region_selector(builtin, &bc.region_id, geometry)?;
-                Ok(bc)
-            })
-            .collect::<BuiltinResult<Vec<_>>>()?;
+        model.constraints.clear();
+        model.boundaries.clear();
+        for condition in boundary_conditions {
+            match condition {
+                ModelConditionPayload::Constraint(mut constraint) => {
+                    let mut error = None;
+                    constraint.visit_targets_mut(|target| {
+                        match resolve_region_selector(builtin, &target.region_id, geometry) {
+                            Ok(region_id) => target.region_id = region_id,
+                            Err(value) => error = Some(value),
+                        }
+                    });
+                    if let Some(error) = error {
+                        return Err(error);
+                    }
+                    model.constraints.push(constraint);
+                }
+                ModelConditionPayload::Boundary(mut boundary) => {
+                    boundary.target.region_id =
+                        resolve_region_selector(builtin, &boundary.target.region_id, geometry)?;
+                    model.boundaries.push(boundary);
+                }
+            }
+        }
     }
     if !loads.is_empty() {
         model.loads = loads
@@ -2906,7 +3065,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         geometry_id: geometry.geometry_id.clone(),
         geometry_revision: geometry.revision,
         units: geometry.units,
-        frame: ReferenceFrame::Global,
+        frame: CoordinateFrame::Global,
         materials: Vec::new(),
         material_assignments: Vec::new(),
         structural: None,
@@ -2915,7 +3074,9 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         electromagnetic: None,
         cfd: None,
         interfaces: Vec::new(),
-        boundary_conditions: Vec::new(),
+        constraints: Vec::new(),
+        boundaries: Vec::new(),
+        connectors: Vec::new(),
         loads: Vec::new(),
         steps: Vec::new(),
     }
@@ -3002,12 +3163,12 @@ fn material_assignment_to_object(assignment: MaterialAssignment) -> BuiltinResul
     )
 }
 
-fn boundary_condition_to_object(bc: BoundaryCondition) -> BuiltinResult<Value> {
+fn boundary_condition_to_object(condition: ModelConditionPayload) -> BuiltinResult<Value> {
     serializable_to_object(
         BOUNDARY_CONDITION_NAME,
         &ERROR_INTERNAL,
         FEA_BOUNDARY_CONDITION_CLASS,
-        &bc,
+        &condition,
         Some(FEA_PAYLOAD_JSON_PROPERTY),
     )
 }
@@ -3097,7 +3258,7 @@ fn material_assignment_vec_from_value(
 fn boundary_condition_vec_from_value(
     builtin: &'static str,
     value: &Value,
-) -> BuiltinResult<Vec<BoundaryCondition>> {
+) -> BuiltinResult<Vec<ModelConditionPayload>> {
     object_vec_from_value(builtin, value, FEA_BOUNDARY_CONDITION_CLASS)
 }
 
@@ -5216,7 +5377,7 @@ mod tests {
         Value::Tensor(Tensor::new_2d(vec![10.0, 20.0, 30.0], 1, 3).expect("tensor should build"))
     }
 
-    fn boundary_payload(value: Value) -> BoundaryCondition {
+    fn boundary_payload(value: Value) -> ModelConditionPayload {
         let Value::Object(object) = value else {
             panic!("expected boundary condition object");
         };
@@ -6082,18 +6243,22 @@ run:
         let Some(Value::String(payload)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY) else {
             panic!("expected boundary condition JSON payload");
         };
-        let decoded: BoundaryCondition =
+        let decoded: ModelConditionPayload =
             serde_json::from_str(payload).expect("boundary condition payload should decode");
-        assert_eq!(decoded.bc_id, "tip_rotation");
-        assert_eq!(decoded.region_id, "tip_node");
-        assert!(matches!(
-            decoded.kind,
-            BoundaryConditionKind::PrescribedRotation {
-                rx: 0.1,
-                ry: 0.2,
-                rz: 0.3
-            }
-        ));
+        let ModelConditionPayload::Constraint(AnalysisConstraint::Structural(constraint)) = decoded
+        else {
+            panic!("expected structural constraint")
+        };
+        assert_eq!(constraint.constraint_id, "tip_rotation");
+        let StructuralConstraintKind::PrescribedRotations(values) = constraint.kind else {
+            panic!("expected prescribed rotations")
+        };
+        assert_eq!(values.target.region_id, "tip_node");
+        assert_eq!(values.values.len(), 3);
+        assert_eq!(
+            values.values[0].value.constant().map(|value| value.radians),
+            Some(0.1)
+        );
     }
 
     #[test]
@@ -6109,14 +6274,21 @@ run:
             )))
             .unwrap(),
         );
-        assert!(matches!(
-            rotation.kind,
-            BoundaryConditionKind::PrescribedRotation {
-                rx: 1.0,
-                ry: 2.0,
-                rz: 3.0
-            }
-        ));
+        let ModelConditionPayload::Constraint(AnalysisConstraint::Structural(rotation)) = rotation
+        else {
+            panic!("expected structural constraint")
+        };
+        let StructuralConstraintKind::PrescribedRotations(rotation) = rotation.kind else {
+            panic!("expected prescribed rotations")
+        };
+        assert_eq!(
+            rotation
+                .values
+                .iter()
+                .map(|value| value.value.constant().expect("constant").radians)
+                .collect::<Vec<_>>(),
+            vec![1.0, 2.0, 3.0]
+        );
 
         let cases = [
             (
@@ -6153,13 +6325,21 @@ run:
             )))
             .unwrap(),
         );
-        assert!(matches!(
-            convection.kind,
-            BoundaryConditionKind::ThermalConvection {
-                ambient_temperature_k: 9.0,
-                coefficient_w_per_m2k: 10.0
-            }
-        ));
+        let ModelConditionPayload::Boundary(convection) = convection else {
+            panic!("expected natural boundary")
+        };
+        let BoundaryOperator::ThermalConvection {
+            ambient_temperature,
+            coefficient,
+        } = convection.operator
+        else {
+            panic!("expected thermal convection")
+        };
+        assert_eq!(
+            ambient_temperature.constant().map(|value| value.kelvin),
+            Some(9.0)
+        );
+        assert_eq!(coefficient.watts_per_square_meter_kelvin, 10.0);
     }
 
     #[test]
@@ -6182,11 +6362,16 @@ run:
                 )))
                 .unwrap(),
             );
-            let BoundaryConditionKind::ThermalHeatFlux { heat_flux_w_per_m2 } = boundary.kind
-            else {
-                panic!("expected thermal heat-flux boundary");
+            let ModelConditionPayload::Boundary(boundary) = boundary else {
+                panic!("expected natural boundary")
             };
-            assert_eq!(heat_flux_w_per_m2, expected);
+            let BoundaryOperator::ThermalHeatFlux { value } = boundary.operator else {
+                panic!("expected thermal heat-flux boundary")
+            };
+            assert_eq!(
+                value.constant().map(|value| value.watts_per_square_meter),
+                Some(expected)
+            );
         }
     }
 
@@ -6367,6 +6552,7 @@ run:
 
     #[test]
     fn fea_results_field_exposes_values_metadata_and_plot_context() {
+        let _guard = crate::analysis::storage::artifact_store_test_guard();
         let (run_value, _study) = synthetic_plot_run_value();
 
         let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
@@ -6440,6 +6626,7 @@ run:
     #[cfg(feature = "plot-core")]
     #[test]
     fn plot_and_mesh_overloads_return_figure_handles_for_fea_objects() {
+        let _guard = crate::analysis::storage::artifact_store_test_guard();
         let (run_value, _study) = synthetic_plot_run_value();
 
         let mesh_handle = block_on(crate::call_builtin_async(
@@ -6468,6 +6655,7 @@ run:
 
     #[test]
     fn mesh_request_defaults_to_solver_edges_and_accepts_cad_reference() {
+        let _guard = crate::analysis::storage::artifact_store_test_guard();
         let (run_value, _study) = synthetic_plot_run_value();
         let default = mesh_request_from_args(std::slice::from_ref(&run_value))
             .expect("default mesh request should parse");
@@ -6494,6 +6682,7 @@ run:
 
     #[test]
     fn fea_plot_request_accepts_solver_mesh_edge_option() {
+        let _guard = crate::analysis::storage::artifact_store_test_guard();
         let (run_value, _study) = synthetic_plot_run_value();
         let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
         let field = block_on(fea_field_builtin(vec![
@@ -6546,11 +6735,6 @@ run:
     }
 
     fn synthetic_plot_run_value() -> (Value, Value) {
-        crate::analysis::storage::configure_artifact_store(
-            crate::analysis::storage::AnalysisArtifactStoreConfig::InMemory,
-        )
-        .expect("artifact store should configure");
-
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         std::fs::write(tmp.path().join("part.stl"), TRIANGLE_STL)
             .expect("geometry fixture should write");
@@ -6748,9 +6932,10 @@ run:
 
     #[test]
     fn fea_results_translates_successful_selectors_and_public_indices_once() {
+        let _guard = crate::analysis::storage::artifact_store_test_guard();
         let run_id = persist_synthetic_indexed_results();
         let selected = block_on(fea_results_builtin(vec![
-            Value::String(run_id.clone()),
+            Value::String(run_id),
             Value::String("ModeIndices".to_string()),
             Value::Int(IntValue::U8(2)),
             Value::String("TransientSnapshotIndices".to_string()),
@@ -6775,12 +6960,7 @@ run:
         };
         assert_eq!(time_points.materialize_f64(), vec![1.0]);
 
-        let full = block_on(fea_results_builtin(vec![Value::String(run_id)]))
-            .expect("full indexed results");
-        let Value::Object(full) = full else {
-            panic!("results object");
-        };
-        let Some(Value::Struct(summary)) = full.properties.get("summary") else {
+        let Some(Value::Struct(summary)) = selected.properties.get("summary") else {
             panic!("results summary");
         };
         let Some(Value::Tensor(indices)) = summary.fields.get("available_mode_indices") else {

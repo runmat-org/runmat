@@ -105,7 +105,7 @@ pub fn analysis_author_study_op(
         confidence: EvidenceConfidence::Inferred,
     }];
     let (boundary_condition_region_id, boundary_condition_region_source) =
-        if model.boundary_conditions.is_empty() {
+        if model.constraints.is_empty() && model.boundaries.is_empty() {
             (None, None)
         } else {
             let (region_id, source) = select_authoring_boundary_region(
@@ -149,9 +149,11 @@ pub fn analysis_author_study_op(
         })?;
         (Some(region_id), Some(source))
     };
-    if let Some(boundary) = model.boundary_conditions.first_mut() {
-        if let Some(region_id) = &boundary_condition_region_id {
-            boundary.region_id = region_id.clone();
+    if let Some(region_id) = &boundary_condition_region_id {
+        if let Some(constraint) = model.constraints.first_mut() {
+            constraint.visit_targets_mut(|target| target.region_id = region_id.clone());
+        } else if let Some(boundary) = model.boundaries.first_mut() {
+            boundary.target.region_id = region_id.clone();
         }
     }
     let mut selected_structural_force_n = None;

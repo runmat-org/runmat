@@ -7,8 +7,8 @@ mod solver_solid_boundary;
 use std::{collections::BTreeMap, fmt};
 
 use runmat_analysis_core::{
-    AnalysisModel, BeamSectionModel, BoundaryConditionKind, LoadKind, ShellSectionModel,
-    StructuralElementKind, StructuralModel,
+    AnalysisModel, BeamSectionModel, LoadKind, ShellSectionModel, StructuralConstraintKind,
+    StructuralElementKind, StructuralModel, StructuralRotationDof, StructuralTranslationDof,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
@@ -103,10 +103,10 @@ pub enum SolverMeshRegionMappingError {
         region_id: String,
         load_kind: &'static str,
     },
-    UnmappedBoundaryConditionRegion {
-        bc_id: String,
+    UnmappedConstraintRegion {
+        constraint_id: String,
         region_id: String,
-        boundary_condition_kind: &'static str,
+        constraint_kind: &'static str,
     },
 }
 
@@ -121,13 +121,13 @@ impl fmt::Display for SolverMeshRegionMappingError {
                 f,
                 "solver mesh load region did not resolve to persistent boundary provenance: load_id={load_id} region_id={region_id} load_kind={load_kind}"
             ),
-            SolverMeshRegionMappingError::UnmappedBoundaryConditionRegion {
-                bc_id,
+            SolverMeshRegionMappingError::UnmappedConstraintRegion {
+                constraint_id,
                 region_id,
-                boundary_condition_kind,
+                constraint_kind,
             } => write!(
                 f,
-                "solver mesh boundary condition region did not resolve to persistent boundary provenance: bc_id={bc_id} region_id={region_id} boundary_condition_kind={boundary_condition_kind}"
+                "solver mesh constraint region did not resolve to persistent boundary provenance: constraint_id={constraint_id} region_id={region_id} constraint_kind={constraint_kind}"
             ),
         }
     }
@@ -406,7 +406,7 @@ fn assemble_linear_system_impl(
             0
         };
 
-    let legacy_constrained_dof_count = model.boundary_conditions.len().min(dof_count);
+    let legacy_constrained_dof_count = model.constraints.len().min(dof_count);
     let mut constrained = vec![false; dof_count];
     let constraint_offset = 0;
     for idx in 0..legacy_constrained_dof_count {
@@ -956,11 +956,18 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
     }
 
     let mut constrained = vec![false; dof_count];
-    for bc in &model.boundary_conditions {
-        let target_nodes = structural_target_nodes(structural, &bc.region_id);
+    for constraint in model
+        .constraints
+        .iter()
+        .filter_map(|value| value.structural())
+    {
+        let Some(target) = constraint.kind.target() else {
+            continue;
+        };
+        let target_nodes = structural_target_nodes(structural, &target.region_id);
         for node_index in target_nodes {
-            match bc.kind {
-                BoundaryConditionKind::Fixed => {
+            match &constraint.kind {
+                StructuralConstraintKind::Fixed { .. } => {
                     for kind in StructuralDofKind::ORDER {
                         constrain_dof(
                             &structural_dof_layout,
@@ -972,47 +979,45 @@ fn assemble_beam_system(model: &AnalysisModel) -> Option<AssemblySummary> {
                         );
                     }
                 }
-                BoundaryConditionKind::PrescribedDisplacement => {
-                    for kind in [
-                        StructuralDofKind::Ux,
-                        StructuralDofKind::Uy,
-                        StructuralDofKind::Uz,
-                    ] {
+                StructuralConstraintKind::PrescribedTranslations(values) => {
+                    for prescribed in &values.values {
+                        let Some(value) = prescribed.value.constant() else {
+                            continue;
+                        };
+                        let kind = match prescribed.dof {
+                            StructuralTranslationDof::Ux => StructuralDofKind::Ux,
+                            StructuralTranslationDof::Uy => StructuralDofKind::Uy,
+                            StructuralTranslationDof::Uz => StructuralDofKind::Uz,
+                        };
                         constrain_dof(
                             &structural_dof_layout,
                             &mut constrained,
                             &mut rhs,
                             node_index,
                             kind,
-                            0.0,
+                            value.meters,
                         );
                     }
                 }
-                BoundaryConditionKind::PrescribedRotation { rx, ry, rz } => {
-                    constrain_dof(
-                        &structural_dof_layout,
-                        &mut constrained,
-                        &mut rhs,
-                        node_index,
-                        StructuralDofKind::Rx,
-                        rx,
-                    );
-                    constrain_dof(
-                        &structural_dof_layout,
-                        &mut constrained,
-                        &mut rhs,
-                        node_index,
-                        StructuralDofKind::Ry,
-                        ry,
-                    );
-                    constrain_dof(
-                        &structural_dof_layout,
-                        &mut constrained,
-                        &mut rhs,
-                        node_index,
-                        StructuralDofKind::Rz,
-                        rz,
-                    );
+                StructuralConstraintKind::PrescribedRotations(values) => {
+                    for prescribed in &values.values {
+                        let Some(value) = prescribed.value.constant() else {
+                            continue;
+                        };
+                        let kind = match prescribed.dof {
+                            StructuralRotationDof::Rx => StructuralDofKind::Rx,
+                            StructuralRotationDof::Ry => StructuralDofKind::Ry,
+                            StructuralRotationDof::Rz => StructuralDofKind::Rz,
+                        };
+                        constrain_dof(
+                            &structural_dof_layout,
+                            &mut constrained,
+                            &mut rhs,
+                            node_index,
+                            kind,
+                            value.radians,
+                        );
+                    }
                 }
                 _ => {}
             }
@@ -1799,6 +1804,18 @@ mod tests {
         ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, StableDigest,
     };
 
+    fn fixed_constraint(region_id: &str) -> runmat_analysis_core::AnalysisConstraint {
+        runmat_analysis_core::AnalysisConstraint::Structural(
+            runmat_analysis_core::StructuralConstraint {
+                constraint_id: "fixed_root".to_string(),
+                frame: runmat_analysis_core::CoordinateFrame::Global,
+                kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
+                    target: runmat_analysis_core::RegionTarget::authored(region_id),
+                },
+            },
+        )
+    }
+
     #[test]
     fn solver_mesh_populates_sparse_solid_stiffness_operator() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -1955,11 +1972,7 @@ mod tests {
     #[test]
     fn solver_mesh_boundary_regions_drive_solid_loads_and_constraints() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-        model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-            bc_id: "fixed_root".to_string(),
-            region_id: "root".to_string(),
-            kind: BoundaryConditionKind::Fixed,
-        }];
+        model.constraints = vec![fixed_constraint("root")];
         model.loads = vec![runmat_analysis_core::LoadCase {
             load_id: "load_tip".to_string(),
             region_id: "tip".to_string(),
@@ -1986,11 +1999,7 @@ mod tests {
     #[test]
     fn strict_solver_mesh_assembly_rejects_unmapped_load_region() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-        model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-            bc_id: "fixed_root".to_string(),
-            region_id: "root".to_string(),
-            kind: BoundaryConditionKind::Fixed,
-        }];
+        model.constraints = vec![fixed_constraint("root")];
         model.loads = vec![runmat_analysis_core::LoadCase {
             load_id: "load_tip".to_string(),
             region_id: "missing_tip".to_string(),
@@ -2022,11 +2031,7 @@ mod tests {
     #[test]
     fn strict_solver_mesh_assembly_rejects_unmapped_constraint_region() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-        model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-            bc_id: "fixed_root".to_string(),
-            region_id: "missing_root".to_string(),
-            kind: BoundaryConditionKind::Fixed,
-        }];
+        model.constraints = vec![fixed_constraint("missing_root")];
         model.loads = vec![runmat_analysis_core::LoadCase {
             load_id: "load_tip".to_string(),
             region_id: "tip".to_string(),
@@ -2047,18 +2052,18 @@ mod tests {
         assert!(matches!(
             err,
             LinearAssemblyError::SolverMeshRegionMapping(
-                SolverMeshRegionMappingError::UnmappedBoundaryConditionRegion { .. }
+                SolverMeshRegionMappingError::UnmappedConstraintRegion { .. }
             )
         ));
         let message = err.to_string();
-        assert!(message.contains("bc_id=fixed_root"));
+        assert!(message.contains("constraint_id=fixed_root"));
         assert!(message.contains("region_id=missing_root"));
     }
 
     #[test]
     fn solver_mesh_boundary_regions_integrate_pressure_loads() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-        model.boundary_conditions = Vec::new();
+        model.constraints = Vec::new();
         model.loads = vec![runmat_analysis_core::LoadCase {
             load_id: "pressure_tip".to_string(),
             region_id: "tip".to_string(),
@@ -2078,7 +2083,7 @@ mod tests {
     #[test]
     fn solver_mesh_boundary_regions_lower_wrench_moments() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-        model.boundary_conditions = Vec::new();
+        model.constraints = Vec::new();
         model.loads = vec![runmat_analysis_core::LoadCase {
             load_id: "wrench_tip".to_string(),
             region_id: "tip".to_string(),

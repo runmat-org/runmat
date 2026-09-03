@@ -3,6 +3,8 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
+#[cfg(test)]
+use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 use runmat_filesystem::{DirEntry, FsFileType};
@@ -438,4 +440,12 @@ pub fn reset_artifact_store_for_tests() {
         .write()
         .expect("analysis artifact retention config lock poisoned") =
         AnalysisArtifactRetentionConfig::default();
+}
+
+#[cfg(test)]
+pub(crate) fn artifact_store_test_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }

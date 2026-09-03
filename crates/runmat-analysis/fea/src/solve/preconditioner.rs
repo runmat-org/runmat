@@ -177,9 +177,9 @@ pub fn build_spd_preconditioner(
 #[cfg(test)]
 mod tests {
     use runmat_analysis_core::{
-        AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition,
-        BoundaryConditionKind, LoadCase, LoadKind, MaterialMechanicalModel, MaterialModel,
-        MaterialThermalModel, ReferenceFrame,
+        AnalysisConstraint, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
+        CoordinateFrame, LoadCase, LoadKind, MaterialMechanicalModel, MaterialModel,
+        MaterialThermalModel, RegionTarget, StructuralConstraint, StructuralConstraintKind,
     };
     use runmat_geometry_core::UnitSystem;
 
@@ -193,7 +193,7 @@ mod tests {
             geometry_id: "geo:test".to_string(),
             geometry_revision: 1,
             units: UnitSystem::Meter,
-            frame: ReferenceFrame::Global,
+            frame: CoordinateFrame::Global,
             materials: vec![MaterialModel {
                 material_id: "m1".to_string(),
                 name: "Steel".to_string(),
@@ -218,11 +218,15 @@ mod tests {
             electromagnetic: None,
             cfd: None,
             interfaces: Vec::new(),
-            boundary_conditions: vec![BoundaryCondition {
-                bc_id: "bc".to_string(),
-                region_id: "root".to_string(),
-                kind: BoundaryConditionKind::Fixed,
-            }],
+            constraints: vec![AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: "bc".to_string(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::Fixed {
+                    target: RegionTarget::boundary("root"),
+                },
+            })],
+            boundaries: Vec::new(),
+            connectors: Vec::new(),
             loads: vec![LoadCase {
                 load_id: "l1".to_string(),
                 region_id: "tip".to_string(),

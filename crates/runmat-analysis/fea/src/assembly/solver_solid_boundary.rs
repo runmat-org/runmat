@@ -1,4 +1,6 @@
-use runmat_analysis_core::{AnalysisModel, BoundaryConditionKind, LoadKind};
+use runmat_analysis_core::{
+    AnalysisModel, LoadKind, StructuralConstraintKind, StructuralTranslationDof,
+};
 use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
@@ -103,36 +105,57 @@ pub(super) fn apply_solver_mesh_structural_regions(
         }
     }
 
-    for bc in &model.boundary_conditions {
-        let target_nodes = solver_mesh_region_node_indices(mesh, &bc.region_id);
+    for constraint in model
+        .constraints
+        .iter()
+        .filter_map(|value| value.structural())
+    {
+        let Some(target) = constraint.kind.target() else {
+            continue;
+        };
+        let target_nodes = solver_mesh_region_node_indices(mesh, &target.region_id);
         if strict_region_mapping
             && target_nodes.is_empty()
             && matches!(
-                bc.kind,
-                BoundaryConditionKind::Fixed | BoundaryConditionKind::PrescribedDisplacement
+                constraint.kind,
+                StructuralConstraintKind::Fixed { .. }
+                    | StructuralConstraintKind::PrescribedTranslations(_)
             )
         {
-            return Err(
-                SolverMeshRegionMappingError::UnmappedBoundaryConditionRegion {
-                    bc_id: bc.bc_id.clone(),
-                    region_id: bc.region_id.clone(),
-                    boundary_condition_kind: match bc.kind {
-                        BoundaryConditionKind::Fixed => "fixed",
-                        BoundaryConditionKind::PrescribedDisplacement => "prescribed_displacement",
-                        _ => "unsupported",
-                    },
+            return Err(SolverMeshRegionMappingError::UnmappedConstraintRegion {
+                constraint_id: constraint.constraint_id.clone(),
+                region_id: target.region_id.clone(),
+                constraint_kind: match constraint.kind {
+                    StructuralConstraintKind::Fixed { .. } => "fixed",
+                    StructuralConstraintKind::PrescribedTranslations(_) => {
+                        "prescribed_translations"
+                    }
+                    _ => "unsupported",
                 },
-            );
+            });
         }
         for node_index in target_nodes {
-            match bc.kind {
-                BoundaryConditionKind::Fixed | BoundaryConditionKind::PrescribedDisplacement => {
+            match &constraint.kind {
+                StructuralConstraintKind::Fixed { .. } => {
                     for kind in [
                         StructuralDofKind::Ux,
                         StructuralDofKind::Uy,
                         StructuralDofKind::Uz,
                     ] {
                         constrain_dof(layout, constrained, rhs, node_index, kind, 0.0);
+                    }
+                }
+                StructuralConstraintKind::PrescribedTranslations(values) => {
+                    for prescribed in &values.values {
+                        let Some(value) = prescribed.value.constant() else {
+                            continue;
+                        };
+                        let kind = match prescribed.dof {
+                            StructuralTranslationDof::Ux => StructuralDofKind::Ux,
+                            StructuralTranslationDof::Uy => StructuralDofKind::Uy,
+                            StructuralTranslationDof::Uz => StructuralDofKind::Uz,
+                        };
+                        constrain_dof(layout, constrained, rhs, node_index, kind, value.meters);
                     }
                 }
                 _ => {}

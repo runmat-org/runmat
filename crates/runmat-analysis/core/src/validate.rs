@@ -1,21 +1,44 @@
 use runmat_geometry_core::UnitSystem;
 use thiserror::Error;
 
-use crate::problem::{
-    loads::LoadKind,
-    model::{AnalysisModel, ReferenceFrame},
-};
+use crate::problem::{coordinate_frame::CoordinateFrame, loads::LoadKind, model::AnalysisModel};
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Error)]
 pub enum AnalysisValidationError {
     #[error(
         "ANALYSIS_VALIDATION_MISSING_MATERIALS: analysis model must include at least one material"
     )]
     MissingMaterials,
-    #[error("ANALYSIS_VALIDATION_MISSING_BCS: analysis model must include at least one boundary condition")]
-    MissingBoundaryConditions,
+    #[error("ANALYSIS_VALIDATION_MISSING_CONDITIONS: analysis model must include at least one constraint or natural boundary")]
+    MissingConstraintsOrBoundaries,
     #[error("ANALYSIS_VALIDATION_MISSING_LOADS: analysis model must include at least one load")]
     MissingLoads,
+    #[error("ANALYSIS_VALIDATION_INVALID_ID: {kind} id must be non-empty")]
+    InvalidId { kind: &'static str },
+    #[error("ANALYSIS_VALIDATION_DUPLICATE_ID: duplicate {kind} id `{id}`")]
+    DuplicateId { kind: &'static str, id: String },
+    #[error("ANALYSIS_VALIDATION_INVALID_TARGET: {owner_id} has an invalid target: {detail}")]
+    InvalidTarget { owner_id: String, detail: String },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_FRAME: coordinate frame is not finite and non-degenerate"
+    )]
+    InvalidFrame,
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_CONSTRAINT: constraint `{constraint_id}` is invalid: {detail}"
+    )]
+    InvalidConstraint {
+        constraint_id: String,
+        detail: String,
+    },
+    #[error("ANALYSIS_VALIDATION_INVALID_BOUNDARY: boundary `{boundary_id}` is invalid: {detail}")]
+    InvalidBoundary { boundary_id: String, detail: String },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_CONNECTOR: connector `{connector_id}` is invalid: {detail}"
+    )]
+    InvalidConnector {
+        connector_id: String,
+        detail: String,
+    },
     #[error(
         "ANALYSIS_VALIDATION_INVALID_MOMENT: moment load {load_id} must have finite components"
     )]
@@ -41,8 +64,8 @@ pub enum AnalysisValidationError {
         "ANALYSIS_VALIDATION_FRAME_MISMATCH: model frame {model:?} does not match geometry frame {geometry:?}"
     )]
     FrameMismatch {
-        model: ReferenceFrame,
-        geometry: ReferenceFrame,
+        model: Box<CoordinateFrame>,
+        geometry: Box<CoordinateFrame>,
     },
 }
 
@@ -50,12 +73,13 @@ pub fn validate_model(model: &AnalysisModel) -> Result<(), AnalysisValidationErr
     if model.materials.is_empty() {
         return Err(AnalysisValidationError::MissingMaterials);
     }
-    if model.boundary_conditions.is_empty() {
-        return Err(AnalysisValidationError::MissingBoundaryConditions);
+    if model.constraints.is_empty() && model.boundaries.is_empty() {
+        return Err(AnalysisValidationError::MissingConstraintsOrBoundaries);
     }
     if model.loads.is_empty() {
         return Err(AnalysisValidationError::MissingLoads);
     }
+    crate::validate_authored::validate_authored_model(model)?;
     for load in &model.loads {
         if let LoadKind::Moment { mx, my, mz } = load.kind {
             if !mx.is_finite() || !my.is_finite() || !mz.is_finite() {
@@ -108,7 +132,7 @@ pub fn validate_model(model: &AnalysisModel) -> Result<(), AnalysisValidationErr
 pub fn validate_model_against_geometry(
     model: &AnalysisModel,
     geometry_units: UnitSystem,
-    geometry_frame: &ReferenceFrame,
+    geometry_frame: &CoordinateFrame,
 ) -> Result<(), AnalysisValidationError> {
     validate_model(model)?;
 
@@ -120,8 +144,8 @@ pub fn validate_model_against_geometry(
     }
     if &model.frame != geometry_frame {
         return Err(AnalysisValidationError::FrameMismatch {
-            model: model.frame.clone(),
-            geometry: geometry_frame.clone(),
+            model: Box::new(model.frame.clone()),
+            geometry: Box::new(geometry_frame.clone()),
         });
     }
     Ok(())

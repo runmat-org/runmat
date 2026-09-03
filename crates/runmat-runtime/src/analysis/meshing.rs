@@ -110,9 +110,26 @@ pub(crate) fn apply_boundary_region_ids(
     model: &mut AnalysisModel,
     aliases: &BTreeMap<String, PersistentEntityId>,
 ) {
-    for boundary_condition in &mut model.boundary_conditions {
-        if let Some(id) = aliases.get(&boundary_condition.region_id) {
-            boundary_condition.region_id = id.source_topology_id.clone();
+    for constraint in &mut model.constraints {
+        constraint.visit_targets_mut(|target| {
+            if let Some(id) = aliases.get(&target.region_id) {
+                target.region_id = id.source_topology_id.clone();
+            }
+        });
+    }
+    for boundary in &mut model.boundaries {
+        if let Some(id) = aliases.get(&boundary.target.region_id) {
+            boundary.target.region_id = id.source_topology_id.clone();
+        }
+    }
+    for connector in &mut model.connectors {
+        if let Some(id) = aliases.get(&connector.primary.region_id) {
+            connector.primary.region_id = id.source_topology_id.clone();
+        }
+        if let Some(secondary) = &mut connector.secondary {
+            if let Some(id) = aliases.get(&secondary.region_id) {
+                secondary.region_id = id.source_topology_id.clone();
+            }
         }
     }
     for load in &mut model.loads {

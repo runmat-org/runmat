@@ -1,5 +1,5 @@
 use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, BoundaryConditionKind, LoadKind,
+    validate_model, AnalysisField, AnalysisModel, LoadKind, StructuralConstraintKind,
 };
 
 use crate::{
@@ -698,13 +698,15 @@ fn structural_force_moment_about_reaction_origin(
 ) -> Option<[f64; 3]> {
     let structural = model.structural.as_ref()?;
     let origin = model
-        .boundary_conditions
+        .constraints
         .iter()
-        .find_map(|bc| {
-            if !matches!(bc.kind, BoundaryConditionKind::Fixed) {
+        .filter_map(|constraint| constraint.structural())
+        .find_map(|constraint| {
+            if !matches!(constraint.kind, StructuralConstraintKind::Fixed { .. }) {
                 return None;
             }
-            structural_node_coordinates(structural, &bc.region_id)
+            let target = constraint.kind.target()?;
+            structural_node_coordinates(structural, &target.region_id)
         })
         .or_else(|| structural.nodes.first().map(|node| node.coordinates_m))?;
     let target = structural_node_coordinates(structural, region_id)?;

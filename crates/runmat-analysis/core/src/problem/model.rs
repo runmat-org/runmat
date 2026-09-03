@@ -2,7 +2,10 @@ use runmat_geometry_core::UnitSystem;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    bc::BoundaryCondition,
+    boundary::AnalysisBoundary,
+    connector::AnalysisConnector,
+    constraint::AnalysisConstraint,
+    coordinate_frame::CoordinateFrame,
     domains::{CfdDomain, ElectroThermalDomain, ElectromagneticDomain, ThermoMechanicalDomain},
     interfaces::AnalysisInterface,
     loads::LoadCase,
@@ -15,20 +18,13 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisModelId(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReferenceFrame {
-    Global,
-    Local(String),
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisModel {
     pub model_id: AnalysisModelId,
     pub geometry_id: String,
     pub geometry_revision: u32,
     pub units: UnitSystem,
-    pub frame: ReferenceFrame,
+    pub frame: CoordinateFrame,
     pub materials: Vec<MaterialModel>,
     #[serde(default)]
     pub material_assignments: Vec<MaterialAssignment>,
@@ -44,7 +40,12 @@ pub struct AnalysisModel {
     pub cfd: Option<CfdDomain>,
     #[serde(default)]
     pub interfaces: Vec<AnalysisInterface>,
-    pub boundary_conditions: Vec<BoundaryCondition>,
+    #[serde(default)]
+    pub constraints: Vec<AnalysisConstraint>,
+    #[serde(default)]
+    pub boundaries: Vec<AnalysisBoundary>,
+    #[serde(default)]
+    pub connectors: Vec<AnalysisConnector>,
     pub loads: Vec<LoadCase>,
     pub steps: Vec<AnalysisStep>,
 }

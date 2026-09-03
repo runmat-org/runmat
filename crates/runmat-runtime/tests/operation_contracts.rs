@@ -1,8 +1,56 @@
 use runmat_analysis_core::{
-    AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure, BoundaryCondition,
-    BoundaryConditionKind, ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind,
-    MaterialAssignment, MaterialElectricalModel, ReferenceFrame,
+    AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure, CoordinateFrame,
+    ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
+    MaterialElectricalModel,
 };
+
+fn magnetic_ground(
+    id: &str,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Magnetic(runmat_analysis_core::MagneticConstraint {
+        constraint_id: id.to_string(),
+        kind: runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround {
+            target: runmat_analysis_core::RegionTarget::authored(region),
+        },
+    })
+}
+
+fn magnetic_insulation(id: &str, region: &str) -> runmat_analysis_core::AnalysisBoundary {
+    runmat_analysis_core::AnalysisBoundary {
+        boundary_id: id.to_string(),
+        target: runmat_analysis_core::RegionTarget::authored(region),
+        operator: runmat_analysis_core::BoundaryOperator::MagneticInsulation,
+    }
+}
+
+fn fluid_constraint(
+    id: &str,
+    region: &str,
+    kind: &str,
+    value: f64,
+) -> runmat_analysis_core::AnalysisConstraint {
+    let target = runmat_analysis_core::RegionTarget::authored(region);
+    let kind = match kind {
+        "inlet" => runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+            target,
+            value: runmat_analysis_core::ValueSchedule::Constant(
+                runmat_analysis_core::Velocity::new(value),
+            ),
+        },
+        "outlet" => runmat_analysis_core::FluidConstraintKind::PressureReference {
+            target,
+            value: runmat_analysis_core::ValueSchedule::Constant(
+                runmat_analysis_core::Pressure::new(value),
+            ),
+        },
+        _ => runmat_analysis_core::FluidConstraintKind::SlipWall { target },
+    };
+    runmat_analysis_core::AnalysisConstraint::Fluid(runmat_analysis_core::FluidConstraint {
+        constraint_id: id.to_string(),
+        kind,
+    })
+}
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
@@ -269,7 +317,7 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
 fn analysis_validate_contract_is_v1_and_maps_codes() {
     let model = contract_linear_static_model();
     let context = OperationContext::new(Some("trace-contract-2".to_string()), None);
-    let envelope = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+    let envelope = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
         .expect("validate should succeed");
     assert_eq!(envelope.operation, "fea.validate");
     assert_eq!(envelope.op_version, "fea.validate/v1");
@@ -279,7 +327,7 @@ fn analysis_validate_contract_is_v1_and_maps_codes() {
     let err = analysis_validate(
         &invalid,
         UnitSystem::Meter,
-        &ReferenceFrame::Global,
+        &CoordinateFrame::Global,
         OperationContext::new(None, None),
     )
     .expect_err("validate should fail");
@@ -839,7 +887,13 @@ fn analysis_create_model_infers_materials_from_step_metadata_contract() {
         .materials
         .iter()
         .any(|material| material.material_id == "mat_aluminum"));
-    assert_eq!(envelope.data.boundary_conditions[0].region_id, "region_1");
+    assert_eq!(
+        envelope.data.constraints[0]
+            .target()
+            .expect("target")
+            .region_id,
+        "region_1"
+    );
     assert_eq!(envelope.data.loads[0].region_id, "region_2");
     assert_eq!(envelope.data.material_assignments.len(), 2);
 }
@@ -851,7 +905,7 @@ fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
     let unit_err = analysis_validate(
         &unit_mismatch,
         UnitSystem::Meter,
-        &ReferenceFrame::Global,
+        &CoordinateFrame::Global,
         OperationContext::new(Some("trace-contract-2b".to_string()), None),
     )
     .expect_err("validate should fail for units");
@@ -866,22 +920,27 @@ fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
     );
 
     let mut frame_mismatch = contract_linear_static_model();
-    frame_mismatch.frame = ReferenceFrame::Local("fixture_frame".to_string());
+    frame_mismatch.frame = CoordinateFrame::Cartesian(runmat_analysis_core::CartesianFrame {
+        frame_id: "fixture_frame".to_string(),
+        origin: runmat_analysis_core::Position::new([0.0, 0.0, 0.0]),
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    });
     let frame_err = analysis_validate(
         &frame_mismatch,
         UnitSystem::Meter,
-        &ReferenceFrame::Global,
+        &CoordinateFrame::Global,
         OperationContext::new(Some("trace-contract-2c".to_string()), None),
     )
     .expect_err("validate should fail for frame");
     assert_eq!(frame_err.error_code, "RM.FEA.VALIDATE.FRAME_MISMATCH");
     assert_eq!(
         frame_err.context.get("model_frame").map(|s| s.as_str()),
-        Some("Local(\"fixture_frame\")")
+        Some("cartesian:fixture_frame")
     );
     assert_eq!(
         frame_err.context.get("geometry_frame").map(|s| s.as_str()),
-        Some("Global")
+        Some("global")
     );
 }
 
@@ -1195,24 +1254,11 @@ fn analysis_run_cfd_contract_shapes_cell_and_boundary_fields() {
         turbulence_intensity: 0.06,
         time_profile: Vec::new(),
     });
-    model.boundary_conditions = vec![
-        BoundaryCondition {
-            bc_id: "bc_cfd_inlet".to_string(),
-            region_id: "fluid_inlet".to_string(),
-            kind: BoundaryConditionKind::CfdInletVelocity {
-                velocity_m_per_s: 4.25,
-            },
-        },
-        BoundaryCondition {
-            bc_id: "bc_cfd_outlet".to_string(),
-            region_id: "fluid_outlet".to_string(),
-            kind: BoundaryConditionKind::CfdOutletPressure { pressure_pa: 0.0 },
-        },
-        BoundaryCondition {
-            bc_id: "bc_cfd_wall".to_string(),
-            region_id: "fluid_wall".to_string(),
-            kind: BoundaryConditionKind::CfdSlipWall,
-        },
+    model.boundaries.clear();
+    model.constraints = vec![
+        fluid_constraint("bc_cfd_inlet", "fluid_inlet", "inlet", 4.25),
+        fluid_constraint("bc_cfd_outlet", "fluid_outlet", "outlet", 0.0),
+        fluid_constraint("bc_cfd_wall", "fluid_wall", "slip", 0.0),
     ];
 
     let envelope = analysis_run_cfd_op(
@@ -1653,11 +1699,13 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     let mut model = contract_linear_static_model();
     model.steps[0].kind = runmat_analysis_core::AnalysisStepKind::Electromagnetic;
     model.materials[0].electrical = Some(MaterialElectricalModel::default());
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_em_snapshot_ground".to_string(),
-        region_id: model.boundary_conditions[0].region_id.clone(),
-        kind: BoundaryConditionKind::VectorPotentialGround,
-    }];
+    let region_id = model.constraints[0]
+        .target()
+        .expect("target")
+        .region_id
+        .clone();
+    model.constraints = vec![magnetic_ground("bc_em_snapshot_ground", region_id)];
+    model.boundaries.clear();
     model.loads = vec![LoadCase {
         load_id: "load_em_snapshot_coil".to_string(),
         region_id: model.loads[0].region_id.clone(),
@@ -1673,18 +1721,11 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
         applied_current_a: 120.0,
     });
     model.materials[0].electrical = Some(MaterialElectricalModel::default());
-    model.boundary_conditions = vec![
-        BoundaryCondition {
-            bc_id: "em_contract_ground".to_string(),
-            region_id: "em_contract_region".to_string(),
-            kind: BoundaryConditionKind::VectorPotentialGround,
-        },
-        BoundaryCondition {
-            bc_id: "em_contract_insulation".to_string(),
-            region_id: "em_contract_region".to_string(),
-            kind: BoundaryConditionKind::MagneticInsulation,
-        },
-    ];
+    model.constraints = vec![magnetic_ground("em_contract_ground", "em_contract_region")];
+    model.boundaries = vec![magnetic_insulation(
+        "em_contract_insulation",
+        "em_contract_region",
+    )];
     model.loads = vec![LoadCase {
         load_id: "em_contract_source".to_string(),
         region_id: "em_contract_region".to_string(),
@@ -1812,11 +1853,13 @@ fn electromagnetic_contract_snapshot_matches_expected_shape() {
     let mut model = contract_linear_static_model();
     model.steps[0].kind = runmat_analysis_core::AnalysisStepKind::Electromagnetic;
     model.materials[0].electrical = Some(MaterialElectricalModel::default());
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_em_snapshot_ground".to_string(),
-        region_id: model.boundary_conditions[0].region_id.clone(),
-        kind: BoundaryConditionKind::VectorPotentialGround,
-    }];
+    let region_id = model.constraints[0]
+        .target()
+        .expect("target")
+        .region_id
+        .clone();
+    model.constraints = vec![magnetic_ground("bc_em_snapshot_ground", region_id)];
+    model.boundaries.clear();
     model.loads = vec![LoadCase {
         load_id: "load_em_snapshot_coil".to_string(),
         region_id: model.loads[0].region_id.clone(),

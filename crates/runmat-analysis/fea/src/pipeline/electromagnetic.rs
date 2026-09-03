@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, BoundaryConditionKind, EvidenceConfidence,
-    LoadKind,
+    validate_model, AnalysisField, AnalysisModel, BoundaryOperator, EvidenceConfidence, LoadKind,
+    MagneticConstraintKind,
 };
 
 use crate::{
@@ -116,18 +116,21 @@ pub fn run_electromagnetic_with_options(
     let coefficient_profile =
         electromagnetic_coefficient_profile(model, domain.reference_frequency_hz)?;
     let material_stats = coefficient_profile.stats;
-    let total_bc_count = model.boundary_conditions.len().max(1);
+    let total_bc_count = (model.constraints.len() + model.boundaries.len()).max(1);
     let mut magnetic_insulation_count = 0usize;
     let mut vector_potential_ground_count = 0usize;
-    for bc in &model.boundary_conditions {
-        match bc.kind {
-            BoundaryConditionKind::MagneticInsulation => {
-                magnetic_insulation_count += 1;
-            }
-            BoundaryConditionKind::VectorPotentialGround => {
-                vector_potential_ground_count += 1;
-            }
-            _ => {}
+    for boundary in &model.boundaries {
+        if matches!(boundary.operator, BoundaryOperator::MagneticInsulation) {
+            magnetic_insulation_count += 1;
+        }
+    }
+    for constraint in &model.constraints {
+        if matches!(
+            constraint,
+            runmat_analysis_core::AnalysisConstraint::Magnetic(value)
+                if matches!(value.kind, MagneticConstraintKind::VectorPotentialGround { .. })
+        ) {
+            vector_potential_ground_count += 1;
         }
     }
     let electromagnetic_boundary_count = magnetic_insulation_count + vector_potential_ground_count;
@@ -143,20 +146,28 @@ pub fn run_electromagnetic_with_options(
     let mut ground_region_indices = std::collections::BTreeSet::new();
     let mut insulation_region_indices = std::collections::BTreeSet::new();
     let mut mapped_boundary_condition_count = 0usize;
-    for bc in &model.boundary_conditions {
-        let Some(region_index) = region_index_by_id.get(bc.region_id.as_str()).copied() else {
+    for constraint in &model.constraints {
+        let runmat_analysis_core::AnalysisConstraint::Magnetic(constraint) = constraint else {
             continue;
         };
-        match bc.kind {
-            BoundaryConditionKind::VectorPotentialGround => {
-                ground_region_indices.insert(region_index);
-                mapped_boundary_condition_count += 1;
-            }
-            BoundaryConditionKind::MagneticInsulation => {
-                insulation_region_indices.insert(region_index);
-                mapped_boundary_condition_count += 1;
-            }
-            _ => {}
+        let MagneticConstraintKind::VectorPotentialGround { target } = &constraint.kind else {
+            continue;
+        };
+        if let Some(region_index) = region_index_by_id.get(target.region_id.as_str()).copied() {
+            ground_region_indices.insert(region_index);
+            mapped_boundary_condition_count += 1;
+        }
+    }
+    for boundary in &model.boundaries {
+        if !matches!(boundary.operator, BoundaryOperator::MagneticInsulation) {
+            continue;
+        }
+        if let Some(region_index) = region_index_by_id
+            .get(boundary.target.region_id.as_str())
+            .copied()
+        {
+            insulation_region_indices.insert(region_index);
+            mapped_boundary_condition_count += 1;
         }
     }
     let boundary_condition_localization_ratio = if electromagnetic_boundary_count == 0 {

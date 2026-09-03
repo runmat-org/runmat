@@ -1,9 +1,11 @@
 use runmat_analysis_core::{
-    AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BeamElementModel,
-    BeamSectionModel, BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase,
-    LoadKind, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    ReferenceFrame, ShellElementModel, ShellSectionModel, StructuralElement, StructuralElementKind,
-    StructuralModel, StructuralNode,
+    AnalysisConstraint, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
+    BeamElementModel, BeamSectionModel, CoordinateFrame, Displacement, EvidenceConfidence,
+    LoadCase, LoadKind, MaterialAssignment, MaterialMechanicalModel, MaterialModel,
+    MaterialThermalModel, PrescribedTranslations, RegionTarget, ShellElementModel,
+    ShellSectionModel, StructuralConstraint, StructuralConstraintKind, StructuralElement,
+    StructuralElementKind, StructuralModel, StructuralNode, StructuralTranslationDof,
+    TranslationDofValue, ValueSchedule,
 };
 use runmat_geometry_core::UnitSystem;
 
@@ -40,6 +42,37 @@ pub enum FixtureId {
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
+}
+
+fn fixed_constraint(constraint_id: &str, region_id: &str) -> AnalysisConstraint {
+    AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: constraint_id.to_string(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Fixed {
+            target: RegionTarget::authored(region_id),
+        },
+    })
+}
+
+fn prescribed_zero_translations(constraint_id: &str, region_id: &str) -> AnalysisConstraint {
+    AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: constraint_id.to_string(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::PrescribedTranslations(PrescribedTranslations {
+            target: RegionTarget::authored(region_id),
+            values: [
+                StructuralTranslationDof::Ux,
+                StructuralTranslationDof::Uy,
+                StructuralTranslationDof::Uz,
+            ]
+            .into_iter()
+            .map(|dof| TranslationDofValue {
+                dof,
+                value: ValueSchedule::Constant(Displacement::new(0.0)),
+            })
+            .collect(),
+        }),
+    })
 }
 
 pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
@@ -98,7 +131,7 @@ fn cantilever_linear_static() -> AnalysisModel {
         geometry_id: "geo:cantilever".to_string(),
         geometry_revision: 1,
         units: UnitSystem::Meter,
-        frame: ReferenceFrame::Global,
+        frame: CoordinateFrame::Global,
         materials: vec![MaterialModel {
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
@@ -128,11 +161,9 @@ fn cantilever_linear_static() -> AnalysisModel {
         electromagnetic: None,
         cfd: None,
         interfaces: Vec::new(),
-        boundary_conditions: vec![BoundaryCondition {
-            bc_id: "bc_root".to_string(),
-            region_id: "root".to_string(),
-            kind: BoundaryConditionKind::Fixed,
-        }],
+        constraints: vec![fixed_constraint("bc_root", "root")],
+        boundaries: Vec::new(),
+        connectors: Vec::new(),
         loads: vec![LoadCase {
             load_id: "tip_load".to_string(),
             region_id: "tip".to_string(),
@@ -319,11 +350,7 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("structural_shell_plate_moment_reference".to_string());
     model.geometry_id = "geo:structural_shell_plate_moment".to_string();
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "fixed_corner".to_string(),
-        region_id: "node:1".to_string(),
-        kind: BoundaryConditionKind::Fixed,
-    }];
+    model.constraints = vec![fixed_constraint("fixed_corner", "node:1")];
     model.loads = vec![LoadCase {
         load_id: "free_corner_moment_y".to_string(),
         region_id: "node:3".to_string(),
@@ -382,11 +409,7 @@ fn structural_beam_reference_model(
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId(model_id.to_string());
     model.geometry_id = geometry_id.to_string();
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "fixed_root".to_string(),
-        region_id: "node:1".to_string(),
-        kind: BoundaryConditionKind::Fixed,
-    }];
+    model.constraints = vec![fixed_constraint("fixed_root", "node:1")];
     model.loads = loads;
     model.material_assignments = vec![MaterialAssignment {
         region_id: "beam_span".to_string(),
@@ -452,11 +475,10 @@ fn transient_long_fixture() -> AnalysisModel {
 fn transient_shock_fixture() -> AnalysisModel {
     let mut model = cantilever_large_load_sweep();
     model.model_id = AnalysisModelId("transient_shock_fixture".to_string());
-    model.boundary_conditions.push(BoundaryCondition {
-        bc_id: "bc_mid_prescribed".to_string(),
-        region_id: "mid_support".to_string(),
-        kind: BoundaryConditionKind::PrescribedDisplacement,
-    });
+    model.constraints.push(prescribed_zero_translations(
+        "bc_mid_prescribed",
+        "mid_support",
+    ));
     model.loads = (0..256)
         .map(|i| {
             let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
@@ -492,11 +514,10 @@ fn nonlinear_assembly_fixture() -> AnalysisModel {
 fn nonlinear_assembly_stress_fixture() -> AnalysisModel {
     let mut model = nonlinear_assembly_fixture();
     model.model_id = AnalysisModelId("nonlinear_assembly_stress_fixture".to_string());
-    model.boundary_conditions.push(BoundaryCondition {
-        bc_id: "bc_stress_mid_support".to_string(),
-        region_id: "mid_support_stress".to_string(),
-        kind: BoundaryConditionKind::PrescribedDisplacement,
-    });
+    model.constraints.push(prescribed_zero_translations(
+        "bc_stress_mid_support",
+        "mid_support_stress",
+    ));
     model.loads = (0..640)
         .map(|i| {
             let phase = if i % 3 == 0 { -1.0 } else { 1.0 };
@@ -597,11 +618,10 @@ fn nonlinear_softening_benchmark_fixture() -> AnalysisModel {
 fn nonlinear_load_path_mix_fixture() -> AnalysisModel {
     let mut model = multi_material_assembly();
     model.model_id = AnalysisModelId("nonlinear_load_path_mix_fixture".to_string());
-    model.boundary_conditions.push(BoundaryCondition {
-        bc_id: "bc_mix_path_support".to_string(),
-        region_id: "mix_path_support".to_string(),
-        kind: BoundaryConditionKind::PrescribedDisplacement,
-    });
+    model.constraints.push(prescribed_zero_translations(
+        "bc_mix_path_support",
+        "mix_path_support",
+    ));
     model.loads = (0..480)
         .map(|i| {
             let scale = 1.0 + (i as f64) * 0.0035;
@@ -991,17 +1011,9 @@ fn multi_material_assembly() -> AnalysisModel {
         },
     ];
 
-    model.boundary_conditions = vec![
-        BoundaryCondition {
-            bc_id: "bc_root".to_string(),
-            region_id: "root".to_string(),
-            kind: BoundaryConditionKind::Fixed,
-        },
-        BoundaryCondition {
-            bc_id: "bc_interface".to_string(),
-            region_id: "interface".to_string(),
-            kind: BoundaryConditionKind::PrescribedDisplacement,
-        },
+    model.constraints = vec![
+        fixed_constraint("bc_root", "root"),
+        prescribed_zero_translations("bc_interface", "interface"),
     ];
 
     model.loads = vec![

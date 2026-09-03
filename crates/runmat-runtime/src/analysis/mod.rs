@@ -7,12 +7,14 @@ use std::time::Instant;
 
 use chrono::Utc;
 use runmat_analysis_core::{
-    validate_model_against_geometry, AnalysisField, AnalysisInterfaceKind, AnalysisModel,
-    AnalysisModelId, AnalysisProcedure, AnalysisRunIdentity, AnalysisStep, AnalysisStepKind,
-    AnalysisValidationError, BoundaryCondition, BoundaryConditionKind, CoupledPhysicsFamily,
-    EvidenceConfidence, FormulationImplementation, LoadCase, LoadKind, MaterialAssignment,
-    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicsFamily, ReferenceFrame,
-    SolutionSpace,
+    validate_model_against_geometry, AnalysisBoundary, AnalysisConstraint, AnalysisField,
+    AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisProcedure, AnalysisRunIdentity,
+    AnalysisStep, AnalysisStepKind, AnalysisValidationError, BoundaryOperator, CoordinateFrame,
+    CoupledPhysicsFamily, EvidenceConfidence, FluidConstraint, FluidConstraintKind,
+    FormulationImplementation, LoadCase, LoadKind, MagneticConstraint, MagneticConstraintKind,
+    MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    PhysicsFamily, Pressure, RegionTarget, SolutionSpace, StructuralConstraint,
+    StructuralConstraintKind, ValueSchedule, Velocity,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -418,6 +420,45 @@ fn persist_fea_run_result_with_progress(
     }
 }
 
+enum ModelCondition {
+    Constraint(AnalysisConstraint),
+    Boundary(AnalysisBoundary),
+}
+
+fn fixed_condition(id: &str, region_id: String) -> ModelCondition {
+    ModelCondition::Constraint(AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: id.to_string(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Fixed {
+            target: RegionTarget::boundary(region_id),
+        },
+    }))
+}
+
+fn magnetic_ground_condition(id: &str, region_id: String) -> ModelCondition {
+    ModelCondition::Constraint(AnalysisConstraint::Magnetic(MagneticConstraint {
+        constraint_id: id.to_string(),
+        kind: MagneticConstraintKind::VectorPotentialGround {
+            target: RegionTarget::boundary(region_id),
+        },
+    }))
+}
+
+fn acoustic_rigid_condition(id: &str, region_id: String) -> ModelCondition {
+    ModelCondition::Boundary(AnalysisBoundary {
+        boundary_id: id.to_string(),
+        target: RegionTarget::boundary(region_id),
+        operator: BoundaryOperator::AcousticRigidWall,
+    })
+}
+
+fn fluid_constraint_condition(id: &str, kind: FluidConstraintKind) -> ModelCondition {
+    ModelCondition::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+        constraint_id: id.to_string(),
+        kind,
+    }))
+}
+
 pub fn analysis_create_model_op(
     geometry: &GeometryAsset,
     intent: AnalysisCreateModelIntentSpec,
@@ -507,11 +548,7 @@ pub fn analysis_create_model_op(
 
     let (default_bc, default_load, default_steps) = match intent.profile {
         AnalysisCreateModelProfile::LinearStaticStructural => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_force".to_string(),
                 region_id: load_region_id,
@@ -527,11 +564,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::ThermoMechanicalCoupled => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_thermal_mech_force".to_string(),
                 region_id: load_region_id,
@@ -547,11 +580,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::ElectroThermalCoupled => (
-            BoundaryCondition {
-                bc_id: "bc_default_electro_thermal_ground".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::VectorPotentialGround,
-            },
+            magnetic_ground_condition("bc_default_electro_thermal_ground", fixed_region_id),
             LoadCase {
                 load_id: "load_default_electro_thermal_current".to_string(),
                 region_id: load_region_id,
@@ -567,11 +596,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::ThermalStandalone => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_thermal_seed".to_string(),
                 region_id: load_region_id,
@@ -587,11 +612,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::ModalStructural => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_modal_seed".to_string(),
                 region_id: load_region_id,
@@ -607,11 +628,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::AcousticHarmonic => (
-            BoundaryCondition {
-                bc_id: "bc_default_acoustic_rigid_wall".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::AcousticRigidWall,
-            },
+            acoustic_rigid_condition("bc_default_acoustic_rigid_wall", fixed_region_id),
             LoadCase {
                 load_id: "load_default_acoustic_harmonic_seed".to_string(),
                 region_id: load_region_id,
@@ -623,11 +640,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::TransientStructural => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_transient_force".to_string(),
                 region_id: load_region_id,
@@ -643,11 +656,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::NonlinearStructural => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_nonlinear_force".to_string(),
                 region_id: load_region_id,
@@ -663,11 +672,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::ElectromagneticStatic => (
-            BoundaryCondition {
-                bc_id: "bc_default_em_ground".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::VectorPotentialGround,
-            },
+            magnetic_ground_condition("bc_default_em_ground", fixed_region_id),
             LoadCase {
                 load_id: "load_default_em_coil_current".to_string(),
                 region_id: load_region_id,
@@ -683,11 +688,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::CfdSteadyState => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_cfd_seed".to_string(),
                 region_id: load_region_id,
@@ -703,11 +704,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::CfdTransient => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_cfd_transient_seed".to_string(),
                 region_id: load_region_id,
@@ -723,11 +720,7 @@ pub fn analysis_create_model_op(
             }],
         ),
         AnalysisCreateModelProfile::ChtCoupled => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_cht_seed".to_string(),
                 region_id: load_region_id,
@@ -749,11 +742,7 @@ pub fn analysis_create_model_op(
             ],
         ),
         AnalysisCreateModelProfile::FsiCoupled => (
-            BoundaryCondition {
-                bc_id: "bc_default_fixed".to_string(),
-                region_id: fixed_region_id,
-                kind: BoundaryConditionKind::Fixed,
-            },
+            fixed_condition("bc_default_fixed", fixed_region_id),
             LoadCase {
                 load_id: "load_default_fsi_seed".to_string(),
                 region_id: load_region_id,
@@ -937,7 +926,7 @@ pub fn analysis_create_model_op(
         _ => None,
     };
 
-    let mut boundary_conditions = vec![default_bc];
+    let mut conditions = vec![default_bc];
     if matches!(
         intent.profile,
         AnalysisCreateModelProfile::CfdSteadyState
@@ -949,30 +938,43 @@ pub fn analysis_create_model_op(
             .as_ref()
             .map(|domain| domain.inlet_velocity_m_per_s)
             .unwrap_or(0.0);
-        boundary_conditions.extend([
-            BoundaryCondition {
-                bc_id: "bc_default_cfd_inlet".to_string(),
-                region_id: "inlet".to_string(),
-                kind: BoundaryConditionKind::CfdInletVelocity {
-                    velocity_m_per_s: default_cfd_inlet_velocity,
+        conditions.extend([
+            fluid_constraint_condition(
+                "bc_default_cfd_inlet",
+                FluidConstraintKind::PrescribedVelocity {
+                    target: RegionTarget::boundary("inlet"),
+                    value: ValueSchedule::Constant(Velocity::new(default_cfd_inlet_velocity)),
                 },
-            },
-            BoundaryCondition {
-                bc_id: "bc_default_cfd_outlet".to_string(),
-                region_id: "outlet".to_string(),
-                kind: BoundaryConditionKind::CfdOutletPressure { pressure_pa: 0.0 },
-            },
-            BoundaryCondition {
-                bc_id: "bc_default_cfd_wall_upper".to_string(),
-                region_id: "wall_upper".to_string(),
-                kind: BoundaryConditionKind::CfdNoSlipWall,
-            },
-            BoundaryCondition {
-                bc_id: "bc_default_cfd_wall_lower".to_string(),
-                region_id: "wall_lower".to_string(),
-                kind: BoundaryConditionKind::CfdNoSlipWall,
-            },
+            ),
+            fluid_constraint_condition(
+                "bc_default_cfd_outlet",
+                FluidConstraintKind::PressureReference {
+                    target: RegionTarget::boundary("outlet"),
+                    value: ValueSchedule::Constant(Pressure::new(0.0)),
+                },
+            ),
+            fluid_constraint_condition(
+                "bc_default_cfd_wall_upper",
+                FluidConstraintKind::NoSlipWall {
+                    target: RegionTarget::boundary("wall_upper"),
+                },
+            ),
+            fluid_constraint_condition(
+                "bc_default_cfd_wall_lower",
+                FluidConstraintKind::NoSlipWall {
+                    target: RegionTarget::boundary("wall_lower"),
+                },
+            ),
         ]);
+    }
+
+    let mut constraints = Vec::new();
+    let mut boundaries = Vec::new();
+    for condition in conditions {
+        match condition {
+            ModelCondition::Constraint(value) => constraints.push(value),
+            ModelCondition::Boundary(value) => boundaries.push(value),
+        }
     }
 
     let model = AnalysisModel {
@@ -980,7 +982,7 @@ pub fn analysis_create_model_op(
         geometry_id: geometry.geometry_id.clone(),
         geometry_revision: geometry.revision,
         units: geometry.units,
-        frame: ReferenceFrame::Global,
+        frame: CoordinateFrame::Global,
         materials: inferred_materials,
         material_assignments: inferred_assignments,
         structural: None,
@@ -989,12 +991,14 @@ pub fn analysis_create_model_op(
         electromagnetic,
         cfd,
         interfaces: Vec::new(),
-        boundary_conditions,
+        constraints,
+        boundaries,
+        connectors: Vec::new(),
         loads: vec![default_load],
         steps: default_steps,
     };
 
-    validate_model_against_geometry(&model, geometry.units, &ReferenceFrame::Global).map_err(
+    validate_model_against_geometry(&model, geometry.units, &CoordinateFrame::Global).map_err(
         |error| {
             operation_error(
                 ANALYSIS_CREATE_MODEL_OPERATION,
@@ -1209,7 +1213,7 @@ pub fn analysis_run_study_op(
     analysis_validate(
         &model,
         spec.geometry.units,
-        &ReferenceFrame::Global,
+        &CoordinateFrame::Global,
         context.clone(),
     )?;
     meshing::apply_boundary_region_ids(&mut model, &study_mesh.boundary_region_ids);
@@ -1852,7 +1856,7 @@ pub fn analysis_run_study_sweep_op(
 pub fn analysis_validate(
     model: &AnalysisModel,
     geometry_units: UnitSystem,
-    geometry_frame: &ReferenceFrame,
+    geometry_frame: &CoordinateFrame,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisValidateResult>, OperationErrorEnvelope> {
     validate_model_against_geometry(model, geometry_units, geometry_frame)
@@ -2317,12 +2321,12 @@ pub fn analysis_run_acoustic_with_options_op(
             ]),
         ));
     }
-    if !model.boundary_conditions.iter().any(|bc| {
+    if !model.boundaries.iter().any(|boundary| {
         matches!(
-            &bc.kind,
-            BoundaryConditionKind::AcousticRigidWall
-                | BoundaryConditionKind::AcousticRadiation
-                | BoundaryConditionKind::AcousticImpedance { .. }
+            &boundary.operator,
+            BoundaryOperator::AcousticRigidWall
+                | BoundaryOperator::AcousticRadiation
+                | BoundaryOperator::AcousticImpedance { .. }
         )
     }) {
         return Err(operation_error(
@@ -2340,7 +2344,7 @@ pub fn analysis_run_acoustic_with_options_op(
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 (
                     "boundary_condition_count".to_string(),
-                    model.boundary_conditions.len().to_string(),
+                    model.boundaries.len().to_string(),
                 ),
             ]),
         ));
@@ -3016,15 +3020,13 @@ fn acoustic_boundary_summary(
     let mut radiation_boundary_count = 0usize;
     let mut impedance_boundary_count = 0usize;
     let mut impedance_sum = 0.0;
-    for bc in &model.boundary_conditions {
-        match bc.kind {
-            BoundaryConditionKind::AcousticRigidWall => rigid_wall_count += 1,
-            BoundaryConditionKind::AcousticRadiation => radiation_boundary_count += 1,
-            BoundaryConditionKind::AcousticImpedance {
-                specific_impedance_pa_s_per_m,
-            } => {
+    for boundary in &model.boundaries {
+        match &boundary.operator {
+            BoundaryOperator::AcousticRigidWall => rigid_wall_count += 1,
+            BoundaryOperator::AcousticRadiation => radiation_boundary_count += 1,
+            BoundaryOperator::AcousticImpedance { impedance } => {
                 impedance_boundary_count += 1;
-                impedance_sum += specific_impedance_pa_s_per_m.max(1.0);
+                impedance_sum += impedance.pascal_seconds_per_meter.max(1.0);
             }
             _ => {}
         }
@@ -3043,8 +3045,7 @@ fn acoustic_boundary_summary(
         rigid_wall_count,
         radiation_boundary_count,
         impedance_boundary_count,
-        coverage_ratio: acoustic_boundary_count as f64
-            / model.boundary_conditions.len().max(1) as f64,
+        coverage_ratio: acoustic_boundary_count as f64 / model.boundaries.len().max(1) as f64,
         mean_specific_impedance_pa_s_per_m,
         radiation_loss_factor: 0.05 * radiation_boundary_count as f64,
         impedance_loss_factor: 0.025
@@ -3675,27 +3676,36 @@ impl CfdBoundarySummary {
             outlet_pressure_pa: 0.0,
         };
 
-        for boundary in &model.boundary_conditions {
-            match &boundary.kind {
-                BoundaryConditionKind::CfdInletVelocity { velocity_m_per_s } => {
+        for constraint in &model.constraints {
+            let AnalysisConstraint::Fluid(constraint) = constraint else {
+                continue;
+            };
+            match &constraint.kind {
+                FluidConstraintKind::PrescribedVelocity { value, .. } => {
+                    let Some(velocity) = value.constant() else {
+                        continue;
+                    };
                     summary.inlet_boundary_count += 1;
                     summary.authored_boundary_count += 1;
-                    inlet_velocity_sum += *velocity_m_per_s;
+                    inlet_velocity_sum += velocity.meters_per_second;
                 }
-                BoundaryConditionKind::CfdOutletPressure { pressure_pa } => {
+                FluidConstraintKind::PressureReference { value, .. } => {
+                    let Some(pressure) = value.constant() else {
+                        continue;
+                    };
                     summary.outlet_boundary_count += 1;
                     summary.authored_boundary_count += 1;
-                    outlet_pressure_sum += *pressure_pa;
+                    outlet_pressure_sum += pressure.pascals;
                 }
-                BoundaryConditionKind::CfdNoSlipWall => {
+                FluidConstraintKind::NoSlipWall { .. } => {
                     summary.no_slip_wall_boundary_count += 1;
                     summary.authored_boundary_count += 1;
                 }
-                BoundaryConditionKind::CfdSlipWall => {
+                FluidConstraintKind::SlipWall { .. } => {
                     summary.slip_wall_boundary_count += 1;
                     summary.authored_boundary_count += 1;
                 }
-                BoundaryConditionKind::CfdSymmetry => {
+                FluidConstraintKind::Symmetry { .. } => {
                     summary.symmetry_boundary_count += 1;
                     summary.authored_boundary_count += 1;
                 }
@@ -3737,31 +3747,40 @@ fn validate_authored_cfd_boundary_conditions(model: &AnalysisModel) -> Result<()
     let mut wall_like_boundary_count = 0usize;
     let mut authored_boundary_count = 0usize;
 
-    for boundary in &model.boundary_conditions {
-        match &boundary.kind {
-            BoundaryConditionKind::CfdInletVelocity { velocity_m_per_s } => {
+    for constraint in &model.constraints {
+        let AnalysisConstraint::Fluid(constraint) = constraint else {
+            continue;
+        };
+        match &constraint.kind {
+            FluidConstraintKind::PrescribedVelocity { value, .. } => {
                 authored_boundary_count += 1;
                 inlet_boundary_count += 1;
-                if !velocity_m_per_s.is_finite() || *velocity_m_per_s < 0.0 {
+                let valid = value.constant().is_some_and(|velocity| {
+                    velocity.is_finite() && velocity.meters_per_second >= 0.0
+                });
+                if !valid {
                     return Err(format!(
                         "cfd inlet boundary {} requires finite non-negative velocity_m_per_s",
-                        boundary.bc_id
+                        constraint.constraint_id
                     ));
                 }
             }
-            BoundaryConditionKind::CfdOutletPressure { pressure_pa } => {
+            FluidConstraintKind::PressureReference { value, .. } => {
                 authored_boundary_count += 1;
                 outlet_boundary_count += 1;
-                if !pressure_pa.is_finite() {
+                if !value
+                    .constant()
+                    .is_some_and(|pressure| pressure.is_finite())
+                {
                     return Err(format!(
                         "cfd outlet boundary {} requires finite pressure_pa",
-                        boundary.bc_id
+                        constraint.constraint_id
                     ));
                 }
             }
-            BoundaryConditionKind::CfdNoSlipWall
-            | BoundaryConditionKind::CfdSlipWall
-            | BoundaryConditionKind::CfdSymmetry => {
+            FluidConstraintKind::NoSlipWall { .. }
+            | FluidConstraintKind::SlipWall { .. }
+            | FluidConstraintKind::Symmetry { .. } => {
                 authored_boundary_count += 1;
                 wall_like_boundary_count += 1;
             }
@@ -7905,24 +7924,40 @@ fn validate_thermal_run_model(
         ));
     }
 
-    if let Some(boundary) = model.boundary_conditions.iter().find(|bc| match &bc.kind {
-        BoundaryConditionKind::ThermalPrescribedTemperature { temperature_k } => {
-            !temperature_k.is_finite() || *temperature_k <= 0.0
-        }
-        BoundaryConditionKind::ThermalHeatFlux { heat_flux_w_per_m2 } => {
-            !heat_flux_w_per_m2.is_finite()
-        }
-        BoundaryConditionKind::ThermalConvection {
-            ambient_temperature_k,
-            coefficient_w_per_m2k,
-        } => {
-            !ambient_temperature_k.is_finite()
-                || *ambient_temperature_k <= 0.0
-                || !coefficient_w_per_m2k.is_finite()
-                || *coefficient_w_per_m2k < 0.0
-        }
-        _ => false,
-    }) {
+    let invalid_constraint = model.constraints.iter().find_map(|constraint| {
+        let AnalysisConstraint::Thermal(constraint) = constraint else {
+            return None;
+        };
+        let runmat_analysis_core::ThermalConstraintKind::Prescribed { value, .. } =
+            &constraint.kind
+        else {
+            return None;
+        };
+        (!value
+            .constant()
+            .is_some_and(|temperature| temperature.is_finite() && temperature.kelvin > 0.0))
+        .then_some(constraint.constraint_id.as_str())
+    });
+    let invalid_boundary = model.boundaries.iter().find_map(|boundary| {
+        let invalid = match &boundary.operator {
+            BoundaryOperator::ThermalHeatFlux { value } => !value
+                .constant()
+                .is_some_and(|heat_flux| heat_flux.is_finite()),
+            BoundaryOperator::ThermalConvection {
+                ambient_temperature,
+                coefficient,
+            } => {
+                !ambient_temperature
+                    .constant()
+                    .is_some_and(|temperature| temperature.is_finite() && temperature.kelvin > 0.0)
+                    || !coefficient.is_finite()
+                    || coefficient.watts_per_square_meter_kelvin < 0.0
+            }
+            _ => false,
+        };
+        invalid.then_some(boundary.boundary_id.as_str())
+    });
+    if let Some(boundary_id) = invalid_constraint.or(invalid_boundary) {
         return Err(operation_error(
             ANALYSIS_RUN_THERMAL_OPERATION,
             ANALYSIS_RUN_THERMAL_OP_VERSION,
@@ -7936,7 +7971,7 @@ fn validate_thermal_run_model(
             "fea.run_thermal requires finite physically valid thermal boundary condition values",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("boundary_condition_id".to_string(), boundary.bc_id.clone()),
+                ("boundary_condition_id".to_string(), boundary_id.to_string()),
             ]),
         ));
     }
@@ -9223,7 +9258,8 @@ pub fn analysis_run_linear_static_with_options(
             QualityReasonCode::SolidMeshNoVolumeElements
                 | QualityReasonCode::SolidMeshUnsupportedElementKind
                 | QualityReasonCode::SolidMeshUnmappedLoadRegion
-                | QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion
+                | QualityReasonCode::SolidMeshUnmappedConstraintRegion
+                | QualityReasonCode::SolidMeshUnmappedBoundaryRegion
                 | QualityReasonCode::SolidMeshMaterialCoverageIncomplete
                 | QualityReasonCode::SolidMeshRenderTopologyIncomplete
                 | QualityReasonCode::SolidMeshQualityMinJacobianFailed
@@ -9476,13 +9512,27 @@ fn boundary_region_mapping_reasons(
             });
         }
     }
-    for boundary_condition in &model.boundary_conditions {
-        if !boundary_region_ids.contains(boundary_condition.region_id.as_str()) {
+    for constraint in &model.constraints {
+        let Some(target) = constraint.target() else {
+            continue;
+        };
+        if !boundary_region_ids.contains(target.region_id.as_str()) {
             reasons.push(QualityReason {
-                code: QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion,
+                code: QualityReasonCode::SolidMeshUnmappedConstraintRegion,
                 detail: format!(
-                    "boundary condition `{}` references region `{}` but the solver mesh has no matching boundary provenance",
-                    boundary_condition.bc_id, boundary_condition.region_id
+                    "constraint `{}` references region `{}` but the solver mesh has no matching boundary provenance",
+                    constraint.constraint_id(), target.region_id
+                ),
+            });
+        }
+    }
+    for boundary in &model.boundaries {
+        if !boundary_region_ids.contains(boundary.target.region_id.as_str()) {
+            reasons.push(QualityReason {
+                code: QualityReasonCode::SolidMeshUnmappedBoundaryRegion,
+                detail: format!(
+                    "boundary `{}` references region `{}` but the solver mesh has no matching boundary provenance",
+                    boundary.boundary_id, boundary.target.region_id
                 ),
             });
         }
@@ -10657,13 +10707,17 @@ fn validate_electromagnetic_run_model(
         ));
     }
 
-    let has_electromagnetic_boundary = model.boundary_conditions.iter().any(|bc| {
-        matches!(
-            &bc.kind,
-            BoundaryConditionKind::MagneticInsulation
-                | BoundaryConditionKind::VectorPotentialGround
-        )
-    });
+    let has_electromagnetic_boundary = model
+        .boundaries
+        .iter()
+        .any(|boundary| matches!(boundary.operator, BoundaryOperator::MagneticInsulation))
+        || model.constraints.iter().any(|constraint| {
+            matches!(
+                constraint,
+                AnalysisConstraint::Magnetic(value)
+                    if matches!(value.kind, MagneticConstraintKind::VectorPotentialGround { .. })
+            )
+        });
     if !has_electromagnetic_boundary {
         return Err(operation_error(
             ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
@@ -10680,7 +10734,7 @@ fn validate_electromagnetic_run_model(
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 (
                     "boundary_condition_count".to_string(),
-                    model.boundary_conditions.len().to_string(),
+                    (model.constraints.len() + model.boundaries.len()).to_string(),
                 ),
             ]),
         ));
@@ -13018,7 +13072,7 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
         {
             issue_codes.push("RM.FEA.STUDY.MODEL_GEOMETRY_MISMATCH".to_string());
         }
-        if validate_model_against_geometry(model, spec.geometry.units, &ReferenceFrame::Global)
+        if validate_model_against_geometry(model, spec.geometry.units, &CoordinateFrame::Global)
             .is_err()
         {
             issue_codes.push("RM.FEA.STUDY.MODEL_INVALID".to_string());
@@ -14995,15 +15049,74 @@ fn map_validate_error(
             "FEA model must include at least one material".to_string(),
             BTreeMap::new(),
         ),
-        AnalysisValidationError::MissingBoundaryConditions => (
-            "RM.FEA.VALIDATE.MISSING_BCS",
-            "FEA model must include at least one boundary condition".to_string(),
+        AnalysisValidationError::MissingConstraintsOrBoundaries => (
+            "RM.FEA.VALIDATE.MISSING_CONDITIONS",
+            "FEA model must include at least one constraint or natural boundary".to_string(),
             BTreeMap::new(),
         ),
         AnalysisValidationError::MissingLoads => (
             "RM.FEA.VALIDATE.MISSING_LOADS",
             "FEA model must include at least one load".to_string(),
             BTreeMap::new(),
+        ),
+        AnalysisValidationError::InvalidId { kind } => (
+            "RM.FEA.VALIDATE.INVALID_ID",
+            format!("{kind} id must be non-empty"),
+            BTreeMap::from([("kind".to_string(), kind.to_string())]),
+        ),
+        AnalysisValidationError::DuplicateId { kind, id } => (
+            "RM.FEA.VALIDATE.DUPLICATE_ID",
+            format!("duplicate {kind} id `{id}`"),
+            BTreeMap::from([
+                ("kind".to_string(), kind.to_string()),
+                ("id".to_string(), id),
+            ]),
+        ),
+        AnalysisValidationError::InvalidTarget { owner_id, detail } => (
+            "RM.FEA.VALIDATE.INVALID_TARGET",
+            format!("{owner_id} has an invalid target: {detail}"),
+            BTreeMap::from([
+                ("owner_id".to_string(), owner_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidFrame => (
+            "RM.FEA.VALIDATE.INVALID_FRAME",
+            "coordinate frame must be finite and non-degenerate".to_string(),
+            BTreeMap::new(),
+        ),
+        AnalysisValidationError::InvalidConstraint {
+            constraint_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_CONSTRAINT",
+            format!("constraint `{constraint_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("constraint_id".to_string(), constraint_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidBoundary {
+            boundary_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_BOUNDARY",
+            format!("boundary `{boundary_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("boundary_id".to_string(), boundary_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidConnector {
+            connector_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_CONNECTOR",
+            format!("connector `{connector_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("connector_id".to_string(), connector_id),
+                ("detail".to_string(), detail),
+            ]),
         ),
         AnalysisValidationError::InvalidMomentVector { load_id } => (
             "RM.FEA.VALIDATE.INVALID_MOMENT",
@@ -15037,8 +15150,8 @@ fn map_validate_error(
             "RM.FEA.VALIDATE.FRAME_MISMATCH",
             format!("model frame {model:?} does not match geometry frame {geometry:?}"),
             BTreeMap::from([
-                ("model_frame".to_string(), format!("{model:?}")),
-                ("geometry_frame".to_string(), format!("{geometry:?}")),
+                ("model_frame".to_string(), model.context_label()),
+                ("geometry_frame".to_string(), geometry.context_label()),
             ]),
         ),
     };

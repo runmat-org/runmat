@@ -1,6 +1,145 @@
 use super::harness::with_harness_provider;
 use super::manifest::default_options;
 use super::*;
+
+fn fixed_constraint(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Structural(
+        runmat_analysis_core::StructuralConstraint {
+            constraint_id: id.into(),
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
+                target: runmat_analysis_core::RegionTarget::authored(region),
+            },
+        },
+    )
+}
+
+fn zero_translation_constraint(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Structural(
+        runmat_analysis_core::StructuralConstraint {
+            constraint_id: id.into(),
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            kind: runmat_analysis_core::StructuralConstraintKind::PrescribedTranslations(
+                runmat_analysis_core::PrescribedTranslations {
+                    target: runmat_analysis_core::RegionTarget::authored(region),
+                    values: [
+                        runmat_analysis_core::StructuralTranslationDof::Ux,
+                        runmat_analysis_core::StructuralTranslationDof::Uy,
+                        runmat_analysis_core::StructuralTranslationDof::Uz,
+                    ]
+                    .into_iter()
+                    .map(|dof| runmat_analysis_core::TranslationDofValue {
+                        dof,
+                        value: runmat_analysis_core::ValueSchedule::Constant(
+                            runmat_analysis_core::Displacement::new(0.0),
+                        ),
+                    })
+                    .collect(),
+                },
+            ),
+        },
+    )
+}
+
+fn magnetic_ground(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Magnetic(runmat_analysis_core::MagneticConstraint {
+        constraint_id: id.into(),
+        kind: runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround {
+            target: runmat_analysis_core::RegionTarget::authored(region),
+        },
+    })
+}
+
+fn magnetic_insulation(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisBoundary {
+    runmat_analysis_core::AnalysisBoundary {
+        boundary_id: id.into(),
+        target: runmat_analysis_core::RegionTarget::authored(region),
+        operator: runmat_analysis_core::BoundaryOperator::MagneticInsulation,
+    }
+}
+
+fn acoustic_boundary(
+    id: impl Into<String>,
+    region: impl Into<String>,
+    operator: runmat_analysis_core::BoundaryOperator,
+) -> runmat_analysis_core::AnalysisBoundary {
+    runmat_analysis_core::AnalysisBoundary {
+        boundary_id: id.into(),
+        target: runmat_analysis_core::RegionTarget::authored(region),
+        operator,
+    }
+}
+
+fn thermal_temperature(
+    id: impl Into<String>,
+    region: impl Into<String>,
+    kelvin: f64,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Thermal(runmat_analysis_core::ThermalConstraint {
+        constraint_id: id.into(),
+        kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
+            target: runmat_analysis_core::RegionTarget::authored(region),
+            value: runmat_analysis_core::ValueSchedule::Constant(
+                runmat_analysis_core::Temperature::new(kelvin),
+            ),
+        },
+    })
+}
+
+fn thermal_boundary(
+    id: impl Into<String>,
+    region: impl Into<String>,
+    operator: runmat_analysis_core::BoundaryOperator,
+) -> runmat_analysis_core::AnalysisBoundary {
+    runmat_analysis_core::AnalysisBoundary {
+        boundary_id: id.into(),
+        target: runmat_analysis_core::RegionTarget::authored(region),
+        operator,
+    }
+}
+
+fn fluid_constraint(
+    id: impl Into<String>,
+    region: impl Into<String>,
+    kind: &str,
+    value: f64,
+) -> runmat_analysis_core::AnalysisConstraint {
+    let target = runmat_analysis_core::RegionTarget::authored(region);
+    let kind = match kind {
+        "inlet" => runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+            target,
+            value: runmat_analysis_core::ValueSchedule::Constant(
+                runmat_analysis_core::Velocity::new(value),
+            ),
+        },
+        "outlet" => runmat_analysis_core::FluidConstraintKind::PressureReference {
+            target,
+            value: runmat_analysis_core::ValueSchedule::Constant(
+                runmat_analysis_core::Pressure::new(value),
+            ),
+        },
+        "no_slip" => runmat_analysis_core::FluidConstraintKind::NoSlipWall { target },
+        "slip" => runmat_analysis_core::FluidConstraintKind::SlipWall { target },
+        "symmetry" => runmat_analysis_core::FluidConstraintKind::Symmetry { target },
+        _ => panic!("unsupported test fluid constraint"),
+    };
+    runmat_analysis_core::AnalysisConstraint::Fluid(runmat_analysis_core::FluidConstraint {
+        constraint_id: id.into(),
+        kind,
+    })
+}
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
     fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id,
@@ -804,32 +943,32 @@ fn electromagnetic_sweep_frequency_hz_for_fixture(spec_id: &str) -> Vec<f64> {
 fn authored_cfd_boundaries_for_fixture(
     spec_id: &str,
     inlet_velocity_m_per_s: f64,
-) -> Vec<runmat_analysis_core::BoundaryCondition> {
+) -> Vec<runmat_analysis_core::AnalysisConstraint> {
     vec![
-        runmat_analysis_core::BoundaryCondition {
-            bc_id: format!("bc_cfd_inlet_{}", spec_id),
-            region_id: "fluid_inlet".to_string(),
-            kind: runmat_analysis_core::BoundaryConditionKind::CfdInletVelocity {
-                velocity_m_per_s: inlet_velocity_m_per_s,
-            },
-        },
-        runmat_analysis_core::BoundaryCondition {
-            bc_id: format!("bc_cfd_outlet_{}", spec_id),
-            region_id: "fluid_outlet".to_string(),
-            kind: runmat_analysis_core::BoundaryConditionKind::CfdOutletPressure {
-                pressure_pa: 0.0,
-            },
-        },
-        runmat_analysis_core::BoundaryCondition {
-            bc_id: format!("bc_cfd_wall_upper_{}", spec_id),
-            region_id: "fluid_wall_upper".to_string(),
-            kind: runmat_analysis_core::BoundaryConditionKind::CfdNoSlipWall,
-        },
-        runmat_analysis_core::BoundaryCondition {
-            bc_id: format!("bc_cfd_wall_lower_{}", spec_id),
-            region_id: "fluid_wall_lower".to_string(),
-            kind: runmat_analysis_core::BoundaryConditionKind::CfdNoSlipWall,
-        },
+        fluid_constraint(
+            format!("bc_cfd_inlet_{spec_id}"),
+            "fluid_inlet",
+            "inlet",
+            inlet_velocity_m_per_s,
+        ),
+        fluid_constraint(
+            format!("bc_cfd_outlet_{spec_id}"),
+            "fluid_outlet",
+            "outlet",
+            0.0,
+        ),
+        fluid_constraint(
+            format!("bc_cfd_wall_upper_{spec_id}"),
+            "fluid_wall_upper",
+            "no_slip",
+            0.0,
+        ),
+        fluid_constraint(
+            format!("bc_cfd_wall_lower_{spec_id}"),
+            "fluid_wall_lower",
+            "no_slip",
+            0.0,
+        ),
     ]
 }
 
@@ -865,24 +1004,25 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 plastic: None,
             });
         }
-        model.boundary_conditions = vec![
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_acoustic_rigid_{}", spec_id),
-                region_id: "acoustic_wall".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::AcousticRigidWall,
-            },
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_acoustic_radiation_{}", spec_id),
-                region_id: "acoustic_open".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::AcousticRadiation,
-            },
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_acoustic_impedance_{}", spec_id),
-                region_id: "acoustic_liner".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::AcousticImpedance {
-                    specific_impedance_pa_s_per_m: 420.0,
+        model.constraints.clear();
+        model.boundaries = vec![
+            acoustic_boundary(
+                format!("bc_acoustic_rigid_{spec_id}"),
+                "acoustic_wall",
+                runmat_analysis_core::BoundaryOperator::AcousticRigidWall,
+            ),
+            acoustic_boundary(
+                format!("bc_acoustic_radiation_{spec_id}"),
+                "acoustic_open",
+                runmat_analysis_core::BoundaryOperator::AcousticRadiation,
+            ),
+            acoustic_boundary(
+                format!("bc_acoustic_impedance_{spec_id}"),
+                "acoustic_liner",
+                runmat_analysis_core::BoundaryOperator::AcousticImpedance {
+                    impedance: runmat_analysis_core::SpecificAcousticImpedance::new(420.0),
                 },
-            },
+            ),
         ];
         model.loads = vec![runmat_analysis_core::LoadCase {
             load_id: format!("load_acoustic_pressure_{}", spec_id),
@@ -902,11 +1042,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 }];
             }
             "acoustic_harmonic_missing_boundary" => {
-                model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-                    bc_id: format!("bc_acoustic_invalid_structural_{}", spec_id),
-                    region_id: "acoustic_wall".to_string(),
-                    kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                }];
+                model.boundaries.clear();
+                model.constraints = vec![fixed_constraint(
+                    format!("bc_acoustic_invalid_structural_{spec_id}"),
+                    "acoustic_wall",
+                )];
             }
             _ => {}
         }
@@ -920,29 +1060,31 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             step_id: format!("step_thermal_{}", spec_id),
             kind: runmat_analysis_core::AnalysisStepKind::Thermal,
         }];
-        model.boundary_conditions = vec![
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_thermal_temperature_{}", spec_id),
-                region_id: "thermal_hot_wall".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::ThermalPrescribedTemperature {
-                    temperature_k: 343.15,
+        model.constraints = vec![thermal_temperature(
+            format!("bc_thermal_temperature_{spec_id}"),
+            "thermal_hot_wall",
+            343.15,
+        )];
+        model.boundaries = vec![
+            thermal_boundary(
+                format!("bc_thermal_flux_{spec_id}"),
+                "thermal_flux_wall",
+                runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
+                    value: runmat_analysis_core::ValueSchedule::Constant(
+                        runmat_analysis_core::HeatFlux::new(4500.0),
+                    ),
                 },
-            },
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_thermal_flux_{}", spec_id),
-                region_id: "thermal_flux_wall".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::ThermalHeatFlux {
-                    heat_flux_w_per_m2: 4500.0,
+            ),
+            thermal_boundary(
+                format!("bc_thermal_convection_{spec_id}"),
+                "thermal_open_wall",
+                runmat_analysis_core::BoundaryOperator::ThermalConvection {
+                    ambient_temperature: runmat_analysis_core::ValueSchedule::Constant(
+                        runmat_analysis_core::Temperature::new(308.15),
+                    ),
+                    coefficient: runmat_analysis_core::HeatTransferCoefficient::new(35.0),
                 },
-            },
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_thermal_convection_{}", spec_id),
-                region_id: "thermal_open_wall".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::ThermalConvection {
-                    ambient_temperature_k: 308.15,
-                    coefficient_w_per_m2k: 35.0,
-                },
-            },
+            ),
         ];
         model.loads = vec![runmat_analysis_core::LoadCase {
             load_id: format!("load_thermal_heat_source_{}", spec_id),
@@ -967,14 +1109,17 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 }];
             }
             "thermal_standalone_ramp_invalid_boundary" => {
-                model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-                    bc_id: format!("bc_thermal_invalid_convection_{}", spec_id),
-                    region_id: "thermal_open_wall".to_string(),
-                    kind: runmat_analysis_core::BoundaryConditionKind::ThermalConvection {
-                        ambient_temperature_k: 293.15,
-                        coefficient_w_per_m2k: f64::NAN,
+                model.constraints.clear();
+                model.boundaries = vec![thermal_boundary(
+                    format!("bc_thermal_invalid_convection_{spec_id}"),
+                    "thermal_open_wall",
+                    runmat_analysis_core::BoundaryOperator::ThermalConvection {
+                        ambient_temperature: runmat_analysis_core::ValueSchedule::Constant(
+                            runmat_analysis_core::Temperature::new(293.15),
+                        ),
+                        coefficient: runmat_analysis_core::HeatTransferCoefficient::new(f64::NAN),
                     },
-                }];
+                )];
             }
             _ => {}
         }
@@ -991,7 +1136,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
-        model.boundary_conditions = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
+        model.boundaries.clear();
+        model.constraints = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
         model.cfd = Some(runmat_analysis_core::CfdDomain {
             enabled: true,
             solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
@@ -1010,7 +1156,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
-        model.boundary_conditions = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
+        model.boundaries.clear();
+        model.constraints = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
         model.cfd = Some(runmat_analysis_core::CfdDomain {
             enabled: true,
             solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
@@ -1038,14 +1185,14 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
-        model.boundary_conditions = if spec_id == "cfd_invalid_boundary_conditions" {
-            vec![runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_cfd_inlet_only_{}", spec_id),
-                region_id: "inlet".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::CfdInletVelocity {
-                    velocity_m_per_s: 5.0,
-                },
-            }]
+        model.boundaries.clear();
+        model.constraints = if spec_id == "cfd_invalid_boundary_conditions" {
+            vec![fluid_constraint(
+                format!("bc_cfd_inlet_only_{spec_id}"),
+                "inlet",
+                "inlet",
+                5.0,
+            )]
         } else {
             authored_cfd_boundaries_for_fixture(spec_id, 5.0)
         };
@@ -1730,27 +1877,13 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
 
         match profile.kind {
             ElectromagneticFixtureKind::Homogeneous => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_ground_0".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_ground_1".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_insulation_0".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_insulation_1".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_ground_0", "em_region_homogeneous"),
+                    magnetic_ground("em_bc_ground_1", "em_region_homogeneous"),
+                ];
+                model.boundaries = vec![
+                    magnetic_insulation("em_bc_insulation_0", "em_region_homogeneous"),
+                    magnetic_insulation("em_bc_insulation_1", "em_region_homogeneous"),
                 ];
                 model.loads = vec![
                     runmat_analysis_core::LoadCase {
@@ -1787,27 +1920,13 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 ];
             }
             ElectromagneticFixtureKind::Heterogeneous => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_ground_hetero".to_string(),
-                        region_id: "em_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_insulation_hetero_0".to_string(),
-                        region_id: "em_region_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_insulation_hetero_1".to_string(),
-                        region_id: "em_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_structural_fallback".to_string(),
-                        region_id: "em_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_ground_hetero", "em_region_0"),
+                    fixed_constraint("em_bc_structural_fallback", "em_region_2"),
+                ];
+                model.boundaries = vec![
+                    magnetic_insulation("em_bc_insulation_hetero_0", "em_region_1"),
+                    magnetic_insulation("em_bc_insulation_hetero_1", "em_region_2"),
                 ];
                 model.loads = vec![
                     runmat_analysis_core::LoadCase {
@@ -1842,27 +1961,12 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 ];
             }
             ElectromagneticFixtureKind::SparseAssignments => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_sparse_ground".to_string(),
-                        region_id: "em_sparse_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_sparse_struct_0".to_string(),
-                        region_id: "em_sparse_region_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_sparse_struct_1".to_string(),
-                        region_id: "em_sparse_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_sparse_struct_2".to_string(),
-                        region_id: "em_sparse_region_3".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::PrescribedDisplacement,
-                    },
+                model.boundaries.clear();
+                model.constraints = vec![
+                    magnetic_ground("em_bc_sparse_ground", "em_sparse_region_0"),
+                    fixed_constraint("em_bc_sparse_struct_0", "em_sparse_region_1"),
+                    fixed_constraint("em_bc_sparse_struct_1", "em_sparse_region_2"),
+                    zero_translation_constraint("em_bc_sparse_struct_2", "em_sparse_region_3"),
                 ];
                 model.loads = vec![
                     runmat_analysis_core::LoadCase {
@@ -1910,32 +2014,23 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 ];
             }
             ElectromagneticFixtureKind::MultiRegionAssignments => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_ground".to_string(),
-                        region_id: "em_multiregion_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_insulation_0".to_string(),
-                        region_id: "em_multiregion_region_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_insulation_1".to_string(),
-                        region_id: "em_multiregion_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_ground_1".to_string(),
-                        region_id: "em_multiregion_region_3".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_insulation_2".to_string(),
-                        region_id: "em_multiregion_region_4".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_multiregion_ground", "em_multiregion_region_0"),
+                    magnetic_ground("em_bc_multiregion_ground_1", "em_multiregion_region_3"),
+                ];
+                model.boundaries = vec![
+                    magnetic_insulation(
+                        "em_bc_multiregion_insulation_0",
+                        "em_multiregion_region_1",
+                    ),
+                    magnetic_insulation(
+                        "em_bc_multiregion_insulation_1",
+                        "em_multiregion_region_2",
+                    ),
+                    magnetic_insulation(
+                        "em_bc_multiregion_insulation_2",
+                        "em_multiregion_region_4",
+                    ),
                 ];
                 model.loads = vec![
                     runmat_analysis_core::LoadCase {
@@ -1994,22 +2089,13 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 ];
             }
             ElectromagneticFixtureKind::OverlapInterference => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_overlap_ground".to_string(),
-                        region_id: "em_overlap_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_overlap_insulation_0".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_overlap_insulation_1".to_string(),
-                        region_id: "em_overlap_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
+                model.constraints = vec![magnetic_ground(
+                    "em_bc_overlap_ground",
+                    "em_overlap_region_0",
+                )];
+                model.boundaries = vec![
+                    magnetic_insulation("em_bc_overlap_insulation_0", "em_overlap_region_1"),
+                    magnetic_insulation("em_bc_overlap_insulation_1", "em_overlap_region_2"),
                 ];
                 model.loads = vec![
                     runmat_analysis_core::LoadCase {
@@ -2055,37 +2141,27 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 ];
             }
             ElectromagneticFixtureKind::BoundaryKernel => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_ground_mapped".to_string(),
-                        region_id: "em_boundary_region_24".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_ground_unmapped_0".to_string(),
-                        region_id: "em_boundary_unmapped_ground_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_ground_unmapped_1".to_string(),
-                        region_id: "em_boundary_unmapped_ground_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_insulation_unmapped_0".to_string(),
-                        region_id: "em_boundary_unmapped_insulation_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_insulation_unmapped_1".to_string(),
-                        region_id: "em_boundary_unmapped_insulation_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_structural_noise".to_string(),
-                        region_id: "em_boundary_region_3".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_boundary_ground_mapped", "em_boundary_region_24"),
+                    magnetic_ground(
+                        "em_bc_boundary_ground_unmapped_0",
+                        "em_boundary_unmapped_ground_0",
+                    ),
+                    magnetic_ground(
+                        "em_bc_boundary_ground_unmapped_1",
+                        "em_boundary_unmapped_ground_1",
+                    ),
+                    fixed_constraint("em_bc_boundary_structural_noise", "em_boundary_region_3"),
+                ];
+                model.boundaries = vec![
+                    magnetic_insulation(
+                        "em_bc_boundary_insulation_unmapped_0",
+                        "em_boundary_unmapped_insulation_0",
+                    ),
+                    magnetic_insulation(
+                        "em_bc_boundary_insulation_unmapped_1",
+                        "em_boundary_unmapped_insulation_1",
+                    ),
                 ];
                 model.loads = vec![
                     runmat_analysis_core::LoadCase {
@@ -2111,23 +2187,21 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 ];
             }
             ElectromagneticFixtureKind::BoundaryPenaltyStress => {
-                model.boundary_conditions = (0..18)
-                    .flat_map(|idx| {
-                        let mut conditions = vec![runmat_analysis_core::BoundaryCondition {
-                            bc_id: format!("em_bc_penalty_ground_{idx}"),
-                            region_id: format!("em_penalty_region_{}", idx + 8),
-                            kind:
-                                runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                        }];
-                        if idx % 2 == 0 {
-                            conditions.push(runmat_analysis_core::BoundaryCondition {
-                                bc_id: format!("em_bc_penalty_insulation_{idx}"),
-                                region_id: format!("em_penalty_region_{}", idx + 20),
-                                kind:
-                                    runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                            });
-                        }
-                        conditions
+                model.constraints = (0..18)
+                    .map(|idx| {
+                        magnetic_ground(
+                            format!("em_bc_penalty_ground_{idx}"),
+                            format!("em_penalty_region_{}", idx + 8),
+                        )
+                    })
+                    .collect();
+                model.boundaries = (0..18)
+                    .filter(|idx| idx % 2 == 0)
+                    .map(|idx| {
+                        magnetic_insulation(
+                            format!("em_bc_penalty_insulation_{idx}"),
+                            format!("em_penalty_region_{}", idx + 20),
+                        )
                     })
                     .collect();
                 model.loads = vec![
@@ -2163,23 +2237,14 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 ];
             }
             ElectromagneticFixtureKind::MultiRegionPhasedSource => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_phase_ground_0".to_string(),
-                        region_id: "em_phase_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_phase_ground_1".to_string(),
-                        region_id: "em_phase_region_8".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_phase_insulation_0".to_string(),
-                        region_id: "em_phase_region_5".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_phase_ground_0", "em_phase_region_0"),
+                    magnetic_ground("em_bc_phase_ground_1", "em_phase_region_8"),
                 ];
+                model.boundaries = vec![magnetic_insulation(
+                    "em_bc_phase_insulation_0",
+                    "em_phase_region_5",
+                )];
                 model.loads = vec![
                     runmat_analysis_core::LoadCase {
                         load_id: "em_load_phase_coil_0".to_string(),
@@ -2257,11 +2322,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 }];
             }
             "electromagnetic_missing_boundary" => {
-                model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-                    bc_id: "em_invalid_structural_fixed".to_string(),
-                    region_id: "em_region_homogeneous".to_string(),
-                    kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                }];
+                model.boundaries.clear();
+                model.constraints = vec![fixed_constraint(
+                    "em_invalid_structural_fixed",
+                    "em_region_homogeneous",
+                )];
             }
             _ => {}
         }
@@ -4273,11 +4338,16 @@ fn write_fixture_solver_mesh_artifact(
     mesh.geometry.geometry_revision = u64::from(model.geometry_revision);
 
     let mut boundary_regions = std::collections::BTreeSet::new();
+    for constraint in &model.constraints {
+        constraint.visit_targets(|target| {
+            boundary_regions.insert(target.region_id.clone());
+        });
+    }
     boundary_regions.extend(
         model
-            .boundary_conditions
+            .boundaries
             .iter()
-            .map(|condition| condition.region_id.clone()),
+            .map(|boundary| boundary.target.region_id.clone()),
     );
     boundary_regions.extend(model.loads.iter().map(|load| load.region_id.clone()));
     for interface in &model.interfaces {
@@ -4332,11 +4402,11 @@ fn configure_mesh_backed_electro_thermal_model(spec: &FixtureSpec, model: &mut A
             fz: 0.0,
         },
     }];
-    model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-        bc_id: format!("{}_fixed", spec.id),
-        region_id: "fixture_fixed_face".to_owned(),
-        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-    }];
+    model.boundaries.clear();
+    model.constraints = vec![fixed_constraint(
+        format!("{}_fixed", spec.id),
+        "fixture_fixed_face",
+    )];
 }
 
 pub(super) fn run_fixture(
@@ -4372,7 +4442,7 @@ pub(super) fn run_fixture(
     let validate_result = analysis_validate(
         &model,
         UnitSystem::Meter,
-        &ReferenceFrame::Global,
+        &runmat_analysis_core::CoordinateFrame::Global,
         OperationContext::new(Some(format!("trace-validate-{}", spec.id)), None),
     );
     let _validate_ms = validate_start.elapsed().as_secs_f64() * 1_000.0;

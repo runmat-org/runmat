@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -12,12 +12,12 @@ use runmat_accelerate_api::{
 };
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure,
-    AnalysisStep, AnalysisStepKind, BeamElementModel, BeamSectionModel, BoundaryCondition,
-    BoundaryConditionKind, CfdSolveFamily, ConductivityFrequencyPoint, CoupledPhysicsFamily,
-    ElectromagneticDomain, EvidenceConfidence, FormulationImplementation, LoadCase, LoadKind,
-    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialThermalModel, PhysicsFamily, ReferenceFrame, SolutionSpace, StructuralElement,
-    StructuralElementKind, StructuralModel, StructuralNode,
+    AnalysisStep, AnalysisStepKind, BeamElementModel, BeamSectionModel, CfdSolveFamily,
+    ConductivityFrequencyPoint, CoordinateFrame, CoupledPhysicsFamily, ElectromagneticDomain,
+    EvidenceConfidence, FormulationImplementation, LoadCase, LoadKind, MaterialAssignment,
+    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    PhysicsFamily, SolutionSpace, StructuralElement, StructuralElementKind, StructuralModel,
+    StructuralNode,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
@@ -86,11 +86,89 @@ use super::*;
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 
+fn fixed_constraint(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Structural(
+        runmat_analysis_core::StructuralConstraint {
+            constraint_id: id.into(),
+            frame: CoordinateFrame::Global,
+            kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
+                target: runmat_analysis_core::RegionTarget::authored(region),
+            },
+        },
+    )
+}
+
+fn magnetic_ground(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Magnetic(runmat_analysis_core::MagneticConstraint {
+        constraint_id: id.into(),
+        kind: runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround {
+            target: runmat_analysis_core::RegionTarget::authored(region),
+        },
+    })
+}
+
+fn magnetic_insulation(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisBoundary {
+    runmat_analysis_core::AnalysisBoundary {
+        boundary_id: id.into(),
+        target: runmat_analysis_core::RegionTarget::authored(region),
+        operator: runmat_analysis_core::BoundaryOperator::MagneticInsulation,
+    }
+}
+
+fn sample_cfd_constraints(
+    inlet_velocity_m_per_s: f64,
+) -> Vec<runmat_analysis_core::AnalysisConstraint> {
+    let fluid = |id: &str, kind| {
+        runmat_analysis_core::AnalysisConstraint::Fluid(runmat_analysis_core::FluidConstraint {
+            constraint_id: id.to_string(),
+            kind,
+        })
+    };
+    vec![
+        fluid(
+            "bc_cfd_inlet",
+            runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+                target: runmat_analysis_core::RegionTarget::boundary("fluid_inlet"),
+                value: runmat_analysis_core::ValueSchedule::Constant(
+                    runmat_analysis_core::Velocity::new(inlet_velocity_m_per_s),
+                ),
+            },
+        ),
+        fluid(
+            "bc_cfd_outlet",
+            runmat_analysis_core::FluidConstraintKind::PressureReference {
+                target: runmat_analysis_core::RegionTarget::boundary("fluid_outlet"),
+                value: runmat_analysis_core::ValueSchedule::Constant(
+                    runmat_analysis_core::Pressure::new(0.0),
+                ),
+            },
+        ),
+        fluid(
+            "bc_cfd_wall_upper",
+            runmat_analysis_core::FluidConstraintKind::NoSlipWall {
+                target: runmat_analysis_core::RegionTarget::boundary("fluid_wall_upper"),
+            },
+        ),
+        fluid(
+            "bc_cfd_wall_lower",
+            runmat_analysis_core::FluidConstraintKind::NoSlipWall {
+                target: runmat_analysis_core::RegionTarget::boundary("fluid_wall_lower"),
+            },
+        ),
+    ]
+}
+
 fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    storage::artifact_store_test_guard()
 }
 
 fn sample_model() -> AnalysisModel {
@@ -99,7 +177,7 @@ fn sample_model() -> AnalysisModel {
         geometry_id: "geo:beam".to_string(),
         geometry_revision: 1,
         units: UnitSystem::Meter,
-        frame: ReferenceFrame::Global,
+        frame: CoordinateFrame::Global,
         materials: vec![MaterialModel {
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
@@ -155,11 +233,9 @@ fn sample_model() -> AnalysisModel {
         electromagnetic: None,
         cfd: None,
         interfaces: Vec::new(),
-        boundary_conditions: vec![BoundaryCondition {
-            bc_id: "bc_root".to_string(),
-            region_id: "node:1".to_string(),
-            kind: BoundaryConditionKind::Fixed,
-        }],
+        constraints: vec![fixed_constraint("bc_root", "node:1")],
+        boundaries: Vec::new(),
+        connectors: Vec::new(),
         loads: vec![LoadCase {
             load_id: "load_tip".to_string(),
             region_id: "node:2".to_string(),
@@ -182,11 +258,7 @@ fn sample_solid_model() -> AnalysisModel {
     model.geometry_id = "geo:closed_cube".to_string();
     model.geometry_revision = 1;
     model.structural = None;
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_root".to_string(),
-        region_id: "root".to_string(),
-        kind: BoundaryConditionKind::Fixed,
-    }];
+    model.constraints = vec![fixed_constraint("bc_root", "root")];
     model.loads = vec![LoadCase {
         load_id: "load_tip".to_string(),
         region_id: "tip".to_string(),
@@ -252,33 +324,6 @@ fn sample_moment_load(load_id: &str) -> LoadCase {
             mz: 3.0,
         },
     }
-}
-
-fn sample_cfd_boundary_conditions(inlet_velocity_m_per_s: f64) -> Vec<BoundaryCondition> {
-    vec![
-        BoundaryCondition {
-            bc_id: "bc_cfd_inlet".to_string(),
-            region_id: "fluid_inlet".to_string(),
-            kind: BoundaryConditionKind::CfdInletVelocity {
-                velocity_m_per_s: inlet_velocity_m_per_s,
-            },
-        },
-        BoundaryCondition {
-            bc_id: "bc_cfd_outlet".to_string(),
-            region_id: "fluid_outlet".to_string(),
-            kind: BoundaryConditionKind::CfdOutletPressure { pressure_pa: 0.0 },
-        },
-        BoundaryCondition {
-            bc_id: "bc_cfd_wall_upper".to_string(),
-            region_id: "fluid_wall_upper".to_string(),
-            kind: BoundaryConditionKind::CfdNoSlipWall,
-        },
-        BoundaryCondition {
-            bc_id: "bc_cfd_wall_lower".to_string(),
-            region_id: "fluid_wall_lower".to_string(),
-            kind: BoundaryConditionKind::CfdNoSlipWall,
-        },
-    ]
 }
 
 fn sample_cht_model() -> AnalysisModel {
@@ -863,7 +908,7 @@ studies:
     assert_eq!(model.materials.len(), 1);
     assert_eq!(model.material_assignments.len(), 1);
     assert_eq!(model.material_assignments[0].region_id, "region_1");
-    assert_eq!(model.boundary_conditions.len(), 1);
+    assert_eq!(model.constraints.len(), 1);
     assert_eq!(model.loads.len(), 1);
     assert_eq!(model.steps.len(), 1);
 }
@@ -984,15 +1029,23 @@ run:
         panic!("expected resolved study");
     };
     let model = study.model.as_ref().expect("explicit model should resolve");
-    assert_eq!(model.boundary_conditions.len(), 1);
-    assert!(matches!(
-        model.boundary_conditions[0].kind,
-        BoundaryConditionKind::PrescribedRotation {
-            rx: 0.1,
-            ry: 0.2,
-            rz: 0.3
-        }
-    ));
+    let runmat_analysis_core::AnalysisConstraint::Structural(constraint) = &model.constraints[0]
+    else {
+        panic!("expected structural constraint")
+    };
+    let runmat_analysis_core::StructuralConstraintKind::PrescribedRotations(values) =
+        &constraint.kind
+    else {
+        panic!("expected prescribed rotations")
+    };
+    assert_eq!(
+        values
+            .values
+            .iter()
+            .map(|entry| entry.value.constant().expect("constant").radians)
+            .collect::<Vec<_>>(),
+        vec![0.1, 0.2, 0.3]
+    );
 }
 
 #[test]
@@ -1203,9 +1256,9 @@ fn analysis_create_model_returns_v1_envelope() {
     assert_eq!(envelope.data.geometry_id, "geo:beam");
     assert_eq!(envelope.data.geometry_revision, 2);
     assert_eq!(envelope.data.units, UnitSystem::Meter);
-    assert_eq!(envelope.data.frame, ReferenceFrame::Global);
+    assert_eq!(envelope.data.frame, CoordinateFrame::Global);
     assert!(!envelope.data.materials.is_empty());
-    assert!(!envelope.data.boundary_conditions.is_empty());
+    assert!(!envelope.data.constraints.is_empty() || !envelope.data.boundaries.is_empty());
     assert!(!envelope.data.loads.is_empty());
     assert!(!envelope.data.steps.is_empty());
     assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Static);
@@ -1421,9 +1474,8 @@ fn analysis_create_model_supports_electro_thermal_profile_template() {
     .expect("electro-thermal profile model creation should succeed");
 
     assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Transient);
-    assert_eq!(
-        envelope.data.boundary_conditions[0].kind,
-        BoundaryConditionKind::VectorPotentialGround
+    assert!(
+        matches!(&envelope.data.constraints[0], runmat_analysis_core::AnalysisConstraint::Magnetic(value) if matches!(value.kind, runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround { .. }))
     );
     assert_eq!(
         envelope.data.loads[0].load_id,
@@ -2003,7 +2055,10 @@ fn analysis_author_study_uses_physical_mesh_regions() {
         .as_ref()
         .expect("authored study should include model");
     assert_eq!(model.material_assignments[0].region_id, "solid");
-    assert_eq!(model.boundary_conditions[0].region_id, "root");
+    assert_eq!(
+        model.constraints[0].target().expect("target").region_id,
+        "root"
+    );
     assert_eq!(model.loads[0].region_id, "tip");
     assert_eq!(
         model.loads[0].kind,
@@ -2102,10 +2157,12 @@ fn analysis_author_study_preserves_non_structural_profile_defaults() {
         .as_ref()
         .expect("authored study should include model");
     assert_eq!(model.material_assignments[0].region_id, "solid");
-    assert_eq!(model.boundary_conditions[0].region_id, "ground");
     assert_eq!(
-        model.boundary_conditions[0].kind,
-        BoundaryConditionKind::VectorPotentialGround
+        model.constraints[0].target().expect("target").region_id,
+        "ground"
+    );
+    assert!(
+        matches!(&model.constraints[0], runmat_analysis_core::AnalysisConstraint::Magnetic(value) if matches!(value.kind, runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround { .. }))
     );
     assert_eq!(model.loads[0].region_id, "coil");
     assert!(matches!(model.loads[0].kind, LoadKind::CoilCurrent { .. }));
@@ -2174,7 +2231,10 @@ fn analysis_author_study_records_modal_driver_without_structural_force_evidence(
         .model
         .as_ref()
         .expect("authored modal study should include model");
-    assert_eq!(model.boundary_conditions[0].region_id, "root");
+    assert_eq!(
+        model.constraints[0].target().expect("target").region_id,
+        "root"
+    );
     assert_eq!(model.loads[0].region_id, "tip");
     assert!(matches!(model.loads[0].kind, LoadKind::BodyForce { .. }));
     assert_eq!(
@@ -2259,7 +2319,10 @@ fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested
         .as_ref()
         .expect("authored study should include model");
     assert_eq!(model.material_assignments[0].region_id, "solid");
-    assert_eq!(model.boundary_conditions[0].region_id, "tip");
+    assert_eq!(
+        model.constraints[0].target().expect("target").region_id,
+        "tip"
+    );
     assert_eq!(model.loads[0].region_id, "root");
     assert_eq!(
         model.loads[0].kind,
@@ -2673,7 +2736,10 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
         .iter()
         .all(|assignment| assignment.assigned_material_id == "mat_aluminum"));
     assert_eq!(
-        envelope.data.boundary_conditions[0].region_id,
+        envelope.data.constraints[0]
+            .target()
+            .expect("target")
+            .region_id,
         "region_root"
     );
     assert_eq!(envelope.data.loads[0].region_id, "region_tip");
@@ -2685,7 +2751,7 @@ fn analysis_validate_returns_typed_envelope() {
     let model = sample_model();
     let context =
         OperationContext::new(Some("trace-a1".to_string()), Some("request-a1".to_string()));
-    let envelope = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+    let envelope = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
         .expect("validation should pass");
 
     assert_eq!(envelope.operation, "fea.validate");
@@ -2700,7 +2766,7 @@ fn analysis_validate_maps_typed_error_code() {
     let mut model = sample_model();
     model.materials.clear();
     let context = OperationContext::new(None, None);
-    let error = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+    let error = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
         .expect_err("validation should fail");
 
     assert_eq!(error.error_code, "RM.FEA.VALIDATE.MISSING_MATERIALS");
@@ -2718,7 +2784,7 @@ fn analysis_validate_maps_invalid_moment_error_code() {
         mz: 1.0,
     };
     let context = OperationContext::new(None, None);
-    let error = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+    let error = analysis_validate(&model, UnitSystem::Meter, &CoordinateFrame::Global, context)
         .expect_err("validation should fail");
 
     assert_eq!(error.error_code, "RM.FEA.VALIDATE.INVALID_MOMENT");
@@ -4518,7 +4584,7 @@ fn persistent_face(source_topology_id: &str) -> PersistentEntityId {
 #[test]
 fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
     let mut model = sample_model();
-    model.boundary_conditions[0].region_id = "face_000001".to_owned();
+    model.constraints[0].visit_targets_mut(|target| target.region_id = "face_000001".to_owned());
     model.loads[0].region_id = "face_000002".to_owned();
     let aliases = BTreeMap::from([
         ("face_000001".to_owned(), persistent_face("exact-face-a")),
@@ -4527,7 +4593,10 @@ fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
 
     super::meshing::apply_boundary_region_ids(&mut model, &aliases);
 
-    assert_eq!(model.boundary_conditions[0].region_id, "exact-face-a");
+    assert_eq!(
+        model.constraints[0].target().expect("target").region_id,
+        "exact-face-a"
+    );
     assert_eq!(model.loads[0].region_id, "exact-face-b");
 }
 
@@ -5023,7 +5092,8 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
     );
     let beam_model = sample_model();
     model.structural = beam_model.structural;
-    model.boundary_conditions = beam_model.boundary_conditions;
+    model.constraints = beam_model.constraints;
+    model.boundaries = beam_model.boundaries;
     model.loads = beam_model.loads;
     let envelope = analysis_run_linear_static_with_options(
         &model,
@@ -5339,11 +5409,11 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_boundary() {
     )
     .expect("acoustic model should be created")
     .data;
-    acoustic_model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_structural_fixed_not_acoustic_boundary".to_string(),
-        region_id: "region_default".to_string(),
-        kind: BoundaryConditionKind::Fixed,
-    }];
+    acoustic_model.boundaries.clear();
+    acoustic_model.constraints = vec![fixed_constraint(
+        "bc_structural_fixed_not_acoustic_boundary",
+        "region_default",
+    )];
 
     let err = analysis_run_acoustic_op(
         &acoustic_model,
@@ -5538,12 +5608,15 @@ fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
         step_id: "thermal_invalid_boundary".to_string(),
         kind: AnalysisStepKind::Thermal,
     }];
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_invalid_convection".to_string(),
-        region_id: "thermal_open_wall".to_string(),
-        kind: BoundaryConditionKind::ThermalConvection {
-            ambient_temperature_k: 293.15,
-            coefficient_w_per_m2k: f64::NAN,
+    model.constraints.clear();
+    model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
+        boundary_id: "bc_invalid_convection".to_string(),
+        target: runmat_analysis_core::RegionTarget::boundary("thermal_open_wall"),
+        operator: runmat_analysis_core::BoundaryOperator::ThermalConvection {
+            ambient_temperature: runmat_analysis_core::ValueSchedule::Constant(
+                runmat_analysis_core::Temperature::new(293.15),
+            ),
+            coefficient: runmat_analysis_core::HeatTransferCoefficient::new(f64::NAN),
         },
     }];
 
@@ -5886,18 +5959,8 @@ fn configure_valid_em_authoring(model: &mut AnalysisModel) {
         reference_frequency_hz: 60.0,
         applied_current_a: 120.0,
     });
-    model.boundary_conditions = vec![
-        BoundaryCondition {
-            bc_id: "em_ground".to_string(),
-            region_id: "em_region".to_string(),
-            kind: BoundaryConditionKind::VectorPotentialGround,
-        },
-        BoundaryCondition {
-            bc_id: "em_insulation".to_string(),
-            region_id: "em_region".to_string(),
-            kind: BoundaryConditionKind::MagneticInsulation,
-        },
-    ];
+    model.constraints = vec![magnetic_ground("em_ground", "em_region")];
+    model.boundaries = vec![magnetic_insulation("em_insulation", "em_region")];
     model.loads = vec![LoadCase {
         load_id: "em_source".to_string(),
         region_id: "em_region".to_string(),
@@ -5981,11 +6044,8 @@ fn analysis_run_electromagnetic_rejects_missing_em_boundary() {
     let mut model = sample_model();
     model.steps[0].kind = AnalysisStepKind::Electromagnetic;
     configure_valid_em_authoring(&mut model);
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "structural_fixed".to_string(),
-        region_id: "em_region".to_string(),
-        kind: BoundaryConditionKind::Fixed,
-    }];
+    model.boundaries.clear();
+    model.constraints = vec![fixed_constraint("structural_fixed", "em_region")];
 
     let err = analysis_run_electromagnetic_op(
         &model,
@@ -7356,16 +7416,19 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.steps[0].kind = AnalysisStepKind::Cfd;
-    model.boundary_conditions = sample_cfd_boundary_conditions(4.25);
+    model.boundaries.clear();
+    model.constraints = sample_cfd_constraints(4.25);
     model
-        .boundary_conditions
-        .retain(|boundary| boundary.bc_id != "bc_cfd_wall_lower");
-    if let Some(wall) = model
-        .boundary_conditions
+        .constraints
+        .retain(|constraint| constraint.constraint_id() != "bc_cfd_wall_lower");
+    if let Some(runmat_analysis_core::AnalysisConstraint::Fluid(wall)) = model
+        .constraints
         .iter_mut()
-        .find(|boundary| boundary.bc_id == "bc_cfd_wall_upper")
+        .find(|constraint| constraint.constraint_id() == "bc_cfd_wall_upper")
     {
-        wall.kind = BoundaryConditionKind::CfdSlipWall;
+        wall.kind = runmat_analysis_core::FluidConstraintKind::SlipWall {
+            target: runmat_analysis_core::RegionTarget::boundary("fluid_wall_upper"),
+        };
     }
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
 
@@ -7529,7 +7592,8 @@ fn analysis_run_cfd_projects_the_canonical_solver_mesh_into_flow_topology() {
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cfd-solver-mesh");
     let mut model = sample_model();
     model.steps[0].kind = AnalysisStepKind::Cfd;
-    model.boundary_conditions = sample_cfd_boundary_conditions(4.25);
+    model.boundaries.clear();
+    model.constraints = sample_cfd_constraints(4.25);
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
 
     let envelope = analysis_run_cfd_with_options_op(
@@ -7590,13 +7654,18 @@ fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     let mut model = sample_model();
     model.steps[0].kind = AnalysisStepKind::Cfd;
     model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_cfd_inlet_only".to_string(),
-        region_id: "fluid_inlet".to_string(),
-        kind: BoundaryConditionKind::CfdInletVelocity {
-            velocity_m_per_s: 4.25,
+    model.boundaries.clear();
+    model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Fluid(
+        runmat_analysis_core::FluidConstraint {
+            constraint_id: "bc_cfd_inlet_only".to_string(),
+            kind: runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+                target: runmat_analysis_core::RegionTarget::boundary("fluid_inlet"),
+                value: runmat_analysis_core::ValueSchedule::Constant(
+                    runmat_analysis_core::Velocity::new(4.25),
+                ),
+            },
         },
-    }];
+    )];
 
     let err = analysis_run_cfd_op(
         &model,
@@ -9137,55 +9206,54 @@ fn solver_topology_counts(run_id: &str) -> (usize, usize) {
 }
 
 #[cfg(feature = "plot-core")]
-fn assert_any_solver_topology_overlay(figures: &[AnalysisGeneratedFigure], run_id: &str) {
+fn assert_solver_topology_mesh(figure: &AnalysisGeneratedFigure, run_id: &str) {
     let (vertex_count, triangle_count) = solver_topology_counts(run_id);
-    let overlay_counts = figures
-        .iter()
-        .filter(|figure| matches!(figure.kind, AnalysisGeneratedFigureKind::MeshResult))
-        .flat_map(|figure| figure.figure.plots())
+    assert!(matches!(
+        figure.kind,
+        AnalysisGeneratedFigureKind::MeshResult
+    ));
+    let mesh_counts = figure
+        .figure
+        .plots()
         .filter_map(|plot| match plot {
             runmat_plot::plots::PlotElement::Mesh(mesh) => Some(mesh),
             _ => None,
         })
-        .map(|mesh| {
-            mesh.scalar_field()
-                .map(|field| field.values.len())
-                .or_else(|| mesh.vector_field().map(|field| field.vectors.len()))
-                .unwrap_or(0)
-        })
-        .filter(|count| *count > 0)
+        .map(|mesh| (mesh.vertices().len(), mesh.triangles().len()))
         .collect::<Vec<_>>();
     assert!(
-        overlay_counts
-            .iter()
-            .any(|count| *count == vertex_count || *count == triangle_count),
-        "expected at least one overlay count to match solver topology vertices={} or triangles={}, got {:?}",
+        mesh_counts.contains(&(vertex_count, triangle_count)),
+        "expected a rendered mesh to match solver topology vertices={} and triangles={}, got {:?}",
         vertex_count,
         triangle_count,
-        overlay_counts
+        mesh_counts
     );
 }
 
 #[cfg(feature = "plot-core")]
 #[test]
-fn analysis_generate_study_run_figures_uses_solver_topology_for_em_fields() {
+fn analysis_generate_study_run_mesh_figure_uses_solver_topology_for_em_run() {
     let _guard = analysis_test_guard();
-    let spec = sample_electromagnetic_study_spec();
+    let mut spec = sample_electromagnetic_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("em-field-figures-solver-mesh");
+    spec.geometry.revision = 1;
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
     let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
         .expect("electromagnetic study should run");
 
-    let figures = analysis_generate_study_run_figures(
+    let figure = analysis_generate_study_run_mesh_figure(
         &spec,
         &run.data.run_id,
         AnalysisFigureGenerationOptions {
-            include_comparison: false,
-            include_trends: false,
+            mesh_source: AnalysisFigureMeshSource::Solver,
             ..AnalysisFigureGenerationOptions::default()
         },
     )
-    .expect("study figures should be generated");
+    .expect("study mesh figure should be generated");
 
-    assert_any_solver_topology_overlay(&figures, &run.data.run_id);
+    assert_solver_topology_mesh(&figure, &run.data.run_id);
+    let _ = fs::remove_dir_all(solver_mesh_root);
 }
 
 #[test]

@@ -8,7 +8,8 @@ pub mod thermo_mechanical;
 pub mod transient;
 
 use runmat_analysis_core::{
-    AnalysisModel, BoundaryConditionKind, LoadKind, StructuralElementKind, StructuralModel,
+    AnalysisModel, LoadKind, StructuralConstraint, StructuralConstraintKind, StructuralElementKind,
+    StructuralModel,
 };
 
 use crate::{
@@ -44,23 +45,33 @@ pub(crate) fn validate_rotational_dof_targets(
             return Err(moment_load_error(load));
         }
     }
-    for bc in &model.boundary_conditions {
-        if !matches!(bc.kind, BoundaryConditionKind::PrescribedRotation { .. }) {
+    for constraint in &model.constraints {
+        let Some(constraint) = constraint.structural() else {
+            continue;
+        };
+        if !matches!(
+            constraint.kind,
+            StructuralConstraintKind::PrescribedRotations(_)
+        ) {
             continue;
         }
         if !summary.structural_dof_layout.has_rotational_dofs() {
-            return Err(rotation_boundary_condition_error(bc));
+            return Err(rotation_constraint_error(constraint));
         }
         let Some(structural) = model.structural.as_ref() else {
             continue;
         };
-        let target_nodes = structural_target_nodes(structural, &bc.region_id);
+        let target = constraint
+            .kind
+            .target()
+            .expect("rotation constraint has a target");
+        let target_nodes = structural_target_nodes(structural, &target.region_id);
         if target_nodes.is_empty()
             || target_nodes
                 .iter()
                 .any(|node_index| !node_has_rotational_dofs(summary, *node_index))
         {
-            return Err(rotation_boundary_condition_error(bc));
+            return Err(rotation_constraint_error(constraint));
         }
     }
     Ok(())
@@ -96,10 +107,15 @@ fn moment_load_error(load: &runmat_analysis_core::LoadCase) -> FeaRunError {
     ))
 }
 
-fn rotation_boundary_condition_error(bc: &runmat_analysis_core::BoundaryCondition) -> FeaRunError {
+fn rotation_constraint_error(constraint: &StructuralConstraint) -> FeaRunError {
+    let region_id = constraint
+        .kind
+        .target()
+        .map(|target| target.region_id.as_str())
+        .unwrap_or("<equation>");
     FeaRunError::InvalidModel(format!(
-        "{}; bc_id={} region_id={}",
-        ROTATION_REQUIRES_ROTATIONAL_DOF_MESSAGE, bc.bc_id, bc.region_id
+        "{}; constraint_id={} region_id={}",
+        ROTATION_REQUIRES_ROTATIONAL_DOF_MESSAGE, constraint.constraint_id, region_id
     ))
 }
 

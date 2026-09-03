@@ -36,6 +36,18 @@ use crate::{
     FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
+
+fn fixed_constraint(id: &str, region: &str) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Structural(
+        runmat_analysis_core::StructuralConstraint {
+            constraint_id: id.to_string(),
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
+                target: runmat_analysis_core::RegionTarget::authored(region),
+            },
+        },
+    )
+}
 use runmat_analysis_core::{ElectromagneticDomain, MaterialElectricalModel};
 use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
@@ -283,21 +295,29 @@ fn moment_loads_require_rotational_dofs() {
 #[test]
 fn prescribed_rotations_require_rotational_dofs() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-        bc_id: "tip_rotation".to_string(),
-        region_id: "tip".to_string(),
-        kind: runmat_analysis_core::BoundaryConditionKind::PrescribedRotation {
-            rx: 0.1,
-            ry: 0.0,
-            rz: 0.0,
+    model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Structural(
+        runmat_analysis_core::StructuralConstraint {
+            constraint_id: "tip_rotation".to_string(),
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            kind: runmat_analysis_core::StructuralConstraintKind::PrescribedRotations(
+                runmat_analysis_core::PrescribedRotations {
+                    target: runmat_analysis_core::RegionTarget::boundary("tip"),
+                    values: vec![runmat_analysis_core::RotationDofValue {
+                        dof: runmat_analysis_core::StructuralRotationDof::Rx,
+                        value: runmat_analysis_core::ValueSchedule::Constant(
+                            runmat_analysis_core::Rotation::new(0.1),
+                        ),
+                    }],
+                },
+            ),
         },
-    }];
+    )];
 
     let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
         .expect_err("prescribed rotations should require rotational DOFs");
     let message = err.to_string();
     assert!(message.contains("prescribed rotations require rotational-DOF structural elements"));
-    assert!(message.contains("bc_id=tip_rotation"));
+    assert!(message.contains("constraint_id=tip_rotation"));
 }
 
 #[test]
@@ -468,11 +488,7 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         }],
         shell_sections: Vec::new(),
     });
-    model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-        bc_id: "fixed_root".to_string(),
-        region_id: "node:1".to_string(),
-        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-    }];
+    model.constraints = vec![fixed_constraint("fixed_root", "node:1")];
     model.loads = vec![runmat_analysis_core::LoadCase {
         load_id: "tip_moment".to_string(),
         region_id: "node:2".to_string(),
@@ -782,9 +798,9 @@ fn single_tetrahedron_solver_mesh_for_model(
     let mut root_regions = std::collections::BTreeSet::from(["root".to_string()]);
     root_regions.extend(
         model
-            .boundary_conditions
+            .constraints
             .iter()
-            .map(|condition| condition.region_id.clone()),
+            .filter_map(|condition| condition.target().map(|target| target.region_id.clone())),
     );
     let mut loaded_regions = std::collections::BTreeSet::from(["tip".to_string()]);
     loaded_regions.extend(model.loads.iter().map(|load| load.region_id.clone()));

@@ -1,5 +1,5 @@
 use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, BoundaryConditionKind, LoadKind,
+    validate_model, AnalysisField, AnalysisModel, BoundaryOperator, LoadKind, ThermalConstraintKind,
 };
 
 use crate::{
@@ -1046,23 +1046,36 @@ fn thermal_source_boundary_summary(
     let mut boundary_heat_flux_w_per_m2 = 0.0_f64;
     let mut convection_ambient_sum_k = 0.0_f64;
     let mut convection_coefficient_sum_w_per_m2k = 0.0_f64;
-    for boundary_condition in &model.boundary_conditions {
-        match boundary_condition.kind {
-            BoundaryConditionKind::ThermalPrescribedTemperature { temperature_k } => {
+    for constraint in &model.constraints {
+        let runmat_analysis_core::AnalysisConstraint::Thermal(constraint) = constraint else {
+            continue;
+        };
+        if let ThermalConstraintKind::Prescribed { value, .. } = &constraint.kind {
+            if let Some(temperature) = value.constant() {
                 prescribed_temperature_count += 1;
-                prescribed_temperature_sum_k += temperature_k;
+                prescribed_temperature_sum_k += temperature.kelvin;
             }
-            BoundaryConditionKind::ThermalHeatFlux { heat_flux_w_per_m2 } => {
+        }
+    }
+    for boundary in &model.boundaries {
+        match &boundary.operator {
+            BoundaryOperator::ThermalHeatFlux { value } => {
+                let Some(heat_flux) = value.constant() else {
+                    continue;
+                };
                 heat_flux_boundary_count += 1;
-                boundary_heat_flux_w_per_m2 += heat_flux_w_per_m2;
+                boundary_heat_flux_w_per_m2 += heat_flux.watts_per_square_meter;
             }
-            BoundaryConditionKind::ThermalConvection {
-                ambient_temperature_k,
-                coefficient_w_per_m2k,
+            BoundaryOperator::ThermalConvection {
+                ambient_temperature,
+                coefficient,
             } => {
+                let Some(ambient_temperature) = ambient_temperature.constant() else {
+                    continue;
+                };
                 convection_boundary_count += 1;
-                convection_ambient_sum_k += ambient_temperature_k;
-                convection_coefficient_sum_w_per_m2k += coefficient_w_per_m2k;
+                convection_ambient_sum_k += ambient_temperature.kelvin;
+                convection_coefficient_sum_w_per_m2k += coefficient.watts_per_square_meter_kelvin;
             }
             _ => {}
         }
@@ -1099,7 +1112,7 @@ fn thermal_source_boundary_summary(
         convection_boundary_count,
         source_coverage_ratio: thermal_source_count as f64 / model.loads.len().max(1) as f64,
         boundary_coverage_ratio: thermal_boundary_count as f64
-            / model.boundary_conditions.len().max(1) as f64,
+            / (model.constraints.len() + model.boundaries.len()).max(1) as f64,
         volumetric_heat_source_w_per_m3,
         prescribed_temperature_mean_k,
         boundary_heat_flux_w_per_m2,
