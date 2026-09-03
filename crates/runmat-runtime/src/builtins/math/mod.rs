@@ -9,6 +9,7 @@ pub mod ode;
 pub mod optim;
 pub mod poly;
 pub mod reduction;
+pub(crate) mod resident_real_unary;
 pub mod rounding;
 pub mod signal;
 pub mod symbolic;

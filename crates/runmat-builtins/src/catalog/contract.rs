@@ -195,6 +195,7 @@ pub enum MathInferenceRule {
     Abs,
     Atan2,
     Bitwise(BitwiseInferenceRule),
+    Discrete(DiscreteInferenceRule),
     ErrorFunction(ErrorFunctionInferenceRule),
     GammaFunction(GammaFunctionInferenceRule),
     IntegerDivide,
@@ -221,6 +222,11 @@ pub enum MathInferenceRule {
     DegreeTrigonometric(DegreeTrigonometricFunction),
     InverseTrigonometric(InverseTrigonometricFunction),
     InverseHyperbolic(InverseHyperbolicFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum DiscreteInferenceRule {
+    Factorial,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

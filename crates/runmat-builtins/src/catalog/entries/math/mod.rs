@@ -1,4 +1,5 @@
 mod bitwise;
+mod discrete;
 pub mod elementwise;
 mod integer_division;
 mod reduction;
@@ -6,6 +7,7 @@ mod rounding;
 mod trigonometry;
 
 pub use bitwise::*;
+pub use discrete::*;
 pub use elementwise::*;
 pub use integer_division::*;
 pub use reduction::*;
@@ -15,6 +17,7 @@ pub use trigonometry::*;
 pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     super::extend_groups(entries, elementwise::ENTRY_GROUPS);
     super::extend_groups(entries, &[bitwise::ENTRIES]);
+    super::extend_groups(entries, &[discrete::ENTRIES]);
     super::extend_groups(entries, &[integer_division::ENTRIES]);
     super::extend_groups(entries, reduction::ENTRY_GROUPS);
     super::extend_groups(entries, &[rounding::ENTRIES]);

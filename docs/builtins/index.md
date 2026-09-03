@@ -39,7 +39,9 @@ For GPU execution details, see [GPU Acceleration & Fusion Engine](/docs/runtime/
 | done | `math/elementwise` | `abs`, `sign`, `real`, `imag`, `conj`, `angle` | yes | E | - | Complex helpers. |
 | done | `math/elementwise` | `exp`, `expm1`, `log`, `log1p`, `log10`, `log2`, `sqrt`, `hypot`, `pow2` | yes | E | - | Exponentials and roots. |
 | done | `math/elementwise` | `single`, `double`, `uint16` | yes | E | - | Numeric casting for scalars and arrays. |
-| done | `math/elementwise` | `plus`, `minus`, `times`, `rdivide`, `ldivide`, `power`, `gamma`, `factorial` | yes | E | - | Elementwise arithmetic and specials. |
+| done | `math/elementwise` | `plus`, `minus`, `times`, `rdivide`, `ldivide`, `power` | yes | E | - | Elementwise arithmetic. |
+| done | `math/elementwise/gamma-functions` | `gamma`, `gammaln` | yes | - | - | Gamma function and its natural logarithm. |
+| done | `math/discrete` | `factorial` | yes | - | - | Elementwise factorial with class-preserving saturation. |
 | done | `math/trigonometry` | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` | yes | E | - | Trigonometric and hyperbolic functions. |
 | done | `math/rounding` | `round`, `floor`, `ceil`, `fix`, `mod`, `rem` | yes | E | - | MATLAB-style rounding and modulo behavior. |
 | done | `math/reduction` | `sum`, `prod`, `mean`, `median`, `min`, `max`, `any`, `all`, `std`, `var`, `cumsum`, `cumprod`, `cummin`, `cummax`, `diff`, `nnz` | yes | R | - | Reductions and cumulative operations. |

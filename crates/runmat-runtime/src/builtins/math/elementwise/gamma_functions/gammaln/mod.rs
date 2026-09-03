@@ -21,7 +21,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::elementwise::logarithm_common::{
     probe_gpu_lower_bound, GpuDomainProbeError, GpuLowerBoundResult,
 };
-use crate::builtins::math::elementwise::resident_real_unary;
+use crate::builtins::math::resident_real_unary;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "gammaln";
