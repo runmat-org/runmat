@@ -12,6 +12,9 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::Bitwise(rule) => {
             super::super::math::bitwise::infer(rule, request, entry)
         }
+        MathInferenceRule::IntegerDivide => {
+            super::super::math::integer_division::infer(request, entry)
+        }
         MathInferenceRule::Hypot => super::super::math_binary::infer_hypot(request, entry),
         MathInferenceRule::Gamma => super::super::math_special::infer_gamma(request, entry),
         MathInferenceRule::GammaLn => super::super::math_special::infer_gammaln(request, entry),

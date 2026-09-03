@@ -2,6 +2,7 @@ pub mod bitwise;
 pub mod discrete;
 pub mod elementwise;
 pub mod fft;
+pub mod integer_division;
 pub mod interpolation;
 pub mod linalg;
 pub mod ode;

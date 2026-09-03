@@ -195,6 +195,7 @@ pub enum MathInferenceRule {
     Abs,
     Atan2,
     Bitwise(BitwiseInferenceRule),
+    IntegerDivide,
     Hypot,
     Gamma,
     GammaLn,
@@ -224,7 +225,19 @@ pub enum MathInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BitwiseInferenceRule {
+    Binary(BinaryBitwiseOperator),
+    Complement,
+    Get,
+    Set,
+    Shift,
     SwapBytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BinaryBitwiseOperator {
+    And,
+    Or,
+    Xor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

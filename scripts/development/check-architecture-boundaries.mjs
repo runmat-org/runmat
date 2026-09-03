@@ -384,33 +384,104 @@ for (const [sourcePath, ceiling] of tabularBinaryBoundaries) {
   }
 }
 
-const bitwiseByteSwapBoundaries = new Map([
+const bitwiseBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/bitwise/mod.rs", 64],
+  ["crates/runmat-builtins/src/catalog/inference/math/bitwise/binary.rs", 160],
+  ["crates/runmat-builtins/src/catalog/inference/math/bitwise/complement.rs", 96],
+  ["crates/runmat-builtins/src/catalog/inference/math/bitwise/position.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/math/bitwise/shift.rs", 128],
   ["crates/runmat-builtins/src/catalog/inference/math/bitwise/swapbytes.rs", 96],
-  ["crates/runmat-builtins/src/catalog/inference/math/bitwise/tests.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/math/bitwise/tests.rs", 192],
   ["crates/runmat-builtins/src/catalog/entries/math/bitwise/mod.rs", 64],
+  ["crates/runmat-builtins/src/catalog/entries/math/bitwise/support.rs", 128],
+  ["crates/runmat-builtins/src/catalog/entries/math/bitwise/binary/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/math/bitwise/binary/support.rs", 192],
   ["crates/runmat-builtins/src/catalog/entries/math/bitwise/swapbytes/mod.rs", 160],
   ["crates/runmat-builtins/src/catalog/entries/math/bitwise/swapbytes/documentation.rs", 192],
+  ["crates/runmat-builtins/src/catalog/inference/math/integer_division.rs", 128],
+  ["crates/runmat-builtins/src/catalog/inference/math/integer_division_tests.rs", 128],
+  ["crates/runmat-builtins/src/catalog/entries/math/integer_division/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/math/integer_division/idivide/mod.rs", 192],
+  ["crates/runmat-builtins/src/catalog/entries/math/integer_division/idivide/documentation.rs", 160],
+  ["crates/runmat-runtime/src/builtins/common/integer_value.rs", 128],
+  ["crates/runmat-runtime/src/builtins/common/resident_output.rs", 128],
   ["crates/runmat-runtime/src/builtins/math/bitwise/mod.rs", 64],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/binary/mod.rs", 64],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/binary/tests.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/mod.rs", 96],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/arguments.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/binary.rs", 96],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/error.rs", 32],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/operand.rs", 288],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/output.rs", 224],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/position.rs", 384],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/resident.rs", 128],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/shift.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/bitwise/engine/sparse.rs", 224],
   ["crates/runmat-runtime/src/builtins/math/bitwise/swapbytes.rs", 128],
   ["crates/runmat-runtime/src/builtins/math/bitwise/swapbytes/tests.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/integer_division/mod.rs", 64],
+  ["crates/runmat-runtime/src/builtins/math/integer_division/engine/mod.rs", 128],
+  ["crates/runmat-runtime/src/builtins/math/integer_division/engine/operand.rs", 160],
+  ["crates/runmat-runtime/src/builtins/math/integer_division/engine/rounding.rs", 128],
+  ["crates/runmat-runtime/src/builtins/math/integer_division/tests/mod.rs", 32],
+  ["crates/runmat-runtime/src/builtins/math/integer_division/tests/rounding.rs", 64],
+  ["crates/runmat-runtime/src/builtins/math/integer_division/tests/semantics.rs", 256],
 ]);
-for (const [sourcePath, ceiling] of bitwiseByteSwapBoundaries) {
+for (const identity of ["bitand", "bitor", "bitxor"]) {
+  bitwiseBoundaries.set(
+    `crates/runmat-builtins/src/catalog/entries/math/bitwise/binary/${identity}.rs`,
+    192
+  );
+  bitwiseBoundaries.set(
+    `crates/runmat-runtime/src/builtins/math/bitwise/binary/${identity}.rs`,
+    64
+  );
+}
+for (const identity of ["bitcmp", "bitget", "bitset", "bitshift"]) {
+  const identityPath = identity === "bitshift"
+    ? `crates/runmat-builtins/src/catalog/entries/math/bitwise/${identity}/mod.rs`
+    : `crates/runmat-builtins/src/catalog/entries/math/bitwise/${identity}.rs`;
+  bitwiseBoundaries.set(
+    identityPath,
+    256
+  );
+  bitwiseBoundaries.set(
+    `crates/runmat-runtime/src/builtins/math/bitwise/${identity}.rs`,
+    64
+  );
+}
+bitwiseBoundaries.set(
+  "crates/runmat-builtins/src/catalog/entries/math/bitwise/bitshift/documentation.rs",
+  160
+);
+for (const { path: sourcePath } of rustSources("crates/runmat-runtime/src/builtins/math/bitwise/engine/tests")) {
+  bitwiseBoundaries.set(sourcePath, 384);
+}
+for (const [sourcePath, ceiling] of bitwiseBoundaries) {
   const lines = read(sourcePath).split("\n").length;
   if (lines > ceiling) {
     fail(
-      `${sourcePath} exceeds its bitwise byte-swap boundary ` +
+      `${sourcePath} exceeds its bitwise or integer-division domain boundary ` +
       `(found ${lines} lines; maximum ${ceiling})`
     );
   }
 }
-for (const [sourcePath, ceiling] of [
-  ["crates/runmat-runtime/src/builtins/logical/bit/integer.rs", 2849],
-  ["crates/runmat-runtime/src/builtins/logical/bit/integer_tests.rs", 1945],
+for (const sourcePath of [
+  "crates/runmat-runtime/src/builtins/logical/bit/integer.rs",
+  "crates/runmat-runtime/src/builtins/logical/bit/integer_tests.rs",
 ]) {
-  const lines = read(sourcePath).split("\n").length;
-  if (lines > ceiling) {
-    fail(`${sourcePath} is shrinking legacy bitwise-integer debt (found ${lines} lines; ceiling ${ceiling})`);
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete mixed-domain bitwise-integer debt and must not return`);
+  }
+}
+const bitwiseRuntimeSources = rustSources("crates/runmat-runtime/src/builtins/math/bitwise");
+for (const { path: sourcePath, text } of bitwiseRuntimeSources) {
+  if (/\bidivide\b|\bIDIVIDE_/.test(text)) {
+    fail(`${sourcePath} crosses the bitwise boundary into integer-division policy`);
+  }
+  if (/match\s+[^\n{]*\.name\s*\(\s*\)|\.name\s*\(\s*\)\s*(?:==|!=)/.test(text)) {
+    fail(`${sourcePath} selects bitwise semantics from a builtin name; dispatch through a typed operation`);
   }
 }
 
