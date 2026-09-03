@@ -100,6 +100,17 @@ if (valueDeclarations.length !== 1 || !valueDeclarations[0].startsWith("crates/r
   fail(`Value must be declared exactly once by runmat-value; found ${valueDeclarations.join(", ") || "none"}`);
 }
 
+const integerClassDeclarations = allRust
+  .filter(({ text }) => /(?:^|\n)\s*pub(?:\([^)]*\))?\s+enum\s+IntegerClass(?:\s|\{|<)/.test(text)
+    || /(?:^|\n)\s*enum\s+IntegerClass(?:\s|\{|<)/.test(text))
+  .map(({ path: sourcePath }) => sourcePath);
+if (integerClassDeclarations.length !== 1 || !integerClassDeclarations[0].startsWith("crates/runmat-types/")) {
+  fail(
+    `IntegerClass must be declared exactly once by runmat-types; found ` +
+    `${integerClassDeclarations.join(", ") || "none"}`
+  );
+}
+
 for (const { path: sourcePath, text } of allRust) {
   if (
     sourcePath.startsWith("crates/runmat-extension-abi/") &&

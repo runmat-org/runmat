@@ -9,6 +9,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::IntegerClass;
 use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -1055,21 +1056,10 @@ fn is_logical_bitwise_value(value: &Value) -> bool {
 
 fn bitwise_integer_class(value: &Value) -> Option<IntegerClass> {
     match value {
-        Value::Int(value) => Some(IntegerClass::from_int(value)),
-        Value::Tensor(tensor) => tensor.integer_storage().map(IntegerClass::from_storage),
-        Value::SparseTensor(sparse) => sparse.integer_storage().map(IntegerClass::from_storage),
-        Value::GpuTensor(handle) => {
-            runmat_accelerate_api::handle_integer_type(handle).map(|class| match class {
-                runmat_accelerate_api::IntegerElementType::I8 => IntegerClass::I8,
-                runmat_accelerate_api::IntegerElementType::I16 => IntegerClass::I16,
-                runmat_accelerate_api::IntegerElementType::I32 => IntegerClass::I32,
-                runmat_accelerate_api::IntegerElementType::I64 => IntegerClass::I64,
-                runmat_accelerate_api::IntegerElementType::U8 => IntegerClass::U8,
-                runmat_accelerate_api::IntegerElementType::U16 => IntegerClass::U16,
-                runmat_accelerate_api::IntegerElementType::U32 => IntegerClass::U32,
-                runmat_accelerate_api::IntegerElementType::U64 => IntegerClass::U64,
-            })
-        }
+        Value::Int(value) => Some(value.integer_class()),
+        Value::Tensor(tensor) => tensor.integer_storage().map(IntegerStorage::integer_class),
+        Value::SparseTensor(sparse) => sparse.integer_storage().map(IntegerStorage::integer_class),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_class(handle),
         _ => None,
     }
 }
@@ -2036,7 +2026,7 @@ fn parse_assumed_type(name: &'static str, value: Value) -> BuiltinResult<Integer
             "assumedtype must be an integer class name",
         ));
     };
-    IntegerClass::parse_name(&keyword).ok_or_else(|| {
+    IntegerClass::from_class_name(&keyword).ok_or_else(|| {
         error_with_detail(
             name,
             &ERROR_INVALID_INPUT,
@@ -2113,8 +2103,8 @@ async fn bit_buffer_from(
         Value::Int(value) => Ok(BitBuffer {
             data: vec![int_to_bits(&value)],
             shape: vec![1, 1],
-            compute_class: require_assumed_class(name, IntegerClass::from_int(&value), assumed)?,
-            output_class: Some(IntegerClass::from_int(&value)),
+            compute_class: require_assumed_class(name, value.integer_class(), assumed)?,
+            output_class: Some(value.integer_class()),
             is_scalar: true,
         }),
         Value::Tensor(tensor) => tensor_to_bit_buffer(name, tensor, assumed),
@@ -2259,8 +2249,8 @@ fn tensor_to_bit_buffer(
     let (data, native_class, output_class) = match tensor.integer_storage() {
         Some(storage) => (
             storage.exact_values().iter().map(int_to_bits).collect(),
-            Some(IntegerClass::from_storage(storage)),
-            Some(IntegerClass::from_storage(storage)),
+            Some(storage.integer_class()),
+            Some(storage.integer_class()),
         ),
         None => {
             if !matches!(
@@ -2406,8 +2396,8 @@ fn double_to_bits(
     }
     let (min, max) = class.range();
     let fits = match class {
-        IntegerClass::I64 => (-(2_f64.powi(63))..2_f64.powi(63)).contains(&value),
-        IntegerClass::U64 => (0.0..2_f64.powi(64)).contains(&value),
+        IntegerClass::Int64 => (-(2_f64.powi(63))..2_f64.powi(63)).contains(&value),
+        IntegerClass::UInt64 => (0.0..2_f64.powi(64)).contains(&value),
         _ => (min as f64..=max as f64).contains(&value),
     };
     if !fits {
@@ -2461,102 +2451,23 @@ fn int_to_bits(value: &IntValue) -> u64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum IntegerClass {
-    I8,
-    I16,
-    I32,
-    I64,
-    U8,
-    U16,
-    U32,
-    U64,
+trait IntegerClassRuntimeExt {
+    fn int_from_i128(self, value: i128) -> IntValue;
+    fn validate(self, value: i128, name: &'static str) -> BuiltinResult<()>;
+    fn value_from_bits(self, bits: u64) -> IntValue;
 }
 
-impl IntegerClass {
-    fn parse_name(name: &str) -> Option<Self> {
-        match name {
-            "int8" => Some(Self::I8),
-            "int16" => Some(Self::I16),
-            "int32" => Some(Self::I32),
-            "int64" => Some(Self::I64),
-            "uint8" => Some(Self::U8),
-            "uint16" => Some(Self::U16),
-            "uint32" => Some(Self::U32),
-            "uint64" => Some(Self::U64),
-            _ => None,
-        }
-    }
-
-    fn from_int(value: &IntValue) -> Self {
-        match value {
-            IntValue::I8(_) => Self::I8,
-            IntValue::I16(_) => Self::I16,
-            IntValue::I32(_) => Self::I32,
-            IntValue::I64(_) => Self::I64,
-            IntValue::U8(_) => Self::U8,
-            IntValue::U16(_) => Self::U16,
-            IntValue::U32(_) => Self::U32,
-            IntValue::U64(_) => Self::U64,
-        }
-    }
-
-    fn from_storage(storage: &IntegerStorage) -> Self {
-        match storage {
-            IntegerStorage::I8(_) => Self::I8,
-            IntegerStorage::I16(_) => Self::I16,
-            IntegerStorage::I32(_) => Self::I32,
-            IntegerStorage::I64(_) => Self::I64,
-            IntegerStorage::U8(_) => Self::U8,
-            IntegerStorage::U16(_) => Self::U16,
-            IntegerStorage::U32(_) => Self::U32,
-            IntegerStorage::U64(_) => Self::U64,
-        }
-    }
-
-    fn bit_width(self) -> u32 {
-        match self {
-            Self::I8 | Self::U8 => 8,
-            Self::I16 | Self::U16 => 16,
-            Self::I32 | Self::U32 => 32,
-            Self::I64 | Self::U64 => 64,
-        }
-    }
-
-    fn bit_mask(self) -> u64 {
-        match self.bit_width() {
-            64 => u64::MAX,
-            width => (1_u64 << width) - 1,
-        }
-    }
-
-    fn is_signed(self) -> bool {
-        matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64)
-    }
-
-    fn range(self) -> (i128, i128) {
-        match self {
-            Self::I8 => (i8::MIN as i128, i8::MAX as i128),
-            Self::I16 => (i16::MIN as i128, i16::MAX as i128),
-            Self::I32 => (i32::MIN as i128, i32::MAX as i128),
-            Self::I64 => (i64::MIN as i128, i64::MAX as i128),
-            Self::U8 => (0, u8::MAX as i128),
-            Self::U16 => (0, u16::MAX as i128),
-            Self::U32 => (0, u32::MAX as i128),
-            Self::U64 => (0, u64::MAX as i128),
-        }
-    }
-
+impl IntegerClassRuntimeExt for IntegerClass {
     fn int_from_i128(self, value: i128) -> IntValue {
         match self {
-            Self::I8 => IntValue::I8(value as i8),
-            Self::I16 => IntValue::I16(value as i16),
-            Self::I32 => IntValue::I32(value as i32),
-            Self::I64 => IntValue::I64(value as i64),
-            Self::U8 => IntValue::U8(value as u8),
-            Self::U16 => IntValue::U16(value as u16),
-            Self::U32 => IntValue::U32(value as u32),
-            Self::U64 => IntValue::U64(value as u64),
+            Self::Int8 => IntValue::I8(value as i8),
+            Self::Int16 => IntValue::I16(value as i16),
+            Self::Int32 => IntValue::I32(value as i32),
+            Self::Int64 => IntValue::I64(value as i64),
+            Self::UInt8 => IntValue::U8(value as u8),
+            Self::UInt16 => IntValue::U16(value as u16),
+            Self::UInt32 => IntValue::U32(value as u32),
+            Self::UInt64 => IntValue::U64(value as u64),
         }
     }
 
@@ -2575,14 +2486,14 @@ impl IntegerClass {
 
     fn value_from_bits(self, bits: u64) -> IntValue {
         match self {
-            Self::I8 => IntValue::I8(bits as u8 as i8),
-            Self::I16 => IntValue::I16(bits as u16 as i16),
-            Self::I32 => IntValue::I32(bits as u32 as i32),
-            Self::I64 => IntValue::I64(bits as i64),
-            Self::U8 => IntValue::U8(bits as u8),
-            Self::U16 => IntValue::U16(bits as u16),
-            Self::U32 => IntValue::U32(bits as u32),
-            Self::U64 => IntValue::U64(bits),
+            Self::Int8 => IntValue::I8(bits as u8 as i8),
+            Self::Int16 => IntValue::I16(bits as u16 as i16),
+            Self::Int32 => IntValue::I32(bits as u32 as i32),
+            Self::Int64 => IntValue::I64(bits as i64),
+            Self::UInt8 => IntValue::U8(bits as u8),
+            Self::UInt16 => IntValue::U16(bits as u16),
+            Self::UInt32 => IntValue::U32(bits as u32),
+            Self::UInt64 => IntValue::U64(bits),
         }
     }
 }
@@ -2604,7 +2515,7 @@ async fn integer_buffer_from(name: &'static str, value: Value) -> BuiltinResult<
         Value::Int(value) => Ok(IntegerBuffer {
             data: vec![int_value_to_i128(&value)],
             shape: vec![1, 1],
-            class: IntegerClass::from_int(&value),
+            class: value.integer_class(),
         }),
         Value::Tensor(tensor) => tensor_to_integer_buffer(name, tensor),
         Value::GpuTensor(handle) => {
@@ -2631,7 +2542,7 @@ fn tensor_to_integer_buffer(name: &'static str, tensor: Tensor) -> BuiltinResult
                 .map(int_value_to_i128)
                 .collect(),
             shape,
-            class: IntegerClass::from_storage(storage),
+            class: storage.integer_class(),
         });
     }
     match tensor.numeric_dtype() {
@@ -2676,7 +2587,7 @@ fn idivide_output_class(
     match (left.class, right.class) {
         (Some(lhs), Some(rhs)) if lhs == rhs => Ok(lhs),
         (Some(class), None) | (None, Some(class)) => {
-            if matches!(class, IntegerClass::I64 | IntegerClass::U64) {
+            if matches!(class, IntegerClass::Int64 | IntegerClass::UInt64) {
                 return Err(error_with_detail(
                     IDIVIDE_NAME,
                     &ERROR_INVALID_INPUT,

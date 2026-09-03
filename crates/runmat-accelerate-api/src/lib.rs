@@ -310,12 +310,49 @@ impl IntegerElementType {
     }
 }
 
+impl From<IntegerElementType> for runmat_types::IntegerClass {
+    fn from(element_type: IntegerElementType) -> Self {
+        match element_type {
+            IntegerElementType::I8 => Self::Int8,
+            IntegerElementType::I16 => Self::Int16,
+            IntegerElementType::I32 => Self::Int32,
+            IntegerElementType::I64 => Self::Int64,
+            IntegerElementType::U8 => Self::UInt8,
+            IntegerElementType::U16 => Self::UInt16,
+            IntegerElementType::U32 => Self::UInt32,
+            IntegerElementType::U64 => Self::UInt64,
+        }
+    }
+}
+
+impl From<runmat_types::IntegerClass> for IntegerElementType {
+    fn from(class: runmat_types::IntegerClass) -> Self {
+        use runmat_types::IntegerClass;
+
+        match class {
+            IntegerClass::Int8 => Self::I8,
+            IntegerClass::Int16 => Self::I16,
+            IntegerClass::Int32 => Self::I32,
+            IntegerClass::Int64 => Self::I64,
+            IntegerClass::UInt8 => Self::U8,
+            IntegerClass::UInt16 => Self::U16,
+            IntegerClass::UInt32 => Self::U32,
+            IntegerClass::UInt64 => Self::U64,
+        }
+    }
+}
+
 /// Look up the exact native integer class stored by a GPU tensor handle.
 pub fn handle_integer_type(handle: &GpuTensorHandle) -> Option<IntegerElementType> {
     handle
         .descriptor
         .element_type
         .and_then(NumericElementType::integer_type)
+}
+
+/// Look up the source-language integer class stored by a GPU tensor handle.
+pub fn handle_integer_class(handle: &GpuTensorHandle) -> Option<runmat_types::IntegerClass> {
+    handle_integer_type(handle).map(Into::into)
 }
 
 impl Default for GpuTensorStorage {
@@ -5485,5 +5522,22 @@ mod tests {
         assert!(!is_unsupported_provider_operation(&ordinary));
         assert_eq!(unsupported.to_string(), "test operation is unavailable");
         assert_eq!(dynamic.to_string(), "unsupported precision 64");
+    }
+
+    #[test]
+    fn provider_integer_elements_round_trip_source_language_classes() {
+        for element_type in [
+            IntegerElementType::I8,
+            IntegerElementType::I16,
+            IntegerElementType::I32,
+            IntegerElementType::I64,
+            IntegerElementType::U8,
+            IntegerElementType::U16,
+            IntegerElementType::U32,
+            IntegerElementType::U64,
+        ] {
+            let class = runmat_types::IntegerClass::from(element_type);
+            assert_eq!(IntegerElementType::from(class), element_type);
+        }
     }
 }

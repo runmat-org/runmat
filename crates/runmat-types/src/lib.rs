@@ -20,7 +20,7 @@ pub use declaration::{
 };
 pub use fact::*;
 pub use identity::*;
-pub use integer_literal::{IntegerLiteral, IntegerLiteralClass};
+pub use integer_literal::{IntegerClass, IntegerLiteral, IntegerLiteralClass};
 pub use rules::*;
 pub use source::{merge_span, Span};
 pub use symbolic::{

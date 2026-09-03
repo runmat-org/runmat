@@ -65,6 +65,39 @@ impl NumericClass {
             Self::UInt64 => "uint64",
         }
     }
+
+    pub const fn integer_class(self) -> Option<crate::IntegerClass> {
+        use crate::IntegerClass;
+
+        match self {
+            Self::Double | Self::Single => None,
+            Self::Int8 => Some(IntegerClass::Int8),
+            Self::UInt8 => Some(IntegerClass::UInt8),
+            Self::Int16 => Some(IntegerClass::Int16),
+            Self::UInt16 => Some(IntegerClass::UInt16),
+            Self::Int32 => Some(IntegerClass::Int32),
+            Self::UInt32 => Some(IntegerClass::UInt32),
+            Self::Int64 => Some(IntegerClass::Int64),
+            Self::UInt64 => Some(IntegerClass::UInt64),
+        }
+    }
+}
+
+impl From<crate::IntegerClass> for NumericClass {
+    fn from(class: crate::IntegerClass) -> Self {
+        use crate::IntegerClass;
+
+        match class {
+            IntegerClass::Int8 => Self::Int8,
+            IntegerClass::UInt8 => Self::UInt8,
+            IntegerClass::Int16 => Self::Int16,
+            IntegerClass::UInt16 => Self::UInt16,
+            IntegerClass::Int32 => Self::Int32,
+            IntegerClass::UInt32 => Self::UInt32,
+            IntegerClass::Int64 => Self::Int64,
+            IntegerClass::UInt64 => Self::UInt64,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -83,7 +116,7 @@ pub struct NumericFact {
 #[cfg(test)]
 mod tests {
     use super::NumericClass;
-    use crate::{standard, ClassIdentity};
+    use crate::{standard, ClassIdentity, IntegerClass};
 
     #[test]
     fn numeric_classes_resolve_from_typed_class_identity() {
@@ -95,5 +128,24 @@ mod tests {
             NumericClass::from_class_identity(&ClassIdentity::from("table")),
             None
         );
+    }
+
+    #[test]
+    fn numeric_and_integer_classes_convert_without_names() {
+        for integer in [
+            IntegerClass::Int8,
+            IntegerClass::Int16,
+            IntegerClass::Int32,
+            IntegerClass::Int64,
+            IntegerClass::UInt8,
+            IntegerClass::UInt16,
+            IntegerClass::UInt32,
+            IntegerClass::UInt64,
+        ] {
+            let numeric = NumericClass::from(integer);
+            assert_eq!(numeric.integer_class(), Some(integer));
+        }
+        assert_eq!(NumericClass::Double.integer_class(), None);
+        assert_eq!(NumericClass::Single.integer_class(), None);
     }
 }

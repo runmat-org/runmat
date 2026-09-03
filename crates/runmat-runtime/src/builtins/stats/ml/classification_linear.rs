@@ -12,6 +12,7 @@ use runmat_builtins::{
     ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::IntegerClass;
 use runmat_value::{
     CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, StructValue,
     Tensor, Value,
@@ -353,18 +354,6 @@ enum LabelKind {
     Integer(IntegerClass),
     Text,
     Logical,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum IntegerClass {
-    I8,
-    I16,
-    I32,
-    I64,
-    U8,
-    U16,
-    U32,
-    U64,
 }
 
 #[derive(Clone, Debug)]
@@ -1767,42 +1756,15 @@ fn is_missing_label(label: &ClassLabel) -> bool {
 }
 
 fn integer_class(storage: &IntegerStorage) -> IntegerClass {
-    match storage {
-        IntegerStorage::I8(_) => IntegerClass::I8,
-        IntegerStorage::I16(_) => IntegerClass::I16,
-        IntegerStorage::I32(_) => IntegerClass::I32,
-        IntegerStorage::I64(_) => IntegerClass::I64,
-        IntegerStorage::U8(_) => IntegerClass::U8,
-        IntegerStorage::U16(_) => IntegerClass::U16,
-        IntegerStorage::U32(_) => IntegerClass::U32,
-        IntegerStorage::U64(_) => IntegerClass::U64,
-    }
+    storage.integer_class()
 }
 
 fn integer_class_for_value(value: &IntValue) -> IntegerClass {
-    match value {
-        IntValue::I8(_) => IntegerClass::I8,
-        IntValue::I16(_) => IntegerClass::I16,
-        IntValue::I32(_) => IntegerClass::I32,
-        IntValue::I64(_) => IntegerClass::I64,
-        IntValue::U8(_) => IntegerClass::U8,
-        IntValue::U16(_) => IntegerClass::U16,
-        IntValue::U32(_) => IntegerClass::U32,
-        IntValue::U64(_) => IntegerClass::U64,
-    }
+    value.integer_class()
 }
 
 fn integer_class_name(class: IntegerClass) -> &'static str {
-    match class {
-        IntegerClass::I8 => "int8",
-        IntegerClass::I16 => "int16",
-        IntegerClass::I32 => "int32",
-        IntegerClass::I64 => "int64",
-        IntegerClass::U8 => "uint8",
-        IntegerClass::U16 => "uint16",
-        IntegerClass::U32 => "uint32",
-        IntegerClass::U64 => "uint64",
-    }
+    class.class_name()
 }
 
 fn integer_cmp(left: &IntValue, right: &IntValue) -> Ordering {
@@ -1821,42 +1783,42 @@ fn integer_cmp(left: &IntValue, right: &IntValue) -> Ordering {
 
 fn integer_storage(class: IntegerClass, values: Vec<IntValue>) -> Result<IntegerStorage, String> {
     match class {
-        IntegerClass::I8 => collect_integer_values(values, "int8", |v| match v {
+        IntegerClass::Int8 => collect_integer_values(values, "int8", |v| match v {
             IntValue::I8(v) => Some(v),
             _ => None,
         })
         .map(IntegerStorage::I8),
-        IntegerClass::I16 => collect_integer_values(values, "int16", |v| match v {
+        IntegerClass::Int16 => collect_integer_values(values, "int16", |v| match v {
             IntValue::I16(v) => Some(v),
             _ => None,
         })
         .map(IntegerStorage::I16),
-        IntegerClass::I32 => collect_integer_values(values, "int32", |v| match v {
+        IntegerClass::Int32 => collect_integer_values(values, "int32", |v| match v {
             IntValue::I32(v) => Some(v),
             _ => None,
         })
         .map(IntegerStorage::I32),
-        IntegerClass::I64 => collect_integer_values(values, "int64", |v| match v {
+        IntegerClass::Int64 => collect_integer_values(values, "int64", |v| match v {
             IntValue::I64(v) => Some(v),
             _ => None,
         })
         .map(IntegerStorage::I64),
-        IntegerClass::U8 => collect_integer_values(values, "uint8", |v| match v {
+        IntegerClass::UInt8 => collect_integer_values(values, "uint8", |v| match v {
             IntValue::U8(v) => Some(v),
             _ => None,
         })
         .map(IntegerStorage::U8),
-        IntegerClass::U16 => collect_integer_values(values, "uint16", |v| match v {
+        IntegerClass::UInt16 => collect_integer_values(values, "uint16", |v| match v {
             IntValue::U16(v) => Some(v),
             _ => None,
         })
         .map(IntegerStorage::U16),
-        IntegerClass::U32 => collect_integer_values(values, "uint32", |v| match v {
+        IntegerClass::UInt32 => collect_integer_values(values, "uint32", |v| match v {
             IntValue::U32(v) => Some(v),
             _ => None,
         })
         .map(IntegerStorage::U32),
-        IntegerClass::U64 => collect_integer_values(values, "uint64", |v| match v {
+        IntegerClass::UInt64 => collect_integer_values(values, "uint64", |v| match v {
             IntValue::U64(v) => Some(v),
             _ => None,
         })

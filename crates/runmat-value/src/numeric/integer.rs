@@ -33,6 +33,12 @@ impl IntegerStorage {
         }
     }
 
+    pub fn integer_class(&self) -> runmat_types::IntegerClass {
+        self.numeric_dtype()
+            .integer_class()
+            .expect("IntegerStorage always has an integer dtype")
+    }
+
     /// Construct a one-element buffer preserving the scalar's MATLAB integer
     /// class.
     pub fn from_scalar(value: IntValue) -> Self {
