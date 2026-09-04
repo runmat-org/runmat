@@ -17,6 +17,7 @@ use crate::BuiltinResult;
 
 #[runtime_builtin(
     name = "discretize",
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::binning::discretize"
 )]
 pub(crate) async fn discretize_builtin(

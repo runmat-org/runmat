@@ -23,8 +23,8 @@ use containers::*;
 pub(crate) use containers::{
     categorical_categories, categorical_compare, categorical_declared_levels,
     categorical_extrema_to_value, categorical_from_args, categorical_labels,
-    categorical_max_evaluate, categorical_min_evaluate, categorical_observation_labels,
-    timetable_row_times, CategoricalComparison,
+    categorical_levels_for_observations, categorical_max_evaluate, categorical_min_evaluate,
+    categorical_observation_labels, timetable_row_times, CategoricalComparison,
 };
 pub(crate) use display::categorical_label_at;
 use display::format_key_number;

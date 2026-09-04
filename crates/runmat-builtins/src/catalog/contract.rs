@@ -155,7 +155,10 @@ pub enum CombinatoricsInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum GroupingInferenceRule {
+    Counts,
+    GroupedApply,
     IndexLabels,
+    SortedGroups,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

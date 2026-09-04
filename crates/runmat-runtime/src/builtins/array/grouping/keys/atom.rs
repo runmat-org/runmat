@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use runmat_value::IntValue;
+use runmat_value::{IntValue, NumericScalar};
 
 /// One exact component of a grouping key.
 ///
@@ -15,6 +15,21 @@ pub(crate) enum KeyAtom {
 }
 
 impl KeyAtom {
+    pub(crate) fn from_numeric(value: NumericScalar) -> Option<Self> {
+        match value {
+            NumericScalar::F64(value) if value.is_nan() => None,
+            NumericScalar::F64(value) => Some(Self::Number(value)),
+            NumericScalar::F32(value) if value.is_nan() => None,
+            NumericScalar::F32(value) => Some(Self::Number(f64::from(value))),
+            value => value.into_int_value().map(Self::Integer),
+        }
+    }
+
+    pub(crate) fn from_text(value: &str) -> Option<Self> {
+        (!crate::builtins::strings::common::is_missing_string(value))
+            .then(|| Self::Text(value.into()))
+    }
+
     pub(crate) fn label(&self) -> String {
         match self {
             Self::Missing => "<missing>".into(),

@@ -919,6 +919,34 @@ pub(crate) fn categorical_declared_levels(object: &ObjectInstance) -> BuiltinRes
     Ok(Value::Object(levels))
 }
 
+pub(crate) fn categorical_levels_for_observations(
+    object: &ObjectInstance,
+    labels: &[Option<String>],
+) -> BuiltinResult<Value> {
+    let categories = categorical_categories(object)?;
+    let codes = labels
+        .iter()
+        .map(|label| {
+            let Some(label) = label else {
+                return Ok(f64::NAN);
+            };
+            categories
+                .iter()
+                .position(|category| category == label)
+                .map(|index| index as f64 + 1.0)
+                .ok_or_else(|| {
+                    invalid_variable("categorical: group label is not a declared category")
+                })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let codes = Tensor::new(codes, vec![labels.len(), 1]).map_err(invalid_variable)?;
+    let mut levels = object.clone();
+    levels
+        .properties
+        .insert("Codes".to_string(), Value::Tensor(codes));
+    Ok(Value::Object(levels))
+}
+
 pub(crate) fn categorical_categories(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
     match object.properties.get("Categories") {
         Some(Value::StringArray(array)) => Ok(array.data.clone()),
