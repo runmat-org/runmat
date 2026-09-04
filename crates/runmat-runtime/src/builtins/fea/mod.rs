@@ -31,8 +31,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Once;
 
+#[cfg(test)]
+use crate::analysis::AnalysisStudySweepValidateData;
 use crate::analysis::{
     analysis_create_model_op, analysis_plan_study_op, analysis_plan_study_sweep_op,
     analysis_results_by_run_id_op, analysis_results_compare_op, analysis_run_study_op,
@@ -1112,7 +1113,7 @@ pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
             VALIDATE_NAME,
             &ERROR_OPERATION,
             &ERROR_INTERNAL,
-            FEA_VALIDATION_CLASS,
+            FEA_SWEEP_VALIDATION_CLASS,
             analysis_validate_study_sweep_op(&spec, OperationContext::new(None, None)),
         ),
     }
@@ -3085,9 +3086,16 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
                 builtin_error(
                     builtin,
                     &ERROR_INPUT,
-                    "fea.RunResult does not contain a run_id; sweep results expose run_entries",
+                    "fea.RunResult does not contain its required run_id",
                 )
             })
+        }
+        Value::Object(object) if object.class_name == FEA_SWEEP_RUN_RESULT_CLASS => {
+            Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                "fea.SweepRunResult contains multiple run_entries; select one run entry explicitly",
+            ))
         }
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
             scalar_string(value, builtin, &ERROR_INPUT)
@@ -3999,7 +4007,7 @@ fn sweep_plan_result_to_object(
     serializable_to_object_preserving_integers(
         PLAN_NAME,
         &ERROR_INTERNAL,
-        FEA_PLAN_CLASS,
+        FEA_SWEEP_PLAN_CLASS,
         &envelope.data,
         &[],
         &[
@@ -4020,7 +4028,7 @@ fn sweep_run_result_to_object(
     serializable_to_object_preserving_integers(
         RUN_NAME,
         &ERROR_INTERNAL,
-        FEA_RUN_RESULT_CLASS,
+        FEA_SWEEP_RUN_RESULT_CLASS,
         &envelope.data,
         &[],
         &[
@@ -4517,272 +4525,6 @@ fn resolve_study_template(
             "fea.study requires Template; choose a model template from fea.capabilities().modelTemplates",
         )
     })
-}
-
-fn ensure_fea_classes_registered() {
-    static PORTABLE_SCHEMAS: Once = Once::new();
-    PORTABLE_SCHEMAS.call_once(|| {
-        for (class_name, type_identity, fields, required, validate) in fea_class_schemas() {
-            crate::execution::value_codec::register_immutable_value_class(
-                crate::execution::value_codec::ImmutableValueClassSchema {
-                    class_name,
-                    type_identity,
-                    schema_version: 1,
-                    allowed_fields: fields,
-                    required_fields: required,
-                    validate,
-                },
-            )
-            .unwrap_or_else(|error| {
-                panic!("failed to register immutable FEA class {class_name}: {error}")
-            });
-        }
-    });
-    FEA_CLASSES_REGISTERED.ensure(|| {
-        for (class_name, _, fields, _, _) in fea_class_schemas() {
-            let methods = match class_name {
-                FEA_STUDY_CLASS | FEA_SWEEP_CLASS => workflow_methods(),
-                FEA_RUN_RESULT_CLASS => run_result_methods(),
-                FEA_RESULTS_CLASS => results_methods(),
-                FEA_FIELD_CLASS => field_methods(),
-                _ => HashMap::new(),
-            };
-            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.to_string(),
-                parent: None,
-                properties: immutable_runtime_properties(fields),
-                methods,
-            });
-        }
-    });
-}
-
-type FeaClassSchema = (
-    &'static str,
-    &'static str,
-    &'static [&'static str],
-    &'static [&'static str],
-    crate::execution::value_codec::ImmutableValueClassValidator,
-);
-
-fn fea_class_schemas() -> [FeaClassSchema; 16] {
-    [
-        (
-            FEA_STUDY_CLASS,
-            "runmat.fea.study",
-            STUDY_FIELDS,
-            &["study_id", "geometry", "create_model_intent", "execution"],
-            validate_fea_object,
-        ),
-        (
-            FEA_SWEEP_CLASS,
-            "runmat.fea.sweep",
-            SWEEP_FIELDS,
-            SWEEP_FIELDS,
-            validate_fea_object,
-        ),
-        (
-            FEA_VALIDATION_CLASS,
-            "runmat.fea.validation",
-            VALIDATION_FIELDS,
-            &["valid", "issue_codes", "evidence_artifact_path"],
-            validate_fea_object,
-        ),
-        (
-            FEA_PLAN_CLASS,
-            "runmat.fea.plan",
-            PLAN_FIELDS,
-            &["evidence_artifact_path"],
-            validate_fea_object,
-        ),
-        (
-            FEA_RUN_RESULT_CLASS,
-            "runmat.fea.run-result",
-            RUN_RESULT_FIELDS,
-            &["evidence_artifact_path"],
-            validate_fea_object,
-        ),
-        (
-            FEA_MODEL_CLASS,
-            "runmat.fea.model",
-            MODEL_FIELDS,
-            &[
-                "model_id",
-                "geometry_id",
-                "geometry_revision",
-                "units",
-                "frame",
-                "materials",
-                "material_assignments",
-                "interfaces",
-                "constraints",
-                "boundaries",
-                "connectors",
-                "signals",
-                "excitations",
-                "excitation_cases",
-                "initial_conditions",
-                "response_spectra",
-                "sequence",
-            ],
-            validate_fea_object,
-        ),
-        (
-            FEA_MATERIAL_CLASS,
-            "runmat.fea.material",
-            MATERIAL_FIELDS,
-            &["material_id", "name", "mechanical", "thermal"],
-            validate_fea_object,
-        ),
-        (
-            FEA_MATERIAL_ASSIGNMENT_CLASS,
-            "runmat.fea.material-assignment",
-            MATERIAL_ASSIGNMENT_FIELDS,
-            MATERIAL_ASSIGNMENT_FIELDS,
-            validate_fea_object,
-        ),
-        (
-            FEA_BOUNDARY_CONDITION_CLASS,
-            "runmat.fea.boundary-condition",
-            BOUNDARY_CONDITION_FIELDS,
-            &[],
-            validate_condition_object,
-        ),
-        (
-            FEA_STEP_CLASS,
-            "runmat.fea.step",
-            STEP_FIELDS,
-            STEP_FIELDS,
-            validate_fea_object,
-        ),
-        (
-            FEA_DOMAIN_CLASS,
-            "runmat.fea.domain",
-            DOMAIN_FIELDS,
-            DOMAIN_FIELDS,
-            validate_fea_object,
-        ),
-        (
-            FEA_INTERFACE_CLASS,
-            "runmat.fea.interface",
-            INTERFACE_FIELDS,
-            INTERFACE_FIELDS,
-            validate_fea_object,
-        ),
-        (
-            FEA_RESULTS_CLASS,
-            "runmat.fea.results",
-            RESULTS_FIELDS,
-            &[
-                "identity",
-                "field_descriptors",
-                "fields",
-                "run_status",
-                "numerically_acceptable",
-                "production_publishable",
-                "quality_reasons",
-                "production_publication_reasons",
-                "provenance",
-                "summary",
-                "run_id",
-            ],
-            validate_fea_object,
-        ),
-        (
-            FEA_FIELD_CLASS,
-            "runmat.fea.field",
-            FIELD_FIELDS,
-            &[
-                "field_id",
-                "shape",
-                "values",
-                "unit",
-                "location",
-                "kind",
-                "family",
-                "quantity",
-                "topology_id",
-                "element_kind",
-                "component_count",
-                "element_count",
-                "entity_count",
-                "value_count",
-                "storage",
-            ],
-            validate_fea_object,
-        ),
-        (
-            FEA_COMPARE_CLASS,
-            "runmat.fea.compare",
-            COMPARE_FIELDS,
-            &[
-                "baseline_run_id",
-                "candidate_run_id",
-                "numerically_acceptable_changed",
-                "production_publishable_changed",
-                "run_status_changed",
-                "quality_reason_count_delta",
-            ],
-            validate_fea_object,
-        ),
-        (
-            FEA_TRENDS_CLASS,
-            "runmat.fea.trends",
-            TRENDS_FIELDS,
-            TRENDS_FIELDS,
-            validate_fea_object,
-        ),
-    ]
-}
-
-fn immutable_runtime_properties(
-    fields: &[&str],
-) -> HashMap<String, crate::class_registry::RuntimeProperty> {
-    fields
-        .iter()
-        .map(|name| {
-            (
-                (*name).to_string(),
-                crate::class_registry::RuntimeProperty {
-                    name: (*name).to_string(),
-                    is_static: false,
-                    is_constant: true,
-                    is_dependent: false,
-                    get_access: MemberAccess::Public,
-                    set_access: MemberAccess::Private,
-                    default_value: None,
-                },
-            )
-        })
-        .collect()
-}
-
-fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
-    if object
-        .properties
-        .keys()
-        .any(|name| name.starts_with("__runmat_"))
-    {
-        return Err(format!(
-            "immutable FEA class `{}` contains an opaque runtime property",
-            object.class_name
-        ));
-    }
-    Ok(())
-}
-
-fn validate_condition_object(object: &ObjectInstance) -> Result<(), String> {
-    validate_fea_object(object)?;
-    let variants = ["constraint", "boundary"]
-        .into_iter()
-        .filter(|name| object.properties.contains_key(*name))
-        .count();
-    if variants != 1 {
-        return Err(
-            "fea.BoundaryCondition must contain exactly one typed condition variant".into(),
-        );
-    }
-    Ok(())
 }
 
 fn workflow_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
@@ -5298,6 +5040,92 @@ mod tests {
             Some("1")
         );
         assert!(error.message.contains("at index 1 "));
+    }
+
+    #[test]
+    fn sweep_operation_classes_are_exact_and_do_not_inherit_single_run_methods() {
+        ensure_fea_classes_registered();
+
+        let validation = serializable_to_object(
+            VALIDATE_NAME,
+            &ERROR_INTERNAL,
+            FEA_SWEEP_VALIDATION_CLASS,
+            &AnalysisStudySweepValidateData {
+                sweep_id: "sweep".into(),
+                valid: true,
+                issue_codes: Vec::new(),
+                study_entries: Vec::new(),
+                evidence_artifact_path: "validation.json".into(),
+            },
+        )
+        .expect("sweep validation object");
+        let plan = serializable_to_object_preserving_integers(
+            PLAN_NAME,
+            &ERROR_INTERNAL,
+            FEA_SWEEP_PLAN_CLASS,
+            &AnalysisStudySweepPlanData {
+                sweep_id: "sweep".into(),
+                study_count: 0,
+                planned_count: 0,
+                failed_count: 0,
+                failure_entries: Vec::new(),
+                plan_entries: Vec::new(),
+                evidence_artifact_path: "plan.json".into(),
+            },
+            &[],
+            &[
+                "study_count",
+                "planned_count",
+                "failed_count",
+                "study_index",
+            ],
+        )
+        .expect("sweep plan object");
+        let run = serializable_to_object_preserving_integers(
+            RUN_NAME,
+            &ERROR_INTERNAL,
+            FEA_SWEEP_RUN_RESULT_CLASS,
+            &AnalysisStudySweepData {
+                sweep_id: "sweep".into(),
+                study_count: 0,
+                success_count: 0,
+                failed_count: 0,
+                failure_entries: Vec::new(),
+                run_entries: Vec::new(),
+                evidence_artifact_path: "run.json".into(),
+            },
+            &[],
+            &[
+                "study_count",
+                "success_count",
+                "failed_count",
+                "study_index",
+            ],
+        )
+        .expect("sweep run object");
+
+        for (value, expected_class) in [
+            (validation, FEA_SWEEP_VALIDATION_CLASS),
+            (plan, FEA_SWEEP_PLAN_CLASS),
+            (run, FEA_SWEEP_RUN_RESULT_CLASS),
+        ] {
+            assert_object_class(&value, expected_class);
+            let payload = crate::execution::value_codec::encode_inline_value(&value)
+                .expect("sweep value should be portable");
+            assert_eq!(
+                crate::execution::value_codec::decode_inline_value(&payload)
+                    .expect("sweep value should decode"),
+                value
+            );
+        }
+
+        for class_name in [FEA_VALIDATION_CLASS, FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS] {
+            assert!(crate::class_registry::lookup_property(class_name, "sweep_id").is_none());
+        }
+        assert!(crate::class_registry::lookup_method(FEA_RUN_RESULT_CLASS, "results").is_some());
+        assert!(
+            crate::class_registry::lookup_method(FEA_SWEEP_RUN_RESULT_CLASS, "results").is_none()
+        );
     }
 
     #[test]

@@ -1,8 +1,11 @@
 pub(super) const FEA_STUDY_CLASS: &str = "fea.Study";
 pub(super) const FEA_SWEEP_CLASS: &str = "fea.Sweep";
 pub(super) const FEA_VALIDATION_CLASS: &str = "fea.Validation";
+pub(super) const FEA_SWEEP_VALIDATION_CLASS: &str = "fea.SweepValidation";
 pub(super) const FEA_PLAN_CLASS: &str = "fea.Plan";
+pub(super) const FEA_SWEEP_PLAN_CLASS: &str = "fea.SweepPlan";
 pub(super) const FEA_RUN_RESULT_CLASS: &str = "fea.RunResult";
+pub(super) const FEA_SWEEP_RUN_RESULT_CLASS: &str = "fea.SweepRunResult";
 pub(super) const FEA_MODEL_CLASS: &str = "fea.Model";
 pub(super) const FEA_MATERIAL_CLASS: &str = "fea.Material";
 pub(super) const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
@@ -30,11 +33,12 @@ pub(super) const STUDY_FIELDS: &[&str] = &[
     "meshing_evidence_artifact_path",
 ];
 pub(super) const SWEEP_FIELDS: &[&str] = &["sweep_id", "studies", "fail_fast"];
-pub(super) const VALIDATION_FIELDS: &[&str] = &[
+pub(super) const VALIDATION_FIELDS: &[&str] =
+    &["valid", "issue_codes", "issues", "evidence_artifact_path"];
+pub(super) const SWEEP_VALIDATION_FIELDS: &[&str] = &[
     "sweep_id",
     "valid",
     "issue_codes",
-    "issues",
     "study_entries",
     "evidence_artifact_path",
 ];
@@ -47,6 +51,9 @@ pub(super) const PLAN_FIELDS: &[&str] = &[
     "run_operation",
     "run_op_version",
     "study_fingerprint",
+    "evidence_artifact_path",
+];
+pub(super) const SWEEP_PLAN_FIELDS: &[&str] = &[
     "sweep_id",
     "study_count",
     "planned_count",
@@ -77,6 +84,10 @@ pub(super) const RUN_RESULT_FIELDS: &[&str] = &[
     "quality_reasons",
     "production_publication_reasons",
     "provenance",
+    "evidence_artifact_path",
+    FEA_STUDY_CONTEXT_PROPERTY,
+];
+pub(super) const SWEEP_RUN_RESULT_FIELDS: &[&str] = &[
     "sweep_id",
     "study_count",
     "success_count",
@@ -84,7 +95,6 @@ pub(super) const RUN_RESULT_FIELDS: &[&str] = &[
     "failure_entries",
     "run_entries",
     "evidence_artifact_path",
-    FEA_STUDY_CONTEXT_PROPERTY,
 ];
 pub(super) const MODEL_FIELDS: &[&str] = &[
     "model_id",
@@ -199,3 +209,318 @@ pub(super) const COMPARE_FIELDS: &[&str] = &[
     "solve_ms_delta",
 ];
 pub(super) const TRENDS_FIELDS: &[&str] = &["window_size", "summaries"];
+
+type FeaClassSchema = (
+    &'static str,
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+    crate::execution::value_codec::ImmutableValueClassValidator,
+);
+
+pub(super) fn ensure_fea_classes_registered() {
+    static PORTABLE_SCHEMAS: Once = Once::new();
+    PORTABLE_SCHEMAS.call_once(|| {
+        for (class_name, type_identity, fields, required, validate) in fea_class_schemas() {
+            crate::execution::value_codec::register_immutable_value_class(
+                crate::execution::value_codec::ImmutableValueClassSchema {
+                    class_name,
+                    type_identity,
+                    schema_version: 1,
+                    allowed_fields: fields,
+                    required_fields: required,
+                    validate,
+                },
+            )
+            .unwrap_or_else(|error| {
+                panic!("failed to register immutable FEA class {class_name}: {error}")
+            });
+        }
+    });
+    FEA_CLASSES_REGISTERED.ensure(|| {
+        for (class_name, _, fields, _, _) in fea_class_schemas() {
+            let methods = match class_name {
+                FEA_STUDY_CLASS | FEA_SWEEP_CLASS => workflow_methods(),
+                FEA_RUN_RESULT_CLASS => run_result_methods(),
+                FEA_RESULTS_CLASS => results_methods(),
+                FEA_FIELD_CLASS => field_methods(),
+                _ => HashMap::new(),
+            };
+            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+                name: class_name.to_string(),
+                parent: None,
+                properties: immutable_runtime_properties(fields),
+                methods,
+            });
+        }
+    });
+}
+
+fn immutable_runtime_properties(
+    fields: &[&str],
+) -> HashMap<String, crate::class_registry::RuntimeProperty> {
+    fields
+        .iter()
+        .map(|name| {
+            (
+                (*name).to_string(),
+                crate::class_registry::RuntimeProperty {
+                    name: (*name).to_string(),
+                    is_static: false,
+                    is_constant: true,
+                    is_dependent: false,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Private,
+                    default_value: None,
+                },
+            )
+        })
+        .collect()
+}
+
+fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
+    if object
+        .properties
+        .keys()
+        .any(|name| name.starts_with("__runmat_"))
+    {
+        return Err(format!(
+            "immutable FEA class `{}` contains an opaque runtime property",
+            object.class_name
+        ));
+    }
+    Ok(())
+}
+
+fn validate_condition_object(object: &ObjectInstance) -> Result<(), String> {
+    validate_fea_object(object)?;
+    let variants = ["constraint", "boundary"]
+        .into_iter()
+        .filter(|name| object.properties.contains_key(*name))
+        .count();
+    if variants != 1 {
+        return Err(
+            "fea.BoundaryCondition must contain exactly one typed condition variant".into(),
+        );
+    }
+    Ok(())
+}
+
+fn fea_class_schemas() -> [FeaClassSchema; 19] {
+    [
+        (
+            FEA_STUDY_CLASS,
+            "runmat.fea.study",
+            STUDY_FIELDS,
+            &["study_id", "geometry", "create_model_intent", "execution"],
+            validate_fea_object,
+        ),
+        (
+            FEA_SWEEP_CLASS,
+            "runmat.fea.sweep",
+            SWEEP_FIELDS,
+            SWEEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_VALIDATION_CLASS,
+            "runmat.fea.validation",
+            VALIDATION_FIELDS,
+            VALIDATION_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_SWEEP_VALIDATION_CLASS,
+            "runmat.fea.sweep-validation",
+            SWEEP_VALIDATION_FIELDS,
+            SWEEP_VALIDATION_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_PLAN_CLASS,
+            "runmat.fea.plan",
+            PLAN_FIELDS,
+            PLAN_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_SWEEP_PLAN_CLASS,
+            "runmat.fea.sweep-plan",
+            SWEEP_PLAN_FIELDS,
+            SWEEP_PLAN_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_RUN_RESULT_CLASS,
+            "runmat.fea.run-result",
+            RUN_RESULT_FIELDS,
+            &[
+                "study_id",
+                "model_id",
+                "model_template",
+                "procedure_step",
+                "execution",
+                "identity",
+                "study_fingerprint",
+                "operation_sequence",
+                "run_operation",
+                "run_op_version",
+                "run_id",
+                "run_status",
+                "numerically_acceptable",
+                "production_publishable",
+                "solver_convergence",
+                "result_quality",
+                "quality_reasons",
+                "production_publication_reasons",
+                "provenance",
+                "evidence_artifact_path",
+            ],
+            validate_fea_object,
+        ),
+        (
+            FEA_SWEEP_RUN_RESULT_CLASS,
+            "runmat.fea.sweep-run-result",
+            SWEEP_RUN_RESULT_FIELDS,
+            SWEEP_RUN_RESULT_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_MODEL_CLASS,
+            "runmat.fea.model",
+            MODEL_FIELDS,
+            &[
+                "model_id",
+                "geometry_id",
+                "geometry_revision",
+                "units",
+                "frame",
+                "materials",
+                "material_assignments",
+                "interfaces",
+                "constraints",
+                "boundaries",
+                "connectors",
+                "signals",
+                "excitations",
+                "excitation_cases",
+                "initial_conditions",
+                "response_spectra",
+                "sequence",
+            ],
+            validate_fea_object,
+        ),
+        (
+            FEA_MATERIAL_CLASS,
+            "runmat.fea.material",
+            MATERIAL_FIELDS,
+            &["material_id", "name", "mechanical", "thermal"],
+            validate_fea_object,
+        ),
+        (
+            FEA_MATERIAL_ASSIGNMENT_CLASS,
+            "runmat.fea.material-assignment",
+            MATERIAL_ASSIGNMENT_FIELDS,
+            MATERIAL_ASSIGNMENT_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_BOUNDARY_CONDITION_CLASS,
+            "runmat.fea.boundary-condition",
+            BOUNDARY_CONDITION_FIELDS,
+            &[],
+            validate_condition_object,
+        ),
+        (
+            FEA_STEP_CLASS,
+            "runmat.fea.step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_DOMAIN_CLASS,
+            "runmat.fea.domain",
+            DOMAIN_FIELDS,
+            DOMAIN_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_INTERFACE_CLASS,
+            "runmat.fea.interface",
+            INTERFACE_FIELDS,
+            INTERFACE_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_RESULTS_CLASS,
+            "runmat.fea.results",
+            RESULTS_FIELDS,
+            &[
+                "identity",
+                "field_descriptors",
+                "fields",
+                "run_status",
+                "numerically_acceptable",
+                "production_publishable",
+                "quality_reasons",
+                "production_publication_reasons",
+                "provenance",
+                "summary",
+                "run_id",
+            ],
+            validate_fea_object,
+        ),
+        (
+            FEA_FIELD_CLASS,
+            "runmat.fea.field",
+            FIELD_FIELDS,
+            &[
+                "field_id",
+                "shape",
+                "values",
+                "unit",
+                "location",
+                "kind",
+                "family",
+                "quantity",
+                "topology_id",
+                "element_kind",
+                "component_count",
+                "element_count",
+                "entity_count",
+                "value_count",
+                "storage",
+            ],
+            validate_fea_object,
+        ),
+        (
+            FEA_COMPARE_CLASS,
+            "runmat.fea.compare",
+            COMPARE_FIELDS,
+            &[
+                "baseline_run_id",
+                "candidate_run_id",
+                "numerically_acceptable_changed",
+                "production_publishable_changed",
+                "run_status_changed",
+                "quality_reason_count_delta",
+            ],
+            validate_fea_object,
+        ),
+        (
+            FEA_TRENDS_CLASS,
+            "runmat.fea.trends",
+            TRENDS_FIELDS,
+            TRENDS_FIELDS,
+            validate_fea_object,
+        ),
+    ]
+}
+use std::collections::HashMap;
+use std::sync::Once;
+
+use runmat_types::MemberAccess;
+use runmat_value::ObjectInstance;
+
+use super::{field_methods, results_methods, run_result_methods, workflow_methods};

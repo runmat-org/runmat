@@ -167,7 +167,7 @@ Mode and transient snapshot selectors use the normal one-based RunMat scripting 
 
 The `fea.results` and `fea.trends` query paths are host-side and do not gather or execute stored device fields. `fea.run` may execute through the study's configured GPU solver. None of these operations intrinsically requires native OCCT when consuming existing typed objects, STL/synthetic geometry, or persisted artifacts; only path-time import of topology-bearing CAD may require the configured OCCT backend.
 
-`fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. `fea.RunResult` exposes `results`, `field`, and `plot`; `fea.Results` exposes `field` and `plot`; `fea.Field` exposes `plot`.
+`fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. A study produces `fea.Validation`, `fea.Plan`, and `fea.RunResult`; a sweep produces the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. Only `fea.RunResult` represents one run and therefore exposes `results`, `field`, and `plot`. `fea.Results` exposes `field` and `plot`; `fea.Field` exposes `plot`.
 
 ## `.fea` Document Fields
 
