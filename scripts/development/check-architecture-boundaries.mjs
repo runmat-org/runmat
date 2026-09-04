@@ -452,45 +452,12 @@ for (const [sourcePath, ceiling] of [
     );
   }
 }
-const legacyGroupingSource = read("crates/runmat-runtime/src/builtins/array/grouping/legacy.rs");
-const legacyGroupingLines = legacyGroupingSource.split("\n").length;
-if (legacyGroupingLines > 1524) {
-  fail(
-    "array/grouping/legacy.rs is a shrink-only legacy godfile " +
-      `(found ${legacyGroupingLines} lines; ceiling 1524); extract each migrated identity into its domain package`
-  );
-}
-for (const forbidden of [
-  'name = "combinations"',
-  "COMBINATIONS_DESCRIPTOR",
-  "COMBINATIONS_INTEGER_CAPABILITIES",
-  "combinations_impl",
-  'name = "discretize"',
-  "DISCRETIZE_DESCRIPTOR",
-  "DISCRETIZE_INTEGER_CAPABILITIES",
-  "discretize_impl",
-  'name = "grp2idx"',
-  "GRP2IDX_DESCRIPTOR",
-  "GRP2IDX_INTEGER_CAPABILITIES",
-  "grp2idx_builtin",
-  'name = "findgroups"',
-  "FINDGROUPS_DESCRIPTOR",
-  "FINDGROUPS_INTEGER_CAPABILITIES",
-  "findgroups_builtin",
-  'name = "groupcounts"',
-  "GROUPCOUNTS_DESCRIPTOR",
-  "GROUPCOUNTS_INTEGER_CAPABILITIES",
-  "groupcounts_builtin",
-  'name = "splitapply"',
-  "SPLITAPPLY_DESCRIPTOR",
-  "SPLITAPPLY_INTEGER_CAPABILITIES",
-  "splitapply_builtin",
-]) {
-  if (legacyGroupingSource.includes(forbidden)) {
-    fail(`array/grouping/legacy.rs retains migrated responsibility (${forbidden})`);
-  }
+if (fs.existsSync(path.join(repo, "crates/runmat-runtime/src/builtins/array/grouping/legacy.rs"))) {
+  fail("array/grouping/legacy.rs must not return after the final identity migration");
 }
 for (const sourcePath of [
+  "docs/builtins/reference/accumarray.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/accumarray.json",
   "docs/builtins/reference/grp2idx.json",
   "crates/runmat-runtime/src/builtins/builtins-json/grp2idx.json",
   "docs/builtins/reference/findgroups.json",
@@ -501,7 +468,7 @@ for (const sourcePath of [
   "crates/runmat-runtime/src/builtins/builtins-json/splitapply.json",
 ]) {
   if (fs.existsSync(path.join(repo, sourcePath))) {
-    fail(`${sourcePath} is obsolete grp2idx documentation debt and must not return`);
+    fail(`${sourcePath} is obsolete catalog-migration documentation debt and must not return`);
   }
 }
 
@@ -511,6 +478,13 @@ const groupingCompositionRoots = new Set([
   "crates/runmat-runtime/src/builtins/array/grouping/mod.rs",
   "crates/runmat-runtime/src/builtins/array/grouping/keys/mod.rs",
   "crates/runmat-runtime/src/builtins/array/grouping/variables/mod.rs",
+]);
+const accumulationCompositionRoots = new Set([
+  "crates/runmat-builtins/src/catalog/entries/array/accumulation/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/array/accumulation/accumarray/mod.rs",
+  "crates/runmat-builtins/src/catalog/inference/array/accumulation/mod.rs",
+  "crates/runmat-runtime/src/builtins/array/accumulation/mod.rs",
+  "crates/runmat-runtime/src/builtins/array/accumulation/accumarray/mod.rs",
 ]);
 for (const rootPath of [
   "crates/runmat-builtins/src/catalog/entries/array/grouping",
@@ -540,6 +514,29 @@ for (const rootPath of [
       /\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)
     ) {
       fail(`${sourcePath} duplicates catalog-owned grouping metadata`);
+    }
+  }
+}
+for (const rootPath of [
+  "crates/runmat-builtins/src/catalog/entries/array/accumulation",
+  "crates/runmat-builtins/src/catalog/inference/array/accumulation",
+  "crates/runmat-runtime/src/builtins/array/accumulation",
+]) {
+  for (const { path: sourcePath, text } of rustSources(rootPath)) {
+    const lines = text.split("\n").length;
+    const isTest = sourcePath.includes("/tests/") || sourcePath.endsWith("/tests.rs");
+    const ceiling = accumulationCompositionRoots.has(sourcePath) ? 80 : isTest ? 400 : 224;
+    if (lines > ceiling || Buffer.byteLength(text, "utf8") > 24 * 1024) {
+      fail(
+        `${sourcePath} exceeds the accumulation module ceiling ` +
+        `(found ${lines} lines; maximum ${ceiling} and 24 KiB)`
+      );
+    }
+    if (
+      rootPath.includes("runmat-runtime") &&
+      /\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)
+    ) {
+      fail(`${sourcePath} duplicates catalog-owned accumulation metadata`);
     }
   }
 }

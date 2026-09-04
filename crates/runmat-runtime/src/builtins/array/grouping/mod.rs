@@ -4,9 +4,6 @@ pub(crate) mod findgroups;
 pub(crate) mod groupcounts;
 pub(crate) mod grp2idx;
 mod keys;
-mod legacy;
 mod requested_outputs;
 pub(crate) mod splitapply;
 mod variables;
-
-pub(crate) use legacy::*;
