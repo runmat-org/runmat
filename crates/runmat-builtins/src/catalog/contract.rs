@@ -134,8 +134,15 @@ pub enum AggregateInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ArrayInferenceRule {
+    Combinatorics(CombinatoricsInferenceRule),
     Creation(ArrayCreationInferenceRule),
     Introspection(ArrayIntrospectionInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum CombinatoricsInferenceRule {
+    Combinations,
+    Permutations,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

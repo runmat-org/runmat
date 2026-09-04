@@ -752,6 +752,16 @@ pub fn builtin_integer_metadata_by_name(name: &str) -> Option<BuiltinIntegerMeta
         })
 }
 
+/// Returns the compatibility extensions declared for a builtin.
+///
+/// Catalog-owned identities take precedence while unmigrated builtins retain
+/// their runtime registration as the bounded fallback during catalog cutover.
+pub fn builtin_extensions_by_name(name: &str) -> Option<&'static [BuiltinExtensionDescriptor]> {
+    builtin_catalog_entry_by_name(name)
+        .map(|entry| entry.extensions)
+        .or_else(|| builtin_function_by_name(name).map(|function| function.extensions))
+}
+
 /// Returns the physical-stack contract for a builtin call.
 ///
 /// Canonical catalog declarations take precedence. Runtime registration remains
