@@ -2,17 +2,19 @@ use runmat_analysis_core::{
     AcousticConstraint, AcousticConstraintKind, AnalysisBoundary, AnalysisConstraint,
     AnalysisField, AnalysisFieldValues, AnalysisInterface, AnalysisInterfaceKind, AnalysisModel,
     AnalysisModelId, AnalysisProcedure, AnalysisSequence, BoundaryOperator, CfdDomain,
-    CoordinateFrame, Displacement, ElectricCurrent, ElectricPotential, ElectricalConstraint,
-    ElectricalConstraintKind, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence,
-    ExcitationAction, ExcitationCase, ExcitationTarget, FluidConstraint, FluidConstraintKind,
-    FormulationRequirement, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
-    MagneticConstraintKind, MagneticVectorPotential, MaterialAcousticModel, MaterialAssignment,
-    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
-    MaterialThermalModel, PhysicalSignal, PhysicsFamily, PrescribedStructuralDofs, PrescribedValue,
-    Pressure, ProcedureStep, RegionTarget, Rotation, RotationDofValue, SolutionSpace,
-    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
-    StructuralRotationDof, StructuralTranslationDof, Temperature, ThermalConstraint,
-    ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue, Velocity,
+    ComplexPhase, CoordinateFrame, Displacement, ElectricCurrent, ElectricPotential,
+    ElectricalConstraint, ElectricalConstraintKind, ElectroThermalDomain, ElectromagneticDomain,
+    EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationTarget, FluidConstraint,
+    FluidConstraintKind, FormulationRequirement, HeatFlux, HeatTransferCoefficient,
+    MagneticConstraint, MagneticConstraintKind, MagneticVectorPotential, MaterialAcousticModel,
+    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialPlasticModel, MaterialThermalModel, PairedConstraint, PairingPolicy,
+    PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint, PhysicalSignal,
+    PhysicsFamily, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
+    RegionTarget, Rotation, RotationDofValue, SolutionSpace, SpecificAcousticImpedance,
+    StructuralConstraint, StructuralConstraintKind, StructuralRotationDof,
+    StructuralTranslationDof, Temperature, TemperatureDifference, ThermalConstraint,
+    ThermalConstraintKind, ThermoMechanicalDomain, Translation, TranslationDofValue, Velocity,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
@@ -2752,17 +2754,20 @@ fn value_from_json_preserving_integer_kinds(
 ) -> BuiltinResult<Value> {
     let mut converted = value_from_json(json)
         .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
-    promote_json_integer_kinds(builtin, error, &mut converted, json)?;
+    promote_json_scalar_kinds(builtin, error, &mut converted, json)?;
     Ok(converted)
 }
 
-fn promote_json_integer_kinds(
+fn promote_json_scalar_kinds(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
     value: &mut Value,
     json: &serde_json::Value,
 ) -> BuiltinResult<()> {
     match (value, json) {
+        (target, serde_json::Value::String(value)) => {
+            *target = Value::String(value.clone());
+        }
         (target, serde_json::Value::Number(number)) if number.is_u64() => {
             *target = Value::Int(IntValue::U64(
                 number.as_u64().expect("checked unsigned number"),
@@ -2782,20 +2787,20 @@ fn promote_json_integer_kinds(
         (Value::Struct(structure), serde_json::Value::Object(map)) => {
             for (name, child) in map {
                 if let Some(target) = structure.fields.get_mut(name) {
-                    promote_json_integer_kinds(builtin, error, target, child)?;
+                    promote_json_scalar_kinds(builtin, error, target, child)?;
                 }
             }
         }
         (Value::Object(object), serde_json::Value::Object(map)) => {
             for (name, child) in map {
                 if let Some(target) = object.properties.get_mut(name) {
-                    promote_json_integer_kinds(builtin, error, target, child)?;
+                    promote_json_scalar_kinds(builtin, error, target, child)?;
                 }
             }
         }
         (Value::Cell(cell), serde_json::Value::Array(items)) => {
             for (target, child) in cell.data.iter_mut().zip(items) {
-                promote_json_integer_kinds(builtin, error, target, child)?;
+                promote_json_scalar_kinds(builtin, error, target, child)?;
             }
         }
         _ => {}
@@ -4030,9 +4035,7 @@ execution:
         assert_eq!(study_object.class_name, FEA_STUDY_CLASS);
         assert_eq!(
             study_object.properties.get("study_id"),
-            Some(&Value::CharArray(runmat_value::CharArray::new_row(
-                "bracket_static"
-            )))
+            Some(&Value::String("bracket_static".into()))
         );
         let inline = crate::execution::value_codec::encode_inline_value(&study)
             .expect("typed FEA study should cross an execution boundary");

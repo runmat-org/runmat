@@ -140,6 +140,14 @@ fn bound_region(
             "constraint id must not be empty",
         ));
     }
+    let (geometry_id, geometry_revision, target) = bound_region_target(builtin, region)?;
+    Ok((id, geometry_id, geometry_revision, target))
+}
+
+fn bound_region_target(
+    builtin: &'static str,
+    region: &Value,
+) -> BuiltinResult<(String, u32, RegionTarget)> {
     let GeometryRegionRef {
         geometry_id,
         geometry_revision,
@@ -147,10 +155,52 @@ fn bound_region(
         ..
     } = region_ref_from_value(builtin, region)?;
     Ok((
-        id,
         geometry_id,
         geometry_revision,
         RegionTarget::boundary(region_id),
+    ))
+}
+
+fn bound_region_pair(
+    builtin: &'static str,
+    id: String,
+    primary: &Value,
+    secondary: &Value,
+    pairing: &Value,
+) -> BuiltinResult<(String, String, u32, PairedConstraint)> {
+    if id.is_empty() {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "constraint id must not be empty",
+        ));
+    }
+    let (geometry_id, geometry_revision, primary_target) = bound_region_target(builtin, primary)?;
+    let (secondary_geometry_id, secondary_revision, secondary_target) =
+        bound_region_target(builtin, secondary)?;
+    if geometry_id != secondary_geometry_id || geometry_revision != secondary_revision {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "paired regions must belong to the same geometry revision",
+        ));
+    }
+    if primary_target.region_id == secondary_target.region_id {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "paired constraints require distinct primary and secondary regions",
+        ));
+    }
+    Ok((
+        id,
+        geometry_id,
+        geometry_revision,
+        PairedConstraint {
+            primary: primary_target,
+            secondary: secondary_target,
+            pairing: support::pairing_policy_from_value(builtin, pairing)?,
+        },
     ))
 }
 
@@ -161,7 +211,7 @@ fn bound_constraint_to_object<T: Serialize>(
     geometry_revision: u32,
     constraint: T,
 ) -> BuiltinResult<Value> {
-    serializable_to_object_preserving_integers(
+    let mut object = serializable_to_object_value(
         builtin,
         &ERROR_INTERNAL,
         class_name,
@@ -170,9 +220,12 @@ fn bound_constraint_to_object<T: Serialize>(
             geometry_revision,
             constraint,
         },
-        &[],
-        &["geometry_revision"],
-    )
+    )?;
+    object.properties.insert(
+        "geometry_revision".into(),
+        Value::Int(IntValue::U32(geometry_revision)),
+    );
+    Ok(Value::Object(object))
 }
 
 #[runtime_builtin(
@@ -198,24 +251,18 @@ pub async fn structural_fixed_builtin(id: String, region: Value) -> BuiltinResul
         region_id,
         ..
     } = region_ref_from_value(STRUCTURAL_FIXED_NAME, &region)?;
-    let value = GeometryBoundConstraint {
+    bound_constraint_to_object(
+        STRUCTURAL_FIXED_NAME,
+        FEA_STRUCTURAL_CONSTRAINT_CLASS,
         geometry_id,
         geometry_revision,
-        constraint: StructuralConstraint {
+        StructuralConstraint {
             constraint_id: id,
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Fixed {
                 target: RegionTarget::boundary(region_id),
             },
         },
-    };
-    serializable_to_object_preserving_integers(
-        STRUCTURAL_FIXED_NAME,
-        &ERROR_INTERNAL,
-        FEA_STRUCTURAL_CONSTRAINT_CLASS,
-        &value,
-        &[],
-        &["geometry_revision"],
     )
 }
 
@@ -252,24 +299,18 @@ pub async fn thermal_prescribed_builtin(
         TEMPERATURE_CLASS,
         "kelvin",
     )?;
-    let value = GeometryBoundConstraint {
+    bound_constraint_to_object(
+        THERMAL_PRESCRIBED_NAME,
+        FEA_THERMAL_CONSTRAINT_CLASS,
         geometry_id,
         geometry_revision,
-        constraint: ThermalConstraint {
+        ThermalConstraint {
             constraint_id: id,
             kind: ThermalConstraintKind::Prescribed {
                 target: RegionTarget::boundary(region_id),
                 value: PrescribedValue::Constant(Temperature::new(kelvin)),
             },
         },
-    };
-    serializable_to_object_preserving_integers(
-        THERMAL_PRESCRIBED_NAME,
-        &ERROR_INTERNAL,
-        FEA_THERMAL_CONSTRAINT_CLASS,
-        &value,
-        &[],
-        &["geometry_revision"],
     )
 }
 
@@ -383,6 +424,7 @@ mod acoustic;
 mod electrical;
 mod fluid;
 mod magnetic;
+mod paired;
 mod structural;
 mod support;
 
@@ -400,6 +442,19 @@ use self::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::{
+        paired::{
+            acoustic_phase_periodic_builtin, electrical_periodic_builtin, fluid_periodic_builtin,
+            magnetic_phase_periodic_builtin, structural_periodic_builtin, structural_tie_builtin,
+            thermal_affine_jump_builtin, thermal_periodic_builtin,
+        },
+        support::{
+            pairing::{periodic_pairing_geometric_builtin, periodic_pairing_matching_builtin},
+            periodic_transform::{
+                periodic_transform_identity_builtin, periodic_transform_translation_builtin,
+            },
+        },
+    };
     use crate::builtins::geometry::region::geometry_region_builtin;
     use crate::builtins::geometry::{
         geometry_asset_from_value_with_builtin, geometry_load_builtin,
@@ -419,6 +474,19 @@ mod tests {
             path.to_string_lossy().to_string(),
         )]))
         .expect("geometry should load")
+    }
+
+    fn distinct_region(region: &Value) -> Value {
+        let Value::Object(mut object) = region.clone() else {
+            panic!("expected geometry.Region")
+        };
+        object
+            .properties
+            .insert("region_id".into(), Value::String("face:secondary".into()));
+        object
+            .properties
+            .insert("name".into(), Value::String("Secondary".into()));
+        Value::Object(object)
     }
 
     #[test]
@@ -544,6 +612,203 @@ mod tests {
             "wrong_dimension".into(),
             region,
             displacement,
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn paired_relations_are_typed_transformed_and_dimensionally_sound() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let asset = load_fixture(&tmp.path().join("paired.stl"), 1.0);
+        let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
+            .expect("asset should decode");
+        let primary = block_on(geometry_region_builtin(
+            asset,
+            decoded.regions[0].region_id.clone(),
+        ))
+        .expect("primary region");
+        let secondary = distinct_region(&primary);
+        let matching = block_on(periodic_pairing_matching_builtin()).expect("matching pairing");
+        let identity = block_on(periodic_transform_identity_builtin()).expect("identity transform");
+        let translation = block_on(
+            crate::builtins::fea::values::translation_millimeters_builtin(Value::Tensor(
+                Tensor::new_2d(vec![10.0, 0.0, 0.0], 1, 3).unwrap(),
+            )),
+        )
+        .expect("translation");
+        let translated = block_on(periodic_transform_translation_builtin(translation))
+            .expect("translated transform");
+        let tolerance = block_on(crate::builtins::fea::values::length_micrometers_builtin(
+            Value::Num(5.0),
+        ))
+        .expect("tolerance");
+        let geometric =
+            block_on(periodic_pairing_geometric_builtin(tolerance)).expect("geometric pairing");
+
+        let tie = block_on(structural_tie_builtin(
+            "tie".into(),
+            primary.clone(),
+            secondary.clone(),
+            matching.clone(),
+        ))
+        .expect("structural tie");
+        let tie: BoundStructuralConstraint = object_payload(
+            "fea.StructuralConstraint.tie",
+            &tie,
+            FEA_STRUCTURAL_CONSTRAINT_CLASS,
+        )
+        .unwrap();
+        assert!(matches!(
+            tie.constraint.kind,
+            StructuralConstraintKind::Tie(PairedConstraint {
+                pairing: PairingPolicy::Matching,
+                ..
+            })
+        ));
+
+        let periodic = block_on(structural_periodic_builtin(
+            "periodic".into(),
+            primary.clone(),
+            secondary.clone(),
+            translated,
+            geometric,
+        ))
+        .expect("structural periodic relation");
+        let periodic: BoundStructuralConstraint = object_payload(
+            "fea.StructuralConstraint.periodic",
+            &periodic,
+            FEA_STRUCTURAL_CONSTRAINT_CLASS,
+        )
+        .unwrap();
+        assert!(matches!(
+            periodic.constraint.kind,
+            StructuralConstraintKind::Periodic(PeriodicConstraint {
+                transform: PeriodicTransform::Translation(Translation {
+                    meters: [0.01, 0.0, 0.0]
+                }),
+                ..
+            })
+        ));
+
+        let jump = block_on(
+            crate::builtins::fea::values::temperature_difference_celsius_builtin(Value::Num(-15.0)),
+        )
+        .expect("temperature difference");
+        let affine = block_on(thermal_affine_jump_builtin(
+            "jump".into(),
+            primary.clone(),
+            secondary.clone(),
+            identity.clone(),
+            matching.clone(),
+            jump,
+        ))
+        .expect("affine thermal relation");
+        let affine: BoundThermalConstraint = object_payload(
+            "fea.ThermalConstraint.affineJump",
+            &affine,
+            FEA_THERMAL_CONSTRAINT_CLASS,
+        )
+        .unwrap();
+        assert!(matches!(
+            affine.constraint.kind,
+            ThermalConstraintKind::AffineJump {
+                temperature_jump: PrescribedValue::Constant(TemperatureDifference {
+                    kelvin: -15.0
+                }),
+                ..
+            }
+        ));
+        let absolute_temperature = block_on(
+            crate::builtins::fea::values::temperature_celsius_builtin(Value::Num(15.0)),
+        )
+        .unwrap();
+        assert!(block_on(thermal_affine_jump_builtin(
+            "wrong_dimension".into(),
+            primary.clone(),
+            secondary.clone(),
+            identity.clone(),
+            matching.clone(),
+            absolute_temperature,
+        ))
+        .is_err());
+
+        let phase = block_on(crate::builtins::fea::values::complex_phase_degrees_builtin(
+            Value::Num(90.0),
+        ))
+        .expect("phase");
+        for value in [
+            block_on(magnetic_phase_periodic_builtin(
+                "magnetic".into(),
+                primary.clone(),
+                secondary.clone(),
+                identity.clone(),
+                matching.clone(),
+                phase.clone(),
+            ))
+            .expect("magnetic phase relation"),
+            block_on(acoustic_phase_periodic_builtin(
+                "acoustic".into(),
+                primary.clone(),
+                secondary.clone(),
+                identity.clone(),
+                matching.clone(),
+                phase,
+            ))
+            .expect("acoustic phase relation"),
+        ] {
+            let encoded = crate::execution::value_codec::encode_inline_value(&value)
+                .expect("paired relation should encode");
+            assert_eq!(
+                crate::execution::value_codec::decode_inline_value(&encoded)
+                    .expect("paired relation should decode"),
+                value
+            );
+        }
+
+        for result in [
+            block_on(thermal_periodic_builtin(
+                "thermal".into(),
+                primary.clone(),
+                secondary.clone(),
+                identity.clone(),
+                matching.clone(),
+            )),
+            block_on(electrical_periodic_builtin(
+                "electrical".into(),
+                primary.clone(),
+                secondary.clone(),
+                identity.clone(),
+                matching.clone(),
+            )),
+            block_on(fluid_periodic_builtin(
+                "fluid".into(),
+                primary.clone(),
+                secondary.clone(),
+                identity.clone(),
+                matching.clone(),
+            )),
+        ] {
+            assert!(result.is_ok(), "family periodic constructor should succeed");
+        }
+        assert!(block_on(structural_tie_builtin(
+            "self_pair".into(),
+            primary.clone(),
+            primary.clone(),
+            matching.clone(),
+        ))
+        .is_err());
+        let mut foreign = distinct_region(&primary);
+        let Value::Object(object) = &mut foreign else {
+            unreachable!()
+        };
+        object
+            .properties
+            .insert("geometry_id".into(), Value::String("foreign".into()));
+        assert!(block_on(structural_tie_builtin(
+            "foreign_pair".into(),
+            primary,
+            foreign,
+            matching,
         ))
         .is_err());
     }

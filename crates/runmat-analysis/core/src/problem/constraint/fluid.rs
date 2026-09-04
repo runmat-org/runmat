@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{visit_pair, visit_pair_ref, PairedConstraint};
+use super::{visit_periodic, visit_periodic_ref, PeriodicConstraint};
 use crate::problem::{
     prescribed_value::PrescribedValue,
     quantity::{Pressure, Velocity},
@@ -34,7 +34,7 @@ pub enum FluidConstraintKind {
     Symmetry {
         target: RegionTarget,
     },
-    Periodic(PairedConstraint),
+    Periodic(PeriodicConstraint),
     PressureReference {
         target: RegionTarget,
         value: PrescribedValue<Pressure>,
@@ -50,7 +50,7 @@ impl FluidConstraintKind {
             | Self::SlipWall { target }
             | Self::Symmetry { target }
             | Self::PressureReference { target, .. } => Some(target),
-            Self::Periodic(pair) => Some(&pair.primary),
+            Self::Periodic(periodic) => Some(&periodic.pair.primary),
         }
     }
 
@@ -62,7 +62,7 @@ impl FluidConstraintKind {
             | Self::SlipWall { target }
             | Self::Symmetry { target }
             | Self::PressureReference { target, .. } => visit(target),
-            Self::Periodic(pair) => visit_pair(pair, visit),
+            Self::Periodic(periodic) => visit_periodic(periodic, visit),
         }
     }
 
@@ -74,7 +74,7 @@ impl FluidConstraintKind {
             | Self::SlipWall { target }
             | Self::Symmetry { target }
             | Self::PressureReference { target, .. } => visit(target),
-            Self::Periodic(pair) => visit_pair_ref(pair, visit),
+            Self::Periodic(periodic) => visit_periodic_ref(periodic, visit),
         }
     }
 }

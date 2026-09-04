@@ -34,6 +34,7 @@ scalar_quantity!(Length, meters);
 scalar_quantity!(Displacement, meters);
 scalar_quantity!(Rotation, radians);
 scalar_quantity!(Temperature, kelvin);
+scalar_quantity!(TemperatureDifference, kelvin);
 scalar_quantity!(Pressure, pascals);
 scalar_quantity!(ElectricPotential, volts);
 scalar_quantity!(ElectricCurrent, amperes);
@@ -56,6 +57,50 @@ scalar_quantity!(ElectricCurrentDensity, amperes_per_square_meter);
 scalar_quantity!(ElectricChargeDensity, coulombs_per_cubic_meter);
 scalar_quantity!(Stiffness, newtons_per_meter);
 scalar_quantity!(Damping, newton_seconds_per_meter);
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Translation {
+    pub meters: [f64; 3],
+}
+
+impl Translation {
+    pub const fn new(meters: [f64; 3]) -> Self {
+        Self { meters }
+    }
+
+    pub fn is_finite(self) -> bool {
+        self.meters.into_iter().all(f64::is_finite)
+    }
+}
+
+impl FiniteQuantity for Translation {
+    fn is_finite(&self) -> bool {
+        self.meters.into_iter().all(f64::is_finite)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComplexPhase {
+    pub radians: f64,
+}
+
+impl ComplexPhase {
+    pub const fn new(radians: f64) -> Self {
+        Self { radians }
+    }
+
+    pub fn is_finite(self) -> bool {
+        self.radians.is_finite()
+    }
+}
+
+impl FiniteQuantity for ComplexPhase {
+    fn is_finite(&self) -> bool {
+        self.radians.is_finite()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

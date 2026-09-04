@@ -3,8 +3,9 @@ use std::collections::HashSet;
 use crate::{
     AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisModel,
     AnalysisValidationError, BoundaryOperator, ConnectorKind, CoordinateFrame, EntityDimension,
-    ExpectedTopology, FluidConstraintKind, MagneticConstraintKind, PairingPolicy, PhysicalSignal,
-    StructuralConstraintKind, ThermalConstraintKind,
+    ExpectedTopology, FluidConstraintKind, MagneticConstraintKind, PairingPolicy,
+    PeriodicConstraint, PeriodicTransform, PhysicalSignal, StructuralConstraintKind,
+    ThermalConstraintKind,
 };
 
 pub(crate) fn validate_authored_model(
@@ -119,9 +120,8 @@ fn validate_constraint_values(
                 value.reference_point.reference_point_id.trim().is_empty()
                     || !value.reference_point.position.is_finite()
             }
-            StructuralConstraintKind::Tie(pair) | StructuralConstraintKind::Periodic(pair) => {
-                !pairing_is_valid(&pair.pairing)
-            }
+            StructuralConstraintKind::Tie(pair) => !pairing_is_valid(&pair.pairing),
+            StructuralConstraintKind::Periodic(periodic) => !periodic_is_valid(periodic),
             StructuralConstraintKind::Equation(equation) => {
                 equation.terms.is_empty()
                     || !equation.right_hand_side.is_finite()
@@ -134,13 +134,12 @@ fn validate_constraint_values(
         },
         AnalysisConstraint::Thermal(value) => match &value.kind {
             ThermalConstraintKind::Prescribed { value, .. } => !value.is_well_formed(signals),
-            ThermalConstraintKind::Periodic(pair) | ThermalConstraintKind::Tie(pair) => {
-                !pairing_is_valid(&pair.pairing)
-            }
+            ThermalConstraintKind::Periodic(periodic) => !periodic_is_valid(periodic),
+            ThermalConstraintKind::Tie(pair) => !pairing_is_valid(&pair.pairing),
             ThermalConstraintKind::AffineJump {
-                pair,
+                periodic,
                 temperature_jump,
-            } => !pairing_is_valid(&pair.pairing) || !temperature_jump.is_well_formed(signals),
+            } => !periodic_is_valid(periodic) || !temperature_jump.is_well_formed(signals),
         },
         AnalysisConstraint::Electrical(value) => match &value.kind {
             crate::ElectricalConstraintKind::PrescribedPotential { value, .. } => {
@@ -149,21 +148,27 @@ fn validate_constraint_values(
             crate::ElectricalConstraintKind::IntegralCurrent { value, .. } => {
                 !value.is_well_formed(signals)
             }
-            crate::ElectricalConstraintKind::Periodic(pair) => !pairing_is_valid(&pair.pairing),
+            crate::ElectricalConstraintKind::Periodic(periodic) => !periodic_is_valid(periodic),
             _ => false,
         },
         AnalysisConstraint::Magnetic(value) => match &value.kind {
             MagneticConstraintKind::PrescribedVectorPotential { value, .. } => {
                 !value.is_well_formed(signals)
             }
-            MagneticConstraintKind::Periodic(pair) => !pairing_is_valid(&pair.pairing),
+            MagneticConstraintKind::Periodic(periodic) => !periodic_is_valid(periodic),
+            MagneticConstraintKind::PhaseShiftedPeriodic(periodic) => {
+                !periodic_is_valid(&periodic.periodic) || !periodic.phase.is_finite()
+            }
             _ => false,
         },
         AnalysisConstraint::Acoustic(value) => match &value.kind {
             crate::AcousticConstraintKind::PrescribedPressure { value, .. } => {
                 !value.is_well_formed(signals)
             }
-            crate::AcousticConstraintKind::Periodic(pair) => !pairing_is_valid(&pair.pairing),
+            crate::AcousticConstraintKind::Periodic(periodic) => !periodic_is_valid(periodic),
+            crate::AcousticConstraintKind::PhaseShiftedPeriodic(periodic) => {
+                !periodic_is_valid(&periodic.periodic) || !periodic.phase.is_finite()
+            }
         },
         AnalysisConstraint::Fluid(value) => match &value.kind {
             FluidConstraintKind::PrescribedVelocity { value, .. }
@@ -171,7 +176,7 @@ fn validate_constraint_values(
                 velocity: value, ..
             } => !value.is_well_formed(signals),
             FluidConstraintKind::PressureReference { value, .. } => !value.is_well_formed(signals),
-            FluidConstraintKind::Periodic(pair) => !pairing_is_valid(&pair.pairing),
+            FluidConstraintKind::Periodic(periodic) => !periodic_is_valid(periodic),
             _ => false,
         },
     };
@@ -316,6 +321,24 @@ fn pairing_is_valid(pairing: &PairingPolicy) -> bool {
         PairingPolicy::Matching => true,
         PairingPolicy::GeometricTolerance(value) => value.is_finite() && value.meters >= 0.0,
     }
+}
+
+fn periodic_is_valid(periodic: &PeriodicConstraint) -> bool {
+    pairing_is_valid(&periodic.pair.pairing)
+        && match periodic.transform {
+            PeriodicTransform::Identity => true,
+            PeriodicTransform::Translation(value) => value.is_finite(),
+            PeriodicTransform::Rotation {
+                origin,
+                axis,
+                angle,
+            } => {
+                origin.is_finite()
+                    && angle.is_finite()
+                    && axis.into_iter().all(f64::is_finite)
+                    && axis.into_iter().any(|value| value != 0.0)
+            }
+        }
 }
 
 fn has_duplicates<T: Eq + std::hash::Hash>(values: impl IntoIterator<Item = T>) -> bool {

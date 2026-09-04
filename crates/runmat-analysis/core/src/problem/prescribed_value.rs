@@ -4,7 +4,7 @@ use super::quantity::FiniteQuantity;
 use super::{
     quantity::{
         Displacement, ElectricCurrent, ElectricPotential, HeatFlux, MagneticVectorPotential,
-        Pressure, Rotation, Temperature, Velocity,
+        Pressure, Rotation, Temperature, TemperatureDifference, Velocity,
     },
     signal::{PhysicalQuantityKind, PhysicalSignal, SignalId, SignalRepresentation, SignalValue},
 };
@@ -73,6 +73,11 @@ macro_rules! prescribed_quantity {
 prescribed_quantity!(Displacement, Displacement, Displacement);
 prescribed_quantity!(Rotation, Rotation, Rotation);
 prescribed_quantity!(Temperature, Temperature, Temperature);
+prescribed_quantity!(
+    TemperatureDifference,
+    TemperatureDifference,
+    TemperatureDifference
+);
 prescribed_quantity!(Pressure, Pressure, Pressure);
 prescribed_quantity!(ElectricPotential, ElectricPotential, ElectricPotential);
 prescribed_quantity!(ElectricCurrent, ElectricCurrent, ElectricCurrent);

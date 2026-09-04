@@ -25,6 +25,7 @@ pub(crate) fn validate_signals(signals: &[PhysicalSignal]) -> Result<(), Analysi
             PhysicalSignal::Pressure(value) => validate_signal(value),
             PhysicalSignal::BodyForceDensity(value) => validate_signal(value),
             PhysicalSignal::Temperature(value) => validate_signal(value),
+            PhysicalSignal::TemperatureDifference(value) => validate_signal(value),
             PhysicalSignal::HeatFlux(value) => validate_signal(value),
             PhysicalSignal::HeatGenerationDensity(value) => validate_signal(value),
             PhysicalSignal::ElectricPotential(value) => validate_signal(value),

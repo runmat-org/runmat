@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::{visit_pair, visit_pair_ref, PairedConstraint};
+use super::{
+    visit_periodic, visit_periodic_ref, PeriodicConstraint, PhaseShiftedPeriodicConstraint,
+};
 use crate::problem::{
     prescribed_value::PrescribedValue, quantity::MagneticVectorPotential, target::RegionTarget,
 };
@@ -19,7 +21,8 @@ pub enum MagneticConstraintKind {
         target: RegionTarget,
         value: PrescribedValue<MagneticVectorPotential>,
     },
-    Periodic(PairedConstraint),
+    Periodic(PeriodicConstraint),
+    PhaseShiftedPeriodic(PhaseShiftedPeriodicConstraint),
     VectorPotentialGround {
         target: RegionTarget,
     },
@@ -34,7 +37,8 @@ impl MagneticConstraintKind {
             Self::PrescribedVectorPotential { target, .. }
             | Self::VectorPotentialGround { target }
             | Self::CoulombGauge { target } => Some(target),
-            Self::Periodic(pair) => Some(&pair.primary),
+            Self::Periodic(periodic) => Some(&periodic.pair.primary),
+            Self::PhaseShiftedPeriodic(periodic) => Some(&periodic.periodic.pair.primary),
         }
     }
 
@@ -43,7 +47,8 @@ impl MagneticConstraintKind {
             Self::PrescribedVectorPotential { target, .. }
             | Self::VectorPotentialGround { target }
             | Self::CoulombGauge { target } => visit(target),
-            Self::Periodic(pair) => visit_pair(pair, visit),
+            Self::Periodic(periodic) => visit_periodic(periodic, visit),
+            Self::PhaseShiftedPeriodic(periodic) => visit_periodic(&mut periodic.periodic, visit),
         }
     }
 
@@ -52,7 +57,8 @@ impl MagneticConstraintKind {
             Self::PrescribedVectorPotential { target, .. }
             | Self::VectorPotentialGround { target }
             | Self::CoulombGauge { target } => visit(target),
-            Self::Periodic(pair) => visit_pair_ref(pair, visit),
+            Self::Periodic(periodic) => visit_periodic_ref(periodic, visit),
+            Self::PhaseShiftedPeriodic(periodic) => visit_periodic_ref(&periodic.periodic, visit),
         }
     }
 }

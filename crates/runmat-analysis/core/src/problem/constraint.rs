@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{quantity::Length, target::RegionTarget};
+use super::{
+    quantity::{ComplexPhase, Length, Position, Rotation, Translation},
+    target::RegionTarget,
+};
 
 mod acoustic;
 mod electrical;
@@ -99,6 +102,32 @@ pub enum PairingPolicy {
     GeometricTolerance(Length),
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeriodicConstraint {
+    pub pair: PairedConstraint,
+    pub transform: PeriodicTransform,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PeriodicTransform {
+    Identity,
+    Translation(Translation),
+    Rotation {
+        origin: Position,
+        axis: [f64; 3],
+        angle: Rotation,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseShiftedPeriodicConstraint {
+    pub periodic: PeriodicConstraint,
+    pub phase: ComplexPhase,
+}
+
 pub(super) fn visit_pair_ref(pair: &PairedConstraint, visit: &mut impl FnMut(&RegionTarget)) {
     visit(&pair.primary);
     visit(&pair.secondary);
@@ -107,4 +136,18 @@ pub(super) fn visit_pair_ref(pair: &PairedConstraint, visit: &mut impl FnMut(&Re
 pub(super) fn visit_pair(pair: &mut PairedConstraint, visit: &mut impl FnMut(&mut RegionTarget)) {
     visit(&mut pair.primary);
     visit(&mut pair.secondary);
+}
+
+pub(super) fn visit_periodic_ref(
+    periodic: &PeriodicConstraint,
+    visit: &mut impl FnMut(&RegionTarget),
+) {
+    visit_pair_ref(&periodic.pair, visit);
+}
+
+pub(super) fn visit_periodic(
+    periodic: &mut PeriodicConstraint,
+    visit: &mut impl FnMut(&mut RegionTarget),
+) {
+    visit_pair(&mut periodic.pair, visit);
 }

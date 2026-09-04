@@ -6,6 +6,7 @@ use super::*;
 pub(super) const DISPLACEMENT_CLASS: &str = "fea.Displacement";
 pub(super) const ROTATION_CLASS: &str = "fea.Rotation";
 pub(super) const TEMPERATURE_CLASS: &str = "fea.Temperature";
+pub(super) const TEMPERATURE_DIFFERENCE_CLASS: &str = "fea.TemperatureDifference";
 pub(super) const PRESSURE_CLASS: &str = "fea.Pressure";
 pub(super) const VELOCITY_CLASS: &str = "fea.Velocity";
 pub(super) const HEAT_FLUX_CLASS: &str = "fea.HeatFlux";
@@ -16,6 +17,8 @@ pub(super) const ELECTRIC_CURRENT_CLASS: &str = "fea.ElectricCurrent";
 pub(super) const MAGNETIC_VECTOR_POTENTIAL_CLASS: &str = "fea.MagneticVectorPotential";
 pub(super) const LENGTH_CLASS: &str = "fea.Length";
 pub(super) const POSITION_CLASS: &str = "fea.Position";
+pub(super) const TRANSLATION_CLASS: &str = "fea.Translation";
+pub(super) const COMPLEX_PHASE_CLASS: &str = "fea.ComplexPhase";
 
 const METERS: &[&str] = &["meters"];
 const RADIANS: &[&str] = &["radians"];
@@ -43,20 +46,19 @@ const QUANTITY_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Immutable dimensioned FEA value in canonical SI storage.",
 }];
-const POSITION_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "coordinates",
+const VECTOR_QUANTITY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "components",
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description:
-        "Finite real three-component coordinate vector in the unit named by the constructor.",
+    description: "Finite real three-component vector in the unit named by the constructor.",
 }];
-const POSITION_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "position",
+const VECTOR_QUANTITY_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "quantity",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Immutable fea.Position in canonical meter storage.",
+    description: "Immutable three-component dimensioned FEA value in canonical meter storage.",
 }];
 
 const QUANTITY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
@@ -78,24 +80,24 @@ pub(super) const QUANTITY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescrip
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
         notes: "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution.",
     }];
-const POSITION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+const VECTOR_QUANTITY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
-        name: "coordinates",
+        name: "components",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round.",
     }];
-pub(super) const POSITION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+pub(super) const VECTOR_QUANTITY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
-        form: "three-component position",
-        inputs: &POSITION_INTEGER_INPUTS,
+        form: "three-component dimensioned vector",
+        inputs: &VECTOR_QUANTITY_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
         output_class: BuiltinIntegerOutputClassRule::NotApplicable,
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Unit conversion and canonical coordinate storage are binary64 operations; resident values are rejected without provider execution.",
+        notes: "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution.",
     }];
 
 macro_rules! scalar_quantity_builtin {
@@ -141,6 +143,30 @@ scalar_quantity_builtin!(
     DISPLACEMENT_CLASS,
     "meters",
     1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    complex_phase_radians_builtin,
+    COMPLEX_PHASE_RADIANS_DESCRIPTOR,
+    COMPLEX_PHASE_RADIANS_SIGNATURES,
+    "fea.ComplexPhase.radians",
+    "phase = fea.ComplexPhase.radians(radians)",
+    "Create a complex phase shift from radians.",
+    COMPLEX_PHASE_CLASS,
+    "radians",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    complex_phase_degrees_builtin,
+    COMPLEX_PHASE_DEGREES_DESCRIPTOR,
+    COMPLEX_PHASE_DEGREES_SIGNATURES,
+    "fea.ComplexPhase.degrees",
+    "phase = fea.ComplexPhase.degrees(degrees)",
+    "Create a complex phase shift from degrees.",
+    COMPLEX_PHASE_CLASS,
+    "radians",
+    std::f64::consts::PI / 180.0,
     0.0
 );
 scalar_quantity_builtin!(
@@ -214,6 +240,30 @@ scalar_quantity_builtin!(
     "kelvin",
     1.0,
     273.15
+);
+scalar_quantity_builtin!(
+    temperature_difference_kelvin_builtin,
+    TEMPERATURE_DIFFERENCE_KELVIN_DESCRIPTOR,
+    TEMPERATURE_DIFFERENCE_KELVIN_SIGNATURES,
+    "fea.TemperatureDifference.kelvin",
+    "difference = fea.TemperatureDifference.kelvin(value)",
+    "Create a temperature difference from kelvin.",
+    TEMPERATURE_DIFFERENCE_CLASS,
+    "kelvin",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    temperature_difference_celsius_builtin,
+    TEMPERATURE_DIFFERENCE_CELSIUS_DESCRIPTOR,
+    TEMPERATURE_DIFFERENCE_CELSIUS_SIGNATURES,
+    "fea.TemperatureDifference.celsius",
+    "difference = fea.TemperatureDifference.celsius(value)",
+    "Create a temperature difference from degrees Celsius.",
+    TEMPERATURE_DIFFERENCE_CLASS,
+    "kelvin",
+    1.0,
+    0.0
 );
 scalar_quantity_builtin!(
     pressure_pascals_builtin,
@@ -348,15 +398,15 @@ scalar_quantity_builtin!(
     0.0
 );
 
-macro_rules! position_builtin {
+macro_rules! vector_quantity_builtin {
     (
         $function:ident, $descriptor:ident, $signatures:ident,
-        $builtin_name:literal, $label:literal, $summary:literal, $scale:expr
+        $builtin_name:literal, $label:literal, $summary:literal, $class:expr, $scale:expr
     ) => {
         const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
             label: $label,
-            inputs: &POSITION_INPUTS,
-            outputs: &POSITION_OUTPUTS,
+            inputs: &VECTOR_QUANTITY_INPUTS,
+            outputs: &VECTOR_QUANTITY_OUTPUTS,
         }];
         pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
             signatures: &$signatures,
@@ -368,35 +418,57 @@ macro_rules! position_builtin {
                                                     name = $builtin_name,
                                                     category = "fea",
                                                     summary = $summary,
-                                            keywords = "fea,position,coordinates,units,typed",
+                                            keywords = "fea,quantity,vector,components,units,typed",
                                             descriptor($descriptor),
-                                            integer_capabilities(POSITION_INTEGER_CAPABILITIES),
+                                            integer_capabilities(VECTOR_QUANTITY_INTEGER_CAPABILITIES),
                                             builtin_path = "crate::builtins::fea::values"
                                                 )]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
-            let coordinates = finite_numeric_vector3($builtin_name, &value, "coordinates")?;
-            let coordinates = coordinates.map(|value| value * $scale);
-            position_to_value($builtin_name, coordinates)
+            let components = finite_numeric_vector3($builtin_name, &value, "components")?;
+            let components = components.map(|value| value * $scale);
+            vector_quantity_to_value($builtin_name, $class, components)
         }
     };
 }
 
-position_builtin!(
+vector_quantity_builtin!(
     position_meters_builtin,
     POSITION_METERS_DESCRIPTOR,
     POSITION_METERS_SIGNATURES,
     "fea.Position.meters",
     "position = fea.Position.meters(coordinates)",
     "Create a position from meter coordinates.",
+    POSITION_CLASS,
     1.0
 );
-position_builtin!(
+vector_quantity_builtin!(
     position_millimeters_builtin,
     POSITION_MILLIMETERS_DESCRIPTOR,
     POSITION_MILLIMETERS_SIGNATURES,
     "fea.Position.millimeters",
     "position = fea.Position.millimeters(coordinates)",
     "Create a position from millimeter coordinates.",
+    POSITION_CLASS,
+    1.0e-3
+);
+vector_quantity_builtin!(
+    translation_meters_builtin,
+    TRANSLATION_METERS_DESCRIPTOR,
+    TRANSLATION_METERS_SIGNATURES,
+    "fea.Translation.meters",
+    "translation = fea.Translation.meters(components)",
+    "Create a translation vector from meter components.",
+    TRANSLATION_CLASS,
+    1.0
+);
+vector_quantity_builtin!(
+    translation_millimeters_builtin,
+    TRANSLATION_MILLIMETERS_DESCRIPTOR,
+    TRANSLATION_MILLIMETERS_SIGNATURES,
+    "fea.Translation.millimeters",
+    "translation = fea.Translation.millimeters(components)",
+    "Create a translation vector from millimeter components.",
+    TRANSLATION_CLASS,
     1.0e-3
 );
 
@@ -433,11 +505,16 @@ pub(super) fn ensure_quantity_classes_registered() {
     });
 }
 
-fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 13] {
+fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 16] {
     [
         (DISPLACEMENT_CLASS, "runmat.fea.displacement", METERS),
         (ROTATION_CLASS, "runmat.fea.rotation", RADIANS),
         (TEMPERATURE_CLASS, "runmat.fea.temperature", KELVIN),
+        (
+            TEMPERATURE_DIFFERENCE_CLASS,
+            "runmat.fea.temperature-difference",
+            KELVIN,
+        ),
         (PRESSURE_CLASS, "runmat.fea.pressure", PASCALS),
         (VELOCITY_CLASS, "runmat.fea.velocity", METERS_PER_SECOND),
         (
@@ -472,6 +549,8 @@ fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]);
         ),
         (LENGTH_CLASS, "runmat.fea.length", METERS),
         (POSITION_CLASS, "runmat.fea.position", METERS),
+        (TRANSLATION_CLASS, "runmat.fea.translation", METERS),
+        (COMPLEX_PHASE_CLASS, "runmat.fea.complex-phase", RADIANS),
     ]
 }
 
@@ -512,6 +591,10 @@ fn quantity_methods(class_name: &str) -> HashMap<String, crate::class_registry::
             ("kelvin", "fea.Temperature.kelvin"),
             ("celsius", "fea.Temperature.celsius"),
         ],
+        TEMPERATURE_DIFFERENCE_CLASS => &[
+            ("kelvin", "fea.TemperatureDifference.kelvin"),
+            ("celsius", "fea.TemperatureDifference.celsius"),
+        ],
         PRESSURE_CLASS => &[("pascals", "fea.Pressure.pascals")],
         VELOCITY_CLASS => &[("metersPerSecond", "fea.Velocity.metersPerSecond")],
         HEAT_FLUX_CLASS => &[("wattsPerSquareMeter", "fea.HeatFlux.wattsPerSquareMeter")],
@@ -537,6 +620,14 @@ fn quantity_methods(class_name: &str) -> HashMap<String, crate::class_registry::
         POSITION_CLASS => &[
             ("meters", "fea.Position.meters"),
             ("millimeters", "fea.Position.millimeters"),
+        ],
+        TRANSLATION_CLASS => &[
+            ("meters", "fea.Translation.meters"),
+            ("millimeters", "fea.Translation.millimeters"),
+        ],
+        COMPLEX_PHASE_CLASS => &[
+            ("radians", "fea.ComplexPhase.radians"),
+            ("degrees", "fea.ComplexPhase.degrees"),
         ],
         _ => unreachable!("quantity schemas contain only known classes"),
     };
@@ -568,8 +659,8 @@ fn validate_quantity_object(object: &ObjectInstance) -> Result<(), String> {
     let Some(value) = object.properties.get(fields[0]) else {
         return Err(format!("{} is missing `{}`", object.class_name, fields[0]));
     };
-    if object.class_name == POSITION_CLASS {
-        finite_numeric_vector3("fea.Position", value, "coordinates")
+    if object.class_name == POSITION_CLASS || object.class_name == TRANSLATION_CLASS {
+        finite_numeric_vector3("FEA vector quantity", value, "components")
             .map(|_| ())
             .map_err(|error| error.message().to_string())
     } else {
@@ -615,14 +706,18 @@ fn quantity_to_value(
     Ok(Value::Object(object))
 }
 
-fn position_to_value(builtin: &'static str, coordinates: [f64; 3]) -> BuiltinResult<Value> {
+fn vector_quantity_to_value(
+    builtin: &'static str,
+    class_name: &'static str,
+    coordinates: [f64; 3],
+) -> BuiltinResult<Value> {
     ensure_quantity_classes_registered();
-    let mut object = ObjectInstance::new(POSITION_CLASS.into());
+    let mut object = ObjectInstance::new(class_name.into());
     let tensor = Tensor::new_2d(coordinates.to_vec(), 1, 3).map_err(|error| {
         builtin_error(
             builtin,
             &ERROR_INTERNAL,
-            format!("failed to construct position: {error}"),
+            format!("failed to construct dimensioned vector: {error}"),
         )
     })?;
     object
@@ -662,28 +757,41 @@ pub(super) fn quantity_scalar(
 }
 
 pub(super) fn position_meters(builtin: &'static str, value: &Value) -> BuiltinResult<[f64; 3]> {
+    vector_quantity(builtin, value, POSITION_CLASS, "position")
+}
+
+pub(super) fn translation_meters(builtin: &'static str, value: &Value) -> BuiltinResult<[f64; 3]> {
+    vector_quantity(builtin, value, TRANSLATION_CLASS, "translation")
+}
+
+fn vector_quantity(
+    builtin: &'static str,
+    value: &Value,
+    class_name: &'static str,
+    label: &str,
+) -> BuiltinResult<[f64; 3]> {
     let Value::Object(object) = value else {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected {POSITION_CLASS}"),
+            format!("expected {class_name}"),
         ));
     };
-    if object.class_name != POSITION_CLASS {
+    if object.class_name != class_name {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected {POSITION_CLASS}, got {}", object.class_name),
+            format!("expected {class_name}, got {}", object.class_name),
         ));
     }
     let coordinates = object.properties.get("meters").ok_or_else(|| {
         builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("{POSITION_CLASS} is missing `meters`"),
+            format!("{class_name} is missing `meters`"),
         )
     })?;
-    finite_numeric_vector3(builtin, coordinates, "position")
+    finite_numeric_vector3(builtin, coordinates, label)
 }
 
 pub(super) fn finite_numeric_scalar(
@@ -808,6 +916,12 @@ mod tests {
         assert_eq!(
             quantity_scalar("test", &celsius, TEMPERATURE_CLASS, "kelvin").unwrap(),
             293.15
+        );
+        let difference = block_on(temperature_difference_celsius_builtin(Value::Num(-20.0)))
+            .expect("temperature difference");
+        assert_eq!(
+            quantity_scalar("test", &difference, TEMPERATURE_DIFFERENCE_CLASS, "kelvin").unwrap(),
+            -20.0
         );
     }
 

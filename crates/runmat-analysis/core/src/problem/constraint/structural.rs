@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{visit_pair, visit_pair_ref, PairedConstraint};
+use super::{
+    visit_pair, visit_pair_ref, visit_periodic, visit_periodic_ref, PairedConstraint,
+    PeriodicConstraint,
+};
 use crate::problem::{
     coordinate_frame::CoordinateFrame,
     prescribed_value::PrescribedValue,
@@ -37,7 +40,7 @@ pub enum StructuralConstraintKind {
     RigidCoupling(ReferencePointCoupling),
     DistributingCoupling(ReferencePointCoupling),
     Tie(PairedConstraint),
-    Periodic(PairedConstraint),
+    Periodic(PeriodicConstraint),
     Equation(StructuralConstraintEquation),
 }
 
@@ -50,7 +53,8 @@ impl StructuralConstraintKind {
             | Self::Antisymmetry { target } => Some(target),
             Self::Prescribed(value) => Some(&value.target),
             Self::RigidCoupling(value) | Self::DistributingCoupling(value) => Some(&value.target),
-            Self::Tie(value) | Self::Periodic(value) => Some(&value.primary),
+            Self::Tie(value) => Some(&value.primary),
+            Self::Periodic(value) => Some(&value.pair.primary),
             Self::Equation(_) => None,
         }
     }
@@ -65,7 +69,8 @@ impl StructuralConstraintKind {
             Self::RigidCoupling(value) | Self::DistributingCoupling(value) => {
                 visit(&mut value.target)
             }
-            Self::Tie(pair) | Self::Periodic(pair) => visit_pair(pair, visit),
+            Self::Tie(pair) => visit_pair(pair, visit),
+            Self::Periodic(periodic) => visit_periodic(periodic, visit),
             Self::Equation(equation) => {
                 for term in &mut equation.terms {
                     visit(&mut term.target);
@@ -82,7 +87,8 @@ impl StructuralConstraintKind {
             | Self::Antisymmetry { target } => visit(target),
             Self::Prescribed(value) => visit(&value.target),
             Self::RigidCoupling(value) | Self::DistributingCoupling(value) => visit(&value.target),
-            Self::Tie(pair) | Self::Periodic(pair) => visit_pair_ref(pair, visit),
+            Self::Tie(pair) => visit_pair_ref(pair, visit),
+            Self::Periodic(periodic) => visit_periodic_ref(periodic, visit),
             Self::Equation(equation) => equation.terms.iter().for_each(|term| visit(&term.target)),
         }
     }

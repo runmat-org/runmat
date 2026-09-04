@@ -364,11 +364,18 @@ fn structural_constraint_methods() -> HashMap<String, crate::class_registry::Run
             "distributingCoupling",
             "fea.StructuralConstraint.distributingCoupling",
         ),
+        ("tie", "fea.StructuralConstraint.tie"),
+        ("periodic", "fea.StructuralConstraint.periodic"),
     ])
 }
 
 fn thermal_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("prescribed", "fea.ThermalConstraint.prescribed")])
+    static_methods(&[
+        ("prescribed", "fea.ThermalConstraint.prescribed"),
+        ("tie", "fea.ThermalConstraint.tie"),
+        ("periodic", "fea.ThermalConstraint.periodic"),
+        ("affineJump", "fea.ThermalConstraint.affineJump"),
+    ])
 }
 
 fn electrical_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
@@ -390,6 +397,7 @@ fn electrical_constraint_methods() -> HashMap<String, crate::class_registry::Run
             "potentialReference",
             "fea.ElectricalConstraint.potentialReference",
         ),
+        ("periodic", "fea.ElectricalConstraint.periodic"),
     ])
 }
 
@@ -404,14 +412,26 @@ fn magnetic_constraint_methods() -> HashMap<String, crate::class_registry::Runti
             "fea.MagneticConstraint.vectorPotentialGround",
         ),
         ("coulombGauge", "fea.MagneticConstraint.coulombGauge"),
+        ("periodic", "fea.MagneticConstraint.periodic"),
+        (
+            "phaseShiftedPeriodic",
+            "fea.MagneticConstraint.phaseShiftedPeriodic",
+        ),
     ])
 }
 
 fn acoustic_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[(
-        "prescribedPressure",
-        "fea.AcousticConstraint.prescribedPressure",
-    )])
+    static_methods(&[
+        (
+            "prescribedPressure",
+            "fea.AcousticConstraint.prescribedPressure",
+        ),
+        ("periodic", "fea.AcousticConstraint.periodic"),
+        (
+            "phaseShiftedPeriodic",
+            "fea.AcousticConstraint.phaseShiftedPeriodic",
+        ),
+    ])
 }
 
 fn fluid_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
@@ -425,6 +445,7 @@ fn fluid_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeM
         ("slipWall", "fea.FluidConstraint.slipWall"),
         ("symmetry", "fea.FluidConstraint.symmetry"),
         ("pressureReference", "fea.FluidConstraint.pressureReference"),
+        ("periodic", "fea.FluidConstraint.periodic"),
     ])
 }
 

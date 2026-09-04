@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{visit_pair, visit_pair_ref, PairedConstraint};
+use super::{visit_periodic, visit_periodic_ref, PeriodicConstraint};
 use crate::problem::{
     prescribed_value::PrescribedValue,
     quantity::{ElectricCurrent, ElectricPotential},
@@ -31,7 +31,7 @@ pub enum ElectricalConstraintKind {
         target: RegionTarget,
         value: PrescribedValue<ElectricCurrent>,
     },
-    Periodic(PairedConstraint),
+    Periodic(PeriodicConstraint),
     PotentialReference {
         target: RegionTarget,
     },
@@ -45,7 +45,7 @@ impl ElectricalConstraintKind {
             | Self::FloatingConductor { target }
             | Self::IntegralCurrent { target, .. }
             | Self::PotentialReference { target } => Some(target),
-            Self::Periodic(pair) => Some(&pair.primary),
+            Self::Periodic(periodic) => Some(&periodic.pair.primary),
         }
     }
 
@@ -56,7 +56,7 @@ impl ElectricalConstraintKind {
             | Self::FloatingConductor { target }
             | Self::IntegralCurrent { target, .. }
             | Self::PotentialReference { target } => visit(target),
-            Self::Periodic(pair) => visit_pair(pair, visit),
+            Self::Periodic(periodic) => visit_periodic(periodic, visit),
         }
     }
 
@@ -67,7 +67,7 @@ impl ElectricalConstraintKind {
             | Self::FloatingConductor { target }
             | Self::IntegralCurrent { target, .. }
             | Self::PotentialReference { target } => visit(target),
-            Self::Periodic(pair) => visit_pair_ref(pair, visit),
+            Self::Periodic(periodic) => visit_periodic_ref(periodic, visit),
         }
     }
 }

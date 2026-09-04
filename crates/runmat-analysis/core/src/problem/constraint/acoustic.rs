@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::{visit_pair, visit_pair_ref, PairedConstraint};
+use super::{
+    visit_periodic, visit_periodic_ref, PeriodicConstraint, PhaseShiftedPeriodicConstraint,
+};
 use crate::problem::{prescribed_value::PrescribedValue, quantity::Pressure, target::RegionTarget};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,28 +19,32 @@ pub enum AcousticConstraintKind {
         target: RegionTarget,
         value: PrescribedValue<Pressure>,
     },
-    Periodic(PairedConstraint),
+    Periodic(PeriodicConstraint),
+    PhaseShiftedPeriodic(PhaseShiftedPeriodicConstraint),
 }
 
 impl AcousticConstraintKind {
     pub(super) fn target(&self) -> Option<&RegionTarget> {
         match self {
             Self::PrescribedPressure { target, .. } => Some(target),
-            Self::Periodic(pair) => Some(&pair.primary),
+            Self::Periodic(periodic) => Some(&periodic.pair.primary),
+            Self::PhaseShiftedPeriodic(periodic) => Some(&periodic.periodic.pair.primary),
         }
     }
 
     pub(super) fn visit_targets_mut(&mut self, visit: &mut impl FnMut(&mut RegionTarget)) {
         match self {
             Self::PrescribedPressure { target, .. } => visit(target),
-            Self::Periodic(pair) => visit_pair(pair, visit),
+            Self::Periodic(periodic) => visit_periodic(periodic, visit),
+            Self::PhaseShiftedPeriodic(periodic) => visit_periodic(&mut periodic.periodic, visit),
         }
     }
 
     pub(super) fn visit_targets(&self, visit: &mut impl FnMut(&RegionTarget)) {
         match self {
             Self::PrescribedPressure { target, .. } => visit(target),
-            Self::Periodic(pair) => visit_pair_ref(pair, visit),
+            Self::Periodic(periodic) => visit_periodic_ref(periodic, visit),
+            Self::PhaseShiftedPeriodic(periodic) => visit_periodic_ref(&periodic.periodic, visit),
         }
     }
 }

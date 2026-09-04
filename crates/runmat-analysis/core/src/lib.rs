@@ -39,7 +39,8 @@ pub use problem::connector::{AnalysisConnector, ConnectorKind};
 pub use problem::constraint::{
     AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, ElectricalConstraint,
     ElectricalConstraintKind, FluidConstraint, FluidConstraintKind, MagneticConstraint,
-    MagneticConstraintKind, PairingPolicy, PrescribedStructuralDofs, ReferencePointCoupling,
+    MagneticConstraintKind, PairedConstraint, PairingPolicy, PeriodicConstraint, PeriodicTransform,
+    PhaseShiftedPeriodicConstraint, PrescribedStructuralDofs, ReferencePointCoupling,
     RotationDofValue, StructuralConstraint, StructuralConstraintEquation,
     StructuralConstraintEquationTerm, StructuralConstraintKind, StructuralRotationDof,
     StructuralTranslationDof, ThermalConstraint, ThermalConstraintKind, TranslationDofValue,
@@ -71,11 +72,12 @@ pub use problem::materials::{
 pub use problem::model::{AnalysisModel, AnalysisModelId};
 pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{
-    Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, Damping, Displacement,
-    ElectricCharge, ElectricChargeDensity, ElectricCurrent, ElectricCurrentDensity,
+    Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, ComplexPhase, Damping,
+    Displacement, ElectricCharge, ElectricChargeDensity, ElectricCurrent, ElectricCurrentDensity,
     ElectricPotential, Force, HeatFlux, HeatGenerationDensity, HeatTransferCoefficient, Length,
     MagneticVectorPotential, MassFlowRate, Moment, Position, Pressure, Rotation,
-    SpecificAcousticImpedance, Stiffness, Temperature, Traction, Velocity,
+    SpecificAcousticImpedance, Stiffness, Temperature, TemperatureDifference, Traction,
+    Translation, Velocity,
 };
 pub use problem::reference_point::ReferencePoint;
 pub use problem::response_spectrum::{
