@@ -16,7 +16,6 @@ mod math_hyperbolic;
 mod math_inverse;
 mod math_logarithms;
 mod math_reduction;
-mod math_roots;
 mod math_rounding;
 mod math_trigonometric;
 mod metadata_predicate;

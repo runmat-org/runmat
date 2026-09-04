@@ -25,7 +25,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::elementwise::logarithm_common::{
+use crate::builtins::math::elementwise::domain_probe::{
     probe_gpu_lower_bound, GpuLowerBoundResult,
 };
 use crate::builtins::math::symbolic::symbolic_function;

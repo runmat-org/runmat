@@ -19,8 +19,8 @@ use runmat_value::{
     Value,
 };
 
+use super::domain_probe::{probe_gpu_lower_bound, GpuLowerBoundResult};
 use super::log::{log_complex_parts, log_complex_parts_f32};
-use super::logarithm_common::{probe_gpu_lower_bound, GpuLowerBoundResult};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,

@@ -32,7 +32,7 @@ impl std::fmt::Display for GpuDomainProbeError {
     }
 }
 
-/// Determine whether any real input value falls below a caller-defined bound.
+/// Determine whether any real resident input value falls below a caller-defined bound.
 ///
 /// A provider that does not implement `reduce_min` leaves the requirement
 /// unknown so the caller can gather safely. Any other provider failure is
