@@ -452,12 +452,12 @@ for (const [sourcePath, ceiling] of [
     );
   }
 }
-const legacyGroupingSource = read("crates/runmat-runtime/src/builtins/array/grouping.rs");
+const legacyGroupingSource = read("crates/runmat-runtime/src/builtins/array/grouping/legacy.rs");
 const legacyGroupingLines = legacyGroupingSource.split("\n").length;
-if (legacyGroupingLines > 4261) {
+if (legacyGroupingLines > 3871) {
   fail(
-    "array/grouping.rs is a shrink-only legacy godfile " +
-    `(found ${legacyGroupingLines} lines; ceiling 4261); extract each migrated identity into its domain package`
+    "array/grouping/legacy.rs is a shrink-only legacy godfile " +
+    `(found ${legacyGroupingLines} lines; ceiling 3871); extract each migrated identity into its domain package`
   );
 }
 for (const forbidden of [
@@ -469,9 +469,59 @@ for (const forbidden of [
   "DISCRETIZE_DESCRIPTOR",
   "DISCRETIZE_INTEGER_CAPABILITIES",
   "discretize_impl",
+  'name = "grp2idx"',
+  "GRP2IDX_DESCRIPTOR",
+  "GRP2IDX_INTEGER_CAPABILITIES",
+  "grp2idx_builtin",
 ]) {
   if (legacyGroupingSource.includes(forbidden)) {
-    fail(`array/grouping.rs retains migrated combinations responsibility (${forbidden})`);
+    fail(`array/grouping/legacy.rs retains migrated responsibility (${forbidden})`);
+  }
+}
+for (const sourcePath of [
+  "docs/builtins/reference/grp2idx.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/grp2idx.json",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete grp2idx documentation debt and must not return`);
+  }
+}
+
+const groupingCompositionRoots = new Set([
+  "crates/runmat-builtins/src/catalog/entries/array/grouping/mod.rs",
+  "crates/runmat-builtins/src/catalog/inference/array/grouping/mod.rs",
+  "crates/runmat-runtime/src/builtins/array/grouping/mod.rs",
+  "crates/runmat-runtime/src/builtins/array/grouping/keys/mod.rs",
+]);
+for (const rootPath of [
+  "crates/runmat-builtins/src/catalog/entries/array/grouping",
+  "crates/runmat-builtins/src/catalog/inference/array/grouping",
+  "crates/runmat-runtime/src/builtins/array/grouping",
+]) {
+  for (const { path: sourcePath, text } of rustSources(rootPath)) {
+    if (sourcePath.endsWith("/legacy.rs")) continue;
+    const lines = text.split("\n").length;
+    const isDocumentation = /\/(?:documentation|examples|faqs)\.rs$/.test(sourcePath);
+    const isTest = sourcePath.includes("/tests/") || sourcePath.endsWith("/tests.rs");
+    const ceiling = groupingCompositionRoots.has(sourcePath)
+      ? 64
+      : isDocumentation
+        ? 500
+        : isTest
+          ? 400
+          : 256;
+    if (lines > ceiling || Buffer.byteLength(text, "utf8") > 24 * 1024) {
+      fail(
+        `${sourcePath} exceeds its grouping role boundary ` +
+        `(found ${lines} lines; maximum ${ceiling} and 24 KiB)`
+      );
+    }
+    if (
+      rootPath.includes("runmat-runtime") &&
+      /\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)
+    ) {
+      fail(`${sourcePath} duplicates catalog-owned grouping metadata`);
+    }
   }
 }
 

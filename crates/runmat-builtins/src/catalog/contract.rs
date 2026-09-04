@@ -137,6 +137,7 @@ pub enum ArrayInferenceRule {
     Binning(BinningInferenceRule),
     Combinatorics(CombinatoricsInferenceRule),
     Creation(ArrayCreationInferenceRule),
+    Grouping(GroupingInferenceRule),
     Introspection(ArrayIntrospectionInferenceRule),
 }
 
@@ -150,6 +151,11 @@ pub enum CombinatoricsInferenceRule {
     CartesianProduct,
     Permutations,
     SelectionCombinations,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum GroupingInferenceRule {
+    IndexLabels,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -21,8 +21,9 @@ pub use registry::ensure_table_class_registered;
 pub(crate) use binary::{finish_binary, plan_binary};
 use containers::*;
 pub(crate) use containers::{
-    categorical_categories, categorical_compare, categorical_extrema_to_value,
-    categorical_from_args, categorical_labels, categorical_max_evaluate, categorical_min_evaluate,
+    categorical_categories, categorical_compare, categorical_declared_levels,
+    categorical_extrema_to_value, categorical_from_args, categorical_labels,
+    categorical_max_evaluate, categorical_min_evaluate, categorical_observation_labels,
     timetable_row_times, CategoricalComparison,
 };
 pub(crate) use display::categorical_label_at;
