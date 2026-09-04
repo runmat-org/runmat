@@ -55,6 +55,7 @@ mod author_study;
 pub(crate) mod classes;
 mod constraints;
 mod modeling;
+mod values;
 mod visualization;
 use classes::*;
 use constraints::*;
@@ -84,6 +85,11 @@ const MESH_NAME: &str = "mesh";
 const MESH_METHOD_BUILTIN_NAME: &str = "__runmat_fea_mesh";
 const COMPARE_NAME: &str = "fea.compare";
 const TRENDS_NAME: &str = "fea.trends";
+
+pub(crate) fn ensure_value_classes_registered() {
+    classes::ensure_fea_classes_registered();
+    values::ensure_quantity_classes_registered();
+}
 
 const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "result",

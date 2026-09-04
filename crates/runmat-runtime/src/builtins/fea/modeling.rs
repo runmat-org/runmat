@@ -12,6 +12,7 @@ pub(super) enum ModelConditionPayload {
     Constraint(AnalysisConstraint),
     Boundary(AnalysisBoundary),
     BoundStructural(BoundStructuralConstraint),
+    BoundThermal(BoundThermalConstraint),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1229,6 +1230,12 @@ fn build_model_from_parts(
                         .constraints
                         .push(AnalysisConstraint::Structural(bound.constraint));
                 }
+                ModelConditionPayload::BoundThermal(bound) => {
+                    bound.require_geometry(builtin, geometry)?;
+                    model
+                        .constraints
+                        .push(AnalysisConstraint::Thermal(bound.constraint));
+                }
             }
         }
     }
@@ -1499,6 +1506,10 @@ fn boundary_condition_vec_from_value(
             Value::Object(object) if object.class_name == FEA_STRUCTURAL_CONSTRAINT_CLASS => {
                 object_payload(builtin, value, FEA_STRUCTURAL_CONSTRAINT_CLASS)
                     .map(ModelConditionPayload::BoundStructural)
+            }
+            Value::Object(object) if object.class_name == FEA_THERMAL_CONSTRAINT_CLASS => {
+                object_payload(builtin, value, FEA_THERMAL_CONSTRAINT_CLASS)
+                    .map(ModelConditionPayload::BoundThermal)
             }
             Value::Object(object) => Err(builtin_error(
                 builtin,

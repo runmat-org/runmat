@@ -11,6 +11,7 @@ pub(super) const FEA_MATERIAL_CLASS: &str = "fea.Material";
 pub(super) const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
 pub(super) const FEA_BOUNDARY_CONDITION_CLASS: &str = "fea.BoundaryCondition";
 pub(super) const FEA_STRUCTURAL_CONSTRAINT_CLASS: &str = "fea.StructuralConstraint";
+pub(super) const FEA_THERMAL_CONSTRAINT_CLASS: &str = "fea.ThermalConstraint";
 pub(super) const FEA_STEP_CLASS: &str = "fea.Step";
 pub(super) const FEA_DOMAIN_CLASS: &str = "fea.Domain";
 pub(super) const FEA_INTERFACE_CLASS: &str = "fea.Interface";
@@ -245,6 +246,7 @@ pub(crate) fn ensure_fea_classes_registered() {
             let methods = match class_name {
                 FEA_STUDY_CLASS | FEA_SWEEP_CLASS => workflow_methods(),
                 FEA_STRUCTURAL_CONSTRAINT_CLASS => structural_constraint_methods(),
+                FEA_THERMAL_CONSTRAINT_CLASS => thermal_constraint_methods(),
                 FEA_RUN_RESULT_CLASS => run_result_methods(),
                 FEA_RESULTS_CLASS => results_methods(),
                 FEA_FIELD_CLASS => field_methods(),
@@ -310,20 +312,31 @@ fn validate_condition_object(object: &ObjectInstance) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_structural_constraint_object(object: &ObjectInstance) -> Result<(), String> {
+fn validate_bound_constraint_object(object: &ObjectInstance) -> Result<(), String> {
     validate_fea_object(object)?;
     match object.properties.get("geometry_id") {
         Some(Value::String(value)) if !value.is_empty() => {}
-        _ => return Err("fea.StructuralConstraint.geometry_id must be a non-empty string".into()),
+        _ => {
+            return Err(format!(
+                "{}.geometry_id must be a non-empty string",
+                object.class_name
+            ))
+        }
     }
     if !matches!(
         object.properties.get("geometry_revision"),
         Some(Value::Int(IntValue::U32(_)))
     ) {
-        return Err("fea.StructuralConstraint.geometry_revision must be uint32".into());
+        return Err(format!(
+            "{}.geometry_revision must be uint32",
+            object.class_name
+        ));
     }
     if !matches!(object.properties.get("constraint"), Some(Value::Struct(_))) {
-        return Err("fea.StructuralConstraint.constraint must be a typed structure".into());
+        return Err(format!(
+            "{}.constraint must be a typed structure",
+            object.class_name
+        ));
     }
     Ok(())
 }
@@ -351,7 +364,30 @@ fn structural_constraint_methods() -> HashMap<String, crate::class_registry::Run
     .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 20] {
+fn thermal_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    [(
+        "prescribed",
+        crate::builtins::fea::constraints::THERMAL_PRESCRIBED_NAME,
+    )]
+    .into_iter()
+    .map(|(name, function_name)| {
+        (
+            name.to_string(),
+            crate::class_registry::RuntimeMethod {
+                name: name.to_string(),
+                is_static: true,
+                is_abstract: false,
+                is_sealed: false,
+                access: MemberAccess::Public,
+                function_name: function_name.to_string(),
+                implicit_class_argument: None,
+            },
+        )
+    })
+    .collect()
+}
+
+fn fea_class_schemas() -> [FeaClassSchema; 21] {
     [
         (
             FEA_STUDY_CLASS,
@@ -481,7 +517,14 @@ fn fea_class_schemas() -> [FeaClassSchema; 20] {
             "runmat.fea.structural-constraint",
             STRUCTURAL_CONSTRAINT_FIELDS,
             STRUCTURAL_CONSTRAINT_FIELDS,
-            validate_structural_constraint_object,
+            validate_bound_constraint_object,
+        ),
+        (
+            FEA_THERMAL_CONSTRAINT_CLASS,
+            "runmat.fea.thermal-constraint",
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            validate_bound_constraint_object,
         ),
         (
             FEA_STEP_CLASS,

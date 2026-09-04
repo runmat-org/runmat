@@ -40,6 +40,6 @@ pub mod wasm_registry;
 /// class availability never depends on which builtins happened to run first in
 /// that process.
 pub(crate) fn ensure_builtin_value_classes_registered() {
-    fea::classes::ensure_fea_classes_registered();
+    fea::ensure_value_classes_registered();
     geometry::region::ensure_region_class_registered();
 }
