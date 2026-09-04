@@ -33,3 +33,13 @@ pub mod table;
 pub mod testing;
 pub mod timing;
 pub mod wasm_registry;
+
+/// Register immutable value classes that are part of the runtime itself.
+///
+/// Execution workers call this before encoding or decoding portable values so
+/// class availability never depends on which builtins happened to run first in
+/// that process.
+pub(crate) fn ensure_builtin_value_classes_registered() {
+    fea::classes::ensure_fea_classes_registered();
+    geometry::region::ensure_region_class_registered();
+}

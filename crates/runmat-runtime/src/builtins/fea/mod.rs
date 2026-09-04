@@ -52,10 +52,12 @@ use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvel
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod author_study;
-mod classes;
+pub(crate) mod classes;
+mod constraints;
 mod modeling;
 mod visualization;
 use classes::*;
+use constraints::*;
 use modeling::*;
 #[cfg(test)]
 use visualization::{mesh_request_from_args, plot_request_from_args};

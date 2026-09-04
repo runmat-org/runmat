@@ -11,6 +11,7 @@ pub(super) struct DomainPayload {
 pub(super) enum ModelConditionPayload {
     Constraint(AnalysisConstraint),
     Boundary(AnalysisBoundary),
+    BoundStructural(BoundStructuralConstraint),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1222,6 +1223,12 @@ fn build_model_from_parts(
                         resolve_region_selector(builtin, &boundary.target.region_id, geometry)?;
                     model.boundaries.push(boundary);
                 }
+                ModelConditionPayload::BoundStructural(bound) => {
+                    bound.require_geometry(builtin, geometry)?;
+                    model
+                        .constraints
+                        .push(AnalysisConstraint::Structural(bound.constraint));
+                }
             }
         }
     }
@@ -1472,7 +1479,35 @@ fn boundary_condition_vec_from_value(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<Vec<ModelConditionPayload>> {
-    object_vec_from_value(builtin, value, FEA_BOUNDARY_CONDITION_CLASS)
+    let values = match value {
+        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Object(_) => vec![value],
+        other => {
+            return Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("expected a typed FEA condition object or cell array; got {other:?}"),
+            ))
+        }
+    };
+    values
+        .into_iter()
+        .map(|value| match value {
+            Value::Object(object) if object.class_name == FEA_BOUNDARY_CONDITION_CLASS => {
+                object_payload(builtin, value, FEA_BOUNDARY_CONDITION_CLASS)
+            }
+            Value::Object(object) if object.class_name == FEA_STRUCTURAL_CONSTRAINT_CLASS => {
+                object_payload(builtin, value, FEA_STRUCTURAL_CONSTRAINT_CLASS)
+                    .map(ModelConditionPayload::BoundStructural)
+            }
+            Value::Object(object) => Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("unsupported FEA condition class `{}`", object.class_name),
+            )),
+            _ => unreachable!("condition inputs were classified above"),
+        })
+        .collect()
 }
 
 fn typed_vec_from_value<T: DeserializeOwned>(

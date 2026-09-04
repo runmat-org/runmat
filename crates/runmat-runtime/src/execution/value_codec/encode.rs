@@ -6,6 +6,7 @@ use runmat_execution::value::{
 use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 
 pub fn encode_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
+    crate::builtins::ensure_builtin_value_classes_registered();
     encode(value, "$")
 }
 

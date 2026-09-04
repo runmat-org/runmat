@@ -10,6 +10,7 @@ use runmat_value::{
 use super::ValueCodecError;
 
 pub fn decode_inline_value(payload: &ValuePayload) -> Result<Value, ValueCodecError> {
+    crate::builtins::ensure_builtin_value_classes_registered();
     payload
         .validate(ValueLimits::default())
         .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;

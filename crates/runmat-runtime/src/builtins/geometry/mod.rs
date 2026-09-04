@@ -16,6 +16,7 @@ use crate::builtins::io::json::jsondecode::value_from_json;
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+pub mod region;
 pub mod triangulation;
 
 pub const GEOMETRY_ASSET_CLASS: &str = "geometry.Asset";
@@ -675,6 +676,7 @@ fn geometry_asset_methods() -> HashMap<String, crate::class_registry::RuntimeMet
         ("mesh", GEOMETRY_MESH_METHOD_NAME),
         ("listRegions", GEOMETRY_LIST_REGIONS_NAME),
         ("meshes", GEOMETRY_MESHES_NAME),
+        ("region", region::GEOMETRY_REGION_NAME),
     ]
     .into_iter()
     .map(|(name, function_name)| {

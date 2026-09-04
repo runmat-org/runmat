@@ -10,6 +10,7 @@ pub(super) const FEA_MODEL_CLASS: &str = "fea.Model";
 pub(super) const FEA_MATERIAL_CLASS: &str = "fea.Material";
 pub(super) const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
 pub(super) const FEA_BOUNDARY_CONDITION_CLASS: &str = "fea.BoundaryCondition";
+pub(super) const FEA_STRUCTURAL_CONSTRAINT_CLASS: &str = "fea.StructuralConstraint";
 pub(super) const FEA_STEP_CLASS: &str = "fea.Step";
 pub(super) const FEA_DOMAIN_CLASS: &str = "fea.Domain";
 pub(super) const FEA_INTERFACE_CLASS: &str = "fea.Interface";
@@ -136,6 +137,8 @@ pub(super) const MATERIAL_ASSIGNMENT_FIELDS: &[&str] = &[
     "confidence",
 ];
 pub(super) const BOUNDARY_CONDITION_FIELDS: &[&str] = &["constraint", "boundary"];
+pub(super) const STRUCTURAL_CONSTRAINT_FIELDS: &[&str] =
+    &["geometry_id", "geometry_revision", "constraint"];
 pub(super) const STEP_FIELDS: &[&str] = &[
     "step_id",
     "family",
@@ -218,7 +221,7 @@ type FeaClassSchema = (
     crate::execution::value_codec::ImmutableValueClassValidator,
 );
 
-pub(super) fn ensure_fea_classes_registered() {
+pub(crate) fn ensure_fea_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     PORTABLE_SCHEMAS.call_once(|| {
         for (class_name, type_identity, fields, required, validate) in fea_class_schemas() {
@@ -241,6 +244,7 @@ pub(super) fn ensure_fea_classes_registered() {
         for (class_name, _, fields, _, _) in fea_class_schemas() {
             let methods = match class_name {
                 FEA_STUDY_CLASS | FEA_SWEEP_CLASS => workflow_methods(),
+                FEA_STRUCTURAL_CONSTRAINT_CLASS => structural_constraint_methods(),
                 FEA_RUN_RESULT_CLASS => run_result_methods(),
                 FEA_RESULTS_CLASS => results_methods(),
                 FEA_FIELD_CLASS => field_methods(),
@@ -306,7 +310,48 @@ fn validate_condition_object(object: &ObjectInstance) -> Result<(), String> {
     Ok(())
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 19] {
+fn validate_structural_constraint_object(object: &ObjectInstance) -> Result<(), String> {
+    validate_fea_object(object)?;
+    match object.properties.get("geometry_id") {
+        Some(Value::String(value)) if !value.is_empty() => {}
+        _ => return Err("fea.StructuralConstraint.geometry_id must be a non-empty string".into()),
+    }
+    if !matches!(
+        object.properties.get("geometry_revision"),
+        Some(Value::Int(IntValue::U32(_)))
+    ) {
+        return Err("fea.StructuralConstraint.geometry_revision must be uint32".into());
+    }
+    if !matches!(object.properties.get("constraint"), Some(Value::Struct(_))) {
+        return Err("fea.StructuralConstraint.constraint must be a typed structure".into());
+    }
+    Ok(())
+}
+
+fn structural_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    [(
+        "fixed",
+        crate::builtins::fea::constraints::STRUCTURAL_FIXED_NAME,
+    )]
+    .into_iter()
+    .map(|(name, function_name)| {
+        (
+            name.to_string(),
+            crate::class_registry::RuntimeMethod {
+                name: name.to_string(),
+                is_static: true,
+                is_abstract: false,
+                is_sealed: false,
+                access: MemberAccess::Public,
+                function_name: function_name.to_string(),
+                implicit_class_argument: None,
+            },
+        )
+    })
+    .collect()
+}
+
+fn fea_class_schemas() -> [FeaClassSchema; 20] {
     [
         (
             FEA_STUDY_CLASS,
@@ -432,6 +477,13 @@ fn fea_class_schemas() -> [FeaClassSchema; 19] {
             validate_condition_object,
         ),
         (
+            FEA_STRUCTURAL_CONSTRAINT_CLASS,
+            "runmat.fea.structural-constraint",
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            validate_structural_constraint_object,
+        ),
+        (
             FEA_STEP_CLASS,
             "runmat.fea.step",
             STEP_FIELDS,
@@ -521,6 +573,6 @@ use std::collections::HashMap;
 use std::sync::Once;
 
 use runmat_types::MemberAccess;
-use runmat_value::ObjectInstance;
+use runmat_value::{IntValue, ObjectInstance, Value};
 
 use super::{field_methods, results_methods, run_result_methods, workflow_methods};
