@@ -10,19 +10,19 @@ const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
     implementation: &[BuiltinDocumentationLink {
         label: "Runtime implementation",
         target: BuiltinDocumentationLinkTarget::Source(
-            "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/exp.rs",
+            "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/exponentials/exp/mod.rs",
         ),
     }],
     verification: &[
         BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::UnitTest,
             label: "CPU and representation tests",
-            location: "builtins::math::elementwise::exp::tests",
+            location: "builtins::math::elementwise::exponentials::exp::tests::host",
         },
         BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::ProviderTest,
             label: "Provider round-trip test",
-            location: "builtins::math::elementwise::exp::tests::exp_gpu_provider_roundtrip",
+            location: "builtins::math::elementwise::exponentials::exp::tests::provider",
         },
     ],
     notes: &[],
@@ -146,7 +146,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     },
 ];
 
-pub(in super::super) const EXP_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+pub(super) const EXP_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("exp"),
     slug: Some("exp"),

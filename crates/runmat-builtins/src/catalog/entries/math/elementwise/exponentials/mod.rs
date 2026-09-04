@@ -1,4 +1,3 @@
-mod documentation;
 mod exp;
 mod expm1;
 

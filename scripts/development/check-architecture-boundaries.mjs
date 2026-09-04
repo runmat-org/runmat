@@ -934,6 +934,40 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 256,
 });
 
+enforceMigratedBuiltinFamily({
+  name: "exponential family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/exponentials",
+    "crates/runmat-builtins/src/catalog/inference/math/exponentials",
+    "crates/runmat-runtime/src/builtins/math/elementwise/exponentials",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/exponentials/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/exponentials/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/exponentials/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/exponentials/exp/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/exponentials/expm1/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/exponentials/exp/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/exponentials/expm1/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-builtins/src/catalog/inference/math_exponential.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/exponentials/exp.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/exponentials/expm1.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/exponentials/documentation/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/exponentials/documentation/exp.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/exponentials/documentation/expm1.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/exp.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/expm1.rs",
+    "docs/builtins/reference/exp.json",
+    "docs/builtins/reference/expm1.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/exp.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/expm1.json",
+  ],
+  leafLineCeiling: 208,
+  testLineCeiling: 256,
+});
+
 const gammaFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/mod.rs", 40],
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/common.rs", 64],

@@ -20,7 +20,7 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
             "gpuArray contains negative values",
         )),
         Ok(GpuLowerBoundResult::AtOrAbove) => match provider.unary_sqrt(&input).await {
-            Ok(output) => super::super::provider_support::validate_real_unary_output(
+            Ok(output) => super::super::super::unary_provider::validate_real_unary_output(
                 provider,
                 &input,
                 output,
@@ -60,7 +60,7 @@ async fn fallback(
     input: &GpuTensorHandle,
     provider: &'static dyn AccelProvider,
 ) -> BuiltinResult<Value> {
-    super::super::provider_support::gather_compute_restore(
+    super::super::super::unary_provider::gather_compute_restore(
         input,
         provider,
         BUILTIN_NAME,
