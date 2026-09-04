@@ -26,7 +26,6 @@ mod logarithm_common;
 pub(crate) mod minus;
 pub(crate) mod numeric_limits;
 pub(crate) mod plus;
-pub(crate) mod pow2;
 pub(crate) mod power;
 pub(crate) mod powers_of_two;
 pub(crate) mod rdivide;

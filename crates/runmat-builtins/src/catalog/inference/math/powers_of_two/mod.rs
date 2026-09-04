@@ -1,7 +1,5 @@
 mod next_exponent;
-
-#[cfg(test)]
-mod tests;
+mod power;
 
 use crate::{BuiltinCatalogEntry, PowerOfTwoInferenceRule};
 use runmat_types::{CallInference, CallRequest};
@@ -13,5 +11,6 @@ pub(in crate::catalog::inference) fn infer(
 ) -> CallInference {
     match rule {
         PowerOfTwoInferenceRule::NextExponent => next_exponent::infer(request, entry),
+        PowerOfTwoInferenceRule::Power => power::infer(request, entry),
     }
 }

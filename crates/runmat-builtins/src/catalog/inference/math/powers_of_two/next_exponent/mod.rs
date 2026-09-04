@@ -7,6 +7,9 @@ use runmat_types::{
 use super::super::super::support::facts::{materialize, preserve_shape_as_dynamic};
 use super::super::super::{argument_error, finish_fixed, numeric_kind};
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.len() != 1 {
