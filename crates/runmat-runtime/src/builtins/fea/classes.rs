@@ -12,6 +12,10 @@ pub(super) const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
 pub(super) const FEA_BOUNDARY_CONDITION_CLASS: &str = "fea.BoundaryCondition";
 pub(super) const FEA_STRUCTURAL_CONSTRAINT_CLASS: &str = "fea.StructuralConstraint";
 pub(super) const FEA_THERMAL_CONSTRAINT_CLASS: &str = "fea.ThermalConstraint";
+pub(super) const FEA_ELECTRICAL_CONSTRAINT_CLASS: &str = "fea.ElectricalConstraint";
+pub(super) const FEA_MAGNETIC_CONSTRAINT_CLASS: &str = "fea.MagneticConstraint";
+pub(super) const FEA_ACOUSTIC_CONSTRAINT_CLASS: &str = "fea.AcousticConstraint";
+pub(super) const FEA_FLUID_CONSTRAINT_CLASS: &str = "fea.FluidConstraint";
 pub(super) const FEA_STEP_CLASS: &str = "fea.Step";
 pub(super) const FEA_DOMAIN_CLASS: &str = "fea.Domain";
 pub(super) const FEA_INTERFACE_CLASS: &str = "fea.Interface";
@@ -247,6 +251,10 @@ pub(crate) fn ensure_fea_classes_registered() {
                 FEA_STUDY_CLASS | FEA_SWEEP_CLASS => workflow_methods(),
                 FEA_STRUCTURAL_CONSTRAINT_CLASS => structural_constraint_methods(),
                 FEA_THERMAL_CONSTRAINT_CLASS => thermal_constraint_methods(),
+                FEA_ELECTRICAL_CONSTRAINT_CLASS => electrical_constraint_methods(),
+                FEA_MAGNETIC_CONSTRAINT_CLASS => magnetic_constraint_methods(),
+                FEA_ACOUSTIC_CONSTRAINT_CLASS => acoustic_constraint_methods(),
+                FEA_FLUID_CONSTRAINT_CLASS => fluid_constraint_methods(),
                 FEA_RUN_RESULT_CLASS => run_result_methods(),
                 FEA_RESULTS_CLASS => results_methods(),
                 FEA_FIELD_CLASS => field_methods(),
@@ -342,52 +350,99 @@ fn validate_bound_constraint_object(object: &ObjectInstance) -> Result<(), Strin
 }
 
 fn structural_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [(
-        "fixed",
-        crate::builtins::fea::constraints::STRUCTURAL_FIXED_NAME,
-    )]
-    .into_iter()
-    .map(|(name, function_name)| {
+    static_methods(&[
+        ("fixed", "fea.StructuralConstraint.fixed"),
         (
-            name.to_string(),
-            crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
-                is_static: true,
-                is_abstract: false,
-                is_sealed: false,
-                access: MemberAccess::Public,
-                function_name: function_name.to_string(),
-                implicit_class_argument: None,
-            },
-        )
-    })
-    .collect()
+            "normalDisplacement",
+            "fea.StructuralConstraint.normalDisplacement",
+        ),
+        ("symmetry", "fea.StructuralConstraint.symmetry"),
+        ("antisymmetry", "fea.StructuralConstraint.antisymmetry"),
+    ])
 }
 
 fn thermal_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [(
-        "prescribed",
-        crate::builtins::fea::constraints::THERMAL_PRESCRIBED_NAME,
-    )]
-    .into_iter()
-    .map(|(name, function_name)| {
-        (
-            name.to_string(),
-            crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
-                is_static: true,
-                is_abstract: false,
-                is_sealed: false,
-                access: MemberAccess::Public,
-                function_name: function_name.to_string(),
-                implicit_class_argument: None,
-            },
-        )
-    })
-    .collect()
+    static_methods(&[("prescribed", "fea.ThermalConstraint.prescribed")])
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 21] {
+fn electrical_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        (
+            "prescribedPotential",
+            "fea.ElectricalConstraint.prescribedPotential",
+        ),
+        ("equipotential", "fea.ElectricalConstraint.equipotential"),
+        (
+            "floatingConductor",
+            "fea.ElectricalConstraint.floatingConductor",
+        ),
+        (
+            "integralCurrent",
+            "fea.ElectricalConstraint.integralCurrent",
+        ),
+        (
+            "potentialReference",
+            "fea.ElectricalConstraint.potentialReference",
+        ),
+    ])
+}
+
+fn magnetic_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        (
+            "prescribedVectorPotential",
+            "fea.MagneticConstraint.prescribedVectorPotential",
+        ),
+        (
+            "vectorPotentialGround",
+            "fea.MagneticConstraint.vectorPotentialGround",
+        ),
+        ("coulombGauge", "fea.MagneticConstraint.coulombGauge"),
+    ])
+}
+
+fn acoustic_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[(
+        "prescribedPressure",
+        "fea.AcousticConstraint.prescribedPressure",
+    )])
+}
+
+fn fluid_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        (
+            "prescribedVelocity",
+            "fea.FluidConstraint.prescribedVelocity",
+        ),
+        ("movingWall", "fea.FluidConstraint.movingWall"),
+        ("noSlipWall", "fea.FluidConstraint.noSlipWall"),
+        ("slipWall", "fea.FluidConstraint.slipWall"),
+        ("symmetry", "fea.FluidConstraint.symmetry"),
+        ("pressureReference", "fea.FluidConstraint.pressureReference"),
+    ])
+}
+
+fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    names
+        .iter()
+        .map(|(name, function_name)| {
+            (
+                (*name).to_string(),
+                crate::class_registry::RuntimeMethod {
+                    name: (*name).to_string(),
+                    is_static: true,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: MemberAccess::Public,
+                    function_name: (*function_name).to_string(),
+                    implicit_class_argument: None,
+                },
+            )
+        })
+        .collect()
+}
+
+fn fea_class_schemas() -> [FeaClassSchema; 25] {
     [
         (
             FEA_STUDY_CLASS,
@@ -522,6 +577,34 @@ fn fea_class_schemas() -> [FeaClassSchema; 21] {
         (
             FEA_THERMAL_CONSTRAINT_CLASS,
             "runmat.fea.thermal-constraint",
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            validate_bound_constraint_object,
+        ),
+        (
+            FEA_ELECTRICAL_CONSTRAINT_CLASS,
+            "runmat.fea.electrical-constraint",
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            validate_bound_constraint_object,
+        ),
+        (
+            FEA_MAGNETIC_CONSTRAINT_CLASS,
+            "runmat.fea.magnetic-constraint",
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            validate_bound_constraint_object,
+        ),
+        (
+            FEA_ACOUSTIC_CONSTRAINT_CLASS,
+            "runmat.fea.acoustic-constraint",
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            STRUCTURAL_CONSTRAINT_FIELDS,
+            validate_bound_constraint_object,
+        ),
+        (
+            FEA_FLUID_CONSTRAINT_CLASS,
+            "runmat.fea.fluid-constraint",
             STRUCTURAL_CONSTRAINT_FIELDS,
             STRUCTURAL_CONSTRAINT_FIELDS,
             validate_bound_constraint_object,

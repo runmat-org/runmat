@@ -82,6 +82,12 @@ pub(super) const THERMAL_PRESCRIBED_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor
         canonical_builtin: None,
         notes: "The prescribed-temperature constructor accepts an identifier, geometry.Region, and already-dimensioned fea.Temperature value; it has no direct integer input role.",
     };
+pub(super) const TYPED_CONSTRAINT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "Concrete constraint constructors accept identifiers, immutable geometry regions, and already-dimensioned values; they have no direct integer input role.",
+    };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -93,6 +99,10 @@ pub(super) struct GeometryBoundConstraint<T> {
 
 pub(super) type BoundStructuralConstraint = GeometryBoundConstraint<StructuralConstraint>;
 pub(super) type BoundThermalConstraint = GeometryBoundConstraint<ThermalConstraint>;
+pub(super) type BoundElectricalConstraint = GeometryBoundConstraint<ElectricalConstraint>;
+pub(super) type BoundMagneticConstraint = GeometryBoundConstraint<MagneticConstraint>;
+pub(super) type BoundAcousticConstraint = GeometryBoundConstraint<AcousticConstraint>;
+pub(super) type BoundFluidConstraint = GeometryBoundConstraint<FluidConstraint>;
 
 impl<T> GeometryBoundConstraint<T> {
     pub(super) fn require_geometry(
@@ -116,6 +126,53 @@ impl<T> GeometryBoundConstraint<T> {
         }
         Ok(())
     }
+}
+
+fn bound_region(
+    builtin: &'static str,
+    id: String,
+    region: &Value,
+) -> BuiltinResult<(String, String, u32, RegionTarget)> {
+    if id.is_empty() {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "constraint id must not be empty",
+        ));
+    }
+    let GeometryRegionRef {
+        geometry_id,
+        geometry_revision,
+        region_id,
+        ..
+    } = region_ref_from_value(builtin, region)?;
+    Ok((
+        id,
+        geometry_id,
+        geometry_revision,
+        RegionTarget::boundary(region_id),
+    ))
+}
+
+fn bound_constraint_to_object<T: Serialize>(
+    builtin: &'static str,
+    class_name: &'static str,
+    geometry_id: String,
+    geometry_revision: u32,
+    constraint: T,
+) -> BuiltinResult<Value> {
+    serializable_to_object_preserving_integers(
+        builtin,
+        &ERROR_INTERNAL,
+        class_name,
+        &GeometryBoundConstraint {
+            geometry_id,
+            geometry_revision,
+            constraint,
+        },
+        &[],
+        &["geometry_revision"],
+    )
 }
 
 #[runtime_builtin(
@@ -215,6 +272,125 @@ pub async fn thermal_prescribed_builtin(
         &["geometry_revision"],
     )
 }
+
+macro_rules! define_simple_constraint {
+    (
+        $function:ident, $descriptor:ident, $signatures:ident,
+        $builtin_name:literal, $label:literal, $summary:literal, $class:expr,
+        $build:expr
+    ) => {
+        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+            label: $label,
+            inputs: &FIXED_INPUTS,
+            outputs: &OUT_ANY,
+        }];
+        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$signatures,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &ERRORS,
+        };
+        #[runtime_builtin(
+                                            name = $builtin_name,
+                                            category = "fea",
+                                            summary = $summary,
+                                            keywords = "fea,constraint,region,typed",
+                                            descriptor($descriptor),
+                                            integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+                                            builtin_path = "crate::builtins::fea::constraints"
+                                        )]
+        pub async fn $function(id: String, region: Value) -> BuiltinResult<Value> {
+            let (id, geometry_id, geometry_revision, target) =
+                bound_region($builtin_name, id, &region)?;
+            let constraint = ($build)(id, target);
+            bound_constraint_to_object(
+                $builtin_name,
+                $class,
+                geometry_id,
+                geometry_revision,
+                constraint,
+            )
+        }
+    };
+}
+
+macro_rules! define_quantity_constraint {
+    (
+        $function:ident, $descriptor:ident, $signatures:ident, $inputs:ident,
+        $builtin_name:literal, $label:literal, $summary:literal, $class:expr,
+        $value_name:literal, $value_class:expr, $value_field:literal, $build:expr
+    ) => {
+        const $inputs: [BuiltinParamDescriptor; 3] = [
+            BuiltinParamDescriptor {
+                name: "id",
+                ty: BuiltinParamType::StringScalar,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Constraint identifier.",
+            },
+            BuiltinParamDescriptor {
+                name: "region",
+                ty: BuiltinParamType::Any,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "A geometry.Region selected from the model geometry.",
+            },
+            BuiltinParamDescriptor {
+                name: $value_name,
+                ty: BuiltinParamType::Any,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "A dimension-specific immutable FEA value.",
+            },
+        ];
+        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+            label: $label,
+            inputs: &$inputs,
+            outputs: &OUT_ANY,
+        }];
+        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$signatures,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &ERRORS,
+        };
+        #[runtime_builtin(
+                                            name = $builtin_name,
+                                            category = "fea",
+                                            summary = $summary,
+                                            keywords = "fea,constraint,region,quantity,typed",
+                                            descriptor($descriptor),
+                                            integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+                                            builtin_path = "crate::builtins::fea::constraints"
+                                        )]
+        pub async fn $function(id: String, region: Value, value: Value) -> BuiltinResult<Value> {
+            let (id, geometry_id, geometry_revision, target) =
+                bound_region($builtin_name, id, &region)?;
+            let value = quantity_scalar($builtin_name, &value, $value_class, $value_field)?;
+            let constraint = ($build)(id, target, value);
+            bound_constraint_to_object(
+                $builtin_name,
+                $class,
+                geometry_id,
+                geometry_revision,
+                constraint,
+            )
+        }
+    };
+}
+
+mod acoustic;
+mod electrical;
+mod fluid;
+mod magnetic;
+mod structural;
+
+#[cfg(test)]
+use self::{
+    acoustic::acoustic_prescribed_pressure_builtin,
+    electrical::electrical_potential_reference_builtin, fluid::fluid_no_slip_wall_builtin,
+    magnetic::magnetic_vector_potential_ground_builtin,
+};
 
 #[cfg(test)]
 mod tests {
@@ -364,5 +540,101 @@ mod tests {
             displacement,
         ))
         .is_err());
+    }
+
+    #[test]
+    fn every_simple_family_constraint_composes_through_typed_classes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let asset = load_fixture(&tmp.path().join("families.stl"), 1.0);
+        let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
+            .expect("asset should decode");
+        let select = || {
+            block_on(geometry_region_builtin(
+                asset.clone(),
+                decoded.regions[0].region_id.clone(),
+            ))
+            .expect("region")
+        };
+        let temperature = block_on(crate::builtins::fea::values::temperature_kelvin_builtin(
+            Value::Num(300.0),
+        ))
+        .unwrap();
+        let pressure = block_on(crate::builtins::fea::values::pressure_pascals_builtin(
+            Value::Num(1.0),
+        ))
+        .unwrap();
+        let constraints = vec![
+            block_on(structural_fixed_builtin("structural".into(), select())).unwrap(),
+            block_on(thermal_prescribed_builtin(
+                "thermal".into(),
+                select(),
+                temperature,
+            ))
+            .unwrap(),
+            block_on(electrical_potential_reference_builtin(
+                "electrical".into(),
+                select(),
+            ))
+            .unwrap(),
+            block_on(magnetic_vector_potential_ground_builtin(
+                "magnetic".into(),
+                select(),
+            ))
+            .unwrap(),
+            block_on(acoustic_prescribed_pressure_builtin(
+                "acoustic".into(),
+                select(),
+                pressure,
+            ))
+            .unwrap(),
+            block_on(fluid_no_slip_wall_builtin("fluid".into(), select())).unwrap(),
+        ];
+        let conditions = crate::make_cell_with_shape(constraints, vec![1, 6]).unwrap();
+        let model = create_model_object_from_args(vec![
+            Value::String("families".into()),
+            asset,
+            Value::String("Template".into()),
+            Value::String("linear_static_structural".into()),
+            Value::String("BoundaryConditions".into()),
+            conditions,
+        ])
+        .expect("typed family constraints should compose");
+        let model: AnalysisModel = object_payload(MODEL_NAME, &model, FEA_MODEL_CLASS).unwrap();
+        assert_eq!(model.constraints.len(), 6);
+        assert!(matches!(
+            model.constraints[0],
+            AnalysisConstraint::Structural(_)
+        ));
+        assert!(matches!(
+            model.constraints[1],
+            AnalysisConstraint::Thermal(_)
+        ));
+        assert!(matches!(
+            model.constraints[2],
+            AnalysisConstraint::Electrical(_)
+        ));
+        assert!(matches!(
+            model.constraints[3],
+            AnalysisConstraint::Magnetic(_)
+        ));
+        assert!(matches!(
+            model.constraints[4],
+            AnalysisConstraint::Acoustic(_)
+        ));
+        assert!(matches!(model.constraints[5], AnalysisConstraint::Fluid(_)));
+
+        ensure_fea_classes_registered();
+        for (class_name, method) in [
+            (FEA_STRUCTURAL_CONSTRAINT_CLASS, "normalDisplacement"),
+            (FEA_THERMAL_CONSTRAINT_CLASS, "prescribed"),
+            (FEA_ELECTRICAL_CONSTRAINT_CLASS, "integralCurrent"),
+            (FEA_MAGNETIC_CONSTRAINT_CLASS, "coulombGauge"),
+            (FEA_ACOUSTIC_CONSTRAINT_CLASS, "prescribedPressure"),
+            (FEA_FLUID_CONSTRAINT_CLASS, "movingWall"),
+        ] {
+            let (definition, _) = crate::class_registry::lookup_method(class_name, method)
+                .expect("typed class method should be registered");
+            assert!(definition.is_static);
+        }
     }
 }

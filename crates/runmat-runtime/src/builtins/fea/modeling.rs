@@ -13,6 +13,10 @@ pub(super) enum ModelConditionPayload {
     Boundary(AnalysisBoundary),
     BoundStructural(BoundStructuralConstraint),
     BoundThermal(BoundThermalConstraint),
+    BoundElectrical(BoundElectricalConstraint),
+    BoundMagnetic(BoundMagneticConstraint),
+    BoundAcoustic(BoundAcousticConstraint),
+    BoundFluid(BoundFluidConstraint),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1236,6 +1240,30 @@ fn build_model_from_parts(
                         .constraints
                         .push(AnalysisConstraint::Thermal(bound.constraint));
                 }
+                ModelConditionPayload::BoundElectrical(bound) => {
+                    bound.require_geometry(builtin, geometry)?;
+                    model
+                        .constraints
+                        .push(AnalysisConstraint::Electrical(bound.constraint));
+                }
+                ModelConditionPayload::BoundMagnetic(bound) => {
+                    bound.require_geometry(builtin, geometry)?;
+                    model
+                        .constraints
+                        .push(AnalysisConstraint::Magnetic(bound.constraint));
+                }
+                ModelConditionPayload::BoundAcoustic(bound) => {
+                    bound.require_geometry(builtin, geometry)?;
+                    model
+                        .constraints
+                        .push(AnalysisConstraint::Acoustic(bound.constraint));
+                }
+                ModelConditionPayload::BoundFluid(bound) => {
+                    bound.require_geometry(builtin, geometry)?;
+                    model
+                        .constraints
+                        .push(AnalysisConstraint::Fluid(bound.constraint));
+                }
             }
         }
     }
@@ -1510,6 +1538,22 @@ fn boundary_condition_vec_from_value(
             Value::Object(object) if object.class_name == FEA_THERMAL_CONSTRAINT_CLASS => {
                 object_payload(builtin, value, FEA_THERMAL_CONSTRAINT_CLASS)
                     .map(ModelConditionPayload::BoundThermal)
+            }
+            Value::Object(object) if object.class_name == FEA_ELECTRICAL_CONSTRAINT_CLASS => {
+                object_payload(builtin, value, FEA_ELECTRICAL_CONSTRAINT_CLASS)
+                    .map(ModelConditionPayload::BoundElectrical)
+            }
+            Value::Object(object) if object.class_name == FEA_MAGNETIC_CONSTRAINT_CLASS => {
+                object_payload(builtin, value, FEA_MAGNETIC_CONSTRAINT_CLASS)
+                    .map(ModelConditionPayload::BoundMagnetic)
+            }
+            Value::Object(object) if object.class_name == FEA_ACOUSTIC_CONSTRAINT_CLASS => {
+                object_payload(builtin, value, FEA_ACOUSTIC_CONSTRAINT_CLASS)
+                    .map(ModelConditionPayload::BoundAcoustic)
+            }
+            Value::Object(object) if object.class_name == FEA_FLUID_CONSTRAINT_CLASS => {
+                object_payload(builtin, value, FEA_FLUID_CONSTRAINT_CLASS)
+                    .map(ModelConditionPayload::BoundFluid)
             }
             Value::Object(object) => Err(builtin_error(
                 builtin,

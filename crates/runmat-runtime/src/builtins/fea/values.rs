@@ -365,14 +365,14 @@ macro_rules! position_builtin {
             errors: &ERRORS,
         };
         #[runtime_builtin(
-                                            name = $builtin_name,
-                                            category = "fea",
-                                            summary = $summary,
-                                    keywords = "fea,position,coordinates,units,typed",
-                                    descriptor($descriptor),
-                                    integer_capabilities(POSITION_INTEGER_CAPABILITIES),
-                                    builtin_path = "crate::builtins::fea::values"
-                                        )]
+                                                    name = $builtin_name,
+                                                    category = "fea",
+                                                    summary = $summary,
+                                            keywords = "fea,position,coordinates,units,typed",
+                                            descriptor($descriptor),
+                                            integer_capabilities(POSITION_INTEGER_CAPABILITIES),
+                                            builtin_path = "crate::builtins::fea::values"
+                                                )]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
             let coordinates = numeric_vector3($builtin_name, &value)?;
             let coordinates = coordinates.map(|value| value * $scale);
