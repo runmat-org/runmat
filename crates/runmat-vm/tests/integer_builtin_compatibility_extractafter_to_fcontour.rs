@@ -65,7 +65,7 @@ fn compiled_eye_and_false_accept_every_integer_dimension_class() {
 }
 
 #[test]
-fn compiled_fcontour_and_boundary_condition_accept_every_integer_class() {
+fn compiled_fcontour_accepts_every_integer_class() {
     let _plot_guard = runmat_runtime::builtins::plotting::lock_plot_test_context();
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     for constructor in INTEGER_CONSTRUCTORS {
@@ -75,17 +75,11 @@ fn compiled_fcontour_and_boundary_condition_accept_every_integer_class() {
                 "MeshDensity", {constructor}(3), ...
                 "LevelList", {constructor}([1 0]), ...
                 "Fill", {constructor}(1));
-            boundary = fea.boundaryCondition("wall", "face", "thermalHeatFlux", ...
-                "heatFluxWPerM2", {constructor}(2));
             "#
         );
         let values = execute_source(&source)
             .unwrap_or_else(|error| panic!("{constructor} compiled plot/FEA: {error}"));
         assert!(values.iter().any(|value| matches!(value, Value::Num(_))));
-        assert!(values.iter().any(|value| {
-            matches!(value, Value::Object(object)
-                if object.class_name == "fea.BoundaryCondition")
-        }));
     }
 }
 

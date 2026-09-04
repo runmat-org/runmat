@@ -164,14 +164,15 @@ steel = fea.material("steel", ...
     "YoungsModulusPa", 200e9, ...
     "PoissonRatio", 0.30);
 
-fixed = fea.boundaryCondition("fixed_base", "name:Base_Mount", "fixed");
+base = geometry.region(geom, "name:Base_Mount");
+fixed = fea.StructuralConstraint.fixed("fixed_base", base);
 tipLoad = fea.loadCase("tip_force", "name:Tip_Load", "force", ...
     "Vector", [0 -1000 0]);
 
 model = fea.model("bracket_static_model", geom, ...
     "Profile", "linear_static_structural", ...
     "Materials", {steel}, ...
-    "BoundaryConditions", {fixed}, ...
+    "Constraints", {fixed}, ...
     "Loads", {tipLoad});
 
 opts = fea.runOptions("linear_static", ...
@@ -197,7 +198,22 @@ plot(stress);
 print("bracket_von_mises.png", "-dpng");
 ```
 
-`fea.boundaryCondition` accepts finite real numeric scalars for the fields of `prescribedRotation`, `acousticImpedance`, `thermalPrescribedTemperature`, `thermalHeatFlux`, `thermalConvection`, `cfdInletVelocity`, and `cfdOutletPressure`. All eight built-in integer classes are accepted for those fields; the constructor preserves the exact scalar until one explicit IEEE-754 binary64 model-storage conversion, so sufficiently wide integers can round. The `fea.boundaryCondition` builtin reference lists the required field names for each kind.
+Constraints and natural boundaries are separate typed values. Select a `geometry.Region`, then use the class for the relevant physics family. For example, `fea.StructuralConstraint.fixed(...)` constrains structural degrees of freedom, while `fea.StructuralBoundary.pressure(...)` applies a pressure operator. Thermal, electrical, magnetic, acoustic, and fluid families expose the same distinction where it is physically meaningful. Physical values must be created with dimensioned constructors such as `fea.Pressure.pascals(...)`, `fea.Temperature.kelvin(...)`, and `fea.HeatFlux.wattsPerSquareMeter(...)`; an untyped number cannot silently acquire a unit.
+
+This thermal example builds a Robin boundary without embedding a unit or condition kind in text:
+
+```matlab
+wall = geometry.region(geom, "name:Cooling_Wall");
+ambient = fea.Temperature.celsius(22);
+h = fea.HeatTransferCoefficient.wattsPerSquareMeterKelvin(18);
+cooling = fea.ThermalBoundary.convection("ambient_cooling", wall, ambient, h);
+
+thermalModel = fea.model("cooled_bracket", geom, ...
+    "Template", "thermal_transient", ...
+    "Boundaries", {cooling});
+```
+
+Use `Constraints` for prescribed values and kinematic relations, and `Boundaries` for natural or Robin operators. For fluid models, inlet velocity and wall motion are constraints; outlet pressure is a boundary. For thermal models, prescribed temperature is a constraint; heat flux and convection are boundaries.
 
 The same host-only physical-value boundary applies to the documented numeric fields of `fea.material`, `fea.loadCase`, `fea.domain`, and `fea.interface`: field names, scalar/vector shape, finiteness, and kind-specific requirements are validated before one binary64 model-storage conversion, and sufficiently wide integers can round. Nested domain revision values, geometry/model revisions, plan counts, field shape/count metadata, and comparison count deltas are structural integers instead; they remain exact and do not enter the physical-value conversion. The conventional plotting handle remains a double at the scripting boundary. Resident numeric constructor fields are rejected because typed FEA object construction performs no provider execution.
 
@@ -249,7 +265,8 @@ The typed constructors are:
 | --- | --- |
 | `fea.material(...)` | Mechanical, thermal, electrical, and plastic material data. |
 | `fea.materialAssignment(...)` | Region-to-material assignment. |
-| `fea.boundaryCondition(...)` | Constraints such as `fixed` or EM boundary kinds. |
+| `fea.<Family>Constraint.<kind>(...)` | Essential, kinematic, gauge, pairing, and reference constraints bound to a `geometry.Region`. |
+| `fea.<Family>Boundary.<kind>(...)` | Natural and Robin boundary operators such as pressure, heat flux, convection, radiation, impedance, and outlet pressure. |
 | `fea.loadCase(...)` | Force, moment/torque, pressure, body force, current density, or coil current. |
 | `fea.step(...)` | Analysis step. |
 | `fea.domain(...)` | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |

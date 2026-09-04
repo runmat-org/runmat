@@ -218,7 +218,6 @@ fn validate_boundaries(
             BoundaryOperator::AcousticImpedance { impedance } => {
                 impedance.is_finite() && impedance.pascal_seconds_per_meter > 0.0
             }
-            BoundaryOperator::FluidInletVelocity { value } => value.is_well_formed(signals),
             _ => true,
         };
         if !valid {

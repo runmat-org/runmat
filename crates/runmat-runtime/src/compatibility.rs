@@ -2053,7 +2053,6 @@ mod tests {
             "fclose",
             "fcontour",
             "feedback",
-            "fea.boundaryCondition",
             "fea.domain",
             "fea.interface",
             "fea.material",

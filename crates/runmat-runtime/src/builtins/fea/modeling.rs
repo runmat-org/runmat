@@ -6,11 +6,8 @@ pub(super) struct DomainPayload {
     pub(super) data: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum ModelConditionPayload {
-    Constraint(AnalysisConstraint),
-    Boundary(AnalysisBoundary),
+#[derive(Debug, Clone)]
+pub(super) enum BoundConstraintPayload {
     BoundStructural(BoundStructuralConstraint),
     BoundThermal(BoundThermalConstraint),
     BoundElectrical(BoundElectricalConstraint),
@@ -42,7 +39,8 @@ pub(super) struct StudyConstructorOptions {
     pub(super) model_defaults: ModelDefaultsMode,
     pub(super) materials: Vec<MaterialModel>,
     pub(super) material_assignments: Vec<MaterialAssignment>,
-    pub(super) boundary_conditions: Vec<ModelConditionPayload>,
+    pub(super) constraints: Vec<BoundConstraintPayload>,
+    pub(super) boundaries: Vec<GeometryBoundBoundary>,
     pub(super) signals: Vec<PhysicalSignal>,
     pub(super) excitations: Vec<ExcitationAction>,
     pub(super) excitation_cases: Vec<ExcitationCase>,
@@ -87,7 +85,8 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
             options.frame,
             options.materials,
             options.material_assignments,
-            options.boundary_conditions,
+            options.constraints,
+            options.boundaries,
             options.signals,
             options.excitations,
             options.excitation_cases,
@@ -165,7 +164,6 @@ impl StudyConstructorOptions {
             let key = option_key(&pair[0], STUDY_NAME)?;
             let canonical = match key.as_str() {
                 "materialassignments" | "assignments" => "materialassignments",
-                "boundaryconditions" | "bcs" => "boundaryconditions",
                 "excitationcases" | "cases" => "excitationcases",
                 other => other,
             };
@@ -216,9 +214,11 @@ impl StudyConstructorOptions {
                     options.material_assignments =
                         material_assignment_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
-                "boundaryconditions" | "bcs" => {
-                    options.boundary_conditions =
-                        boundary_condition_vec_from_value(STUDY_NAME, &pair[1])?;
+                "constraints" => {
+                    options.constraints = constraint_vec_from_value(STUDY_NAME, &pair[1])?;
+                }
+                "boundaries" => {
+                    options.boundaries = boundary_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
                 "signals" => {
                     options.signals = typed_vec_from_value(STUDY_NAME, &pair[1], "signals")?;
@@ -252,7 +252,8 @@ impl StudyConstructorOptions {
         self.frame.is_some()
             || !self.materials.is_empty()
             || !self.material_assignments.is_empty()
-            || !self.boundary_conditions.is_empty()
+            || !self.constraints.is_empty()
+            || !self.boundaries.is_empty()
             || !self.signals.is_empty()
             || !self.excitations.is_empty()
             || !self.excitation_cases.is_empty()
@@ -269,7 +270,8 @@ struct ModelConstructorOptions {
     defaults: ModelDefaultsMode,
     materials: Vec<MaterialModel>,
     material_assignments: Vec<MaterialAssignment>,
-    boundary_conditions: Vec<ModelConditionPayload>,
+    constraints: Vec<BoundConstraintPayload>,
+    boundaries: Vec<GeometryBoundBoundary>,
     signals: Vec<PhysicalSignal>,
     excitations: Vec<ExcitationAction>,
     excitation_cases: Vec<ExcitationCase>,
@@ -346,7 +348,8 @@ pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<V
         options.frame,
         options.materials,
         options.material_assignments,
-        options.boundary_conditions,
+        options.constraints,
+        options.boundaries,
         options.signals,
         options.excitations,
         options.excitation_cases,
@@ -388,9 +391,11 @@ fn parse_model_constructor_options(
                 options.material_assignments =
                     material_assignment_vec_from_value(builtin, pair.value)?;
             }
-            "boundaryconditions" | "bcs" => {
-                options.boundary_conditions =
-                    boundary_condition_vec_from_value(builtin, pair.value)?;
+            "constraints" => {
+                options.constraints = constraint_vec_from_value(builtin, pair.value)?;
+            }
+            "boundaries" => {
+                options.boundaries = boundary_vec_from_value(builtin, pair.value)?;
             }
             "signals" => options.signals = typed_vec_from_value(builtin, pair.value, "signals")?,
             "excitations" => {
@@ -601,294 +606,6 @@ pub(super) fn create_material_assignment_object_from_args(
         assigned_material_id,
         confidence,
     })
-}
-
-pub(super) fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() < 3 {
-        return Err(builtin_error(
-            BOUNDARY_CONDITION_NAME,
-            &ERROR_INPUT,
-            "fea.boundaryCondition requires id, region, and kind arguments",
-        ));
-    }
-    let bc_id = scalar_string(&args[0], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
-    let region_id = scalar_string(&args[1], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
-    let kind_text = scalar_string(&args[2], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
-    let mut fields = boundary_fields_from_name_values(&args[3..])?;
-    let target = RegionTarget::boundary(region_id);
-    let condition =
-        match normalize_token(&kind_text).as_str() {
-            "fixed" => ModelConditionPayload::Constraint(AnalysisConstraint::Structural(
-                StructuralConstraint {
-                    constraint_id: bc_id,
-                    frame: CoordinateFrame::Global,
-                    kind: StructuralConstraintKind::Fixed { target },
-                },
-            )),
-            "prescribeddisplacement" => ModelConditionPayload::Constraint(
-                AnalysisConstraint::Structural(StructuralConstraint {
-                    constraint_id: bc_id,
-                    frame: CoordinateFrame::Global,
-                    kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                        target,
-                        translations: [
-                            StructuralTranslationDof::Ux,
-                            StructuralTranslationDof::Uy,
-                            StructuralTranslationDof::Uz,
-                        ]
-                        .into_iter()
-                        .map(|dof| TranslationDofValue {
-                            dof,
-                            value: PrescribedValue::Constant(Displacement::new(0.0)),
-                        })
-                        .collect(),
-                        rotations: Vec::new(),
-                    }),
-                }),
-            ),
-            "prescribedrotation" => ModelConditionPayload::Constraint(
-                AnalysisConstraint::Structural(StructuralConstraint {
-                    constraint_id: bc_id,
-                    frame: CoordinateFrame::Global,
-                    kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                        target,
-                        translations: Vec::new(),
-                        rotations: [
-                            (
-                                StructuralRotationDof::Rx,
-                                remove_required_boundary_f64(&mut fields, "rx")?,
-                            ),
-                            (
-                                StructuralRotationDof::Ry,
-                                remove_required_boundary_f64(&mut fields, "ry")?,
-                            ),
-                            (
-                                StructuralRotationDof::Rz,
-                                remove_required_boundary_f64(&mut fields, "rz")?,
-                            ),
-                        ]
-                        .into_iter()
-                        .map(|(dof, value)| RotationDofValue {
-                            dof,
-                            value: PrescribedValue::Constant(Rotation::new(value)),
-                        })
-                        .collect(),
-                    }),
-                }),
-            ),
-            "magneticinsulation" => ModelConditionPayload::Boundary(AnalysisBoundary {
-                boundary_id: bc_id,
-                target,
-                operator: BoundaryOperator::MagneticInsulation,
-            }),
-            "vectorpotentialground" => ModelConditionPayload::Constraint(
-                AnalysisConstraint::Magnetic(MagneticConstraint {
-                    constraint_id: bc_id,
-                    kind: MagneticConstraintKind::VectorPotentialGround { target },
-                }),
-            ),
-            "acousticrigidwall" => ModelConditionPayload::Boundary(AnalysisBoundary {
-                boundary_id: bc_id,
-                target,
-                operator: BoundaryOperator::AcousticRigidWall,
-            }),
-            "acousticradiation" => ModelConditionPayload::Boundary(AnalysisBoundary {
-                boundary_id: bc_id,
-                target,
-                operator: BoundaryOperator::AcousticRadiation,
-            }),
-            "acousticimpedance" => ModelConditionPayload::Boundary(AnalysisBoundary {
-                boundary_id: bc_id,
-                target,
-                operator: BoundaryOperator::AcousticImpedance {
-                    impedance: SpecificAcousticImpedance::new(remove_required_boundary_f64(
-                        &mut fields,
-                        "specific_impedance_pa_s_per_m",
-                    )?),
-                },
-            }),
-            "thermalprescribedtemperature" => {
-                ModelConditionPayload::Constraint(AnalysisConstraint::Thermal(ThermalConstraint {
-                    constraint_id: bc_id,
-                    kind: ThermalConstraintKind::Prescribed {
-                        target,
-                        value: PrescribedValue::Constant(Temperature::new(
-                            remove_required_boundary_f64(&mut fields, "temperature_k")?,
-                        )),
-                    },
-                }))
-            }
-            "thermalheatflux" => ModelConditionPayload::Boundary(AnalysisBoundary {
-                boundary_id: bc_id,
-                target,
-                operator: BoundaryOperator::ThermalHeatFlux {
-                    value: PrescribedValue::Constant(HeatFlux::new(remove_required_boundary_f64(
-                        &mut fields,
-                        "heat_flux_w_per_m2",
-                    )?)),
-                },
-            }),
-            "thermalconvection" => ModelConditionPayload::Boundary(AnalysisBoundary {
-                boundary_id: bc_id,
-                target,
-                operator: BoundaryOperator::ThermalConvection {
-                    ambient_temperature: PrescribedValue::Constant(Temperature::new(
-                        remove_required_boundary_f64(&mut fields, "ambient_temperature_k")?,
-                    )),
-                    coefficient: HeatTransferCoefficient::new(remove_required_boundary_f64(
-                        &mut fields,
-                        "coefficient_w_per_m2k",
-                    )?),
-                },
-            }),
-            "cfdinletvelocity" => {
-                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                    constraint_id: bc_id,
-                    kind: FluidConstraintKind::PrescribedVelocity {
-                        target,
-                        value: PrescribedValue::Constant(Velocity::new(
-                            remove_required_boundary_f64(&mut fields, "velocity_m_per_s")?,
-                        )),
-                    },
-                }))
-            }
-            "cfdoutletpressure" => {
-                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                    constraint_id: bc_id,
-                    kind: FluidConstraintKind::PressureReference {
-                        target,
-                        value: PrescribedValue::Constant(Pressure::new(
-                            remove_required_boundary_f64(&mut fields, "pressure_pa")?,
-                        )),
-                    },
-                }))
-            }
-            "cfdnoslipwall" => {
-                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                    constraint_id: bc_id,
-                    kind: FluidConstraintKind::NoSlipWall { target },
-                }))
-            }
-            "cfdslipwall" => {
-                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                    constraint_id: bc_id,
-                    kind: FluidConstraintKind::SlipWall { target },
-                }))
-            }
-            "cfdsymmetry" => {
-                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                    constraint_id: bc_id,
-                    kind: FluidConstraintKind::Symmetry { target },
-                }))
-            }
-            _ => {
-                return Err(builtin_error(
-                    BOUNDARY_CONDITION_NAME,
-                    &ERROR_INPUT,
-                    format!("unsupported boundary condition kind `{kind_text}`"),
-                ))
-            }
-        };
-    reject_unknown_boundary_fields(fields)?;
-    boundary_condition_to_object(condition)
-}
-
-fn boundary_fields_from_name_values(args: &[Value]) -> BuiltinResult<HashMap<String, &Value>> {
-    let mut fields = HashMap::new();
-    for pair in expect_name_value_tail(BOUNDARY_CONDITION_NAME, args)? {
-        let raw = scalar_string(pair.name, BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
-        let key = canonical_field_name(&raw);
-        if fields.insert(key.clone(), pair.value).is_some() {
-            return Err(builtin_error(
-                BOUNDARY_CONDITION_NAME,
-                &ERROR_INPUT,
-                format!("duplicate fea.boundaryCondition option `{key}`"),
-            ));
-        }
-    }
-    Ok(fields)
-}
-
-fn remove_required_boundary_f64(
-    fields: &mut HashMap<String, &Value>,
-    key: &str,
-) -> BuiltinResult<f64> {
-    let Some(value) = fields.remove(key) else {
-        return Err(builtin_error(
-            BOUNDARY_CONDITION_NAME,
-            &ERROR_INPUT,
-            format!("missing required option `{key}`"),
-        ));
-    };
-    boundary_numeric_scalar_f64(value, key)
-}
-
-fn boundary_numeric_scalar_f64(value: &Value, key: &str) -> BuiltinResult<f64> {
-    let converted = match value {
-        Value::Num(value) => *value,
-        Value::Int(value) => boundary_integer_to_f64(value),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            boundary_numeric_storage_scalar_to_f64(
-                tensor
-                    .numeric_value_at(0)
-                    .expect("validated scalar tensor storage"),
-            )
-        }
-        _ => {
-            return Err(builtin_error(
-                BOUNDARY_CONDITION_NAME,
-                &ERROR_INPUT,
-                format!("numeric option `{key}` must be a real numeric scalar"),
-            ))
-        }
-    };
-    if !converted.is_finite() {
-        return Err(builtin_error(
-            BOUNDARY_CONDITION_NAME,
-            &ERROR_INPUT,
-            format!("numeric option `{key}` must be finite"),
-        ));
-    }
-    Ok(converted)
-}
-
-pub(super) fn boundary_integer_to_f64(value: &IntValue) -> f64 {
-    match value {
-        IntValue::I8(value) => f64::from(*value),
-        IntValue::I16(value) => f64::from(*value),
-        IntValue::I32(value) => f64::from(*value),
-        IntValue::I64(value) => *value as f64,
-        IntValue::U8(value) => f64::from(*value),
-        IntValue::U16(value) => f64::from(*value),
-        IntValue::U32(value) => f64::from(*value),
-        IntValue::U64(value) => *value as f64,
-    }
-}
-
-fn boundary_numeric_storage_scalar_to_f64(value: NumericScalar) -> f64 {
-    match value {
-        NumericScalar::F64(value) => value,
-        NumericScalar::F32(value) => f64::from(value),
-        NumericScalar::I8(value) => f64::from(value),
-        NumericScalar::I16(value) => f64::from(value),
-        NumericScalar::I32(value) => f64::from(value),
-        NumericScalar::I64(value) => value as f64,
-        NumericScalar::U8(value) => f64::from(value),
-        NumericScalar::U16(value) => f64::from(value),
-        NumericScalar::U32(value) => f64::from(value),
-        NumericScalar::U64(value) => value as f64,
-    }
-}
-
-fn reject_unknown_boundary_fields(fields: HashMap<String, &Value>) -> BuiltinResult<()> {
-    if let Some(key) = fields.keys().next() {
-        return Err(builtin_error(
-            BOUNDARY_CONDITION_NAME,
-            &ERROR_INPUT,
-            format!("unsupported fea.boundaryCondition option `{key}`"),
-        ));
-    }
-    Ok(())
 }
 
 pub(super) fn create_step_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1168,7 +885,8 @@ fn build_model_from_parts(
     frame: Option<CoordinateFrame>,
     materials: Vec<MaterialModel>,
     material_assignments: Vec<MaterialAssignment>,
-    boundary_conditions: Vec<ModelConditionPayload>,
+    constraints: Vec<BoundConstraintPayload>,
+    boundaries: Vec<GeometryBoundBoundary>,
     signals: Vec<PhysicalSignal>,
     excitations: Vec<ExcitationAction>,
     excitation_cases: Vec<ExcitationCase>,
@@ -1206,66 +924,54 @@ fn build_model_from_parts(
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
     }
-    if !boundary_conditions.is_empty() {
+    if !constraints.is_empty() {
         model.constraints.clear();
-        model.boundaries.clear();
-        for condition in boundary_conditions {
-            match condition {
-                ModelConditionPayload::Constraint(mut constraint) => {
-                    let mut error = None;
-                    constraint.visit_targets_mut(|target| {
-                        match resolve_region_selector(builtin, &target.region_id, geometry) {
-                            Ok(region_id) => target.region_id = region_id,
-                            Err(value) => error = Some(value),
-                        }
-                    });
-                    if let Some(error) = error {
-                        return Err(error);
-                    }
-                    model.constraints.push(constraint);
-                }
-                ModelConditionPayload::Boundary(mut boundary) => {
-                    boundary.target.region_id =
-                        resolve_region_selector(builtin, &boundary.target.region_id, geometry)?;
-                    model.boundaries.push(boundary);
-                }
-                ModelConditionPayload::BoundStructural(bound) => {
+        for constraint in constraints {
+            match constraint {
+                BoundConstraintPayload::BoundStructural(bound) => {
                     bound.require_geometry(builtin, geometry)?;
                     model
                         .constraints
                         .push(AnalysisConstraint::Structural(bound.constraint));
                 }
-                ModelConditionPayload::BoundThermal(bound) => {
+                BoundConstraintPayload::BoundThermal(bound) => {
                     bound.require_geometry(builtin, geometry)?;
                     model
                         .constraints
                         .push(AnalysisConstraint::Thermal(bound.constraint));
                 }
-                ModelConditionPayload::BoundElectrical(bound) => {
+                BoundConstraintPayload::BoundElectrical(bound) => {
                     bound.require_geometry(builtin, geometry)?;
                     model
                         .constraints
                         .push(AnalysisConstraint::Electrical(bound.constraint));
                 }
-                ModelConditionPayload::BoundMagnetic(bound) => {
+                BoundConstraintPayload::BoundMagnetic(bound) => {
                     bound.require_geometry(builtin, geometry)?;
                     model
                         .constraints
                         .push(AnalysisConstraint::Magnetic(bound.constraint));
                 }
-                ModelConditionPayload::BoundAcoustic(bound) => {
+                BoundConstraintPayload::BoundAcoustic(bound) => {
                     bound.require_geometry(builtin, geometry)?;
                     model
                         .constraints
                         .push(AnalysisConstraint::Acoustic(bound.constraint));
                 }
-                ModelConditionPayload::BoundFluid(bound) => {
+                BoundConstraintPayload::BoundFluid(bound) => {
                     bound.require_geometry(builtin, geometry)?;
                     model
                         .constraints
                         .push(AnalysisConstraint::Fluid(bound.constraint));
                 }
             }
+        }
+    }
+    if !boundaries.is_empty() {
+        model.boundaries.clear();
+        for boundary in boundaries {
+            boundary.require_geometry(builtin, geometry)?;
+            model.boundaries.push(boundary.boundary);
         }
     }
     if !signals.is_empty() {
@@ -1453,15 +1159,6 @@ fn material_assignment_to_object(assignment: MaterialAssignment) -> BuiltinResul
     )
 }
 
-fn boundary_condition_to_object(condition: ModelConditionPayload) -> BuiltinResult<Value> {
-    serializable_to_object(
-        BOUNDARY_CONDITION_NAME,
-        &ERROR_INTERNAL,
-        FEA_BOUNDARY_CONDITION_CLASS,
-        &condition,
-    )
-}
-
 fn step_to_object(step: ProcedureStep) -> BuiltinResult<Value> {
     serializable_to_object(STEP_NAME, &ERROR_INTERNAL, FEA_STEP_CLASS, &step)
 }
@@ -1511,10 +1208,10 @@ fn material_assignment_vec_from_value(
     object_vec_from_value(builtin, value, FEA_MATERIAL_ASSIGNMENT_CLASS)
 }
 
-fn boundary_condition_vec_from_value(
+fn constraint_vec_from_value(
     builtin: &'static str,
     value: &Value,
-) -> BuiltinResult<Vec<ModelConditionPayload>> {
+) -> BuiltinResult<Vec<BoundConstraintPayload>> {
     let values = match value {
         Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
@@ -1522,48 +1219,98 @@ fn boundary_condition_vec_from_value(
             return Err(builtin_error(
                 builtin,
                 &ERROR_INPUT,
-                format!("expected a typed FEA condition object or cell array; got {other:?}"),
+                format!("expected a typed FEA constraint object or cell array; got {other:?}"),
             ))
         }
     };
     values
         .into_iter()
         .map(|value| match value {
-            Value::Object(object) if object.class_name == FEA_BOUNDARY_CONDITION_CLASS => {
-                object_payload(builtin, value, FEA_BOUNDARY_CONDITION_CLASS)
-            }
             Value::Object(object) if object.class_name == FEA_STRUCTURAL_CONSTRAINT_CLASS => {
                 object_payload(builtin, value, FEA_STRUCTURAL_CONSTRAINT_CLASS)
-                    .map(ModelConditionPayload::BoundStructural)
+                    .map(BoundConstraintPayload::BoundStructural)
             }
             Value::Object(object) if object.class_name == FEA_THERMAL_CONSTRAINT_CLASS => {
                 object_payload(builtin, value, FEA_THERMAL_CONSTRAINT_CLASS)
-                    .map(ModelConditionPayload::BoundThermal)
+                    .map(BoundConstraintPayload::BoundThermal)
             }
             Value::Object(object) if object.class_name == FEA_ELECTRICAL_CONSTRAINT_CLASS => {
                 object_payload(builtin, value, FEA_ELECTRICAL_CONSTRAINT_CLASS)
-                    .map(ModelConditionPayload::BoundElectrical)
+                    .map(BoundConstraintPayload::BoundElectrical)
             }
             Value::Object(object) if object.class_name == FEA_MAGNETIC_CONSTRAINT_CLASS => {
                 object_payload(builtin, value, FEA_MAGNETIC_CONSTRAINT_CLASS)
-                    .map(ModelConditionPayload::BoundMagnetic)
+                    .map(BoundConstraintPayload::BoundMagnetic)
             }
             Value::Object(object) if object.class_name == FEA_ACOUSTIC_CONSTRAINT_CLASS => {
                 object_payload(builtin, value, FEA_ACOUSTIC_CONSTRAINT_CLASS)
-                    .map(ModelConditionPayload::BoundAcoustic)
+                    .map(BoundConstraintPayload::BoundAcoustic)
             }
             Value::Object(object) if object.class_name == FEA_FLUID_CONSTRAINT_CLASS => {
                 object_payload(builtin, value, FEA_FLUID_CONSTRAINT_CLASS)
-                    .map(ModelConditionPayload::BoundFluid)
+                    .map(BoundConstraintPayload::BoundFluid)
             }
             Value::Object(object) => Err(builtin_error(
                 builtin,
                 &ERROR_INPUT,
-                format!("unsupported FEA condition class `{}`", object.class_name),
+                format!("unsupported FEA constraint class `{}`", object.class_name),
             )),
-            _ => unreachable!("condition inputs were classified above"),
+            _ => unreachable!("constraint inputs were classified above"),
         })
         .collect()
+}
+
+fn boundary_vec_from_value(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<Vec<GeometryBoundBoundary>> {
+    let values = match value {
+        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Object(_) => vec![value],
+        other => {
+            return Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("expected a typed FEA boundary object or cell array; got {other:?}"),
+            ))
+        }
+    };
+    values
+        .into_iter()
+        .map(|value| match value {
+            Value::Object(object) if object.class_name == FEA_STRUCTURAL_BOUNDARY_CLASS => {
+                bound_boundary_payload(builtin, value, FEA_STRUCTURAL_BOUNDARY_CLASS)
+            }
+            Value::Object(object) if object.class_name == FEA_THERMAL_BOUNDARY_CLASS => {
+                bound_boundary_payload(builtin, value, FEA_THERMAL_BOUNDARY_CLASS)
+            }
+            Value::Object(object) if object.class_name == FEA_MAGNETIC_BOUNDARY_CLASS => {
+                bound_boundary_payload(builtin, value, FEA_MAGNETIC_BOUNDARY_CLASS)
+            }
+            Value::Object(object) if object.class_name == FEA_ACOUSTIC_BOUNDARY_CLASS => {
+                bound_boundary_payload(builtin, value, FEA_ACOUSTIC_BOUNDARY_CLASS)
+            }
+            Value::Object(object) if object.class_name == FEA_FLUID_BOUNDARY_CLASS => {
+                bound_boundary_payload(builtin, value, FEA_FLUID_BOUNDARY_CLASS)
+            }
+            Value::Object(object) => Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("unsupported FEA boundary class `{}`", object.class_name),
+            )),
+            _ => unreachable!("boundary inputs were classified above"),
+        })
+        .collect()
+}
+
+fn bound_boundary_payload(
+    builtin: &'static str,
+    value: &Value,
+    class_name: &'static str,
+) -> BuiltinResult<GeometryBoundBoundary> {
+    let boundary: GeometryBoundBoundary = object_payload(builtin, value, class_name)?;
+    boundary.require_class(builtin, class_name)?;
+    Ok(boundary)
 }
 
 fn typed_vec_from_value<T: DeserializeOwned>(

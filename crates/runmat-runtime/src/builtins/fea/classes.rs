@@ -9,13 +9,17 @@ pub(super) const FEA_SWEEP_RUN_RESULT_CLASS: &str = "fea.SweepRunResult";
 pub(super) const FEA_MODEL_CLASS: &str = "fea.Model";
 pub(super) const FEA_MATERIAL_CLASS: &str = "fea.Material";
 pub(super) const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
-pub(super) const FEA_BOUNDARY_CONDITION_CLASS: &str = "fea.BoundaryCondition";
 pub(super) const FEA_STRUCTURAL_CONSTRAINT_CLASS: &str = "fea.StructuralConstraint";
 pub(super) const FEA_THERMAL_CONSTRAINT_CLASS: &str = "fea.ThermalConstraint";
 pub(super) const FEA_ELECTRICAL_CONSTRAINT_CLASS: &str = "fea.ElectricalConstraint";
 pub(super) const FEA_MAGNETIC_CONSTRAINT_CLASS: &str = "fea.MagneticConstraint";
 pub(super) const FEA_ACOUSTIC_CONSTRAINT_CLASS: &str = "fea.AcousticConstraint";
 pub(super) const FEA_FLUID_CONSTRAINT_CLASS: &str = "fea.FluidConstraint";
+pub(super) const FEA_STRUCTURAL_BOUNDARY_CLASS: &str = "fea.StructuralBoundary";
+pub(super) const FEA_THERMAL_BOUNDARY_CLASS: &str = "fea.ThermalBoundary";
+pub(super) const FEA_MAGNETIC_BOUNDARY_CLASS: &str = "fea.MagneticBoundary";
+pub(super) const FEA_ACOUSTIC_BOUNDARY_CLASS: &str = "fea.AcousticBoundary";
+pub(super) const FEA_FLUID_BOUNDARY_CLASS: &str = "fea.FluidBoundary";
 pub(super) const FEA_STEP_CLASS: &str = "fea.Step";
 pub(super) const FEA_DOMAIN_CLASS: &str = "fea.Domain";
 pub(super) const FEA_INTERFACE_CLASS: &str = "fea.Interface";
@@ -141,9 +145,9 @@ pub(super) const MATERIAL_ASSIGNMENT_FIELDS: &[&str] = &[
     "assigned_material_id",
     "confidence",
 ];
-pub(super) const BOUNDARY_CONDITION_FIELDS: &[&str] = &["constraint", "boundary"];
 pub(super) const STRUCTURAL_CONSTRAINT_FIELDS: &[&str] =
     &["geometry_id", "geometry_revision", "constraint"];
+pub(super) const BOUNDARY_FIELDS: &[&str] = &["geometry_id", "geometry_revision", "boundary"];
 pub(super) const STEP_FIELDS: &[&str] = &[
     "step_id",
     "family",
@@ -255,6 +259,11 @@ pub(crate) fn ensure_fea_classes_registered() {
                 FEA_MAGNETIC_CONSTRAINT_CLASS => magnetic_constraint_methods(),
                 FEA_ACOUSTIC_CONSTRAINT_CLASS => acoustic_constraint_methods(),
                 FEA_FLUID_CONSTRAINT_CLASS => fluid_constraint_methods(),
+                FEA_STRUCTURAL_BOUNDARY_CLASS => structural_boundary_methods(),
+                FEA_THERMAL_BOUNDARY_CLASS => thermal_boundary_methods(),
+                FEA_MAGNETIC_BOUNDARY_CLASS => magnetic_boundary_methods(),
+                FEA_ACOUSTIC_BOUNDARY_CLASS => acoustic_boundary_methods(),
+                FEA_FLUID_BOUNDARY_CLASS => fluid_boundary_methods(),
                 FEA_RUN_RESULT_CLASS => run_result_methods(),
                 FEA_RESULTS_CLASS => results_methods(),
                 FEA_FIELD_CLASS => field_methods(),
@@ -306,20 +315,6 @@ fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_condition_object(object: &ObjectInstance) -> Result<(), String> {
-    validate_fea_object(object)?;
-    let variants = ["constraint", "boundary"]
-        .into_iter()
-        .filter(|name| object.properties.contains_key(*name))
-        .count();
-    if variants != 1 {
-        return Err(
-            "fea.BoundaryCondition must contain exactly one typed condition variant".into(),
-        );
-    }
-    Ok(())
-}
-
 fn validate_bound_constraint_object(object: &ObjectInstance) -> Result<(), String> {
     validate_fea_object(object)?;
     match object.properties.get("geometry_id") {
@@ -343,6 +338,35 @@ fn validate_bound_constraint_object(object: &ObjectInstance) -> Result<(), Strin
     if !matches!(object.properties.get("constraint"), Some(Value::Struct(_))) {
         return Err(format!(
             "{}.constraint must be a typed structure",
+            object.class_name
+        ));
+    }
+    Ok(())
+}
+
+fn validate_bound_boundary_object(object: &ObjectInstance) -> Result<(), String> {
+    validate_fea_object(object)?;
+    match object.properties.get("geometry_id") {
+        Some(Value::String(value)) if !value.is_empty() => {}
+        _ => {
+            return Err(format!(
+                "{}.geometry_id must be a non-empty string",
+                object.class_name
+            ))
+        }
+    }
+    if !matches!(
+        object.properties.get("geometry_revision"),
+        Some(Value::Int(IntValue::U32(_)))
+    ) {
+        return Err(format!(
+            "{}.geometry_revision must be uint32",
+            object.class_name
+        ));
+    }
+    if !matches!(object.properties.get("boundary"), Some(Value::Struct(_))) {
+        return Err(format!(
+            "{}.boundary must be a typed structure",
             object.class_name
         ));
     }
@@ -449,6 +473,33 @@ fn fluid_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeM
     ])
 }
 
+fn structural_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("pressure", "fea.StructuralBoundary.pressure")])
+}
+
+fn thermal_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("heatFlux", "fea.ThermalBoundary.heatFlux"),
+        ("convection", "fea.ThermalBoundary.convection"),
+    ])
+}
+
+fn magnetic_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("insulation", "fea.MagneticBoundary.insulation")])
+}
+
+fn acoustic_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("rigidWall", "fea.AcousticBoundary.rigidWall"),
+        ("radiation", "fea.AcousticBoundary.radiation"),
+        ("impedance", "fea.AcousticBoundary.impedance"),
+    ])
+}
+
+fn fluid_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("outletPressure", "fea.FluidBoundary.outletPressure")])
+}
+
 fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_registry::RuntimeMethod> {
     names
         .iter()
@@ -469,7 +520,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 25] {
+fn fea_class_schemas() -> [FeaClassSchema; 29] {
     [
         (
             FEA_STUDY_CLASS,
@@ -588,13 +639,6 @@ fn fea_class_schemas() -> [FeaClassSchema; 25] {
             validate_fea_object,
         ),
         (
-            FEA_BOUNDARY_CONDITION_CLASS,
-            "runmat.fea.boundary-condition",
-            BOUNDARY_CONDITION_FIELDS,
-            &[],
-            validate_condition_object,
-        ),
-        (
             FEA_STRUCTURAL_CONSTRAINT_CLASS,
             "runmat.fea.structural-constraint",
             STRUCTURAL_CONSTRAINT_FIELDS,
@@ -635,6 +679,41 @@ fn fea_class_schemas() -> [FeaClassSchema; 25] {
             STRUCTURAL_CONSTRAINT_FIELDS,
             STRUCTURAL_CONSTRAINT_FIELDS,
             validate_bound_constraint_object,
+        ),
+        (
+            FEA_STRUCTURAL_BOUNDARY_CLASS,
+            "runmat.fea.structural-boundary",
+            BOUNDARY_FIELDS,
+            BOUNDARY_FIELDS,
+            validate_bound_boundary_object,
+        ),
+        (
+            FEA_THERMAL_BOUNDARY_CLASS,
+            "runmat.fea.thermal-boundary",
+            BOUNDARY_FIELDS,
+            BOUNDARY_FIELDS,
+            validate_bound_boundary_object,
+        ),
+        (
+            FEA_MAGNETIC_BOUNDARY_CLASS,
+            "runmat.fea.magnetic-boundary",
+            BOUNDARY_FIELDS,
+            BOUNDARY_FIELDS,
+            validate_bound_boundary_object,
+        ),
+        (
+            FEA_ACOUSTIC_BOUNDARY_CLASS,
+            "runmat.fea.acoustic-boundary",
+            BOUNDARY_FIELDS,
+            BOUNDARY_FIELDS,
+            validate_bound_boundary_object,
+        ),
+        (
+            FEA_FLUID_BOUNDARY_CLASS,
+            "runmat.fea.fluid-boundary",
+            BOUNDARY_FIELDS,
+            BOUNDARY_FIELDS,
+            validate_bound_boundary_object,
         ),
         (
             FEA_STEP_CLASS,

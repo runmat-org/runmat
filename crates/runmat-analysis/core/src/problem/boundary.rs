@@ -4,7 +4,6 @@ use super::{
     prescribed_value::PrescribedValue,
     quantity::{
         HeatFlux, HeatTransferCoefficient, Pressure, SpecificAcousticImpedance, Temperature,
-        Velocity,
     },
     target::RegionTarget,
 };
@@ -36,13 +35,7 @@ pub enum BoundaryOperator {
     AcousticImpedance {
         impedance: SpecificAcousticImpedance,
     },
-    FluidInletVelocity {
-        value: PrescribedValue<Velocity>,
-    },
     FluidOutletPressure {
         value: PrescribedValue<Pressure>,
     },
-    FluidNoSlipWall,
-    FluidSlipWall,
-    FluidSymmetry,
 }

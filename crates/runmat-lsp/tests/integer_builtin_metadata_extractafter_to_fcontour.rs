@@ -3,7 +3,7 @@ use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, hover_at, signature_help_at, CompatMode,
 };
 
-const EXTRACTAFTER_TO_FEA_BOUNDARY_BUILTINS: [&str; 10] = [
+const EXTRACTAFTER_TO_FCONTOUR_BUILTINS: [&str; 9] = [
     "extractAfter",
     "extractBefore",
     "extractBetween",
@@ -13,11 +13,10 @@ const EXTRACTAFTER_TO_FEA_BOUNDARY_BUILTINS: [&str; 10] = [
     "false",
     "fclose",
     "fcontour",
-    "fea.boundaryCondition",
 ];
 
 #[test]
-fn extractafter_to_fea_boundary_descriptors_are_visible_to_signature_help_and_unqualified_hover() {
+fn extractafter_to_fcontour_descriptors_are_visible_to_signature_help_and_unqualified_hover() {
     for (name, source, expected_signature) in [
         (
             "extractAfter",
@@ -48,11 +47,6 @@ fn extractafter_to_fea_boundary_descriptors_are_visible_to_signature_help_and_un
         ("false", "out = false(2);", "L = false(n)"),
         ("fclose", "status = fclose(3);", "status = fclose(fid)"),
         ("fcontour", "h = fcontour(@(x,y) x+y);", "h = fcontour(f)"),
-        (
-            "fea.boundaryCondition",
-            "bc = fea.boundaryCondition(\"bc\", \"face\", \"fixed\");",
-            "bc = fea.boundaryCondition(id, region, kind, Name, Value, ...)",
-        ),
     ] {
         let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
         assert!(analysis.syntax_error.is_none(), "{source}");
@@ -94,7 +88,7 @@ fn integer_builtins_are_public_completions_with_settled_metadata() {
     let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
-    for name in EXTRACTAFTER_TO_FEA_BOUNDARY_BUILTINS {
+    for name in EXTRACTAFTER_TO_FCONTOUR_BUILTINS {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         let descriptor = builtin
             .descriptor
@@ -167,8 +161,4 @@ fn runmat_only_integer_extensions_are_visible_in_builtin_metadata() {
             );
         }
     }
-
-    let boundary = runmat_builtins::builtin_function_by_name("fea.boundaryCondition")
-        .expect("registered boundary constructor");
-    assert!(boundary.extensions.is_empty());
 }

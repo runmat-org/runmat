@@ -55,11 +55,15 @@ use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvel
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod author_study;
+mod boundaries;
 pub(crate) mod classes;
 mod constraints;
 mod modeling;
+#[cfg(test)]
+mod test_support;
 mod values;
 mod visualization;
+use boundaries::*;
 use classes::*;
 use constraints::*;
 use modeling::*;
@@ -73,7 +77,6 @@ const SWEEP_NAME: &str = "fea.sweep";
 const MODEL_NAME: &str = "fea.model";
 const MATERIAL_NAME: &str = "fea.material";
 const MATERIAL_ASSIGNMENT_NAME: &str = "fea.materialAssignment";
-const BOUNDARY_CONDITION_NAME: &str = "fea.boundaryCondition";
 const STEP_NAME: &str = "fea.step";
 const DOMAIN_NAME: &str = "fea.domain";
 const INTERFACE_NAME: &str = "fea.interface";
@@ -493,42 +496,6 @@ const STEP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     inputs: &STEP_INPUTS,
     outputs: &OUT_ANY,
 }];
-const BOUNDARY_CONDITION_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Boundary-condition id.",
-    },
-    BuiltinParamDescriptor {
-        name: "region",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target region id.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Boundary-condition kind.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Numeric fields required by the selected kind.",
-    },
-];
-const BOUNDARY_CONDITION_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "bc = fea.boundaryCondition(id, region, kind, Name, Value, ...)",
-        inputs: &BOUNDARY_CONDITION_INPUTS,
-        outputs: &OUT_ANY,
-    }];
 const RESULTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "results = fea.results(runOrRunId, Name, Value, ...)",
     inputs: &RESULTS_INPUTS,
@@ -840,89 +807,6 @@ const TRENDS_WINDOW_INPUTS: [BuiltinIntegerInputCapability; 1] =
     }];
 pub const FEA_TRENDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "WindowSize", inputs: &TRENDS_WINDOW_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The positive window size and structural trend counts remain exact in the public result object; time and rate fields remain binary64." }];
-pub const FEA_BOUNDARY_CONDITION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &BOUNDARY_CONDITION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const fn boundary_integer_input(name: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion.",
-    }
-}
-
-const BOUNDARY_ROTATION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    boundary_integer_input("rx"),
-    boundary_integer_input("ry"),
-    boundary_integer_input("rz"),
-];
-const BOUNDARY_IMPEDANCE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [boundary_integer_input("specificImpedancePaSPerM")];
-const BOUNDARY_TEMPERATURE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [boundary_integer_input("temperatureK")];
-const BOUNDARY_HEAT_FLUX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [boundary_integer_input("heatFluxWPerM2")];
-const BOUNDARY_CONVECTION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    boundary_integer_input("ambientTemperatureK"),
-    boundary_integer_input("coefficientWPerM2K"),
-];
-const BOUNDARY_INLET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [boundary_integer_input("velocityMPerS")];
-const BOUNDARY_OUTLET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [boundary_integer_input("pressurePa")];
-
-const fn boundary_integer_capability(
-    form: &'static str,
-    inputs: &'static [BuiltinIntegerInputCapability],
-) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The constructor validates scalar shape and finiteness, then performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can therefore round.",
-    }
-}
-
-pub const FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 7] = [
-    boundary_integer_capability(
-        "prescribedRotation integer fields",
-        &BOUNDARY_ROTATION_INTEGER_INPUTS,
-    ),
-    boundary_integer_capability(
-        "acousticImpedance integer field",
-        &BOUNDARY_IMPEDANCE_INTEGER_INPUTS,
-    ),
-    boundary_integer_capability(
-        "thermalPrescribedTemperature integer field",
-        &BOUNDARY_TEMPERATURE_INTEGER_INPUTS,
-    ),
-    boundary_integer_capability(
-        "thermalHeatFlux integer field",
-        &BOUNDARY_HEAT_FLUX_INTEGER_INPUTS,
-    ),
-    boundary_integer_capability(
-        "thermalConvection integer fields",
-        &BOUNDARY_CONVECTION_INTEGER_INPUTS,
-    ),
-    boundary_integer_capability(
-        "cfdInletVelocity integer field",
-        &BOUNDARY_INLET_INTEGER_INPUTS,
-    ),
-    boundary_integer_capability(
-        "cfdOutletPressure integer field",
-        &BOUNDARY_OUTLET_INTEGER_INPUTS,
-    ),
-];
 pub const FEA_RESULTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &RESULTS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -1051,19 +935,6 @@ pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     create_material_assignment_object_from_args(args)
-}
-
-#[runtime_builtin(
-    name = "fea.boundaryCondition",
-    category = "fea",
-    summary = "Create a typed FEA boundary condition.",
-    keywords = "fea,boundary,condition,region,prescribed,rotation",
-    descriptor(crate::builtins::fea::FEA_BOUNDARY_CONDITION_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::fea"
-)]
-pub async fn fea_boundary_condition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    create_boundary_condition_object_from_args(args)
 }
 
 #[runtime_builtin(
@@ -3201,10 +3072,6 @@ mod tests {
         Value::Cell(CellArray::new(values, 1, cols).expect("cell should build"))
     }
 
-    fn boundary_payload(value: Value) -> ModelConditionPayload {
-        object_payload(&value)
-    }
-
     #[test]
     fn study_options_accept_canonical_signal_excitation_and_case_values() {
         let signal_id = runmat_analysis_core::SignalId("tip_force.signal".into());
@@ -3280,19 +3147,6 @@ mod tests {
     fn object_payload<T: DeserializeOwned>(value: &Value) -> T {
         let json = value_to_json("fea.test", value).expect("typed FEA value should encode");
         serde_json::from_value(json).expect("typed FEA value should decode")
-    }
-
-    fn boundary_args(kind: &str, fields: Vec<(&str, Value)>) -> Vec<Value> {
-        let mut args = vec![
-            Value::String("bc".into()),
-            Value::String("region".into()),
-            Value::String(kind.into()),
-        ];
-        for (name, value) in fields {
-            args.push(Value::String(name.into()));
-            args.push(value);
-        }
-        args
     }
 
     #[test]
@@ -3637,7 +3491,7 @@ mod tests {
             IntValue::U32(1),
             IntValue::U64(u64::MAX),
         ] {
-            let expected = boundary_integer_to_f64(&integer);
+            let expected = integer.to_f64();
             let domain = block_on(fea_domain_builtin(vec![
                 Value::String("electromagnetic".into()),
                 Value::String("AppliedCurrentA".into()),
@@ -4079,185 +3933,6 @@ execution:
     }
 
     #[test]
-    fn fea_boundary_condition_accepts_prescribed_rotation() {
-        let boundary = block_on(fea_boundary_condition_builtin(vec![
-            Value::String("tip_rotation".to_string()),
-            Value::String("tip_node".to_string()),
-            Value::String("prescribedRotation".to_string()),
-            Value::String("rx".to_string()),
-            Value::Num(0.1),
-            Value::String("ry".to_string()),
-            Value::Num(0.2),
-            Value::String("rz".to_string()),
-            Value::Num(0.3),
-        ]))
-        .expect("prescribed rotation boundary condition should build");
-        assert_object_class(&boundary, FEA_BOUNDARY_CONDITION_CLASS);
-
-        let decoded: ModelConditionPayload = object_payload(&boundary);
-        let ModelConditionPayload::Constraint(AnalysisConstraint::Structural(constraint)) = decoded
-        else {
-            panic!("expected structural constraint")
-        };
-        assert_eq!(constraint.constraint_id, "tip_rotation");
-        let StructuralConstraintKind::Prescribed(values) = constraint.kind else {
-            panic!("expected prescribed rotations")
-        };
-        assert_eq!(values.target.region_id, "tip_node");
-        assert_eq!(values.rotations.len(), 3);
-        assert_eq!(
-            values.rotations[0]
-                .value
-                .study_constant(&[])
-                .map(|value| value.radians),
-            Some(0.1)
-        );
-    }
-
-    #[test]
-    fn fea_boundary_condition_accepts_integer_fields_for_all_numeric_kinds() {
-        let rotation = boundary_payload(
-            block_on(fea_boundary_condition_builtin(boundary_args(
-                "prescribedRotation",
-                vec![
-                    ("rx", Value::Int(IntValue::I8(1))),
-                    ("ry", Value::Int(IntValue::U16(2))),
-                    ("rz", Value::Int(IntValue::I32(3))),
-                ],
-            )))
-            .unwrap(),
-        );
-        let ModelConditionPayload::Constraint(AnalysisConstraint::Structural(rotation)) = rotation
-        else {
-            panic!("expected structural constraint")
-        };
-        let StructuralConstraintKind::Prescribed(rotation) = rotation.kind else {
-            panic!("expected prescribed rotations")
-        };
-        assert_eq!(
-            rotation
-                .rotations
-                .iter()
-                .map(|value| value.value.study_constant(&[]).expect("constant").radians)
-                .collect::<Vec<_>>(),
-            vec![1.0, 2.0, 3.0]
-        );
-
-        let cases = [
-            (
-                "acousticImpedance",
-                "specificImpedancePaSPerM",
-                IntValue::U32(4),
-            ),
-            (
-                "thermalPrescribedTemperature",
-                "temperatureK",
-                IntValue::I64(5),
-            ),
-            ("thermalHeatFlux", "heatFluxWPerM2", IntValue::U64(6)),
-            ("cfdInletVelocity", "velocityMPerS", IntValue::I16(7)),
-            ("cfdOutletPressure", "pressurePa", IntValue::U8(8)),
-        ];
-        for (kind, field, value) in cases {
-            boundary_payload(
-                block_on(fea_boundary_condition_builtin(boundary_args(
-                    kind,
-                    vec![(field, Value::Int(value))],
-                )))
-                .unwrap(),
-            );
-        }
-
-        let convection = boundary_payload(
-            block_on(fea_boundary_condition_builtin(boundary_args(
-                "thermalConvection",
-                vec![
-                    ("ambientTemperatureK", Value::Int(IntValue::U8(9))),
-                    ("coefficientWPerM2K", Value::Int(IntValue::I16(10))),
-                ],
-            )))
-            .unwrap(),
-        );
-        let ModelConditionPayload::Boundary(convection) = convection else {
-            panic!("expected natural boundary")
-        };
-        let BoundaryOperator::ThermalConvection {
-            ambient_temperature,
-            coefficient,
-        } = convection.operator
-        else {
-            panic!("expected thermal convection")
-        };
-        assert_eq!(
-            ambient_temperature
-                .study_constant(&[])
-                .map(|value| value.kelvin),
-            Some(9.0)
-        );
-        assert_eq!(coefficient.watts_per_square_meter_kelvin, 10.0);
-    }
-
-    #[test]
-    fn fea_boundary_condition_converts_every_integer_class_at_binary64_boundary() {
-        for value in [
-            IntValue::I8(1),
-            IntValue::I16(1),
-            IntValue::I32(1),
-            IntValue::I64(1),
-            IntValue::U8(1),
-            IntValue::U16(1),
-            IntValue::U32(1),
-            IntValue::U64(u64::MAX),
-        ] {
-            let expected = boundary_integer_to_f64(&value);
-            let boundary = boundary_payload(
-                block_on(fea_boundary_condition_builtin(boundary_args(
-                    "thermalHeatFlux",
-                    vec![("heatFluxWPerM2", Value::Int(value))],
-                )))
-                .unwrap(),
-            );
-            let ModelConditionPayload::Boundary(boundary) = boundary else {
-                panic!("expected natural boundary")
-            };
-            let BoundaryOperator::ThermalHeatFlux { value } = boundary.operator else {
-                panic!("expected thermal heat-flux boundary")
-            };
-            assert_eq!(
-                value
-                    .study_constant(&[])
-                    .map(|value| value.watts_per_square_meter),
-                Some(expected)
-            );
-        }
-    }
-
-    #[test]
-    fn fea_boundary_condition_rejects_nonscalar_numeric_fields() {
-        let values =
-            Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![1, 2]), vec![1, 2]).unwrap();
-        let err = block_on(fea_boundary_condition_builtin(boundary_args(
-            "thermalHeatFlux",
-            vec![("heatFluxWPerM2", Value::Tensor(values))],
-        )))
-        .expect_err("nonscalar field must fail");
-        assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
-        assert_eq!(
-            err.context.builtin.as_deref(),
-            Some(BOUNDARY_CONDITION_NAME)
-        );
-    }
-
-    #[test]
-    fn fea_boundary_condition_declares_seven_integer_forms() {
-        assert_eq!(FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES.len(), 7);
-        assert!(FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES
-            .iter()
-            .flat_map(|capability| capability.inputs)
-            .all(|input| input.classes.len() == 8));
-    }
-
-    #[test]
     fn typed_constructors_build_full_study_and_sweep_objects() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
@@ -4293,13 +3968,17 @@ execution:
         .expect("material assignment should build");
         assert_object_class(&assignment, FEA_MATERIAL_ASSIGNMENT_CLASS);
 
-        let fixed = block_on(fea_boundary_condition_builtin(vec![
-            Value::String("fixed_base".to_string()),
-            Value::String(region_id.clone()),
-            Value::String("fixed".to_string()),
-        ]))
-        .expect("boundary condition should build");
-        assert_object_class(&fixed, FEA_BOUNDARY_CONDITION_CLASS);
+        let fixed_region = block_on(crate::builtins::geometry::region::geometry_region_builtin(
+            geometry.clone(),
+            region_id.clone(),
+        ))
+        .expect("fixed region should resolve");
+        let fixed = block_on(structural_fixed_builtin(
+            "fixed_base".to_string(),
+            fixed_region,
+        ))
+        .expect("structural constraint should build");
+        assert_object_class(&fixed, FEA_STRUCTURAL_CONSTRAINT_CLASS);
 
         let step = block_on(fea_step_builtin(vec![
             Value::String("static_step".to_string()),
@@ -4338,7 +4017,7 @@ execution:
             cell(vec![material]),
             Value::String("MaterialAssignments".to_string()),
             cell(vec![assignment]),
-            Value::String("BoundaryConditions".to_string()),
+            Value::String("Constraints".to_string()),
             cell(vec![fixed]),
             Value::String("Steps".to_string()),
             cell(vec![step]),

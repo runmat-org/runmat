@@ -90,7 +90,8 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `mesh(mesh, Name, Value, ...)` | Display solver topology with `Edges`, `Regions`, and `Section` options. |
 | `fea.load(path)` | Load a `.fea` study or sweep file and return `fea.Study` or `fea.Sweep`. |
 | `fea.material(...)`, `fea.materialAssignment(...)` | Create typed material data and region assignments. |
-| `fea.boundaryCondition(...)`, `fea.loadCase(...)` | Create typed constraints, loads, and sources. |
+| `fea.<Family>Constraint.<kind>(...)` | Create typed essential, kinematic, gauge, pairing, and reference constraints. |
+| `fea.<Family>Boundary.<kind>(...)`, `fea.loadCase(...)` | Create typed natural/Robin boundaries, loads, and sources. |
 | `fea.step(...)`, `fea.domain(...)`, `fea.interface(...)` | Create typed analysis steps, physics domains, and interfaces. |
 | `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
 | `fea.model(id, geometry, Name, Value, ...)` | Assemble an explicit model from geometry and typed components. |
@@ -106,7 +107,20 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.compare(baselineRunId, candidateRunId)` | Compare two persisted runs; no Name, Value options are accepted. |
 | `fea.trends(Name, Value, ...)` | Summarize recent persisted runs. |
 
-`fea.boundaryCondition` is a RunMat-native constructor. Its seven numeric boundary forms accept finite real numeric scalars from all eight built-in integer classes and convert them once to the model's binary64 storage fields; scalar shape, finiteness, required fields, and unknown fields are validated before object construction, and invalid input is attributed to `fea.boundaryCondition` with `RunMat:fea:InvalidInput`.
+Family-specific constraints and boundaries require immutable `geometry.Region` values, so every authored condition carries the source geometry identity and revision. Model composition rejects regions from another geometry or an earlier revision. Numeric physical inputs are dimensioned values rather than bare scalars: pressure, heat flux, ambient temperature, heat-transfer coefficient, and acoustic impedance each use their corresponding `fea.*` quantity class. Constraints are supplied through the `Constraints` model/study option; natural and Robin operators are supplied through `Boundaries`.
+
+| Boundary constructor | Typed value |
+| --- | --- |
+| `fea.StructuralBoundary.pressure(id, region, pressure)` | `fea.Pressure` |
+| `fea.ThermalBoundary.heatFlux(id, region, heatFlux)` | `fea.HeatFlux` |
+| `fea.ThermalBoundary.convection(id, region, ambientTemperature, coefficient)` | `fea.Temperature`, `fea.HeatTransferCoefficient` |
+| `fea.MagneticBoundary.insulation(id, region)` | None |
+| `fea.AcousticBoundary.rigidWall(id, region)` | None |
+| `fea.AcousticBoundary.radiation(id, region)` | None |
+| `fea.AcousticBoundary.impedance(id, region, impedance)` | `fea.SpecificAcousticImpedance` |
+| `fea.FluidBoundary.outletPressure(id, region, pressure)` | `fea.Pressure` |
+
+Fluid inlet velocity, moving/no-slip/slip walls, and symmetry are kinematic constraints and therefore live on `fea.FluidConstraint`. A fluid outlet pressure is a natural boundary. Thermal prescribed temperature is an essential constraint, while heat flux and convection are natural/Robin boundaries. This division follows the mathematical role of the condition rather than its placement on a geometric boundary.
 
 `fea.material`, `fea.loadCase`, `fea.domain`, and `fea.interface` are also RunMat-native host constructors. Their documented finite real physical fields accept all eight built-in integer classes, preserve exact input through kind/field/shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. The nested thermo-field-source revision is a structural nonnegative integer and remains exact.
 
@@ -126,7 +140,7 @@ These constructors, planning operations, field projections, comparisons, and plo
 | `fea.results` | `results = fea.results(runOrRunId, Name, Value, ...)` | Run identity, option pairing, option values, and selector shape/range are checked before artifact lookup. An existing `fea.Results` object is accepted without options. |
 | `fea.trends` | `trends = fea.trends(Name, Value, ...)` | `WindowSize` is checked before artifact-store access. |
 
-`fea.study` defaults to profile `linear_static_structural`, backend `cpu`, defaults mode `profile_scaffold`, and a sanitized `<study-id>_model` model id when none is supplied. Its constructor options are `RunKind`/`Kind`, `Profile`, `Backend`, `ModelId`, `Model`, `Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `BoundaryConditions`/`BCs`, `Loads`/`LoadCases`, `Steps`, `Domains`, `Interfaces`, and `RunOptions`/`Options`. Direct integer values do not substitute for any identity or typed-object option.
+`fea.study` defaults to profile `linear_static_structural`, backend `cpu`, defaults mode `profile_scaffold`, and a sanitized `<study-id>_model` model id when none is supplied. Its constructor options include `Template`, `Backend`, `Requirement`, `ModelId`, `Model`, `Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `Constraints`, `Boundaries`, `Signals`, `Excitations`, `ExcitationCases`/`Cases`, `Steps`, `Domains`, `Interfaces`, and `Mesh`. Direct integer values do not substitute for any identity or typed-object option.
 
 ### Run-option numeric contracts
 

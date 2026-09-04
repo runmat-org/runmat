@@ -110,25 +110,37 @@ impl<T> GeometryBoundConstraint<T> {
         builtin: &'static str,
         geometry: &GeometryAsset,
     ) -> BuiltinResult<()> {
-        if self.geometry_id != geometry.geometry_id || self.geometry_revision != geometry.revision {
-            return Err(builtin_error(
-                builtin,
-                &ERROR_INPUT,
-                format!(
-                    "{} belongs to geometry `{}` revision {}, but the model uses `{}` revision {}",
-                    FEA_STRUCTURAL_CONSTRAINT_CLASS,
-                    self.geometry_id,
-                    self.geometry_revision,
-                    geometry.geometry_id,
-                    geometry.revision
-                ),
-            ));
-        }
-        Ok(())
+        require_geometry_binding(
+            builtin,
+            "constraint",
+            &self.geometry_id,
+            self.geometry_revision,
+            geometry,
+        )
     }
 }
 
-fn bound_region(
+pub(super) fn require_geometry_binding(
+    builtin: &'static str,
+    label: &str,
+    geometry_id: &str,
+    geometry_revision: u32,
+    geometry: &GeometryAsset,
+) -> BuiltinResult<()> {
+    if geometry_id != geometry.geometry_id || geometry_revision != geometry.revision {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!(
+                "{label} belongs to geometry `{geometry_id}` revision {geometry_revision}, but the model uses `{}` revision {}",
+                geometry.geometry_id, geometry.revision
+            ),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn bound_region(
     builtin: &'static str,
     id: String,
     region: &Value,
@@ -204,7 +216,7 @@ fn bound_region_pair(
     ))
 }
 
-fn bound_constraint_to_object<T: Serialize>(
+pub(super) fn bound_constraint_to_object<T: Serialize>(
     builtin: &'static str,
     class_name: &'static str,
     geometry_id: String,
@@ -455,26 +467,13 @@ mod tests {
             },
         },
     };
+    use crate::builtins::fea::test_support::load_stl_fixture;
     use crate::builtins::geometry::region::geometry_region_builtin;
     use crate::builtins::geometry::{
         geometry_asset_from_value_with_builtin, geometry_load_builtin,
     };
     use futures::executor::block_on;
     use runmat_analysis_core::ReferencePointCoupling;
-
-    fn load_fixture(path: &std::path::Path, x: f64) -> Value {
-        std::fs::write(
-            path,
-            format!(
-                "solid part\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex {x} 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid part\n"
-            ),
-        )
-        .unwrap();
-        block_on(geometry_load_builtin(vec![Value::String(
-            path.to_string_lossy().to_string(),
-        )]))
-        .expect("geometry should load")
-    }
 
     fn distinct_region(region: &Value) -> Value {
         let Value::Object(mut object) = region.clone() else {
@@ -533,7 +532,7 @@ mod tests {
     #[test]
     fn model_composition_accepts_matching_geometry_and_rejects_a_foreign_region() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let asset = load_fixture(&tmp.path().join("part-a.stl"), 1.0);
+        let asset = load_stl_fixture(&tmp.path().join("part-a.stl"), 1.0);
         let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
             .expect("asset should decode");
         let region = block_on(geometry_region_builtin(
@@ -548,7 +547,7 @@ mod tests {
             asset,
             Value::String("Template".into()),
             Value::String("linear_static_structural".into()),
-            Value::String("BoundaryConditions".into()),
+            Value::String("Constraints".into()),
             constraint.clone(),
         ])
         .expect("matching geometry should compose");
@@ -556,13 +555,13 @@ mod tests {
             object_payload(MODEL_NAME, &model, FEA_MODEL_CLASS).expect("model should decode");
         assert_eq!(model.constraints.len(), 1);
 
-        let foreign_asset = load_fixture(&tmp.path().join("part-b.stl"), 2.0);
+        let foreign_asset = load_stl_fixture(&tmp.path().join("part-b.stl"), 2.0);
         let error = create_model_object_from_args(vec![
             Value::String("foreign".into()),
             foreign_asset,
             Value::String("Template".into()),
             Value::String("linear_static_structural".into()),
-            Value::String("BoundaryConditions".into()),
+            Value::String("Constraints".into()),
             constraint,
         ])
         .unwrap_err();
@@ -572,7 +571,7 @@ mod tests {
     #[test]
     fn thermal_constraint_requires_a_typed_temperature() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let asset = load_fixture(&tmp.path().join("thermal.stl"), 1.0);
+        let asset = load_stl_fixture(&tmp.path().join("thermal.stl"), 1.0);
         let decoded = geometry_asset_from_value_with_builtin(&asset, THERMAL_PRESCRIBED_NAME)
             .expect("asset should decode");
         let region = block_on(geometry_region_builtin(
@@ -619,7 +618,7 @@ mod tests {
     #[test]
     fn paired_relations_are_typed_transformed_and_dimensionally_sound() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let asset = load_fixture(&tmp.path().join("paired.stl"), 1.0);
+        let asset = load_stl_fixture(&tmp.path().join("paired.stl"), 1.0);
         let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
             .expect("asset should decode");
         let primary = block_on(geometry_region_builtin(
@@ -816,7 +815,7 @@ mod tests {
     #[test]
     fn every_simple_family_constraint_composes_through_typed_classes() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let asset = load_fixture(&tmp.path().join("families.stl"), 1.0);
+        let asset = load_stl_fixture(&tmp.path().join("families.stl"), 1.0);
         let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
             .expect("asset should decode");
         let select = || {
@@ -866,7 +865,7 @@ mod tests {
             asset,
             Value::String("Template".into()),
             Value::String("linear_static_structural".into()),
-            Value::String("BoundaryConditions".into()),
+            Value::String("Constraints".into()),
             conditions,
         ])
         .expect("typed family constraints should compose");
@@ -912,7 +911,7 @@ mod tests {
     #[test]
     fn prescribed_structural_dofs_and_reference_couplings_are_fully_typed() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let asset = load_fixture(&tmp.path().join("typed-structural.stl"), 1.0);
+        let asset = load_stl_fixture(&tmp.path().join("typed-structural.stl"), 1.0);
         let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
             .expect("asset should decode");
         let select = || {
@@ -1033,7 +1032,7 @@ mod tests {
             asset,
             Value::String("Template".into()),
             Value::String("linear_static_structural".into()),
-            Value::String("BoundaryConditions".into()),
+            Value::String("Constraints".into()),
             conditions,
         ])
         .expect("typed prescribed DOFs and coupling should compose into a model");
