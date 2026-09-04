@@ -50,6 +50,43 @@ function forbidDependencies(crateName, dependencies) {
   }
 }
 
+function enforceMigratedBuiltinFamily({
+  name,
+  roots,
+  compositionFiles,
+  obsoletePaths,
+  testLineCeiling = 320,
+  leafLineCeiling = 192,
+  byteCeiling = 24 * 1024,
+}) {
+  for (const sourcePath of obsoletePaths) {
+    if (fs.existsSync(path.join(repo, sourcePath))) {
+      fail(`${sourcePath} is obsolete ${name} migration debt and must not return`);
+    }
+  }
+
+  const composition = new Set(compositionFiles);
+  for (const rootPath of roots) {
+    for (const { path: sourcePath, text } of rustSources(rootPath)) {
+      const lines = text.split("\n").length;
+      const isTest = sourcePath.includes("/tests/") || sourcePath.endsWith("/tests.rs");
+      const lineCeiling = composition.has(sourcePath) ? 64 : isTest ? testLineCeiling : leafLineCeiling;
+      if (lines > lineCeiling || Buffer.byteLength(text, "utf8") > byteCeiling) {
+        fail(
+          `${sourcePath} exceeds its ${name} role boundary ` +
+          `(found ${lines} lines; maximum ${lineCeiling} and ${byteCeiling} bytes)`
+        );
+      }
+      if (
+        rootPath.includes("runmat-runtime") &&
+        /\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)
+      ) {
+        fail(`${sourcePath} duplicates catalog-owned ${name} metadata`);
+      }
+    }
+  }
+}
+
 const upwardValueDependencies = [
   "runmat-builtins",
   "runmat-runtime",
@@ -834,57 +871,68 @@ for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/
   }
 }
 
-for (const sourcePath of [
-  "crates/runmat-runtime/src/builtins/math/elementwise/nextpow2.rs",
-  "docs/builtins/reference/nextpow2.json",
-  "crates/runmat-runtime/src/builtins/builtins-json/nextpow2.json",
-  "crates/runmat-runtime/src/builtins/math/elementwise/pow2.rs",
-  "docs/builtins/reference/pow2.json",
-  "crates/runmat-runtime/src/builtins/builtins-json/pow2.json",
-  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/next_exponent.rs",
-  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/tests.rs",
-]) {
-  if (fs.existsSync(path.join(repo, sourcePath))) {
-    fail(`${sourcePath} is obsolete powers-of-two migration debt and must not return`);
-  }
-}
-const powersOfTwoRoots = new Set([
-  "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/mod.rs",
-  "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/nextpow2/mod.rs",
-  "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/pow2/mod.rs",
-  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/mod.rs",
-  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/next_exponent/mod.rs",
-  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/power/mod.rs",
-  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/mod.rs",
-  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/nextpow2/mod.rs",
-  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/mod.rs",
-  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/binary/mod.rs",
-  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/provider/mod.rs",
-  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/tests/mod.rs",
-]);
-for (const rootPath of [
-  "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two",
-  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two",
-  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two",
-]) {
-  for (const { path: sourcePath, text } of rustSources(rootPath)) {
-    const lines = text.split("\n").length;
-    const isTest = sourcePath.includes("/tests/") || sourcePath.endsWith("/tests.rs");
-    const ceiling = powersOfTwoRoots.has(sourcePath) ? 64 : isTest ? 320 : 192;
-    if (lines > ceiling || Buffer.byteLength(text, "utf8") > 24 * 1024) {
-      fail(
-        `${sourcePath} exceeds its powers-of-two role boundary ` +
-        `(found ${lines} lines; maximum ${ceiling} and 24 KiB)`
-      );
-    }
-    if (
-      rootPath.includes("runmat-runtime") &&
-      /\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)
-    ) {
-      fail(`${sourcePath} duplicates catalog-owned powers-of-two metadata`);
-    }
-  }
-}
+enforceMigratedBuiltinFamily({
+  name: "powers-of-two family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two",
+    "crates/runmat-builtins/src/catalog/inference/math/powers_of_two",
+    "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/nextpow2/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/pow2/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/next_exponent/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/power/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/nextpow2/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/binary/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/provider/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/nextpow2.rs",
+    "docs/builtins/reference/nextpow2.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/nextpow2.json",
+    "crates/runmat-runtime/src/builtins/math/elementwise/pow2.rs",
+    "docs/builtins/reference/pow2.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/pow2.json",
+    "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/next_exponent.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/tests.rs",
+  ],
+});
+
+enforceMigratedBuiltinFamily({
+  name: "root family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/roots",
+    "crates/runmat-builtins/src/catalog/inference/math/roots",
+    "crates/runmat-runtime/src/builtins/math/elementwise/roots",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/roots/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/roots/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/roots/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/roots/sqrt/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/roots/realsqrt/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/roots/sqrt/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/roots/realsqrt/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/sqrt.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/realsqrt.rs",
+    "crates/runmat-builtins/src/catalog/inference/math_roots.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/roots/documentation.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithm_common.rs",
+    "docs/builtins/reference/sqrt.json",
+    "docs/builtins/reference/realsqrt.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/sqrt.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/realsqrt.json",
+  ],
+  testLineCeiling: 256,
+});
 
 const gammaFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/mod.rs", 40],
