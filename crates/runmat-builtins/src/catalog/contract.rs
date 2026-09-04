@@ -233,8 +233,7 @@ pub enum MathInferenceRule {
     IntegerDivide,
     Hypot,
     PhaseAngle,
-    Exp,
-    Expm1,
+    Exponential(ExponentialKind),
     Log1p,
     Log2,
     Logarithm(LogarithmBase),
@@ -261,6 +260,12 @@ pub enum MathInferenceRule {
 pub enum PowerOfTwoInferenceRule {
     NextExponent,
     Power,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ExponentialKind {
+    Natural,
+    MinusOne,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

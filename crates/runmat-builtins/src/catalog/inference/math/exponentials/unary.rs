@@ -1,46 +1,34 @@
-use super::support::facts::{materialize_preserving_sparse_storage, preserve_shape_as_dynamic};
-use super::{argument_error, finish_fixed, numeric_kind};
-use crate::BuiltinCatalogEntry;
+use super::super::super::support::facts::{
+    materialize_preserving_sparse_storage, preserve_shape_as_dynamic,
+};
+use super::super::super::{argument_error, finish_fixed, numeric_kind};
+use crate::{BuiltinCatalogEntry, ExponentialKind};
 use runmat_types::{
     AliasFact, CallInference, CallRequest, DynamicReason, MutationFact, NumericClass,
     NumericDomain, ResidencyFact, StorageFact, ValueFact, ValueKindFact,
 };
 
-#[derive(Debug, Clone, Copy)]
-enum ExponentialKind {
-    Exp,
-    Expm1,
-}
-
 impl ExponentialKind {
     const fn name(self) -> &'static str {
         match self {
-            Self::Exp => "exp",
-            Self::Expm1 => "expm1",
+            Self::Natural => "exp",
+            Self::MinusOne => "expm1",
         }
     }
 
     const fn accepts_symbolic(self) -> bool {
-        matches!(self, Self::Exp)
+        matches!(self, Self::Natural)
     }
 
     const fn preserves_sparse_zeros(self) -> bool {
-        matches!(self, Self::Expm1)
+        matches!(self, Self::MinusOne)
     }
 }
 
-pub(super) fn infer_exp(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    infer_exponential(request, entry, ExponentialKind::Exp)
-}
-
-pub(super) fn infer_expm1(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    infer_exponential(request, entry, ExponentialKind::Expm1)
-}
-
-fn infer_exponential(
+pub(super) fn infer(
+    operation: ExponentialKind,
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
-    operation: ExponentialKind,
 ) -> CallInference {
     let mut diagnostics = Vec::new();
     let Some(input) = request.arguments.first() else {

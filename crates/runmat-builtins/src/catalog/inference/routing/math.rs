@@ -31,8 +31,9 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::PhaseAngle => {
             super::super::math_components::infer_phase_angle(request, entry)
         }
-        MathInferenceRule::Exp => super::super::math_exponential::infer_exp(request, entry),
-        MathInferenceRule::Expm1 => super::super::math_exponential::infer_expm1(request, entry),
+        MathInferenceRule::Exponential(kind) => {
+            super::super::math::exponentials::infer(kind, request, entry)
+        }
         MathInferenceRule::Log1p => super::super::math_logarithms::infer_log1p(request, entry),
         MathInferenceRule::Log2 => super::super::math_logarithms::infer_log2(request, entry),
         MathInferenceRule::Logarithm(base) => {
