@@ -4,7 +4,7 @@ use runmat_analysis_core::{
     EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
     ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
     Force, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    Moment, PhysicalSignal, PrescribedTranslations, PrescribedValue, Pressure, ProcedureStep,
+    Moment, PhysicalSignal, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
     ProjectionRequirement, RegionTarget, ShellElementModel, ShellSectionModel, Signal,
     SignalApproximationEvidence, SignalId, SignalPrecision, SignalProvenance, SignalRepresentation,
     SignalShape, SignalValue, StructuralConstraint, StructuralConstraintKind, StructuralElement,
@@ -370,9 +370,9 @@ fn prescribed_zero_translations(constraint_id: &str, region_id: &str) -> Analysi
     AnalysisConstraint::Structural(StructuralConstraint {
         constraint_id: constraint_id.to_string(),
         frame: CoordinateFrame::Global,
-        kind: StructuralConstraintKind::PrescribedTranslations(PrescribedTranslations {
+        kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
             target: RegionTarget::authored(region_id),
-            values: [
+            translations: [
                 StructuralTranslationDof::Ux,
                 StructuralTranslationDof::Uy,
                 StructuralTranslationDof::Uz,
@@ -383,6 +383,7 @@ fn prescribed_zero_translations(constraint_id: &str, region_id: &str) -> Analysi
                 value: PrescribedValue::Constant(Displacement::new(0.0)),
             })
             .collect(),
+            rotations: Vec::new(),
         }),
     })
 }

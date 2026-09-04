@@ -25,10 +25,10 @@ fn zero_translation_constraint(
         runmat_analysis_core::StructuralConstraint {
             constraint_id: id.into(),
             frame: runmat_analysis_core::CoordinateFrame::Global,
-            kind: runmat_analysis_core::StructuralConstraintKind::PrescribedTranslations(
-                runmat_analysis_core::PrescribedTranslations {
+            kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
+                runmat_analysis_core::PrescribedStructuralDofs {
                     target: runmat_analysis_core::RegionTarget::authored(region),
-                    values: [
+                    translations: [
                         runmat_analysis_core::StructuralTranslationDof::Ux,
                         runmat_analysis_core::StructuralTranslationDof::Uy,
                         runmat_analysis_core::StructuralTranslationDof::Uz,
@@ -41,6 +41,7 @@ fn zero_translation_constraint(
                         ),
                     })
                     .collect(),
+                    rotations: Vec::new(),
                 },
             ),
         },

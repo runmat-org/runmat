@@ -1,5 +1,170 @@
+use super::support::{
+    coordinate_frame_from_value, reference_point_from_value, structural_dof_values_from_value,
+};
 use super::*;
 use crate::builtins::fea::values::DISPLACEMENT_CLASS;
+use runmat_analysis_core::ReferencePointCoupling;
+
+const PRESCRIBED_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Constraint identifier.",
+    },
+    BuiltinParamDescriptor {
+        name: "region",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "A geometry.Region selected from the model geometry.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One typed structural DOF value or a cell array of them.",
+    },
+    BuiltinParamDescriptor {
+        name: "frame",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Typed fea.CoordinateFrame value.",
+    },
+];
+const PRESCRIBED_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "constraint = fea.StructuralConstraint.prescribed(id, region, values, frame)",
+    inputs: &PRESCRIBED_INPUTS,
+    outputs: &OUT_ANY,
+}];
+pub(super) const PRESCRIBED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PRESCRIBED_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+const COUPLING_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Constraint identifier.",
+    },
+    BuiltinParamDescriptor {
+        name: "region",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "A geometry.Region selected from the model geometry.",
+    },
+    BuiltinParamDescriptor {
+        name: "referencePoint",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Typed fea.ReferencePoint value.",
+    },
+];
+const COUPLING_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "constraint = fea.StructuralConstraint.coupling(id, region, referencePoint)",
+    inputs: &COUPLING_INPUTS,
+    outputs: &OUT_ANY,
+}];
+pub(super) const COUPLING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COUPLING_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+#[runtime_builtin(
+    name = "fea.StructuralConstraint.prescribed",
+    category = "fea",
+    summary = "Create a component-wise prescribed structural constraint in a typed frame.",
+    keywords = "fea,structural,constraint,dof,frame,typed",
+    descriptor(crate::builtins::fea::constraints::structural::PRESCRIBED_DESCRIPTOR),
+    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    builtin_path = "crate::builtins::fea::constraints::structural"
+)]
+pub async fn structural_prescribed_builtin(
+    id: String,
+    region: Value,
+    values: Value,
+    frame: Value,
+) -> BuiltinResult<Value> {
+    let (id, geometry_id, geometry_revision, target) =
+        bound_region("fea.StructuralConstraint.prescribed", id, &region)?;
+    let (translations, rotations) =
+        structural_dof_values_from_value("fea.StructuralConstraint.prescribed", &values)?;
+    let frame = coordinate_frame_from_value("fea.StructuralConstraint.prescribed", &frame)?;
+    bound_constraint_to_object(
+        "fea.StructuralConstraint.prescribed",
+        FEA_STRUCTURAL_CONSTRAINT_CLASS,
+        geometry_id,
+        geometry_revision,
+        StructuralConstraint {
+            constraint_id: id,
+            frame,
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                target,
+                translations,
+                rotations,
+            }),
+        },
+    )
+}
+
+macro_rules! coupling_builtin {
+    ($function:ident, $name:literal, $variant:ident) => {
+        #[runtime_builtin(
+                    name = $name,
+                    category = "fea",
+                    summary = "Create a typed structural reference-point coupling.",
+                    keywords = "fea,structural,constraint,coupling,reference,point,typed",
+                    descriptor(crate::builtins::fea::constraints::structural::COUPLING_DESCRIPTOR),
+                    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+                    builtin_path = "crate::builtins::fea::constraints::structural"
+                )]
+        pub async fn $function(
+            id: String,
+            region: Value,
+            reference_point: Value,
+        ) -> BuiltinResult<Value> {
+            let (id, geometry_id, geometry_revision, target) = bound_region($name, id, &region)?;
+            let reference_point = reference_point_from_value($name, &reference_point)?;
+            bound_constraint_to_object(
+                $name,
+                FEA_STRUCTURAL_CONSTRAINT_CLASS,
+                geometry_id,
+                geometry_revision,
+                StructuralConstraint {
+                    constraint_id: id,
+                    frame: CoordinateFrame::Global,
+                    kind: StructuralConstraintKind::$variant(ReferencePointCoupling {
+                        target,
+                        reference_point,
+                    }),
+                },
+            )
+        }
+    };
+}
+
+coupling_builtin!(
+    structural_rigid_coupling_builtin,
+    "fea.StructuralConstraint.rigidCoupling",
+    RigidCoupling
+);
+coupling_builtin!(
+    structural_distributing_coupling_builtin,
+    "fea.StructuralConstraint.distributingCoupling",
+    DistributingCoupling
+);
 
 define_simple_constraint!(
     structural_symmetry_builtin,

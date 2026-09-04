@@ -31,14 +31,16 @@ mod validate_outputs;
 mod validate_sequence;
 mod validate_signals;
 
+pub use validate_authored::validate_coordinate_frame;
+
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};
 pub use problem::connector::{AnalysisConnector, ConnectorKind};
 pub use problem::constraint::{
     AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, ElectricalConstraint,
     ElectricalConstraintKind, FluidConstraint, FluidConstraintKind, MagneticConstraint,
-    MagneticConstraintKind, PairingPolicy, PrescribedRotations, PrescribedTranslations,
-    ReferencePointCoupling, RotationDofValue, StructuralConstraint, StructuralConstraintEquation,
+    MagneticConstraintKind, PairingPolicy, PrescribedStructuralDofs, ReferencePointCoupling,
+    RotationDofValue, StructuralConstraint, StructuralConstraintEquation,
     StructuralConstraintEquationTerm, StructuralConstraintKind, StructuralRotationDof,
     StructuralTranslationDof, ThermalConstraint, ThermalConstraintKind, TranslationDofValue,
 };
@@ -285,9 +287,10 @@ mod tests {
         let constraint = AnalysisConstraint::Structural(StructuralConstraint {
             constraint_id: "root_rotation".to_string(),
             frame: CoordinateFrame::Global,
-            kind: StructuralConstraintKind::PrescribedRotations(PrescribedRotations {
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
                 target: RegionTarget::boundary("root"),
-                values: vec![RotationDofValue {
+                translations: Vec::new(),
+                rotations: vec![RotationDofValue {
                     dof: StructuralRotationDof::Rz,
                     value: PrescribedValue::Constant(Rotation::new(0.125)),
                 }],
@@ -296,7 +299,7 @@ mod tests {
 
         let json = serde_json::to_value(&constraint).expect("constraint should serialize");
         assert_eq!(
-            json["structural"]["kind"]["prescribed_rotations"]["values"][0]["value"]["constant"]
+            json["structural"]["kind"]["prescribed"]["rotations"][0]["value"]["constant"]
                 ["radians"],
             0.125
         );
@@ -412,9 +415,9 @@ mod tests {
         model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
             constraint_id: "duplicate_ux".to_string(),
             frame: CoordinateFrame::Global,
-            kind: StructuralConstraintKind::PrescribedTranslations(PrescribedTranslations {
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
                 target: RegionTarget::boundary("root"),
-                values: vec![
+                translations: vec![
                     TranslationDofValue {
                         dof: StructuralTranslationDof::Ux,
                         value: PrescribedValue::Constant(Displacement::new(0.0)),
@@ -424,6 +427,7 @@ mod tests {
                         value: PrescribedValue::Constant(Displacement::new(1.0)),
                     },
                 ],
+                rotations: Vec::new(),
             }),
         })];
 

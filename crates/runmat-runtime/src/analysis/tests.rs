@@ -1116,10 +1116,11 @@ fn fea_document_resolves_prescribed_rotation_boundary_conditions() {
         runmat_analysis_core::StructuralConstraint {
             constraint_id: "tip_rotation".to_string(),
             frame: CoordinateFrame::Global,
-            kind: runmat_analysis_core::StructuralConstraintKind::PrescribedRotations(
-                runmat_analysis_core::PrescribedRotations {
+            kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
+                runmat_analysis_core::PrescribedStructuralDofs {
                     target: runmat_analysis_core::RegionTarget::boundary("tip"),
-                    values: [
+                    translations: Vec::new(),
+                    rotations: [
                         (runmat_analysis_core::StructuralRotationDof::Rx, 0.1),
                         (runmat_analysis_core::StructuralRotationDof::Ry, 0.2),
                         (runmat_analysis_core::StructuralRotationDof::Rz, 0.3),
@@ -1176,14 +1177,13 @@ fn fea_document_resolves_prescribed_rotation_boundary_conditions() {
     else {
         panic!("expected structural constraint")
     };
-    let runmat_analysis_core::StructuralConstraintKind::PrescribedRotations(values) =
-        &constraint.kind
+    let runmat_analysis_core::StructuralConstraintKind::Prescribed(values) = &constraint.kind
     else {
         panic!("expected prescribed rotations")
     };
     assert_eq!(
         values
-            .values
+            .rotations
             .iter()
             .map(|entry| {
                 entry

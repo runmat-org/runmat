@@ -616,178 +616,179 @@ pub(super) fn create_boundary_condition_object_from_args(args: Vec<Value>) -> Bu
     let kind_text = scalar_string(&args[2], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
     let mut fields = boundary_fields_from_name_values(&args[3..])?;
     let target = RegionTarget::boundary(region_id);
-    let condition = match normalize_token(&kind_text).as_str() {
-        "fixed" => ModelConditionPayload::Constraint(AnalysisConstraint::Structural(
-            StructuralConstraint {
-                constraint_id: bc_id,
-                frame: CoordinateFrame::Global,
-                kind: StructuralConstraintKind::Fixed { target },
-            },
-        )),
-        "prescribeddisplacement" => ModelConditionPayload::Constraint(
-            AnalysisConstraint::Structural(StructuralConstraint {
-                constraint_id: bc_id,
-                frame: CoordinateFrame::Global,
-                kind: StructuralConstraintKind::PrescribedTranslations(PrescribedTranslations {
-                    target,
-                    values: [
-                        StructuralTranslationDof::Ux,
-                        StructuralTranslationDof::Uy,
-                        StructuralTranslationDof::Uz,
-                    ]
-                    .into_iter()
-                    .map(|dof| TranslationDofValue {
-                        dof,
-                        value: PrescribedValue::Constant(Displacement::new(0.0)),
-                    })
-                    .collect(),
+    let condition =
+        match normalize_token(&kind_text).as_str() {
+            "fixed" => ModelConditionPayload::Constraint(AnalysisConstraint::Structural(
+                StructuralConstraint {
+                    constraint_id: bc_id,
+                    frame: CoordinateFrame::Global,
+                    kind: StructuralConstraintKind::Fixed { target },
+                },
+            )),
+            "prescribeddisplacement" => ModelConditionPayload::Constraint(
+                AnalysisConstraint::Structural(StructuralConstraint {
+                    constraint_id: bc_id,
+                    frame: CoordinateFrame::Global,
+                    kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                        target,
+                        translations: [
+                            StructuralTranslationDof::Ux,
+                            StructuralTranslationDof::Uy,
+                            StructuralTranslationDof::Uz,
+                        ]
+                        .into_iter()
+                        .map(|dof| TranslationDofValue {
+                            dof,
+                            value: PrescribedValue::Constant(Displacement::new(0.0)),
+                        })
+                        .collect(),
+                        rotations: Vec::new(),
+                    }),
                 }),
+            ),
+            "prescribedrotation" => ModelConditionPayload::Constraint(
+                AnalysisConstraint::Structural(StructuralConstraint {
+                    constraint_id: bc_id,
+                    frame: CoordinateFrame::Global,
+                    kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                        target,
+                        translations: Vec::new(),
+                        rotations: [
+                            (
+                                StructuralRotationDof::Rx,
+                                remove_required_boundary_f64(&mut fields, "rx")?,
+                            ),
+                            (
+                                StructuralRotationDof::Ry,
+                                remove_required_boundary_f64(&mut fields, "ry")?,
+                            ),
+                            (
+                                StructuralRotationDof::Rz,
+                                remove_required_boundary_f64(&mut fields, "rz")?,
+                            ),
+                        ]
+                        .into_iter()
+                        .map(|(dof, value)| RotationDofValue {
+                            dof,
+                            value: PrescribedValue::Constant(Rotation::new(value)),
+                        })
+                        .collect(),
+                    }),
+                }),
+            ),
+            "magneticinsulation" => ModelConditionPayload::Boundary(AnalysisBoundary {
+                boundary_id: bc_id,
+                target,
+                operator: BoundaryOperator::MagneticInsulation,
             }),
-        ),
-        "prescribedrotation" => ModelConditionPayload::Constraint(AnalysisConstraint::Structural(
-            StructuralConstraint {
-                constraint_id: bc_id,
-                frame: CoordinateFrame::Global,
-                kind: StructuralConstraintKind::PrescribedRotations(PrescribedRotations {
-                    target,
-                    values: [
-                        (
-                            StructuralRotationDof::Rx,
-                            remove_required_boundary_f64(&mut fields, "rx")?,
-                        ),
-                        (
-                            StructuralRotationDof::Ry,
-                            remove_required_boundary_f64(&mut fields, "ry")?,
-                        ),
-                        (
-                            StructuralRotationDof::Rz,
-                            remove_required_boundary_f64(&mut fields, "rz")?,
-                        ),
-                    ]
-                    .into_iter()
-                    .map(|(dof, value)| RotationDofValue {
-                        dof,
-                        value: PrescribedValue::Constant(Rotation::new(value)),
-                    })
-                    .collect(),
+            "vectorpotentialground" => ModelConditionPayload::Constraint(
+                AnalysisConstraint::Magnetic(MagneticConstraint {
+                    constraint_id: bc_id,
+                    kind: MagneticConstraintKind::VectorPotentialGround { target },
                 }),
-            },
-        )),
-        "magneticinsulation" => ModelConditionPayload::Boundary(AnalysisBoundary {
-            boundary_id: bc_id,
-            target,
-            operator: BoundaryOperator::MagneticInsulation,
-        }),
-        "vectorpotentialground" => {
-            ModelConditionPayload::Constraint(AnalysisConstraint::Magnetic(MagneticConstraint {
-                constraint_id: bc_id,
-                kind: MagneticConstraintKind::VectorPotentialGround { target },
-            }))
-        }
-        "acousticrigidwall" => ModelConditionPayload::Boundary(AnalysisBoundary {
-            boundary_id: bc_id,
-            target,
-            operator: BoundaryOperator::AcousticRigidWall,
-        }),
-        "acousticradiation" => ModelConditionPayload::Boundary(AnalysisBoundary {
-            boundary_id: bc_id,
-            target,
-            operator: BoundaryOperator::AcousticRadiation,
-        }),
-        "acousticimpedance" => ModelConditionPayload::Boundary(AnalysisBoundary {
-            boundary_id: bc_id,
-            target,
-            operator: BoundaryOperator::AcousticImpedance {
-                impedance: SpecificAcousticImpedance::new(remove_required_boundary_f64(
-                    &mut fields,
-                    "specific_impedance_pa_s_per_m",
-                )?),
-            },
-        }),
-        "thermalprescribedtemperature" => {
-            ModelConditionPayload::Constraint(AnalysisConstraint::Thermal(ThermalConstraint {
-                constraint_id: bc_id,
-                kind: ThermalConstraintKind::Prescribed {
-                    target,
-                    value: PrescribedValue::Constant(Temperature::new(
-                        remove_required_boundary_f64(&mut fields, "temperature_k")?,
+            ),
+            "acousticrigidwall" => ModelConditionPayload::Boundary(AnalysisBoundary {
+                boundary_id: bc_id,
+                target,
+                operator: BoundaryOperator::AcousticRigidWall,
+            }),
+            "acousticradiation" => ModelConditionPayload::Boundary(AnalysisBoundary {
+                boundary_id: bc_id,
+                target,
+                operator: BoundaryOperator::AcousticRadiation,
+            }),
+            "acousticimpedance" => ModelConditionPayload::Boundary(AnalysisBoundary {
+                boundary_id: bc_id,
+                target,
+                operator: BoundaryOperator::AcousticImpedance {
+                    impedance: SpecificAcousticImpedance::new(remove_required_boundary_f64(
+                        &mut fields,
+                        "specific_impedance_pa_s_per_m",
+                    )?),
+                },
+            }),
+            "thermalprescribedtemperature" => {
+                ModelConditionPayload::Constraint(AnalysisConstraint::Thermal(ThermalConstraint {
+                    constraint_id: bc_id,
+                    kind: ThermalConstraintKind::Prescribed {
+                        target,
+                        value: PrescribedValue::Constant(Temperature::new(
+                            remove_required_boundary_f64(&mut fields, "temperature_k")?,
+                        )),
+                    },
+                }))
+            }
+            "thermalheatflux" => ModelConditionPayload::Boundary(AnalysisBoundary {
+                boundary_id: bc_id,
+                target,
+                operator: BoundaryOperator::ThermalHeatFlux {
+                    value: PrescribedValue::Constant(HeatFlux::new(remove_required_boundary_f64(
+                        &mut fields,
+                        "heat_flux_w_per_m2",
+                    )?)),
+                },
+            }),
+            "thermalconvection" => ModelConditionPayload::Boundary(AnalysisBoundary {
+                boundary_id: bc_id,
+                target,
+                operator: BoundaryOperator::ThermalConvection {
+                    ambient_temperature: PrescribedValue::Constant(Temperature::new(
+                        remove_required_boundary_f64(&mut fields, "ambient_temperature_k")?,
                     )),
-                },
-            }))
-        }
-        "thermalheatflux" => ModelConditionPayload::Boundary(AnalysisBoundary {
-            boundary_id: bc_id,
-            target,
-            operator: BoundaryOperator::ThermalHeatFlux {
-                value: PrescribedValue::Constant(HeatFlux::new(remove_required_boundary_f64(
-                    &mut fields,
-                    "heat_flux_w_per_m2",
-                )?)),
-            },
-        }),
-        "thermalconvection" => ModelConditionPayload::Boundary(AnalysisBoundary {
-            boundary_id: bc_id,
-            target,
-            operator: BoundaryOperator::ThermalConvection {
-                ambient_temperature: PrescribedValue::Constant(Temperature::new(
-                    remove_required_boundary_f64(&mut fields, "ambient_temperature_k")?,
-                )),
-                coefficient: HeatTransferCoefficient::new(remove_required_boundary_f64(
-                    &mut fields,
-                    "coefficient_w_per_m2k",
-                )?),
-            },
-        }),
-        "cfdinletvelocity" => {
-            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc_id,
-                kind: FluidConstraintKind::PrescribedVelocity {
-                    target,
-                    value: PrescribedValue::Constant(Velocity::new(remove_required_boundary_f64(
+                    coefficient: HeatTransferCoefficient::new(remove_required_boundary_f64(
                         &mut fields,
-                        "velocity_m_per_s",
-                    )?)),
+                        "coefficient_w_per_m2k",
+                    )?),
                 },
-            }))
-        }
-        "cfdoutletpressure" => {
-            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc_id,
-                kind: FluidConstraintKind::PressureReference {
-                    target,
-                    value: PrescribedValue::Constant(Pressure::new(remove_required_boundary_f64(
-                        &mut fields,
-                        "pressure_pa",
-                    )?)),
-                },
-            }))
-        }
-        "cfdnoslipwall" => {
-            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc_id,
-                kind: FluidConstraintKind::NoSlipWall { target },
-            }))
-        }
-        "cfdslipwall" => {
-            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc_id,
-                kind: FluidConstraintKind::SlipWall { target },
-            }))
-        }
-        "cfdsymmetry" => {
-            ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
-                constraint_id: bc_id,
-                kind: FluidConstraintKind::Symmetry { target },
-            }))
-        }
-        _ => {
-            return Err(builtin_error(
-                BOUNDARY_CONDITION_NAME,
-                &ERROR_INPUT,
-                format!("unsupported boundary condition kind `{kind_text}`"),
-            ))
-        }
-    };
+            }),
+            "cfdinletvelocity" => {
+                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                    constraint_id: bc_id,
+                    kind: FluidConstraintKind::PrescribedVelocity {
+                        target,
+                        value: PrescribedValue::Constant(Velocity::new(
+                            remove_required_boundary_f64(&mut fields, "velocity_m_per_s")?,
+                        )),
+                    },
+                }))
+            }
+            "cfdoutletpressure" => {
+                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                    constraint_id: bc_id,
+                    kind: FluidConstraintKind::PressureReference {
+                        target,
+                        value: PrescribedValue::Constant(Pressure::new(
+                            remove_required_boundary_f64(&mut fields, "pressure_pa")?,
+                        )),
+                    },
+                }))
+            }
+            "cfdnoslipwall" => {
+                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                    constraint_id: bc_id,
+                    kind: FluidConstraintKind::NoSlipWall { target },
+                }))
+            }
+            "cfdslipwall" => {
+                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                    constraint_id: bc_id,
+                    kind: FluidConstraintKind::SlipWall { target },
+                }))
+            }
+            "cfdsymmetry" => {
+                ModelConditionPayload::Constraint(AnalysisConstraint::Fluid(FluidConstraint {
+                    constraint_id: bc_id,
+                    kind: FluidConstraintKind::Symmetry { target },
+                }))
+            }
+            _ => {
+                return Err(builtin_error(
+                    BOUNDARY_CONDITION_NAME,
+                    &ERROR_INPUT,
+                    format!("unsupported boundary condition kind `{kind_text}`"),
+                ))
+            }
+        };
     reject_unknown_boundary_fields(fields)?;
     boundary_condition_to_object(condition)
 }

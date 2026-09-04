@@ -8,12 +8,11 @@ use runmat_analysis_core::{
     FormulationRequirement, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
     MagneticConstraintKind, MagneticVectorPotential, MaterialAcousticModel, MaterialAssignment,
     MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
-    MaterialThermalModel, PhysicalSignal, PhysicsFamily, PrescribedRotations,
-    PrescribedTranslations, PrescribedValue, Pressure, ProcedureStep, RegionTarget, Rotation,
-    RotationDofValue, SolutionSpace, SpecificAcousticImpedance, StructuralConstraint,
-    StructuralConstraintKind, StructuralRotationDof, StructuralTranslationDof, Temperature,
-    ThermalConstraint, ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue,
-    Velocity,
+    MaterialThermalModel, PhysicalSignal, PhysicsFamily, PrescribedStructuralDofs, PrescribedValue,
+    Pressure, ProcedureStep, RegionTarget, Rotation, RotationDofValue, SolutionSpace,
+    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
+    StructuralRotationDof, StructuralTranslationDof, Temperature, ThermalConstraint,
+    ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue, Velocity,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
@@ -90,6 +89,7 @@ const TRENDS_NAME: &str = "fea.trends";
 
 pub(crate) fn ensure_value_classes_registered() {
     classes::ensure_fea_classes_registered();
+    constraints::ensure_constraint_support_classes_registered();
     values::ensure_quantity_classes_registered();
 }
 
@@ -4097,13 +4097,13 @@ execution:
             panic!("expected structural constraint")
         };
         assert_eq!(constraint.constraint_id, "tip_rotation");
-        let StructuralConstraintKind::PrescribedRotations(values) = constraint.kind else {
+        let StructuralConstraintKind::Prescribed(values) = constraint.kind else {
             panic!("expected prescribed rotations")
         };
         assert_eq!(values.target.region_id, "tip_node");
-        assert_eq!(values.values.len(), 3);
+        assert_eq!(values.rotations.len(), 3);
         assert_eq!(
-            values.values[0]
+            values.rotations[0]
                 .value
                 .study_constant(&[])
                 .map(|value| value.radians),
@@ -4128,12 +4128,12 @@ execution:
         else {
             panic!("expected structural constraint")
         };
-        let StructuralConstraintKind::PrescribedRotations(rotation) = rotation.kind else {
+        let StructuralConstraintKind::Prescribed(rotation) = rotation.kind else {
             panic!("expected prescribed rotations")
         };
         assert_eq!(
             rotation
-                .values
+                .rotations
                 .iter()
                 .map(|value| value.value.study_constant(&[]).expect("constant").radians)
                 .collect::<Vec<_>>(),

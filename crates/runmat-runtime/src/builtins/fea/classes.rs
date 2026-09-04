@@ -352,12 +352,18 @@ fn validate_bound_constraint_object(object: &ObjectInstance) -> Result<(), Strin
 fn structural_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     static_methods(&[
         ("fixed", "fea.StructuralConstraint.fixed"),
+        ("prescribed", "fea.StructuralConstraint.prescribed"),
         (
             "normalDisplacement",
             "fea.StructuralConstraint.normalDisplacement",
         ),
         ("symmetry", "fea.StructuralConstraint.symmetry"),
         ("antisymmetry", "fea.StructuralConstraint.antisymmetry"),
+        ("rigidCoupling", "fea.StructuralConstraint.rigidCoupling"),
+        (
+            "distributingCoupling",
+            "fea.StructuralConstraint.distributingCoupling",
+        ),
     ])
 }
 

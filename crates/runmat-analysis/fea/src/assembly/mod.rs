@@ -1370,9 +1370,7 @@ fn assemble_explicit_structural_system(
     {
         if !matches!(
             constraint.kind,
-            StructuralConstraintKind::Fixed { .. }
-                | StructuralConstraintKind::PrescribedTranslations(_)
-                | StructuralConstraintKind::PrescribedRotations(_)
+            StructuralConstraintKind::Fixed { .. } | StructuralConstraintKind::Prescribed(_)
         ) {
             return Err(StructuralAssemblyError::UnsupportedStructuralConstraint {
                 constraint_id: constraint.constraint_id.clone(),
@@ -1406,8 +1404,8 @@ fn assemble_explicit_structural_system(
                         );
                     }
                 }
-                StructuralConstraintKind::PrescribedTranslations(values) => {
-                    for prescribed in &values.values {
+                StructuralConstraintKind::Prescribed(values) => {
+                    for prescribed in &values.translations {
                         let Some(value) = prescribed.value.study_constant(&model.signals) else {
                             continue;
                         };
@@ -1425,9 +1423,7 @@ fn assemble_explicit_structural_system(
                             value.meters,
                         );
                     }
-                }
-                StructuralConstraintKind::PrescribedRotations(values) => {
-                    for prescribed in &values.values {
+                    for prescribed in &values.rotations {
                         let Some(value) = prescribed.value.study_constant(&model.signals) else {
                             continue;
                         };
@@ -2992,15 +2988,16 @@ mod tests {
             runmat_analysis_core::StructuralConstraint {
                 constraint_id: "scheduled_root".to_string(),
                 frame: runmat_analysis_core::CoordinateFrame::Global,
-                kind: runmat_analysis_core::StructuralConstraintKind::PrescribedTranslations(
-                    runmat_analysis_core::PrescribedTranslations {
+                kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
+                    runmat_analysis_core::PrescribedStructuralDofs {
                         target: runmat_analysis_core::RegionTarget::authored("root"),
-                        values: vec![runmat_analysis_core::TranslationDofValue {
+                        translations: vec![runmat_analysis_core::TranslationDofValue {
                             dof: runmat_analysis_core::StructuralTranslationDof::Ux,
                             value: runmat_analysis_core::PrescribedValue::Signal(
                                 runmat_analysis_core::SignalId("time_dependent".to_string()),
                             ),
                         }],
+                        rotations: Vec::new(),
                     },
                 ),
             },

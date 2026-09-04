@@ -401,10 +401,11 @@ fn prescribed_rotations_require_rotational_dofs() {
         runmat_analysis_core::StructuralConstraint {
             constraint_id: "tip_rotation".to_string(),
             frame: runmat_analysis_core::CoordinateFrame::Global,
-            kind: runmat_analysis_core::StructuralConstraintKind::PrescribedRotations(
-                runmat_analysis_core::PrescribedRotations {
+            kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
+                runmat_analysis_core::PrescribedStructuralDofs {
                     target: runmat_analysis_core::RegionTarget::boundary("tip"),
-                    values: vec![runmat_analysis_core::RotationDofValue {
+                    translations: Vec::new(),
+                    rotations: vec![runmat_analysis_core::RotationDofValue {
                         dof: runmat_analysis_core::StructuralRotationDof::Rx,
                         value: runmat_analysis_core::PrescribedValue::Constant(
                             runmat_analysis_core::Rotation::new(0.1),
@@ -465,12 +466,12 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
         let runmat_analysis_core::AnalysisConstraint::Structural(constraint) = constraint else {
             continue;
         };
-        let runmat_analysis_core::StructuralConstraintKind::PrescribedTranslations(values) =
+        let runmat_analysis_core::StructuralConstraintKind::Prescribed(values) =
             &mut constraint.kind
         else {
             continue;
         };
-        for prescribed in &mut values.values {
+        for prescribed in &mut values.translations {
             prescribed.value = runmat_analysis_core::PrescribedValue::Signal(
                 runmat_analysis_core::SignalId("zero_displacement".into()),
             );

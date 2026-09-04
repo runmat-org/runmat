@@ -384,6 +384,11 @@ mod electrical;
 mod fluid;
 mod magnetic;
 mod structural;
+mod support;
+
+pub(super) fn ensure_constraint_support_classes_registered() {
+    support::ensure_constraint_support_classes_registered();
+}
 
 #[cfg(test)]
 use self::{
@@ -400,6 +405,7 @@ mod tests {
         geometry_asset_from_value_with_builtin, geometry_load_builtin,
     };
     use futures::executor::block_on;
+    use runmat_analysis_core::ReferencePointCoupling;
 
     fn load_fixture(path: &std::path::Path, x: f64) -> Value {
         std::fs::write(
@@ -636,5 +642,195 @@ mod tests {
                 .expect("typed class method should be registered");
             assert!(definition.is_static);
         }
+    }
+
+    #[test]
+    fn prescribed_structural_dofs_and_reference_couplings_are_fully_typed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let asset = load_fixture(&tmp.path().join("typed-structural.stl"), 1.0);
+        let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
+            .expect("asset should decode");
+        let select = || {
+            block_on(geometry_region_builtin(
+                asset.clone(),
+                decoded.regions[0].region_id.clone(),
+            ))
+            .expect("region")
+        };
+
+        let ux = block_on(support::dof::structural_dof_ux_builtin()).unwrap();
+        let rz = block_on(support::dof::structural_dof_rz_builtin()).unwrap();
+        let displacement = block_on(
+            crate::builtins::fea::values::displacement_millimeters_builtin(Value::Num(2.5)),
+        )
+        .unwrap();
+        let rotation = block_on(crate::builtins::fea::values::rotation_degrees_builtin(
+            Value::Num(90.0),
+        ))
+        .unwrap();
+        let ux_value = block_on(support::dof::structural_translation_value_builtin(
+            ux.clone(),
+            displacement.clone(),
+        ))
+        .unwrap();
+        let rz_value = block_on(support::dof::structural_rotation_value_builtin(
+            rz, rotation,
+        ))
+        .unwrap();
+        assert!(block_on(support::dof::structural_rotation_value_builtin(
+            ux,
+            displacement,
+        ))
+        .is_err());
+
+        let values = crate::make_cell_with_shape(vec![ux_value.clone(), rz_value], vec![1, 2])
+            .expect("DOF values cell");
+        let frame = block_on(support::frame::coordinate_frame_global_builtin()).unwrap();
+        let prescribed = block_on(structural::structural_prescribed_builtin(
+            "guided".into(),
+            select(),
+            values,
+            frame,
+        ))
+        .expect("typed prescribed constraint");
+        let bound: BoundStructuralConstraint = object_payload(
+            "fea.StructuralConstraint.prescribed",
+            &prescribed,
+            FEA_STRUCTURAL_CONSTRAINT_CLASS,
+        )
+        .unwrap();
+        let StructuralConstraintKind::Prescribed(values) = bound.constraint.kind else {
+            panic!("expected prescribed DOFs")
+        };
+        assert_eq!(values.translations.len(), 1);
+        assert_eq!(values.rotations.len(), 1);
+        assert_eq!(
+            values.translations[0]
+                .value
+                .study_constant(&[])
+                .map(|value| value.meters),
+            Some(0.0025)
+        );
+        assert_eq!(
+            values.rotations[0]
+                .value
+                .study_constant(&[])
+                .map(|value| value.radians),
+            Some(std::f64::consts::FRAC_PI_2)
+        );
+
+        let duplicate_values =
+            crate::make_cell_with_shape(vec![ux_value.clone(), ux_value], vec![1, 2]).unwrap();
+        let frame = block_on(support::frame::coordinate_frame_global_builtin()).unwrap();
+        assert!(block_on(structural::structural_prescribed_builtin(
+            "duplicate".into(),
+            select(),
+            duplicate_values,
+            frame,
+        ))
+        .is_err());
+
+        let position = block_on(crate::builtins::fea::values::position_millimeters_builtin(
+            Value::Tensor(Tensor::new(vec![100.0, 0.0, 25.0], vec![1, 3]).unwrap()),
+        ))
+        .unwrap();
+        let point = block_on(
+            support::reference_point::reference_point_from_coordinates_builtin(
+                "load_point".into(),
+                position,
+            ),
+        )
+        .unwrap();
+        let coupling = block_on(structural::structural_distributing_coupling_builtin(
+            "remote_load".into(),
+            select(),
+            point,
+        ))
+        .unwrap();
+        let bound: BoundStructuralConstraint = object_payload(
+            "fea.StructuralConstraint.distributingCoupling",
+            &coupling,
+            FEA_STRUCTURAL_CONSTRAINT_CLASS,
+        )
+        .unwrap();
+        assert!(matches!(
+            bound.constraint.kind,
+            StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
+                reference_point: runmat_analysis_core::ReferencePoint { position, .. },
+                ..
+            }) if position.meters == [0.1, 0.0, 0.025]
+        ));
+
+        let conditions = crate::make_cell_with_shape(vec![prescribed, coupling], vec![1, 2])
+            .expect("typed structural condition cell");
+        let model = create_model_object_from_args(vec![
+            Value::String("typed_structural".into()),
+            asset,
+            Value::String("Template".into()),
+            Value::String("linear_static_structural".into()),
+            Value::String("BoundaryConditions".into()),
+            conditions,
+        ])
+        .expect("typed prescribed DOFs and coupling should compose into a model");
+        let model: AnalysisModel = object_payload(MODEL_NAME, &model, FEA_MODEL_CLASS).unwrap();
+        assert_eq!(model.constraints.len(), 2);
+
+        ensure_value_classes_registered();
+        for (class_name, method) in [
+            ("fea.StructuralDof", "ux"),
+            ("fea.StructuralDofValue", "translation"),
+            ("fea.CoordinateFrame", "cartesian"),
+            ("fea.ReferencePoint", "fromCoordinates"),
+        ] {
+            let (definition, _) = crate::class_registry::lookup_method(class_name, method)
+                .unwrap_or_else(|| panic!("{class_name}.{method} should be registered"));
+            assert!(definition.is_static);
+        }
+    }
+
+    #[test]
+    fn coordinate_frames_validate_and_round_trip_without_string_dispatch() {
+        let vector = |components: [f64; 3]| {
+            block_on(support::direction::direction_vector_builtin(Value::Tensor(
+                Tensor::new(components.to_vec(), vec![1, 3]).unwrap(),
+            )))
+            .unwrap()
+        };
+        let origin = block_on(crate::builtins::fea::values::position_meters_builtin(
+            Value::Tensor(Tensor::new(vec![0.0, 0.0, 0.0], vec![1, 3]).unwrap()),
+        ))
+        .unwrap();
+        let frame = block_on(support::frame::coordinate_frame_cartesian_builtin(
+            "fixture".into(),
+            origin.clone(),
+            vector([1.0, 0.0, 0.0]),
+            vector([0.0, 1.0, 0.0]),
+        ))
+        .expect("orthogonal axes should form a frame");
+        assert!(matches!(
+            support::coordinate_frame_from_value("test", &frame).unwrap(),
+            CoordinateFrame::Cartesian(runmat_analysis_core::CartesianFrame {
+                frame_id,
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0],
+                ..
+            }) if frame_id == "fixture"
+        ));
+        assert!(block_on(support::frame::coordinate_frame_cartesian_builtin(
+            "parallel".into(),
+            origin,
+            vector([1.0, 0.0, 0.0]),
+            vector([2.0, 0.0, 0.0]),
+        ))
+        .is_err());
+
+        let payload = crate::execution::value_codec::encode_inline_value(&frame)
+            .expect("typed frame should encode");
+        let decoded = crate::execution::value_codec::decode_inline_value(&payload)
+            .expect("typed frame should decode in a portable worker");
+        assert!(matches!(
+            support::coordinate_frame_from_value("test", &decoded).unwrap(),
+            CoordinateFrame::Cartesian(_)
+        ));
     }
 }

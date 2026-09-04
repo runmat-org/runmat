@@ -224,14 +224,11 @@ pub(super) fn validate_structural_inputs(
         let supported = match basis {
             StructuralProjectionBasis::CanonicalSolid => matches!(
                 constraint.kind,
-                StructuralConstraintKind::Fixed { .. }
-                    | StructuralConstraintKind::PrescribedTranslations(_)
+                StructuralConstraintKind::Fixed { .. } | StructuralConstraintKind::Prescribed(_)
             ),
             StructuralProjectionBasis::ExplicitConnectivity => matches!(
                 constraint.kind,
-                StructuralConstraintKind::Fixed { .. }
-                    | StructuralConstraintKind::PrescribedTranslations(_)
-                    | StructuralConstraintKind::PrescribedRotations(_)
+                StructuralConstraintKind::Fixed { .. } | StructuralConstraintKind::Prescribed(_)
             ),
             StructuralProjectionBasis::Synthetic => true,
         };
@@ -241,30 +238,20 @@ pub(super) fn validate_structural_inputs(
                 constraint_kind: structural_constraint_kind_name(&constraint.kind),
             });
         }
-        match &constraint.kind {
-            StructuralConstraintKind::PrescribedTranslations(values) => {
-                if values
-                    .values
+        if let StructuralConstraintKind::Prescribed(values) = &constraint.kind {
+            if values
+                .translations
+                .iter()
+                .any(|value| value.value.study_constant(&model.signals).is_none())
+                || values
+                    .rotations
                     .iter()
                     .any(|value| value.value.study_constant(&model.signals).is_none())
-                {
-                    return Err(StructuralAssemblyError::UnsupportedScheduledConstraint {
-                        constraint_id: constraint.constraint_id.clone(),
-                    });
-                }
+            {
+                return Err(StructuralAssemblyError::UnsupportedScheduledConstraint {
+                    constraint_id: constraint.constraint_id.clone(),
+                });
             }
-            StructuralConstraintKind::PrescribedRotations(values) => {
-                if values
-                    .values
-                    .iter()
-                    .any(|value| value.value.study_constant(&model.signals).is_none())
-                {
-                    return Err(StructuralAssemblyError::UnsupportedScheduledConstraint {
-                        constraint_id: constraint.constraint_id.clone(),
-                    });
-                }
-            }
-            _ => {}
         }
     }
     Ok(())
@@ -273,8 +260,7 @@ pub(super) fn validate_structural_inputs(
 pub(super) fn structural_constraint_kind_name(kind: &StructuralConstraintKind) -> &'static str {
     match kind {
         StructuralConstraintKind::Fixed { .. } => "fixed",
-        StructuralConstraintKind::PrescribedTranslations(_) => "prescribed_translations",
-        StructuralConstraintKind::PrescribedRotations(_) => "prescribed_rotations",
+        StructuralConstraintKind::Prescribed(_) => "prescribed",
         StructuralConstraintKind::NormalDisplacement { .. } => "normal_displacement",
         StructuralConstraintKind::Symmetry { .. } => "symmetry",
         StructuralConstraintKind::Antisymmetry { .. } => "antisymmetry",

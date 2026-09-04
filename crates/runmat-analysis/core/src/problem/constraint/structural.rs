@@ -23,8 +23,7 @@ pub enum StructuralConstraintKind {
     Fixed {
         target: RegionTarget,
     },
-    PrescribedTranslations(PrescribedTranslations),
-    PrescribedRotations(PrescribedRotations),
+    Prescribed(PrescribedStructuralDofs),
     NormalDisplacement {
         target: RegionTarget,
         value: PrescribedValue<Displacement>,
@@ -49,8 +48,7 @@ impl StructuralConstraintKind {
             | Self::NormalDisplacement { target, .. }
             | Self::Symmetry { target }
             | Self::Antisymmetry { target } => Some(target),
-            Self::PrescribedTranslations(value) => Some(&value.target),
-            Self::PrescribedRotations(value) => Some(&value.target),
+            Self::Prescribed(value) => Some(&value.target),
             Self::RigidCoupling(value) | Self::DistributingCoupling(value) => Some(&value.target),
             Self::Tie(value) | Self::Periodic(value) => Some(&value.primary),
             Self::Equation(_) => None,
@@ -63,8 +61,7 @@ impl StructuralConstraintKind {
             | Self::NormalDisplacement { target, .. }
             | Self::Symmetry { target }
             | Self::Antisymmetry { target } => visit(target),
-            Self::PrescribedTranslations(value) => visit(&mut value.target),
-            Self::PrescribedRotations(value) => visit(&mut value.target),
+            Self::Prescribed(value) => visit(&mut value.target),
             Self::RigidCoupling(value) | Self::DistributingCoupling(value) => {
                 visit(&mut value.target)
             }
@@ -83,8 +80,7 @@ impl StructuralConstraintKind {
             | Self::NormalDisplacement { target, .. }
             | Self::Symmetry { target }
             | Self::Antisymmetry { target } => visit(target),
-            Self::PrescribedTranslations(value) => visit(&value.target),
-            Self::PrescribedRotations(value) => visit(&value.target),
+            Self::Prescribed(value) => visit(&value.target),
             Self::RigidCoupling(value) | Self::DistributingCoupling(value) => visit(&value.target),
             Self::Tie(pair) | Self::Periodic(pair) => visit_pair_ref(pair, visit),
             Self::Equation(equation) => equation.terms.iter().for_each(|term| visit(&term.target)),
@@ -124,16 +120,10 @@ pub struct RotationDofValue {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PrescribedTranslations {
+pub struct PrescribedStructuralDofs {
     pub target: RegionTarget,
-    pub values: Vec<TranslationDofValue>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PrescribedRotations {
-    pub target: RegionTarget,
-    pub values: Vec<RotationDofValue>,
+    pub translations: Vec<TranslationDofValue>,
+    pub rotations: Vec<RotationDofValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

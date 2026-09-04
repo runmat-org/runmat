@@ -69,7 +69,8 @@ fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> 
         return Err("scalar signals cannot declare a coordinate frame".to_string());
     }
     if let Some(frame) = &signal.frame {
-        crate::validate_authored::validate_frame(frame).map_err(|error| error.to_string())?;
+        crate::validate_authored::validate_coordinate_frame(frame)
+            .map_err(|error| error.to_string())?;
     }
     validate_evidence(&signal.evidence)?;
     validate_provenance(&signal.provenance)?;

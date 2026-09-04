@@ -374,7 +374,7 @@ macro_rules! position_builtin {
                                             builtin_path = "crate::builtins::fea::values"
                                                 )]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
-            let coordinates = numeric_vector3($builtin_name, &value)?;
+            let coordinates = finite_numeric_vector3($builtin_name, &value, "coordinates")?;
             let coordinates = coordinates.map(|value| value * $scale);
             position_to_value($builtin_name, coordinates)
         }
@@ -401,8 +401,10 @@ position_builtin!(
 );
 
 pub(super) fn ensure_quantity_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
+    static PORTABLE_SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(DISPLACEMENT_CLASS);
+    PORTABLE_SCHEMAS.call_once(|| {
         for (class_name, type_identity, fields) in quantity_schemas() {
             crate::execution::value_codec::register_immutable_value_class(
                 crate::execution::value_codec::ImmutableValueClassSchema {
@@ -417,6 +419,10 @@ pub(super) fn ensure_quantity_classes_registered() {
             .unwrap_or_else(|error| {
                 panic!("failed to register immutable FEA quantity class {class_name}: {error}")
             });
+        }
+    });
+    RUNTIME_CLASSES.ensure(|| {
+        for (class_name, _, fields) in quantity_schemas() {
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
                 name: class_name.into(),
                 parent: None,
@@ -563,7 +569,7 @@ fn validate_quantity_object(object: &ObjectInstance) -> Result<(), String> {
         return Err(format!("{} is missing `{}`", object.class_name, fields[0]));
     };
     if object.class_name == POSITION_CLASS {
-        numeric_vector3("fea.Position", value)
+        finite_numeric_vector3("fea.Position", value, "coordinates")
             .map(|_| ())
             .map_err(|error| error.message().to_string())
     } else {
@@ -655,6 +661,31 @@ pub(super) fn quantity_scalar(
     finite_numeric_scalar(builtin, value, field)
 }
 
+pub(super) fn position_meters(builtin: &'static str, value: &Value) -> BuiltinResult<[f64; 3]> {
+    let Value::Object(object) = value else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("expected {POSITION_CLASS}"),
+        ));
+    };
+    if object.class_name != POSITION_CLASS {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("expected {POSITION_CLASS}, got {}", object.class_name),
+        ));
+    }
+    let coordinates = object.properties.get("meters").ok_or_else(|| {
+        builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("{POSITION_CLASS} is missing `meters`"),
+        )
+    })?;
+    finite_numeric_vector3(builtin, coordinates, "position")
+}
+
 pub(super) fn finite_numeric_scalar(
     builtin: &'static str,
     value: &Value,
@@ -686,19 +717,23 @@ pub(super) fn finite_numeric_scalar(
     Ok(converted)
 }
 
-fn numeric_vector3(builtin: &'static str, value: &Value) -> BuiltinResult<[f64; 3]> {
+pub(super) fn finite_numeric_vector3(
+    builtin: &'static str,
+    value: &Value,
+    label: &str,
+) -> BuiltinResult<[f64; 3]> {
     let Value::Tensor(tensor) = value else {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            "coordinates must be a 1-by-3 or 3-by-1 real numeric vector",
+            format!("{label} must be a 1-by-3 or 3-by-1 real numeric vector"),
         ));
     };
     if tensor.shape != [1, 3] && tensor.shape != [3, 1] {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            "coordinates must be a 1-by-3 or 3-by-1 real numeric vector",
+            format!("{label} must be a 1-by-3 or 3-by-1 real numeric vector"),
         ));
     }
     let mut result = [0.0; 3];
@@ -712,7 +747,7 @@ fn numeric_vector3(builtin: &'static str, value: &Value) -> BuiltinResult<[f64; 
             return Err(builtin_error(
                 builtin,
                 &ERROR_INPUT,
-                "coordinates must contain only finite values",
+                format!("{label} must contain only finite values"),
             ));
         }
     }

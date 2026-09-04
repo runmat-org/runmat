@@ -58,8 +58,8 @@ pub(crate) fn validate_rotational_dof_targets(
             continue;
         };
         if !matches!(
-            constraint.kind,
-            StructuralConstraintKind::PrescribedRotations(_)
+            &constraint.kind,
+            StructuralConstraintKind::Prescribed(values) if !values.rotations.is_empty()
         ) {
             continue;
         }

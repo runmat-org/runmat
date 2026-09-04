@@ -117,8 +117,7 @@ pub(super) fn apply_solver_mesh_structural_regions(
             && target_nodes.is_empty()
             && matches!(
                 constraint.kind,
-                StructuralConstraintKind::Fixed { .. }
-                    | StructuralConstraintKind::PrescribedTranslations(_)
+                StructuralConstraintKind::Fixed { .. } | StructuralConstraintKind::Prescribed(_)
             )
         {
             return Err(SolverMeshRegionMappingError::UnmappedConstraintRegion {
@@ -126,9 +125,7 @@ pub(super) fn apply_solver_mesh_structural_regions(
                 region_id: target.region_id.clone(),
                 constraint_kind: match constraint.kind {
                     StructuralConstraintKind::Fixed { .. } => "fixed",
-                    StructuralConstraintKind::PrescribedTranslations(_) => {
-                        "prescribed_translations"
-                    }
+                    StructuralConstraintKind::Prescribed(_) => "prescribed",
                     _ => "unsupported",
                 },
             });
@@ -144,8 +141,8 @@ pub(super) fn apply_solver_mesh_structural_regions(
                         constrain_dof(layout, constrained, rhs, node_index, kind, 0.0);
                     }
                 }
-                StructuralConstraintKind::PrescribedTranslations(values) => {
-                    for prescribed in &values.values {
+                StructuralConstraintKind::Prescribed(values) => {
+                    for prescribed in &values.translations {
                         let Some(value) = prescribed.value.study_constant(&model.signals) else {
                             continue;
                         };

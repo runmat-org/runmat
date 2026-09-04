@@ -63,7 +63,7 @@ fn validate_excitations(
                 );
             }
             validate_excitation_target(&excitation.target)?;
-            crate::validate_authored::validate_frame(&excitation.frame)
+            crate::validate_authored::validate_coordinate_frame(&excitation.frame)
                 .map_err(|error| error.to_string())?;
             if let Some(direction) = excitation.direction {
                 validate_direction(direction.vector)?;
@@ -378,7 +378,7 @@ fn validate_initial<Q: FiniteQuantity>(
     if let InitialConditionTarget::Region(target) = &condition.target {
         crate::validate_authored::validate_target(target)?;
     }
-    crate::validate_authored::validate_frame(&condition.frame)
+    crate::validate_authored::validate_coordinate_frame(&condition.frame)
         .map_err(|error| error.to_string())?;
     if !steps.contains(condition.applies_before_step_id.as_str()) {
         return Err("initial condition must name an existing following step".to_string());
@@ -531,7 +531,7 @@ fn validate_response_spectra(
                     }
                 }
             }
-            crate::validate_authored::validate_frame(&spectrum.direction.frame)
+            crate::validate_authored::validate_coordinate_frame(&spectrum.direction.frame)
                 .map_err(|error| error.to_string())?;
             validate_direction(spectrum.direction.vector)?;
             let truncation = spectrum.truncation;

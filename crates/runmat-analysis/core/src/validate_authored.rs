@@ -10,7 +10,7 @@ use crate::{
 pub(crate) fn validate_authored_model(
     model: &AnalysisModel,
 ) -> Result<(), AnalysisValidationError> {
-    validate_frame(&model.frame)?;
+    validate_coordinate_frame(&model.frame)?;
     crate::validate_signals::validate_signals(&model.signals)?;
     crate::validate_domains::validate_domains(model)?;
     validate_constraints(&model.constraints, &model.signals)?;
@@ -21,7 +21,7 @@ pub(crate) fn validate_authored_model(
     Ok(())
 }
 
-pub(crate) fn validate_frame(frame: &CoordinateFrame) -> Result<(), AnalysisValidationError> {
+pub fn validate_coordinate_frame(frame: &CoordinateFrame) -> Result<(), AnalysisValidationError> {
     let valid = match frame {
         CoordinateFrame::Global
         | CoordinateFrame::Material
@@ -98,19 +98,16 @@ fn validate_constraint_values(
 ) -> Result<(), AnalysisValidationError> {
     let invalid = match value {
         AnalysisConstraint::Structural(value) => match &value.kind {
-            StructuralConstraintKind::PrescribedTranslations(values) => {
-                values.values.is_empty()
-                    || has_duplicates(values.values.iter().map(|entry| entry.dof))
+            StructuralConstraintKind::Prescribed(values) => {
+                (values.translations.is_empty() && values.rotations.is_empty())
+                    || has_duplicates(values.translations.iter().map(|entry| entry.dof))
+                    || has_duplicates(values.rotations.iter().map(|entry| entry.dof))
                     || values
-                        .values
+                        .translations
                         .iter()
                         .any(|entry| !entry.value.is_well_formed(signals))
-            }
-            StructuralConstraintKind::PrescribedRotations(values) => {
-                values.values.is_empty()
-                    || has_duplicates(values.values.iter().map(|entry| entry.dof))
                     || values
-                        .values
+                        .rotations
                         .iter()
                         .any(|entry| !entry.value.is_well_formed(signals))
             }

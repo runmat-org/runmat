@@ -17,7 +17,7 @@ pub(super) fn validate_spec(
     validate_quantity_family(step, request, spec.quantity)?;
     validate_shape(request, spec)?;
     validate_target(model, request, &spec.target)?;
-    crate::validate_authored::validate_frame(&spec.frame)
+    crate::validate_authored::validate_coordinate_frame(&spec.frame)
         .map_err(|_| invalid_observation(request, "coordinate frame is invalid"))?;
     validate_component(request, spec)?;
     validate_sign(request, spec)?;
