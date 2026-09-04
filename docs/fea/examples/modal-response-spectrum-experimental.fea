@@ -1,0 +1,95 @@
+version: 1
+kind: study
+id: modal_response_spectrum_experimental
+
+geometry:
+  path: geometry/tetrahedron.stl
+  units: meter
+
+model:
+  template: modal_structural
+  defaults: template_scaffold
+
+constraints:
+  - structural:
+      constraint_id: fixed_support
+      frame: global
+      kind:
+        fixed:
+          target:
+            region_id: region_default
+            entity_dimension: face
+            expected_topology: boundary_face
+            cardinality: one_or_more
+
+response_spectra:
+  - spectrum_id: design_spectrum
+    abscissa:
+      frequency_hertz: [5.0, 10.0, 20.0, 40.0]
+    ordinates: [1.2, 2.5, 1.8, 0.7]
+    damping: { ratio: 0.05 }
+    response: absolute_acceleration
+    envelope: maximax
+    interpolation: linear_frequency
+    extrapolation: hold_endpoint
+    direction:
+      frame: global
+      vector: [1.0, 0.0, 0.0]
+    modal_combination: complete_quadratic_combination
+    directional_combination: srss
+    truncation:
+      minimum_cumulative_mass_ratio: 0.9
+      include_residual_mode: true
+      include_rigid_response: true
+      include_missing_mass: true
+    construction: authored_design
+    evidence:
+      sampling_adequacy_ratio: 0.95
+      max_interpolation_error: 0.02
+    provenance_digest: sha256:documented-design-spectrum
+
+sequence:
+  sequence_id: modal_sequence
+  steps:
+    - step_id: modes
+      family: structural
+      procedure: modal_extraction
+      solution_space: direct
+      independent_domain: { eigenvalue: { requested_count: 6 } }
+      activations:
+        - object: { constraint: fixed_support }
+          lifecycle: activate
+      state_inputs: []
+      state_outputs:
+        - state_id: modal_basis
+          kind: modal_basis
+          completeness: complete
+          persistence: until_dependents_complete
+      observations: []
+      accuracy:
+        accuracy_plan_id: modes.accuracy
+        criteria:
+          - criterion_id: algebraic_residual
+            target: global_equilibrium
+            contribution: algebraic
+            tolerance: { relative: 1.0e-8 }
+            evidence: residual_bound
+            mandatory: true
+        unavailable_evidence: mark_indeterminate_experimental
+        exceeded_limit: fail
+        equivalence: { relative_tolerance: 1.0e-10 }
+        resources:
+          maximum_refinement_cycles: 0
+          maximum_solver_tightenings: 0
+          maximum_samples: 1000000
+          maximum_wall_time_milliseconds: 3600000
+          maximum_resident_bytes: 8589934592
+      restart: fresh
+  dependencies: []
+  transitions: []
+  branches: []
+
+execution:
+  - step: modes
+    backend: cpu
+    requirement: experimental

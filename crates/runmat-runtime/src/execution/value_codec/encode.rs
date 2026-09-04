@@ -1,7 +1,7 @@
 use super::ValueCodecError;
 use runmat_execution::value::{
-    CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, SparseValue, StructField,
-    ValuePayload,
+    CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, RegisteredData,
+    RegisteredField, SparseValue, StructField, ValuePayload,
 };
 use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 
@@ -77,10 +77,11 @@ fn encode(value: &Value, path: &str) -> Result<ValuePayload, ValueCodecError> {
                 "GPU buffers require an object reference fenced to a worker and device",
             ))
         }
-        Value::Object(_) | Value::ObjectArray(_) => {
+        Value::Object(value) => encode_immutable_class(value, path)?,
+        Value::ObjectArray(_) => {
             return Err(ValueCodecError::unsupported(
                 path,
-                "value classes require an explicitly registered immutable class codec",
+                "immutable value-class arrays require a shape-preserving registered array codec",
             ))
         }
         Value::HandleObject(_) => {
@@ -145,6 +146,36 @@ fn encode(value: &Value, path: &str) -> Result<ValuePayload, ValueCodecError> {
         )),
     };
     Ok(ValuePayload::Inline(Box::new(inline)))
+}
+
+fn encode_immutable_class(
+    object: &runmat_value::ObjectInstance,
+    path: &str,
+) -> Result<InlineValue, ValueCodecError> {
+    let schema =
+        super::immutable_class::schema_for_class(&object.class_name)?.ok_or_else(|| {
+            ValueCodecError::unsupported(
+                path,
+                "value classes require an explicitly registered immutable class codec",
+            )
+        })?;
+    schema.validate_object(object, path)?;
+    let mut fields = object.properties.iter().collect::<Vec<_>>();
+    fields.sort_by(|left, right| left.0.cmp(right.0));
+    let fields = fields
+        .into_iter()
+        .map(|(name, value)| {
+            Ok(RegisteredField {
+                name: name.clone(),
+                value: encode(value, &field_path(path, name))?,
+            })
+        })
+        .collect::<Result<Vec<_>, ValueCodecError>>()?;
+    Ok(InlineValue::ImmutableValueClass(RegisteredData {
+        type_identity: schema.type_identity().to_owned(),
+        schema_version: schema.schema_version(),
+        fields,
+    }))
 }
 
 fn encode_integer_scalar(value: &IntValue) -> InlineValue {

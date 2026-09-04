@@ -202,14 +202,16 @@ fn normalize_integral_json_numbers(value: &mut serde_json::Value) {
 }
 
 fn vector3_from_value(builtin: &'static str, value: &Value, key: &str) -> BuiltinResult<[f64; 3]> {
-    let values: Vec<f64> =
-        serde_json::from_value(value_to_json(builtin, value)?).map_err(|err| {
+    let values = match value {
+        Value::Tensor(tensor) => tensor.materialize_f64(),
+        _ => serde_json::from_value(value_to_json(builtin, value)?).map_err(|err| {
             builtin_error(
                 builtin,
                 &ERROR_INPUT,
                 format!("invalid vector option `{key}`: {err}"),
             )
-        })?;
+        })?,
+    };
     if values.len() != 3 {
         return Err(builtin_error(
             builtin,
@@ -223,14 +225,18 @@ fn vector3_from_value(builtin: &'static str, value: &Value, key: &str) -> Builti
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_value::{Tensor, Value};
+    use runmat_value::{ObjectInstance, Tensor, Value};
 
     use super::super::{
-        fea_run_builtin, fea_validate_builtin, serializable_to_object, ERROR_INTERNAL,
-        FEA_PAYLOAD_JSON_PROPERTY, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS,
-        FEA_STUDY_SPEC_JSON_PROPERTY, GEOMETRY_ASSET_CLASS, GEOMETRY_ASSET_JSON_PROPERTY,
+        fea_run_builtin, fea_validate_builtin, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS,
+        GEOMETRY_ASSET_CLASS, GEOMETRY_ASSET_JSON_PROPERTY,
     };
     use super::*;
+
+    fn decode_object<T: serde::de::DeserializeOwned>(value: &Value, class_name: &'static str) -> T {
+        super::super::object_payload("fea.test", value, class_name)
+            .expect("typed FEA object should decode")
+    }
 
     fn mesh_summary_value() -> Value {
         crate::builtins::io::json::jsondecode::value_from_json(&serde_json::json!({
@@ -349,14 +355,12 @@ mod tests {
             diagnostics: Vec::new(),
         };
 
-        serializable_to_object(
-            AUTHOR_STUDY_NAME,
-            &ERROR_INTERNAL,
-            GEOMETRY_ASSET_CLASS,
-            &asset,
-            Some(GEOMETRY_ASSET_JSON_PROPERTY),
-        )
-        .expect("geometry asset should convert")
+        let mut object = ObjectInstance::new(GEOMETRY_ASSET_CLASS.into());
+        object.properties.insert(
+            GEOMETRY_ASSET_JSON_PROPERTY.into(),
+            Value::String(serde_json::to_string(&asset).expect("geometry should serialize")),
+        );
+        Value::Object(object)
     }
 
     fn diagram_observation_value() -> Value {
@@ -464,13 +468,7 @@ mod tests {
             panic!("expected authored study object");
         };
         assert_eq!(study_object.class_name, FEA_STUDY_CLASS);
-        let Some(Value::String(payload)) =
-            study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY)
-        else {
-            panic!("expected study JSON payload");
-        };
-        let decoded: crate::analysis::AnalysisStudySpec =
-            serde_json::from_str(payload).expect("authored study should decode");
+        let decoded: crate::analysis::AnalysisStudySpec = decode_object(&study, FEA_STUDY_CLASS);
         let model = decoded.model.expect("authored study should include model");
         assert_eq!(model.material_assignments[0].region_id, "solid");
         assert_eq!(
@@ -511,16 +509,8 @@ mod tests {
         ])
         .expect("authoring should produce a study");
 
-        let Value::Object(study_object) = study.clone() else {
-            panic!("expected authored study object");
-        };
-        let Some(Value::String(study_payload)) =
-            study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY)
-        else {
-            panic!("expected study payload");
-        };
         let decoded_study: crate::analysis::AnalysisStudySpec =
-            serde_json::from_str(study_payload).expect("authored study should decode");
+            decode_object(&study, FEA_STUDY_CLASS);
         assert_eq!(
             decoded_study.solver_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
@@ -531,12 +521,8 @@ mod tests {
             panic!("expected run result object");
         };
         assert_eq!(run_object.class_name, FEA_RUN_RESULT_CLASS);
-        let Some(Value::String(run_payload)) = run_object.properties.get(FEA_PAYLOAD_JSON_PROPERTY)
-        else {
-            panic!("expected run result payload");
-        };
         let run_data: crate::analysis::AnalysisStudyRunData =
-            serde_json::from_str(run_payload).expect("run result should decode");
+            decode_object(&Value::Object(run_object), FEA_RUN_RESULT_CLASS);
         assert_eq!(
             run_data.procedure_step.procedure,
             runmat_analysis_core::AnalysisProcedure::Static
@@ -574,13 +560,8 @@ mod tests {
         let Value::Object(study_object) = study else {
             panic!("expected authored study object");
         };
-        let Some(Value::String(payload)) =
-            study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY)
-        else {
-            panic!("expected study JSON payload");
-        };
         let decoded: crate::analysis::AnalysisStudySpec =
-            serde_json::from_str(payload).expect("authored study should decode");
+            decode_object(&Value::Object(study_object), FEA_STUDY_CLASS);
         let model = decoded.model.expect("authored study should include model");
         assert_eq!(model.material_assignments[0].region_id, "solid");
         assert_eq!(
@@ -607,16 +588,8 @@ mod tests {
         ])
         .expect("minimal authoring inputs should produce a runnable generic study");
 
-        let Value::Object(study_object) = study.clone() else {
-            panic!("expected authored study object");
-        };
-        let Some(Value::String(study_payload)) =
-            study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY)
-        else {
-            panic!("expected study payload");
-        };
         let decoded_study: crate::analysis::AnalysisStudySpec =
-            serde_json::from_str(study_payload).expect("authored study should decode");
+            decode_object(&study, FEA_STUDY_CLASS);
         let model = decoded_study
             .model
             .as_ref()
@@ -637,12 +610,8 @@ mod tests {
             panic!("expected run result object");
         };
         assert_eq!(run_object.class_name, FEA_RUN_RESULT_CLASS);
-        let Some(Value::String(run_payload)) = run_object.properties.get(FEA_PAYLOAD_JSON_PROPERTY)
-        else {
-            panic!("expected run result payload");
-        };
         let run_data: crate::analysis::AnalysisStudyRunData =
-            serde_json::from_str(run_payload).expect("run result should decode");
+            decode_object(&Value::Object(run_object), FEA_RUN_RESULT_CLASS);
         assert_eq!(
             run_data.procedure_step.procedure,
             runmat_analysis_core::AnalysisProcedure::Static

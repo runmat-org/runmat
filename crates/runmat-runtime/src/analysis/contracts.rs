@@ -1471,13 +1471,10 @@ impl AnalysisFieldDescriptor {
             AnalysisFieldValues::DeviceRef(_) => AnalysisFieldStorage::DeviceRef,
         };
         let kind = infer_field_kind(&field.field_id, &field.shape);
-        let class_name = match kind {
-            AnalysisFieldKind::Scalar => "fea.ScalarField",
-            AnalysisFieldKind::Vector => "fea.VectorField",
-            AnalysisFieldKind::Tensor => "fea.TensorField",
-            AnalysisFieldKind::Unknown => "fea.Field",
-        }
-        .to_string();
+        // Runtime currently exposes one concrete immutable field value class. The field's
+        // scalar/vector/tensor shape is carried by `kind`; advertising subclasses that are not
+        // registered would make the public class identity false.
+        let class_name = "fea.Field".to_string();
         let residency = match storage {
             AnalysisFieldStorage::HostF64 => "cpu",
             AnalysisFieldStorage::DeviceRef => "gpu",

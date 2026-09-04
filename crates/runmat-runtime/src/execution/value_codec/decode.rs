@@ -103,11 +103,44 @@ fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> 
         )),
         InlineValue::Exception(value) => decode_exception(value, path),
         InlineValue::Callable(value) => decode_callable(value, path),
-        InlineValue::ImmutableValueClass(_) => Err(ValueCodecError::unsupported(
-            path,
-            "the registered immutable value-class codec is unavailable in this runtime",
-        )),
+        InlineValue::ImmutableValueClass(value) => decode_immutable_class(value, path),
     }
+}
+
+fn decode_immutable_class(
+    registered: &runmat_execution::value::RegisteredData,
+    path: &str,
+) -> Result<Value, ValueCodecError> {
+    let schema = super::immutable_class::schema_for_type_identity(&registered.type_identity)?
+        .ok_or_else(|| {
+            ValueCodecError::invalid(
+                path,
+                format!(
+                    "unknown immutable value-class type identity `{}`",
+                    registered.type_identity
+                ),
+            )
+        })?;
+    if registered.schema_version != schema.schema_version() {
+        return Err(ValueCodecError::invalid(
+            path,
+            format!(
+                "immutable value-class `{}` uses schema version {}, expected {}",
+                registered.type_identity,
+                registered.schema_version,
+                schema.schema_version()
+            ),
+        ));
+    }
+    let mut object = runmat_value::ObjectInstance::new(schema.class_name().to_owned());
+    for field in &registered.fields {
+        object.properties.insert(
+            field.name.clone(),
+            decode(&field.value, &format!("{path}.{}", field.name))?,
+        );
+    }
+    schema.validate_object(&object, path)?;
+    Ok(Value::Object(object))
 }
 
 fn decode_dense(value: &DenseValue, path: &str) -> Result<Value, ValueCodecError> {

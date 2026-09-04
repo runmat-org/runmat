@@ -1156,6 +1156,66 @@ mod tests {
         document.into()
     }
 
+    fn documentation_example_path(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/fea/examples")
+            .join(name)
+    }
+
+    #[test]
+    fn canonical_documentation_examples_parse_and_resolve() {
+        for name in [
+            "structural-static-experimental.fea",
+            "structural-transient-experimental.fea",
+            "modal-response-spectrum-experimental.fea",
+            "acoustic-production-rejected.fea",
+        ] {
+            let path = documentation_example_path(name);
+            let resolved = pollster::block_on(load_fea_document_from_path_async(&path))
+                .unwrap_or_else(|error| panic!("{} must resolve: {error}", path.display()));
+            let FeaResolvedDocument::Study(study) = resolved else {
+                panic!("{} must contain a study", path.display());
+            };
+            assert_eq!(
+                study.execution.steps.len(),
+                study.model.as_ref().unwrap().sequence.steps.len()
+            );
+        }
+    }
+
+    #[test]
+    fn documentation_examples_expose_formulation_requirement_truth() {
+        for name in [
+            "structural-static-experimental.fea",
+            "structural-transient-experimental.fea",
+            "modal-response-spectrum-experimental.fea",
+        ] {
+            let path = documentation_example_path(name);
+            let FeaResolvedDocument::Study(study) =
+                pollster::block_on(load_fea_document_from_path_async(&path)).unwrap()
+            else {
+                panic!("{} must contain a study", path.display());
+            };
+            assert!(study
+                .execution
+                .steps
+                .iter()
+                .all(|step| step.requirement == FormulationRequirement::Experimental));
+        }
+
+        let path = documentation_example_path("acoustic-production-rejected.fea");
+        let FeaResolvedDocument::Study(study) =
+            pollster::block_on(load_fea_document_from_path_async(&path)).unwrap()
+        else {
+            panic!("{} must contain a study", path.display());
+        };
+        assert!(study
+            .execution
+            .steps
+            .iter()
+            .all(|step| step.requirement == FormulationRequirement::Production));
+    }
+
     fn canonical_yaml(value: impl Serialize) -> serde_yaml::Value {
         let json = serde_json::to_value(value).expect("JSON-compatible contract");
         serde_yaml::to_value(json).expect("canonical YAML value")

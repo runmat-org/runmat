@@ -1,0 +1,1442 @@
+use super::super::*;
+
+pub(crate) fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<AnalysisField> {
+    let mut fields = Vec::new();
+    let mut seen = HashSet::new();
+
+    for field in &run_result.run.fields {
+        push_analysis_result_field(&mut fields, &mut seen, field);
+    }
+
+    if let Some(modal) = run_result.modal_results.as_ref() {
+        for field in &modal.mode_shapes {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+    }
+
+    if let Some(thermal) = run_result.thermal_results.as_ref() {
+        for field in &thermal.temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &thermal.temperature_gradient_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &thermal.heat_flux_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &thermal.energy_storage_rate_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &thermal.axis_boundary_heat_flux_summary_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+    }
+
+    if let Some(transient) = run_result.transient_results.as_ref() {
+        for field in &transient.displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.rotation_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.velocity_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.angular_velocity_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.acceleration_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.angular_acceleration_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.von_mises_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.kinetic_energy_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.strain_energy_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.residual_norm_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_thermal_strain_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_thermal_stress_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_von_mises_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.thermo_mechanical_coupling_residual_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.electro_thermal_temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &transient.electro_thermal_thermal_residual_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+    }
+
+    if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
+        for field in &nonlinear.displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.rotation_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.von_mises_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.plastic_strain_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.equivalent_plastic_strain_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.contact_pressure_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.contact_gap_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.load_factor_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.residual_norm_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_thermal_strain_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_thermal_stress_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_displacement_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_von_mises_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.thermo_mechanical_coupling_residual_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.electro_thermal_temperature_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+        for field in &nonlinear.electro_thermal_thermal_residual_snapshots {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+    }
+
+    if let Some(electromagnetic) = run_result.electromagnetic_results.as_ref() {
+        for field in [
+            &electromagnetic.vector_potential_real,
+            &electromagnetic.vector_potential_imag,
+            &electromagnetic.magnetic_flux_density_real,
+            &electromagnetic.magnetic_flux_density_imag,
+            &electromagnetic.magnetic_flux_density_magnitude,
+            &electromagnetic.magnetic_field_real,
+            &electromagnetic.magnetic_field_imag,
+            &electromagnetic.current_density_real,
+            &electromagnetic.current_density_imag,
+            &electromagnetic.electric_field_real,
+            &electromagnetic.electric_field_imag,
+            &electromagnetic.power_loss_density,
+            &electromagnetic.energy_density,
+            &electromagnetic.residual_real,
+            &electromagnetic.residual_imag,
+            &electromagnetic.electric_flux_density_real,
+            &electromagnetic.electric_flux_density_imag,
+            &electromagnetic.poynting_vector_real,
+            &electromagnetic.poynting_vector_imag,
+        ] {
+            push_analysis_result_field(&mut fields, &mut seen, field);
+        }
+    }
+
+    fields
+}
+
+fn push_analysis_result_field(
+    fields: &mut Vec<AnalysisField>,
+    seen: &mut HashSet<String>,
+    field: &AnalysisField,
+) {
+    if !seen.insert(field.field_id.clone()) {
+        return;
+    }
+    fields.push(field.clone());
+}
+
+fn filter_analysis_fields_by_indices(
+    fields: &[AnalysisField],
+    indices: &[usize],
+) -> Vec<AnalysisField> {
+    if fields.is_empty() {
+        return Vec::new();
+    }
+    indices
+        .iter()
+        .filter_map(|index| fields.get(*index).cloned())
+        .collect()
+}
+
+pub(crate) fn analysis_run_field_ids(run_result: &AnalysisRunResult) -> Vec<String> {
+    collect_analysis_result_fields(run_result)
+        .into_iter()
+        .map(|field| field.field_id)
+        .collect()
+}
+
+pub fn analysis_results_op(
+    run_result: &AnalysisRunResult,
+    query: AnalysisResultsQuery,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    let mut collected_fields = collect_analysis_result_fields(run_result);
+
+    if !query.include_fields.is_empty() {
+        let mut filtered = Vec::new();
+        for requested in &query.include_fields {
+            let Some(field) = collected_fields
+                .iter()
+                .find(|field| &field.field_id == requested)
+            else {
+                return Err(operation_error(
+                    ANALYSIS_RESULTS_OPERATION,
+                    ANALYSIS_RESULTS_OP_VERSION,
+                    &context,
+                    OperationErrorSpec {
+                        error_code: "RM.FEA.RESULTS.FIELD_NOT_FOUND",
+                        error_type: OperationErrorType::Input,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    format!("requested FEA field '{requested}' was not produced by run"),
+                    BTreeMap::from([
+                        ("requested_field".to_string(), requested.clone()),
+                        (
+                            "available_fields".to_string(),
+                            collected_fields
+                                .iter()
+                                .map(|field| field.field_id.clone())
+                                .collect::<Vec<_>>()
+                                .join(","),
+                        ),
+                    ]),
+                ));
+            };
+            filtered.push(field.clone());
+        }
+        collected_fields = filtered;
+    }
+    let field_descriptors = collected_fields
+        .iter()
+        .map(AnalysisFieldDescriptor::from_field)
+        .collect::<Vec<_>>();
+
+    let (
+        mode_count,
+        available_mode_indices,
+        min_frequency_hz,
+        max_frequency_hz,
+        max_modal_residual_norm,
+        first_mode_converged,
+    ) = if let Some(modal) = run_result.modal_results.as_ref() {
+        let count = modal.frequencies_hz.len().min(modal.mode_shapes.len());
+        let max_modal_residual_norm = modal.residual_norms.iter().copied().reduce(f64::max);
+        let first_mode_converged = modal.residual_norms.first().copied().map(|v| v <= 1.0e-6);
+        let (min_frequency_hz, max_frequency_hz) = if count == 0 {
+            (None, None)
+        } else {
+            let mut min_value = f64::INFINITY;
+            let mut max_value = f64::NEG_INFINITY;
+            for value in modal.frequencies_hz.iter().copied().take(count) {
+                min_value = min_value.min(value);
+                max_value = max_value.max(value);
+            }
+            (Some(min_value), Some(max_value))
+        };
+        (
+            count,
+            (0..count).collect(),
+            min_frequency_hz,
+            max_frequency_hz,
+            max_modal_residual_norm,
+            first_mode_converged,
+        )
+    } else {
+        (0, Vec::new(), None, None, None, None)
+    };
+
+    let (
+        snapshot_count,
+        time_start_s,
+        time_end_s,
+        max_transient_residual_norm,
+        final_step_converged,
+    ) = if let Some(transient) = run_result.transient_results.as_ref() {
+        let count = transient
+            .time_points_s
+            .len()
+            .min(transient.displacement_snapshots.len());
+        let max_residual = transient.residual_norms.iter().copied().reduce(f64::max);
+        let final_step_converged = max_residual.map(|value| value <= 1.0e-6);
+        if count == 0 {
+            (0, None, None, max_residual, final_step_converged)
+        } else {
+            (
+                count,
+                transient.time_points_s.first().copied(),
+                transient.time_points_s.get(count - 1).copied(),
+                max_residual,
+                final_step_converged,
+            )
+        }
+    } else if let Some(thermal) = run_result.thermal_results.as_ref() {
+        let count = thermal
+            .time_points_s
+            .len()
+            .min(thermal.temperature_snapshots.len());
+        let max_residual = thermal.residual_norms.iter().copied().reduce(f64::max);
+        let final_step_converged = max_residual.map(|value| value <= 1.0e-6);
+        if count == 0 {
+            (0, None, None, max_residual, final_step_converged)
+        } else {
+            (
+                count,
+                thermal.time_points_s.first().copied(),
+                thermal.time_points_s.get(count - 1).copied(),
+                max_residual,
+                final_step_converged,
+            )
+        }
+    } else {
+        (0, None, None, None, None)
+    };
+
+    let (
+        increment_count,
+        failed_increment_count,
+        max_nonlinear_residual_norm,
+        max_nonlinear_increment_norm,
+        max_nonlinear_iteration_count,
+        final_increment_converged,
+        nonlinear_line_search_backtracks,
+        nonlinear_max_backtracks_per_increment,
+        nonlinear_tangent_rebuild_count,
+        nonlinear_iteration_spike_count,
+        nonlinear_convergence_stall_count,
+        nonlinear_backtrack_burst_count,
+    ) = if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
+        let count = nonlinear.load_factors.len();
+        let max_residual = nonlinear.residual_norms.iter().copied().reduce(f64::max);
+        let max_increment_norm = nonlinear.increment_norms.iter().copied().reduce(f64::max);
+        let max_iteration_count = nonlinear.iteration_counts.iter().copied().max();
+        let final_converged =
+            max_residual.map(|value| value <= 1.0e-6 && nonlinear.failed_increments == 0);
+        (
+            count,
+            Some(nonlinear.failed_increments),
+            max_residual,
+            max_increment_norm,
+            max_iteration_count,
+            final_converged,
+            Some(nonlinear.line_search_backtracks),
+            Some(nonlinear.max_line_search_backtracks_per_increment),
+            Some(nonlinear.tangent_rebuild_count),
+            Some(nonlinear.iteration_spike_count),
+            Some(nonlinear.convergence_stall_count),
+            Some(nonlinear.backtrack_burst_count),
+        )
+    } else {
+        (
+            0, None, None, None, None, None, None, None, None, None, None, None,
+        )
+    };
+
+    let thermo_coupling_enabled =
+        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_TM_COUPLING", "enabled");
+    let thermo_coupling_fingerprint = diagnostic_metric_u64(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "coupling_fingerprint",
+    );
+    let thermo_constitutive_temperature_factor = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "constitutive_temperature_factor",
+    );
+    let thermo_effective_modulus_scale = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "effective_modulus_scale",
+    );
+    let thermo_constitutive_material_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "constitutive_material_spread_ratio",
+    );
+    let thermo_assignment_heterogeneity_index = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "assignment_heterogeneity_index",
+    );
+    let thermo_region_delta_count = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "region_delta_count",
+    );
+    let thermo_spatial_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "spatial_coverage_ratio",
+    );
+    let thermo_field_extrapolation_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_TRANSIENT",
+        "field_extrapolation_ratio",
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_TM_NONLINEAR",
+            "field_extrapolation_ratio",
+        )
+    });
+    let thermo_field_clamp_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_TRANSIENT",
+        "field_clamp_ratio",
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_TM_NONLINEAR",
+            "field_clamp_ratio",
+        )
+    });
+    let thermo_transient_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_TRANSIENT",
+        "severity_peak",
+    )
+    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_TRANSIENT", "severity"));
+    let thermo_nonlinear_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_NONLINEAR",
+        "severity_peak",
+    )
+    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_NONLINEAR", "severity"));
+    let electro_thermal_coupling_enabled =
+        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_ET_COUPLING", "enabled");
+    let electro_thermal_coupling_fingerprint = diagnostic_metric_u64(
+        &run_result.run.diagnostics,
+        "FEA_ET_COUPLING",
+        "coupling_fingerprint",
+    );
+    let electro_joule_heating_scale = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_COUPLING",
+        "joule_heating_scale",
+    );
+    let electro_conductivity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_COUPLING",
+        "conductivity_spread_ratio",
+    );
+    let electro_transient_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_TRANSIENT",
+        "severity_peak",
+    )
+    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_ET_TRANSIENT", "severity"));
+    let electro_transient_time_scale_mean = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_TRANSIENT",
+        "time_scale_mean",
+    );
+    let electro_nonlinear_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_NONLINEAR",
+        "severity_peak",
+    )
+    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_ET_NONLINEAR", "severity"));
+    let electro_nonlinear_time_scale_mean = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_NONLINEAR",
+        "time_scale_mean",
+    );
+    let plastic_nonlinear_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_PLASTIC_NONLINEAR",
+        "severity_peak",
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_PLASTIC_NONLINEAR",
+            "severity",
+        )
+    });
+    let plastic_nonlinear_severity_mean = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_PLASTIC_NONLINEAR",
+        "severity_mean",
+    );
+    let plastic_load_realization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_PLASTIC_NONLINEAR",
+        "load_realization_ratio",
+    );
+    let plastic_load_amplification_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_PLASTIC_NONLINEAR",
+        "load_amplification_ratio",
+    );
+    let contact_nonlinear_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_CONTACT_NONLINEAR",
+        "severity_peak",
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_CONTACT_NONLINEAR",
+            "severity",
+        )
+    });
+    let contact_nonlinear_severity_mean = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_CONTACT_NONLINEAR",
+        "severity_mean",
+    );
+    let contact_load_realization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_CONTACT_NONLINEAR",
+        "load_realization_ratio",
+    );
+    let contact_load_amplification_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_CONTACT_NONLINEAR",
+        "load_amplification_ratio",
+    );
+    let thermal_max_residual_norm = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_STABILITY",
+        "max_residual_norm",
+    );
+    let thermal_min_temperature_k = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_STABILITY",
+        "min_temperature_k",
+    );
+    let thermal_max_temperature_k = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_STABILITY",
+        "max_temperature_k",
+    );
+    let thermal_conductivity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_CONSTITUTIVE",
+        "conductivity_spread_ratio",
+    );
+    let thermal_heat_capacity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_CONSTITUTIVE",
+        "heat_capacity_spread_ratio",
+    );
+    let thermal_spatial_gradient_index = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_OUTCOME",
+        "spatial_gradient_index",
+    );
+    let thermal_monotonic_response_fraction = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_OUTCOME",
+        "monotonic_response_fraction",
+    );
+    let thermal_response_realization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_OUTCOME",
+        "thermal_response_realization_ratio",
+    );
+    let electromagnetic_enabled =
+        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_STATIC", "enabled");
+    let electromagnetic_formulation_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "formulation_coverage_ratio",
+    );
+    let electromagnetic_magnetostatic_curl_curl_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "magnetostatic_curl_curl_coverage_ratio",
+    );
+    let electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "magnetoquasistatic_eddy_current_coverage_ratio",
+    );
+    let electromagnetic_full_wave_displacement_current_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "full_wave_displacement_current_coverage_ratio",
+    );
+    let electromagnetic_displacement_to_conduction_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "displacement_to_conduction_ratio",
+    );
+    let electromagnetic_material_frequency_response_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_FORMULATION",
+        "material_frequency_response_coverage_ratio",
+    );
+    let electromagnetic_reference_frequency_hz = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "reference_frequency_hz",
+    );
+    let electromagnetic_applied_current_a = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "applied_current_a",
+    );
+    let electromagnetic_solve_quality = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "solve_quality",
+    );
+    let electromagnetic_conductivity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "conductivity_spread_ratio",
+    );
+    let electromagnetic_relative_permittivity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "relative_permittivity_spread_ratio",
+    );
+    let electromagnetic_relative_permeability_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "relative_permeability_spread_ratio",
+    );
+    let electromagnetic_material_heterogeneity_index = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "electromagnetic_material_heterogeneity_index",
+    );
+    let electromagnetic_assignment_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "assignment_coverage_ratio",
+    );
+    let electromagnetic_assigned_coefficient_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "assigned_coefficient_coverage_ratio",
+    );
+    let electromagnetic_region_coefficient_contrast_index = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "region_coefficient_contrast_index",
+    );
+    let electromagnetic_condition_number_estimate = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "condition_number_estimate",
+    );
+    let electromagnetic_source_realization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "source_realization_ratio",
+    );
+    let electromagnetic_source_region_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "source_region_coverage_ratio",
+    );
+    let electromagnetic_source_material_alignment_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "source_material_alignment_ratio",
+    );
+    let electromagnetic_source_localization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "source_localization_ratio",
+    );
+    let electromagnetic_source_overlap_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "source_overlap_ratio",
+    );
+    let electromagnetic_source_interference_index = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "source_interference_index",
+    );
+    let electromagnetic_boundary_anchor_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "boundary_anchor_ratio",
+    );
+    let electromagnetic_boundary_condition_localization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "boundary_condition_localization_ratio",
+    );
+    let electromagnetic_ground_anchor_effectiveness_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "ground_anchor_effectiveness_ratio",
+    );
+    let electromagnetic_insulation_leakage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "insulation_leakage_ratio",
+    );
+    let electromagnetic_flux_divergence_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "flux_divergence_ratio",
+    );
+    let electromagnetic_energy_imbalance_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "energy_imbalance_ratio",
+    );
+    let electromagnetic_boundary_energy_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "boundary_energy_ratio",
+    );
+    let electromagnetic_boundary_penalty_conditioning_contribution = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "boundary_penalty_conditioning_contribution",
+    );
+    let electromagnetic_source_region_energy_consistency_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SOURCE_ENERGY",
+        "source_region_energy_consistency_ratio",
+    );
+    let electromagnetic_real_residual_norm = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "real_residual_norm",
+    );
+    let electromagnetic_imag_residual_norm = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "imag_residual_norm",
+    );
+    let electromagnetic_sweep_count =
+        diagnostic_metric(&run_result.run.diagnostics, "FEA_EM_SWEEP", "sweep_count");
+    let electromagnetic_resonance_peak_frequency_hz = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_peak_frequency_hz",
+    );
+    let electromagnetic_resonance_peak_flux_density = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_peak_flux_density",
+    );
+    let electromagnetic_resonance_bandwidth_hz = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_bandwidth_hz",
+    );
+    let electromagnetic_resonance_quality_factor = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_quality_factor",
+    );
+    let electromagnetic_resonance_flux_gain = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_flux_gain",
+    );
+
+    let summary = AnalysisResultsSummary {
+        field_count: field_descriptors.len(),
+        total_elements: field_descriptors
+            .iter()
+            .map(|field| field.element_count)
+            .sum(),
+        mode_count,
+        available_mode_indices,
+        min_frequency_hz,
+        max_frequency_hz,
+        max_modal_residual_norm,
+        first_mode_converged,
+        snapshot_count,
+        time_start_s,
+        time_end_s,
+        max_transient_residual_norm,
+        final_step_converged,
+        increment_count,
+        failed_increment_count,
+        max_nonlinear_residual_norm,
+        max_nonlinear_increment_norm,
+        max_nonlinear_iteration_count,
+        final_increment_converged,
+        nonlinear_line_search_backtracks,
+        nonlinear_max_backtracks_per_increment,
+        nonlinear_tangent_rebuild_count,
+        nonlinear_iteration_spike_count,
+        nonlinear_convergence_stall_count,
+        nonlinear_backtrack_burst_count,
+        thermo_coupling_enabled,
+        thermo_coupling_fingerprint,
+        thermo_constitutive_temperature_factor,
+        thermo_effective_modulus_scale,
+        thermo_constitutive_material_spread_ratio,
+        thermo_assignment_heterogeneity_index,
+        thermo_region_delta_count,
+        thermo_spatial_coverage_ratio,
+        thermo_field_extrapolation_ratio,
+        thermo_field_clamp_ratio,
+        thermo_transient_severity,
+        thermo_nonlinear_severity,
+        electro_thermal_coupling_enabled,
+        electro_thermal_coupling_fingerprint,
+        electro_joule_heating_scale,
+        electro_conductivity_spread_ratio,
+        electro_transient_severity,
+        electro_transient_time_scale_mean,
+        electro_nonlinear_severity,
+        electro_nonlinear_time_scale_mean,
+        plastic_nonlinear_severity,
+        plastic_nonlinear_severity_mean,
+        plastic_load_realization_ratio,
+        plastic_load_amplification_ratio,
+        contact_nonlinear_severity,
+        contact_nonlinear_severity_mean,
+        contact_load_realization_ratio,
+        contact_load_amplification_ratio,
+        thermal_max_residual_norm,
+        thermal_min_temperature_k,
+        thermal_max_temperature_k,
+        thermal_conductivity_spread_ratio,
+        thermal_heat_capacity_spread_ratio,
+        thermal_spatial_gradient_index,
+        thermal_monotonic_response_fraction,
+        thermal_response_realization_ratio,
+        electromagnetic_enabled,
+        electromagnetic_formulation_coverage_ratio,
+        electromagnetic_magnetostatic_curl_curl_coverage_ratio,
+        electromagnetic_magnetoquasistatic_eddy_current_coverage_ratio,
+        electromagnetic_full_wave_displacement_current_coverage_ratio,
+        electromagnetic_displacement_to_conduction_ratio,
+        electromagnetic_material_frequency_response_coverage_ratio,
+        electromagnetic_reference_frequency_hz,
+        electromagnetic_applied_current_a,
+        electromagnetic_solve_quality,
+        electromagnetic_conductivity_spread_ratio,
+        electromagnetic_relative_permittivity_spread_ratio,
+        electromagnetic_relative_permeability_spread_ratio,
+        electromagnetic_material_heterogeneity_index,
+        electromagnetic_assignment_coverage_ratio,
+        electromagnetic_assigned_coefficient_coverage_ratio,
+        electromagnetic_region_coefficient_contrast_index,
+        electromagnetic_condition_number_estimate,
+        electromagnetic_source_realization_ratio,
+        electromagnetic_source_region_coverage_ratio,
+        electromagnetic_source_material_alignment_ratio,
+        electromagnetic_source_localization_ratio,
+        electromagnetic_source_overlap_ratio,
+        electromagnetic_source_interference_index,
+        electromagnetic_boundary_anchor_ratio,
+        electromagnetic_boundary_condition_localization_ratio,
+        electromagnetic_ground_anchor_effectiveness_ratio,
+        electromagnetic_insulation_leakage_ratio,
+        electromagnetic_flux_divergence_ratio,
+        electromagnetic_energy_imbalance_ratio,
+        electromagnetic_boundary_energy_ratio,
+        electromagnetic_boundary_penalty_conditioning_contribution,
+        electromagnetic_source_region_energy_consistency_ratio,
+        electromagnetic_real_residual_norm,
+        electromagnetic_imag_residual_norm,
+        electromagnetic_sweep_count,
+        electromagnetic_resonance_peak_frequency_hz,
+        electromagnetic_resonance_peak_flux_density,
+        electromagnetic_resonance_bandwidth_hz,
+        electromagnetic_resonance_quality_factor,
+        electromagnetic_resonance_flux_gain,
+    };
+
+    let modal_results = if query.include_modal_results && query.include_field_values {
+        if let Some(modal) = run_result.modal_results.as_ref() {
+            if query.mode_indices.is_empty() {
+                Some(modal.clone())
+            } else {
+                let mut frequencies_hz = Vec::with_capacity(query.mode_indices.len());
+                let mut mode_shapes = Vec::with_capacity(query.mode_indices.len());
+                let mut residual_norms = Vec::with_capacity(query.mode_indices.len());
+                for &index in &query.mode_indices {
+                    let eigenvalue = modal.frequencies_hz.get(index).copied().ok_or_else(|| {
+                        operation_error(
+                            ANALYSIS_RESULTS_OPERATION,
+                            ANALYSIS_RESULTS_OP_VERSION,
+                            &context,
+                            OperationErrorSpec {
+                                error_code: "RM.FEA.RESULTS.MODE_NOT_FOUND",
+                                error_type: OperationErrorType::Input,
+                                retryable: false,
+                                severity: OperationErrorSeverity::Error,
+                            },
+                            format!("requested modal mode index '{index}' was not produced by run"),
+                            BTreeMap::from([
+                                ("requested_mode_index".to_string(), index.to_string()),
+                                (
+                                    "available_mode_count".to_string(),
+                                    modal.frequencies_hz.len().to_string(),
+                                ),
+                            ]),
+                        )
+                    })?;
+                    let mode_shape = modal.mode_shapes.get(index).cloned().ok_or_else(|| {
+                        operation_error(
+                            ANALYSIS_RESULTS_OPERATION,
+                            ANALYSIS_RESULTS_OP_VERSION,
+                            &context,
+                            OperationErrorSpec {
+                                error_code: "RM.FEA.RESULTS.MODE_NOT_FOUND",
+                                error_type: OperationErrorType::Input,
+                                retryable: false,
+                                severity: OperationErrorSeverity::Error,
+                            },
+                            format!(
+                                "requested modal mode index '{index}' is missing mode shape data"
+                            ),
+                            BTreeMap::from([
+                                ("requested_mode_index".to_string(), index.to_string()),
+                                (
+                                    "available_shape_count".to_string(),
+                                    modal.mode_shapes.len().to_string(),
+                                ),
+                            ]),
+                        )
+                    })?;
+                    let residual_norm =
+                        modal.residual_norms.get(index).copied().ok_or_else(|| {
+                            operation_error(
+                                ANALYSIS_RESULTS_OPERATION,
+                                ANALYSIS_RESULTS_OP_VERSION,
+                                &context,
+                                OperationErrorSpec {
+                                    error_code: "RM.FEA.RESULTS.MODE_NOT_FOUND",
+                                    error_type: OperationErrorType::Input,
+                                    retryable: false,
+                                    severity: OperationErrorSeverity::Error,
+                                },
+                                format!(
+                                    "requested modal mode index '{index}' is missing residual data"
+                                ),
+                                BTreeMap::from([
+                                    ("requested_mode_index".to_string(), index.to_string()),
+                                    (
+                                        "available_residual_count".to_string(),
+                                        modal.residual_norms.len().to_string(),
+                                    ),
+                                ]),
+                            )
+                        })?;
+                    frequencies_hz.push(eigenvalue);
+                    mode_shapes.push(mode_shape);
+                    residual_norms.push(residual_norm);
+                }
+                Some(ModalResultsData {
+                    modal_payload_version: modal.modal_payload_version.clone(),
+                    frequencies_hz,
+                    mode_shapes,
+                    residual_norms,
+                    mode_units: modal.mode_units,
+                    frequency_basis: modal.frequency_basis,
+                })
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let transient_results = if query.include_transient_results && query.include_field_values {
+        if let Some(transient) = run_result.transient_results.as_ref() {
+            if query.transient_snapshot_indices.is_empty() {
+                Some(transient.clone())
+            } else {
+                let mut time_points_s = Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut displacement_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let rotation_snapshots = filter_analysis_fields_by_indices(
+                    &transient.rotation_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let mut velocity_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let angular_velocity_snapshots = filter_analysis_fields_by_indices(
+                    &transient.angular_velocity_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let mut acceleration_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let angular_acceleration_snapshots = filter_analysis_fields_by_indices(
+                    &transient.angular_acceleration_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let mut von_mises_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut kinetic_energy_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut strain_energy_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut residual_norm_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut residual_norms = Vec::with_capacity(query.transient_snapshot_indices.len());
+                let thermo_mechanical_temperature_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_temperature_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_thermal_strain_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_thermal_strain_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_thermal_stress_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_thermal_stress_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_displacement_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_displacement_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_von_mises_snapshots = filter_analysis_fields_by_indices(
+                    &transient.thermo_mechanical_von_mises_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let thermo_mechanical_coupling_residual_snapshots =
+                    filter_analysis_fields_by_indices(
+                        &transient.thermo_mechanical_coupling_residual_snapshots,
+                        &query.transient_snapshot_indices,
+                    );
+                let electro_thermal_temperature_snapshots = filter_analysis_fields_by_indices(
+                    &transient.electro_thermal_temperature_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+                let electro_thermal_thermal_residual_snapshots = filter_analysis_fields_by_indices(
+                    &transient.electro_thermal_thermal_residual_snapshots,
+                    &query.transient_snapshot_indices,
+                );
+
+                for &index in &query.transient_snapshot_indices {
+                    let time_point = transient.time_points_s.get(index).copied().ok_or_else(|| {
+                        operation_error(
+                            ANALYSIS_RESULTS_OPERATION,
+                            ANALYSIS_RESULTS_OP_VERSION,
+                            &context,
+                            OperationErrorSpec {
+                                error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                error_type: OperationErrorType::Input,
+                                retryable: false,
+                                severity: OperationErrorSeverity::Error,
+                            },
+                            format!(
+                                "requested transient snapshot index '{index}' was not produced by run"
+                            ),
+                            BTreeMap::from([
+                                ("requested_snapshot_index".to_string(), index.to_string()),
+                                (
+                                    "available_snapshot_count".to_string(),
+                                    transient.time_points_s.len().to_string(),
+                                ),
+                            ]),
+                        )
+                    })?;
+                    let snapshot = transient
+                        .displacement_snapshots
+                        .get(index)
+                        .cloned()
+                        .ok_or_else(|| {
+                            operation_error(
+                                ANALYSIS_RESULTS_OPERATION,
+                                ANALYSIS_RESULTS_OP_VERSION,
+                                &context,
+                                OperationErrorSpec {
+                                    error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_type: OperationErrorType::Input,
+                                    retryable: false,
+                                    severity: OperationErrorSeverity::Error,
+                                },
+                                format!(
+                                    "requested transient snapshot index '{index}' is missing displacement data"
+                                ),
+                                BTreeMap::from([
+                                    ("requested_snapshot_index".to_string(), index.to_string()),
+                                    (
+                                        "available_displacement_snapshot_count".to_string(),
+                                        transient.displacement_snapshots.len().to_string(),
+                                    ),
+                                ]),
+                            )
+                        })?;
+                    let velocity = transient.velocity_snapshots.get(index).cloned().ok_or_else(|| {
+                        operation_error(
+                            ANALYSIS_RESULTS_OPERATION,
+                            ANALYSIS_RESULTS_OP_VERSION,
+                            &context,
+                            OperationErrorSpec {
+                                error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                error_type: OperationErrorType::Input,
+                                retryable: false,
+                                severity: OperationErrorSeverity::Error,
+                            },
+                            format!(
+                                "requested transient snapshot index '{index}' is missing velocity data"
+                            ),
+                            BTreeMap::from([
+                                ("requested_snapshot_index".to_string(), index.to_string()),
+                                (
+                                    "available_velocity_snapshot_count".to_string(),
+                                    transient.velocity_snapshots.len().to_string(),
+                                ),
+                            ]),
+                        )
+                    })?;
+                    let acceleration =
+                        transient
+                            .acceleration_snapshots
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| {
+                                operation_error(
+                                    ANALYSIS_RESULTS_OPERATION,
+                                    ANALYSIS_RESULTS_OP_VERSION,
+                                    &context,
+                                    OperationErrorSpec {
+                                        error_code:
+                                            "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                        error_type: OperationErrorType::Input,
+                                        retryable: false,
+                                        severity: OperationErrorSeverity::Error,
+                                    },
+                                    format!(
+                                        "requested transient snapshot index '{index}' is missing acceleration data"
+                                    ),
+                                    BTreeMap::from([
+                                        ("requested_snapshot_index".to_string(), index.to_string()),
+                                        (
+                                            "available_acceleration_snapshot_count".to_string(),
+                                            transient.acceleration_snapshots.len().to_string(),
+                                        ),
+                                    ]),
+                                )
+                            })?;
+                    let von_mises =
+                        transient
+                            .von_mises_snapshots
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| {
+                                operation_error(
+                                    ANALYSIS_RESULTS_OPERATION,
+                                    ANALYSIS_RESULTS_OP_VERSION,
+                                    &context,
+                                    OperationErrorSpec {
+                                        error_code:
+                                            "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                        error_type: OperationErrorType::Input,
+                                        retryable: false,
+                                        severity: OperationErrorSeverity::Error,
+                                    },
+                                    format!(
+                                        "requested transient snapshot index '{index}' is missing von Mises data"
+                                    ),
+                                    BTreeMap::from([
+                                        ("requested_snapshot_index".to_string(), index.to_string()),
+                                        (
+                                            "available_von_mises_snapshot_count".to_string(),
+                                            transient.von_mises_snapshots.len().to_string(),
+                                        ),
+                                    ]),
+                                )
+                            })?;
+                    let kinetic_energy =
+                        transient
+                            .kinetic_energy_snapshots
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| {
+                                operation_error(
+                                    ANALYSIS_RESULTS_OPERATION,
+                                    ANALYSIS_RESULTS_OP_VERSION,
+                                    &context,
+                                    OperationErrorSpec {
+                                        error_code:
+                                            "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                        error_type: OperationErrorType::Input,
+                                        retryable: false,
+                                        severity: OperationErrorSeverity::Error,
+                                    },
+                                    format!(
+                                        "requested transient snapshot index '{index}' is missing kinetic energy data"
+                                    ),
+                                    BTreeMap::from([
+                                        ("requested_snapshot_index".to_string(), index.to_string()),
+                                        (
+                                            "available_kinetic_energy_snapshot_count".to_string(),
+                                            transient.kinetic_energy_snapshots.len().to_string(),
+                                        ),
+                                    ]),
+                                )
+                            })?;
+                    let strain_energy =
+                        transient
+                            .strain_energy_snapshots
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| {
+                                operation_error(
+                                    ANALYSIS_RESULTS_OPERATION,
+                                    ANALYSIS_RESULTS_OP_VERSION,
+                                    &context,
+                                    OperationErrorSpec {
+                                        error_code:
+                                            "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                        error_type: OperationErrorType::Input,
+                                        retryable: false,
+                                        severity: OperationErrorSeverity::Error,
+                                    },
+                                    format!(
+                                        "requested transient snapshot index '{index}' is missing strain energy data"
+                                    ),
+                                    BTreeMap::from([
+                                        ("requested_snapshot_index".to_string(), index.to_string()),
+                                        (
+                                            "available_strain_energy_snapshot_count".to_string(),
+                                            transient.strain_energy_snapshots.len().to_string(),
+                                        ),
+                                    ]),
+                                )
+                            })?;
+                    let residual_norm_snapshot = transient
+                        .residual_norm_snapshots
+                        .get(index)
+                        .cloned()
+                        .ok_or_else(|| {
+                            operation_error(
+                                ANALYSIS_RESULTS_OPERATION,
+                                ANALYSIS_RESULTS_OP_VERSION,
+                                &context,
+                                OperationErrorSpec {
+                                    error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_type: OperationErrorType::Input,
+                                    retryable: false,
+                                    severity: OperationErrorSeverity::Error,
+                                },
+                                format!(
+                                    "requested transient snapshot index '{index}' is missing residual field data"
+                                ),
+                                BTreeMap::from([
+                                    ("requested_snapshot_index".to_string(), index.to_string()),
+                                    (
+                                        "available_residual_snapshot_count".to_string(),
+                                        transient.residual_norm_snapshots.len().to_string(),
+                                    ),
+                                ]),
+                            )
+                        })?;
+
+                    if index > 0 {
+                        let residual = transient.residual_norms.get(index - 1).copied().ok_or_else(|| {
+                            operation_error(
+                                ANALYSIS_RESULTS_OPERATION,
+                                ANALYSIS_RESULTS_OP_VERSION,
+                                &context,
+                                OperationErrorSpec {
+                                    error_code: "RM.FEA.RESULTS.TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_type: OperationErrorType::Input,
+                                    retryable: false,
+                                    severity: OperationErrorSeverity::Error,
+                                },
+                                format!(
+                                    "requested transient snapshot index '{index}' is missing residual data"
+                                ),
+                                BTreeMap::from([
+                                    ("requested_snapshot_index".to_string(), index.to_string()),
+                                    (
+                                        "available_residual_count".to_string(),
+                                        transient.residual_norms.len().to_string(),
+                                    ),
+                                ]),
+                            )
+                        })?;
+                        residual_norms.push(residual);
+                    }
+
+                    time_points_s.push(time_point);
+                    displacement_snapshots.push(snapshot);
+                    velocity_snapshots.push(velocity);
+                    acceleration_snapshots.push(acceleration);
+                    von_mises_snapshots.push(von_mises);
+                    kinetic_energy_snapshots.push(kinetic_energy);
+                    strain_energy_snapshots.push(strain_energy);
+                    residual_norm_snapshots.push(residual_norm_snapshot);
+                }
+
+                Some(TransientResultsData {
+                    transient_payload_version: transient.transient_payload_version.clone(),
+                    time_points_s,
+                    displacement_snapshots,
+                    rotation_snapshots,
+                    velocity_snapshots,
+                    angular_velocity_snapshots,
+                    acceleration_snapshots,
+                    angular_acceleration_snapshots,
+                    von_mises_snapshots,
+                    kinetic_energy_snapshots,
+                    strain_energy_snapshots,
+                    residual_norm_snapshots,
+                    thermo_mechanical_temperature_snapshots,
+                    thermo_mechanical_thermal_strain_snapshots,
+                    thermo_mechanical_thermal_stress_snapshots,
+                    thermo_mechanical_displacement_snapshots,
+                    thermo_mechanical_von_mises_snapshots,
+                    thermo_mechanical_coupling_residual_snapshots,
+                    electro_thermal_temperature_snapshots,
+                    electro_thermal_thermal_residual_snapshots,
+                    residual_norms,
+                    integration_method: transient.integration_method,
+                })
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let thermal_results = if query.include_field_values {
+        run_result.thermal_results.clone()
+    } else {
+        None
+    };
+
+    let nonlinear_results = if query.include_nonlinear_results && query.include_field_values {
+        run_result.nonlinear_results.clone()
+    } else {
+        None
+    };
+    let electromagnetic_results =
+        if query.include_electromagnetic_results && query.include_field_values {
+            run_result.electromagnetic_results.clone()
+        } else {
+            None
+        };
+    let fields = if query.include_field_values {
+        collected_fields
+    } else {
+        Vec::new()
+    };
+
+    let data = AnalysisResultsData {
+        identity: run_result.run.identity.clone(),
+        field_descriptors,
+        fields,
+        modal_results,
+        thermal_results,
+        transient_results,
+        nonlinear_results,
+        electromagnetic_results,
+        diagnostics: if query.include_diagnostics {
+            if query.diagnostic_codes.is_empty() {
+                Some(run_result.run.diagnostics.clone())
+            } else {
+                Some(
+                    run_result
+                        .run
+                        .diagnostics
+                        .iter()
+                        .filter(|diag| query.diagnostic_codes.iter().any(|code| code == &diag.code))
+                        .cloned()
+                        .collect(),
+                )
+            }
+        } else {
+            None
+        },
+        run_status: run_result.run_status,
+        numerically_acceptable: run_result.numerically_acceptable,
+        production_publishable: run_result.production_publishable,
+        quality_reasons: run_result.quality_reasons.clone(),
+        production_publication_reasons: run_result.production_publication_reasons.clone(),
+        provenance: run_result.provenance.clone(),
+        summary,
+    };
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RESULTS_OPERATION,
+        ANALYSIS_RESULTS_OP_VERSION,
+        &context,
+        data,
+    ))
+}
+
+pub fn analysis_results_by_run_id_op(
+    run_id: &str,
+    query: AnalysisResultsQuery,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    let run_result = storage::load_run_result(run_id).map_err(|err| {
+        operation_error(
+            ANALYSIS_RESULTS_OPERATION,
+            ANALYSIS_RESULTS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RESULTS.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to load FEA run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+        )
+    })?;
+
+    let Some(run_result) = run_result else {
+        return Err(operation_error(
+            ANALYSIS_RESULTS_OPERATION,
+            ANALYSIS_RESULTS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RESULTS.RUN_NOT_FOUND",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("FEA run_id '{run_id}' was not found"),
+            BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+        ));
+    };
+
+    analysis_results_op(&run_result, query, context)
+}

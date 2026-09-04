@@ -31,6 +31,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Once;
 
 use crate::analysis::{
     analysis_create_model_op, analysis_plan_study_op, analysis_plan_study_sweep_op,
@@ -50,35 +51,11 @@ use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvel
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod author_study;
+mod classes;
 mod visualization;
+use classes::*;
 #[cfg(test)]
 use visualization::{mesh_request_from_args, plot_request_from_args};
-
-const FEA_STUDY_CLASS: &str = "fea.Study";
-const FEA_SWEEP_CLASS: &str = "fea.Sweep";
-const FEA_VALIDATION_CLASS: &str = "fea.Validation";
-const FEA_PLAN_CLASS: &str = "fea.Plan";
-const FEA_RUN_RESULT_CLASS: &str = "fea.RunResult";
-const FEA_MODEL_CLASS: &str = "fea.Model";
-const FEA_MATERIAL_CLASS: &str = "fea.Material";
-const FEA_MATERIAL_ASSIGNMENT_CLASS: &str = "fea.MaterialAssignment";
-const FEA_BOUNDARY_CONDITION_CLASS: &str = "fea.BoundaryCondition";
-const FEA_STEP_CLASS: &str = "fea.Step";
-const FEA_DOMAIN_CLASS: &str = "fea.Domain";
-const FEA_INTERFACE_CLASS: &str = "fea.Interface";
-const FEA_RESULTS_CLASS: &str = "fea.Results";
-const FEA_FIELD_CLASS: &str = "fea.Field";
-const FEA_COMPARE_CLASS: &str = "fea.Compare";
-const FEA_TRENDS_CLASS: &str = "fea.Trends";
-
-static FEA_CLASSES_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(FEA_STUDY_CLASS);
-
-const FEA_STUDY_SPEC_JSON_PROPERTY: &str = "__runmat_fea_study_spec_json";
-const FEA_SWEEP_SPEC_JSON_PROPERTY: &str = "__runmat_fea_sweep_spec_json";
-const FEA_PAYLOAD_JSON_PROPERTY: &str = "__runmat_fea_payload_json";
-const FEA_STUDY_CONTEXT_JSON_PROPERTY: &str = "__runmat_fea_study_context_json";
-const FEA_RUN_ID_CONTEXT_PROPERTY: &str = "__runmat_fea_run_id";
 
 const LOAD_NAME: &str = "fea.load";
 const STUDY_NAME: &str = "fea.study";
@@ -1130,7 +1107,6 @@ pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
             &ERROR_INTERNAL,
             FEA_VALIDATION_CLASS,
             analysis_validate_study_op(&spec, OperationContext::new(None, None)),
-            None,
         ),
         FeaResolvedDocument::Sweep(spec) => operation_result_to_object(
             VALIDATE_NAME,
@@ -1138,7 +1114,6 @@ pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
             &ERROR_INTERNAL,
             FEA_VALIDATION_CLASS,
             analysis_validate_study_sweep_op(&spec, OperationContext::new(None, None)),
-            None,
         ),
     }
 }
@@ -1160,7 +1135,6 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
             &ERROR_INTERNAL,
             FEA_PLAN_CLASS,
             analysis_plan_study_op(&spec, OperationContext::new(None, None)),
-            None,
         ),
         FeaResolvedDocument::Sweep(spec) => sweep_plan_result_to_object(
             analysis_plan_study_sweep_op(&spec, OperationContext::new(None, None)),
@@ -1276,14 +1250,12 @@ async fn resolve_document_input(
     builtin: &'static str,
 ) -> BuiltinResult<FeaResolvedDocument> {
     match input {
-        Value::Object(object) if object.class_name == FEA_STUDY_CLASS => {
-            let spec: AnalysisStudySpec =
-                object_json_property(builtin, &object, FEA_STUDY_SPEC_JSON_PROPERTY, &ERROR_INPUT)?;
+        Value::Object(ref object) if object.class_name == FEA_STUDY_CLASS => {
+            let spec: AnalysisStudySpec = object_payload(builtin, &input, FEA_STUDY_CLASS)?;
             Ok(FeaResolvedDocument::Study(Box::new(spec)))
         }
-        Value::Object(object) if object.class_name == FEA_SWEEP_CLASS => {
-            let spec: AnalysisStudySweepSpec =
-                object_json_property(builtin, &object, FEA_SWEEP_SPEC_JSON_PROPERTY, &ERROR_INPUT)?;
+        Value::Object(ref object) if object.class_name == FEA_SWEEP_CLASS => {
+            let spec: AnalysisStudySweepSpec = object_payload(builtin, &input, FEA_SWEEP_CLASS)?;
             Ok(FeaResolvedDocument::Sweep(spec))
         }
         Value::String(path) => load_fea_document_from_path_async(&PathBuf::from(path))
@@ -1656,7 +1628,6 @@ fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         &ERROR_INTERNAL,
         FEA_MODEL_CLASS,
         &model,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
         &[],
         &["geometry_revision", "revision"],
     )
@@ -2487,7 +2458,6 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         &ERROR_INTERNAL,
         FEA_RESULTS_CLASS,
         &public_data,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
         &[],
         &[
             "shape",
@@ -2527,10 +2497,6 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     object
         .properties
         .insert("run_id".to_string(), Value::String(run_id.clone()));
-    object.properties.insert(
-        FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
-        Value::String(run_id),
-    );
     copy_study_context_property(&args[0], &mut object);
     Ok(Value::Object(object))
 }
@@ -2583,7 +2549,6 @@ fn create_compare_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             },
             OperationContext::new(None, None),
         ),
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
         &[
             "quality_reason_count_delta",
             "failed_increment_delta",
@@ -2636,7 +2601,6 @@ fn create_trends_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             AnalysisTrendsQuery { window_size },
             OperationContext::new(None, None),
         ),
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
     )
 }
 
@@ -2886,7 +2850,6 @@ fn material_to_object(material: MaterialModel) -> BuiltinResult<Value> {
         &ERROR_INTERNAL,
         FEA_MATERIAL_CLASS,
         &material,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
     )
 }
 
@@ -2896,7 +2859,6 @@ fn material_assignment_to_object(assignment: MaterialAssignment) -> BuiltinResul
         &ERROR_INTERNAL,
         FEA_MATERIAL_ASSIGNMENT_CLASS,
         &assignment,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
     )
 }
 
@@ -2906,18 +2868,11 @@ fn boundary_condition_to_object(condition: ModelConditionPayload) -> BuiltinResu
         &ERROR_INTERNAL,
         FEA_BOUNDARY_CONDITION_CLASS,
         &condition,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
     )
 }
 
 fn step_to_object(step: ProcedureStep) -> BuiltinResult<Value> {
-    serializable_to_object(
-        STEP_NAME,
-        &ERROR_INTERNAL,
-        FEA_STEP_CLASS,
-        &step,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
-    )
+    serializable_to_object(STEP_NAME, &ERROR_INTERNAL, FEA_STEP_CLASS, &step)
 }
 
 fn domain_to_object(domain: DomainPayload) -> BuiltinResult<Value> {
@@ -2926,7 +2881,6 @@ fn domain_to_object(domain: DomainPayload) -> BuiltinResult<Value> {
         &ERROR_INTERNAL,
         FEA_DOMAIN_CLASS,
         &domain,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
         &[],
         &["revision"],
     )
@@ -2938,7 +2892,6 @@ fn interface_to_object(interface: AnalysisInterface) -> BuiltinResult<Value> {
         &ERROR_INTERNAL,
         FEA_INTERFACE_CLASS,
         &interface,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
     )
 }
 
@@ -2950,12 +2903,7 @@ fn study_vec_from_value(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<Vec<AnalysisStudySpec>> {
-    object_vec_from_value_with_property(
-        builtin,
-        value,
-        FEA_STUDY_CLASS,
-        FEA_STUDY_SPEC_JSON_PROPERTY,
-    )
+    object_vec_from_value(builtin, value, FEA_STUDY_CLASS)
 }
 
 fn material_vec_from_value(
@@ -3021,29 +2969,13 @@ fn object_vec_from_value<T: DeserializeOwned>(
     value: &Value,
     expected_class: &'static str,
 ) -> BuiltinResult<Vec<T>> {
-    object_vec_from_value_with_property(builtin, value, expected_class, FEA_PAYLOAD_JSON_PROPERTY)
-}
-
-fn object_vec_from_value_with_property<T: DeserializeOwned>(
-    builtin: &'static str,
-    value: &Value,
-    expected_class: &'static str,
-    payload_property: &'static str,
-) -> BuiltinResult<Vec<T>> {
     match value {
         Value::Cell(cell) => cell
             .data
             .iter()
-            .map(|item| {
-                object_payload_with_property(builtin, item, expected_class, payload_property)
-            })
+            .map(|item| object_payload(builtin, item, expected_class))
             .collect(),
-        Value::Object(_) => Ok(vec![object_payload_with_property(
-            builtin,
-            value,
-            expected_class,
-            payload_property,
-        )?]),
+        Value::Object(_) => Ok(vec![object_payload(builtin, value, expected_class)?]),
         other => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -3056,15 +2988,6 @@ fn object_payload<T: DeserializeOwned>(
     builtin: &'static str,
     value: &Value,
     expected_class: &'static str,
-) -> BuiltinResult<T> {
-    object_payload_with_property(builtin, value, expected_class, FEA_PAYLOAD_JSON_PROPERTY)
-}
-
-fn object_payload_with_property<T: DeserializeOwned>(
-    builtin: &'static str,
-    value: &Value,
-    expected_class: &'static str,
-    payload_property: &'static str,
 ) -> BuiltinResult<T> {
     let Value::Object(object) = value else {
         return Err(builtin_error(
@@ -3080,7 +3003,18 @@ fn object_payload_with_property<T: DeserializeOwned>(
             format!("expected {expected_class}, got {}", object.class_name),
         ));
     }
-    object_json_property(builtin, object, payload_property, &ERROR_INPUT)
+    let json = value_to_json(builtin, value)?;
+    serde_json::from_value(json).map_err(|err| {
+        builtin_error_with_source(
+            builtin,
+            &ERROR_INPUT,
+            format!(
+                "{} cannot be decoded from its typed properties: {err}",
+                object.class_name
+            ),
+            err,
+        )
+    })
 }
 
 fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery> {
@@ -3169,9 +3103,7 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
 fn run_id_from_object(object: &ObjectInstance) -> Option<String> {
     object
         .properties
-        .get(FEA_RUN_ID_CONTEXT_PROPERTY)
-        .or_else(|| object.properties.get("run_id"))
-        .or_else(|| object.properties.get("runId"))
+        .get("run_id")
         .and_then(|value| match value {
             Value::String(run_id) => Some(run_id.clone()),
             _ => None,
@@ -3184,7 +3116,7 @@ fn results_data_from_value(
 ) -> BuiltinResult<crate::analysis::AnalysisResultsData> {
     match value {
         Value::Object(object) if object.class_name == FEA_RESULTS_CLASS => {
-            object_json_property(builtin, object, FEA_PAYLOAD_JSON_PROPERTY, &ERROR_INPUT)
+            object_payload(builtin, value, FEA_RESULTS_CLASS)
         }
         _ => {
             let run_id = run_id_from_value(builtin, value)?;
@@ -3207,20 +3139,7 @@ fn run_study_result_to_object(spec: &AnalysisStudySpec) -> BuiltinResult<Value> 
         &ERROR_INTERNAL,
         FEA_RUN_RESULT_CLASS,
         &envelope.data,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
     )?;
-    object.properties.insert(
-        FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
-        Value::String(envelope.data.run_id.clone()),
-    );
-    object.properties.insert(
-        "run_id".to_string(),
-        Value::String(envelope.data.run_id.clone()),
-    );
-    object.properties.insert(
-        "runId".to_string(),
-        Value::String(envelope.data.run_id.clone()),
-    );
     insert_study_context(&mut object, spec)?;
     Ok(Value::Object(object))
 }
@@ -3229,73 +3148,52 @@ fn insert_study_context(
     object: &mut ObjectInstance,
     spec: &AnalysisStudySpec,
 ) -> BuiltinResult<()> {
-    let json = serde_json::to_string(spec).map_err(|err| {
-        builtin_error_with_source(RUN_NAME, &ERROR_INTERNAL, err.to_string(), err)
-    })?;
     object.properties.insert(
-        FEA_STUDY_CONTEXT_JSON_PROPERTY.to_string(),
-        Value::String(json),
+        FEA_STUDY_CONTEXT_PROPERTY.to_string(),
+        study_to_object(spec.clone())?,
     );
     Ok(())
 }
 
 fn copy_study_context_property(source: &Value, target: &mut ObjectInstance) {
-    if let Some(json) = study_context_json_from_value(source) {
-        target.properties.insert(
-            FEA_STUDY_CONTEXT_JSON_PROPERTY.to_string(),
-            Value::String(json),
-        );
+    if let Some(study) = study_context_value(source) {
+        target
+            .properties
+            .insert(FEA_STUDY_CONTEXT_PROPERTY.to_string(), study);
     }
 }
 
 fn copy_run_id_context_property(source: &Value, target: &mut ObjectInstance) {
     if let Some(run_id) = run_id_context_from_value(source) {
-        target.properties.insert(
-            FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
-            Value::String(run_id.clone()),
-        );
         target
             .properties
             .entry("run_id".to_string())
-            .or_insert(Value::String(run_id.clone()));
-        target
-            .properties
-            .entry("runId".to_string())
             .or_insert(Value::String(run_id));
     }
 }
 
-fn study_context_json_from_value(value: &Value) -> Option<String> {
+fn study_context_value(value: &Value) -> Option<Value> {
     let Value::Object(object) = value else {
         return None;
     };
     if object.class_name == FEA_STUDY_CLASS {
-        if let Some(Value::String(json)) = object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY) {
-            return Some(json.clone());
-        }
+        return Some(value.clone());
     }
-    object
-        .properties
-        .get(FEA_STUDY_CONTEXT_JSON_PROPERTY)
-        .and_then(|value| match value {
-            Value::String(json) => Some(json.clone()),
-            _ => None,
-        })
+    object.properties.get(FEA_STUDY_CONTEXT_PROPERTY).cloned()
 }
 
 fn study_context_from_value(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<AnalysisStudySpec> {
-    let Some(json) = study_context_json_from_value(value) else {
+    let Some(study) = study_context_value(value) else {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("{builtin}: FEA visualization requires study geometry context; pass a fea.RunResult from fea.run(study), a derived fea.Results/fea.Field, or call {builtin}(study, runId)"),
+            format!("{builtin}: FEA visualization requires study geometry context; pass a fea.RunResult from fea.run(study), a derived fea.Results/fea.Field, or call {builtin}(study, run ID)"),
         ));
     };
-    serde_json::from_str(&json)
-        .map_err(|err| builtin_error_with_source(builtin, &ERROR_INPUT, err.to_string(), err))
+    object_payload(builtin, &study, FEA_STUDY_CLASS)
 }
 
 fn run_id_context_from_value(value: &Value) -> Option<String> {
@@ -3315,9 +3213,6 @@ fn field_to_object(
         "field_id".to_string(),
         Value::String(field.field_id.clone()),
     );
-    object
-        .properties
-        .insert("id".to_string(), Value::String(field.field_id.clone()));
     object.properties.insert(
         "shape".to_string(),
         usize_slice_tensor(&field.shape, 1, field.shape.len())?,
@@ -3384,22 +3279,6 @@ fn field_to_object(
         "storage".to_string(),
         Value::String(format!("{:?}", descriptor.storage).to_ascii_lowercase()),
     );
-    object.properties.insert(
-        "descriptor".to_string(),
-        serializable_to_value_preserving_integers(
-            FIELD_NAME,
-            &ERROR_INTERNAL,
-            descriptor,
-            &[],
-            &["shape", "element_count", "component_count", "size_bytes"],
-        )?,
-    );
-    let json = serde_json::to_string(field).map_err(|err| {
-        builtin_error_with_source(FIELD_NAME, &ERROR_INTERNAL, err.to_string(), err)
-    })?;
-    object
-        .properties
-        .insert(FEA_PAYLOAD_JSON_PROPERTY.to_string(), Value::String(json));
     Ok(object)
 }
 
@@ -3638,9 +3517,6 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
         Value::CharArray(chars) if chars.rows == 1 => {
             Ok(serde_json::Value::String(chars.data.iter().collect()))
         }
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(serde_json::Value::String(array.data[0].clone()))
-        }
         Value::StringArray(array) => Ok(serde_json::Value::Array(
             array
                 .data
@@ -3649,24 +3525,23 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
                 .map(serde_json::Value::String)
                 .collect(),
         )),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => numeric_scalar_to_json(
+        Value::LogicalArray(array) => nested_array_to_json(builtin, &array.shape, |index| {
+            Ok(serde_json::Value::Bool(array.data[index] != 0))
+        }),
+        Value::Tensor(tensor) if tensor.shape == [1, 1] => numeric_scalar_to_json(
             builtin,
             tensor
                 .numeric_value_at(0)
                 .expect("validated scalar tensor storage"),
         ),
-        Value::Tensor(tensor) => Ok(serde_json::Value::Array(
-            (0..tensor.len())
-                .map(|index| {
-                    numeric_scalar_to_json(
-                        builtin,
-                        tensor
-                            .numeric_value_at(index)
-                            .expect("validated tensor storage"),
-                    )
-                })
-                .collect::<BuiltinResult<Vec<_>>>()?,
-        )),
+        Value::Tensor(tensor) => nested_array_to_json(builtin, &tensor.shape, |index| {
+            numeric_scalar_to_json(
+                builtin,
+                tensor
+                    .numeric_value_at(index)
+                    .expect("validated tensor storage"),
+            )
+        }),
         Value::Cell(cell) => Ok(serde_json::Value::Array(
             cell.data
                 .iter()
@@ -3676,25 +3551,16 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
         Value::Struct(fields) => {
             let mut object = serde_json::Map::new();
             for (key, value) in &fields.fields {
-                object.insert(canonical_field_name(key), value_to_json(builtin, value)?);
+                object.insert(key.clone(), value_to_json(builtin, value)?);
             }
             Ok(serde_json::Value::Object(object))
         }
         Value::Object(object) => {
-            if let Some(Value::String(json)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY) {
-                serde_json::from_str(json).map_err(|err| {
-                    builtin_error_with_source(builtin, &ERROR_INPUT, err.to_string(), err)
-                })
-            } else {
-                let mut object_json = serde_json::Map::new();
-                for (key, value) in &object.properties {
-                    if key.starts_with("__runmat_") {
-                        continue;
-                    }
-                    object_json.insert(canonical_field_name(key), value_to_json(builtin, value)?);
-                }
-                Ok(serde_json::Value::Object(object_json))
+            let mut object_json = serde_json::Map::new();
+            for (key, value) in &object.properties {
+                object_json.insert(key.clone(), value_to_json(builtin, value)?);
             }
+            Ok(serde_json::Value::Object(object_json))
         }
         other => Err(builtin_error(
             builtin,
@@ -3702,6 +3568,45 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
             format!("cannot convert value to FEA JSON payload: {other:?}"),
         )),
     }
+}
+
+fn nested_array_to_json(
+    builtin: &'static str,
+    shape: &[usize],
+    mut element: impl FnMut(usize) -> BuiltinResult<serde_json::Value>,
+) -> BuiltinResult<serde_json::Value> {
+    if shape.iter().product::<usize>() == 0 {
+        return Ok(serde_json::Value::Array(Vec::new()));
+    }
+    fn build(
+        builtin: &'static str,
+        shape: &[usize],
+        dimension: usize,
+        offset: usize,
+        element: &mut impl FnMut(usize) -> BuiltinResult<serde_json::Value>,
+    ) -> BuiltinResult<serde_json::Value> {
+        if dimension == shape.len() {
+            return element(offset);
+        }
+        let stride = shape[..dimension].iter().product::<usize>();
+        let values = (0..shape[dimension])
+            .map(|coordinate| {
+                let next = coordinate
+                    .checked_mul(stride)
+                    .and_then(|term| offset.checked_add(term));
+                let Some(next) = next else {
+                    return Err(builtin_error(
+                        builtin,
+                        &ERROR_INTERNAL,
+                        "FEA value dimensions overflow while encoding a typed object",
+                    ));
+                };
+                build(builtin, shape, dimension + 1, next, element)
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?;
+        Ok(serde_json::Value::Array(values))
+    }
+    build(builtin, shape, 0, 0, &mut element)
 }
 
 fn numeric_scalar_to_json(
@@ -4040,35 +3945,11 @@ fn resolved_document_to_object(document: FeaResolvedDocument) -> BuiltinResult<V
 }
 
 fn study_to_object(spec: AnalysisStudySpec) -> BuiltinResult<Value> {
-    let mut object = serializable_to_object(
-        STUDY_NAME,
-        &ERROR_INTERNAL,
-        FEA_STUDY_CLASS,
-        &spec,
-        Some(FEA_STUDY_SPEC_JSON_PROPERTY),
-    )?;
-    if let Value::Object(ref mut object) = object {
-        object
-            .properties
-            .insert("id".to_string(), Value::String(spec.study_id));
-    }
-    Ok(object)
+    serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, FEA_STUDY_CLASS, &spec)
 }
 
 fn sweep_to_object(spec: AnalysisStudySweepSpec) -> BuiltinResult<Value> {
-    let mut object = serializable_to_object(
-        SWEEP_NAME,
-        &ERROR_INTERNAL,
-        FEA_SWEEP_CLASS,
-        &spec,
-        Some(FEA_SWEEP_SPEC_JSON_PROPERTY),
-    )?;
-    if let Value::Object(ref mut object) = object {
-        object
-            .properties
-            .insert("id".to_string(), Value::String(spec.sweep_id));
-    }
-    Ok(object)
+    serializable_to_object(SWEEP_NAME, &ERROR_INTERNAL, FEA_SWEEP_CLASS, &spec)
 }
 
 fn operation_result_to_object<T: Serialize>(
@@ -4077,7 +3958,6 @@ fn operation_result_to_object<T: Serialize>(
     internal_error_descriptor: &'static BuiltinErrorDescriptor,
     class_name: &'static str,
     result: Result<OperationEnvelope<T>, OperationErrorEnvelope>,
-    hidden_json_property: Option<&'static str>,
 ) -> BuiltinResult<Value> {
     let envelope =
         result.map_err(|err| operation_error(builtin, operation_error_descriptor, err))?;
@@ -4086,7 +3966,6 @@ fn operation_result_to_object<T: Serialize>(
         internal_error_descriptor,
         class_name,
         &envelope.data,
-        hidden_json_property,
     )
 }
 
@@ -4096,7 +3975,6 @@ fn operation_result_to_object_preserving_integers<T: Serialize>(
     internal_error_descriptor: &'static BuiltinErrorDescriptor,
     class_name: &'static str,
     result: Result<OperationEnvelope<T>, OperationErrorEnvelope>,
-    hidden_json_property: Option<&'static str>,
     signed_fields: &[&str],
     unsigned_fields: &[&str],
 ) -> BuiltinResult<Value> {
@@ -4107,7 +3985,6 @@ fn operation_result_to_object_preserving_integers<T: Serialize>(
         internal_error_descriptor,
         class_name,
         &envelope.data,
-        hidden_json_property,
         signed_fields,
         unsigned_fields,
     )
@@ -4124,7 +4001,6 @@ fn sweep_plan_result_to_object(
         &ERROR_INTERNAL,
         FEA_PLAN_CLASS,
         &envelope.data,
-        None,
         &[],
         &[
             "study_count",
@@ -4146,7 +4022,6 @@ fn sweep_run_result_to_object(
         &ERROR_INTERNAL,
         FEA_RUN_RESULT_CLASS,
         &envelope.data,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
         &[],
         &[
             "study_count",
@@ -4200,10 +4075,8 @@ fn serializable_to_object<T: Serialize>(
     error: &'static BuiltinErrorDescriptor,
     class_name: &'static str,
     value: &T,
-    hidden_json_property: Option<&'static str>,
 ) -> BuiltinResult<Value> {
-    serializable_to_object_value(builtin, error, class_name, value, hidden_json_property)
-        .map(Value::Object)
+    serializable_to_object_value(builtin, error, class_name, value).map(Value::Object)
 }
 
 fn serializable_to_object_preserving_integers<T: Serialize>(
@@ -4211,14 +4084,12 @@ fn serializable_to_object_preserving_integers<T: Serialize>(
     error: &'static BuiltinErrorDescriptor,
     class_name: &'static str,
     value: &T,
-    hidden_json_property: Option<&'static str>,
     signed_fields: &[&str],
     unsigned_fields: &[&str],
 ) -> BuiltinResult<Value> {
     let json = serde_json::to_value(value)
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
-    let object =
-        serializable_to_object_value(builtin, error, class_name, value, hidden_json_property)?;
+    let object = serializable_to_object_value(builtin, error, class_name, value)?;
     let mut wrapped = Value::Object(object);
     promote_named_integer_fields(
         builtin,
@@ -4345,7 +4216,7 @@ fn exact_integer_json_value(
                         })
                     })
                     .collect::<BuiltinResult<Vec<_>>>()?;
-                Tensor::new_integer(IntegerStorage::I64(values), vec![1, items.len()])
+                Tensor::new_integer(IntegerStorage::I64(values), vec![items.len()])
                     .map(Value::Tensor)
                     .map(Some)
                     .map_err(|message| builtin_error(builtin, error, message))
@@ -4362,7 +4233,7 @@ fn exact_integer_json_value(
                         })
                     })
                     .collect::<BuiltinResult<Vec<_>>>()?;
-                Tensor::new_integer(IntegerStorage::U64(values), vec![1, items.len()])
+                Tensor::new_integer(IntegerStorage::U64(values), vec![items.len()])
                     .map(Value::Tensor)
                     .map(Some)
                     .map_err(|message| builtin_error(builtin, error, message))
@@ -4521,24 +4392,36 @@ fn serializable_to_object_value<T: Serialize>(
     error: &'static BuiltinErrorDescriptor,
     class_name: &'static str,
     value: &T,
-    hidden_json_property: Option<&'static str>,
 ) -> BuiltinResult<ObjectInstance> {
     ensure_fea_classes_registered();
     let json = serde_json::to_value(value)
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
-    let converted = value_from_json_preserving_integer_kinds(builtin, error, &json)?;
+    let public_json = omit_null_object_fields(json.clone());
+    let converted = value_from_json_preserving_integer_kinds(builtin, error, &public_json)?;
     let mut object = ObjectInstance::new(class_name.to_string());
     if let Value::Struct(fields) = converted {
         object.properties = fields.fields.into_iter().collect();
     } else {
         object.properties.insert("value".to_string(), converted);
     }
-    if let Some(property) = hidden_json_property {
-        object
-            .properties
-            .insert(property.to_string(), Value::String(json.to_string()));
-    }
     Ok(object)
+}
+
+fn omit_null_object_fields(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(fields) => serde_json::Value::Object(
+            fields
+                .into_iter()
+                .filter_map(|(name, value)| {
+                    (!value.is_null()).then(|| (name, omit_null_object_fields(value)))
+                })
+                .collect(),
+        ),
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(omit_null_object_fields).collect())
+        }
+        value => value,
+    }
 }
 
 fn geometry_asset_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<GeometryAsset> {
@@ -4637,67 +4520,269 @@ fn resolve_study_template(
 }
 
 fn ensure_fea_classes_registered() {
-    FEA_CLASSES_REGISTERED.ensure(|| {
-        let workflow_methods = workflow_methods();
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: FEA_STUDY_CLASS.to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: workflow_methods.clone(),
-        });
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: FEA_SWEEP_CLASS.to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: workflow_methods,
-        });
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: FEA_RUN_RESULT_CLASS.to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: run_result_methods(),
-        });
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: FEA_RESULTS_CLASS.to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: results_methods(),
-        });
-        for class_name in [FEA_VALIDATION_CLASS, FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS] {
-            if class_name == FEA_RUN_RESULT_CLASS {
-                continue;
-            }
-            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.to_string(),
-                parent: None,
-                properties: HashMap::new(),
-                methods: HashMap::new(),
-            });
-        }
-        for class_name in [
-            FEA_MODEL_CLASS,
-            FEA_MATERIAL_CLASS,
-            FEA_MATERIAL_ASSIGNMENT_CLASS,
-            FEA_BOUNDARY_CONDITION_CLASS,
-            FEA_STEP_CLASS,
-            FEA_DOMAIN_CLASS,
-            FEA_INTERFACE_CLASS,
-            FEA_FIELD_CLASS,
-            FEA_COMPARE_CLASS,
-            FEA_TRENDS_CLASS,
-        ] {
-            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.to_string(),
-                parent: None,
-                properties: HashMap::new(),
-                methods: if class_name == FEA_FIELD_CLASS {
-                    field_methods()
-                } else {
-                    HashMap::new()
+    static PORTABLE_SCHEMAS: Once = Once::new();
+    PORTABLE_SCHEMAS.call_once(|| {
+        for (class_name, type_identity, fields, required, validate) in fea_class_schemas() {
+            crate::execution::value_codec::register_immutable_value_class(
+                crate::execution::value_codec::ImmutableValueClassSchema {
+                    class_name,
+                    type_identity,
+                    schema_version: 1,
+                    allowed_fields: fields,
+                    required_fields: required,
+                    validate,
                 },
+            )
+            .unwrap_or_else(|error| {
+                panic!("failed to register immutable FEA class {class_name}: {error}")
             });
         }
     });
+    FEA_CLASSES_REGISTERED.ensure(|| {
+        for (class_name, _, fields, _, _) in fea_class_schemas() {
+            let methods = match class_name {
+                FEA_STUDY_CLASS | FEA_SWEEP_CLASS => workflow_methods(),
+                FEA_RUN_RESULT_CLASS => run_result_methods(),
+                FEA_RESULTS_CLASS => results_methods(),
+                FEA_FIELD_CLASS => field_methods(),
+                _ => HashMap::new(),
+            };
+            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+                name: class_name.to_string(),
+                parent: None,
+                properties: immutable_runtime_properties(fields),
+                methods,
+            });
+        }
+    });
+}
+
+type FeaClassSchema = (
+    &'static str,
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+    crate::execution::value_codec::ImmutableValueClassValidator,
+);
+
+fn fea_class_schemas() -> [FeaClassSchema; 16] {
+    [
+        (
+            FEA_STUDY_CLASS,
+            "runmat.fea.study",
+            STUDY_FIELDS,
+            &["study_id", "geometry", "create_model_intent", "execution"],
+            validate_fea_object,
+        ),
+        (
+            FEA_SWEEP_CLASS,
+            "runmat.fea.sweep",
+            SWEEP_FIELDS,
+            SWEEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_VALIDATION_CLASS,
+            "runmat.fea.validation",
+            VALIDATION_FIELDS,
+            &["valid", "issue_codes", "evidence_artifact_path"],
+            validate_fea_object,
+        ),
+        (
+            FEA_PLAN_CLASS,
+            "runmat.fea.plan",
+            PLAN_FIELDS,
+            &["evidence_artifact_path"],
+            validate_fea_object,
+        ),
+        (
+            FEA_RUN_RESULT_CLASS,
+            "runmat.fea.run-result",
+            RUN_RESULT_FIELDS,
+            &["evidence_artifact_path"],
+            validate_fea_object,
+        ),
+        (
+            FEA_MODEL_CLASS,
+            "runmat.fea.model",
+            MODEL_FIELDS,
+            &[
+                "model_id",
+                "geometry_id",
+                "geometry_revision",
+                "units",
+                "frame",
+                "materials",
+                "material_assignments",
+                "interfaces",
+                "constraints",
+                "boundaries",
+                "connectors",
+                "signals",
+                "excitations",
+                "excitation_cases",
+                "initial_conditions",
+                "response_spectra",
+                "sequence",
+            ],
+            validate_fea_object,
+        ),
+        (
+            FEA_MATERIAL_CLASS,
+            "runmat.fea.material",
+            MATERIAL_FIELDS,
+            &["material_id", "name", "mechanical", "thermal"],
+            validate_fea_object,
+        ),
+        (
+            FEA_MATERIAL_ASSIGNMENT_CLASS,
+            "runmat.fea.material-assignment",
+            MATERIAL_ASSIGNMENT_FIELDS,
+            MATERIAL_ASSIGNMENT_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_BOUNDARY_CONDITION_CLASS,
+            "runmat.fea.boundary-condition",
+            BOUNDARY_CONDITION_FIELDS,
+            &[],
+            validate_condition_object,
+        ),
+        (
+            FEA_STEP_CLASS,
+            "runmat.fea.step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_DOMAIN_CLASS,
+            "runmat.fea.domain",
+            DOMAIN_FIELDS,
+            DOMAIN_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_INTERFACE_CLASS,
+            "runmat.fea.interface",
+            INTERFACE_FIELDS,
+            INTERFACE_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_RESULTS_CLASS,
+            "runmat.fea.results",
+            RESULTS_FIELDS,
+            &[
+                "identity",
+                "field_descriptors",
+                "fields",
+                "run_status",
+                "numerically_acceptable",
+                "production_publishable",
+                "quality_reasons",
+                "production_publication_reasons",
+                "provenance",
+                "summary",
+                "run_id",
+            ],
+            validate_fea_object,
+        ),
+        (
+            FEA_FIELD_CLASS,
+            "runmat.fea.field",
+            FIELD_FIELDS,
+            &[
+                "field_id",
+                "shape",
+                "values",
+                "unit",
+                "location",
+                "kind",
+                "family",
+                "quantity",
+                "topology_id",
+                "element_kind",
+                "component_count",
+                "element_count",
+                "entity_count",
+                "value_count",
+                "storage",
+            ],
+            validate_fea_object,
+        ),
+        (
+            FEA_COMPARE_CLASS,
+            "runmat.fea.compare",
+            COMPARE_FIELDS,
+            &[
+                "baseline_run_id",
+                "candidate_run_id",
+                "numerically_acceptable_changed",
+                "production_publishable_changed",
+                "run_status_changed",
+                "quality_reason_count_delta",
+            ],
+            validate_fea_object,
+        ),
+        (
+            FEA_TRENDS_CLASS,
+            "runmat.fea.trends",
+            TRENDS_FIELDS,
+            TRENDS_FIELDS,
+            validate_fea_object,
+        ),
+    ]
+}
+
+fn immutable_runtime_properties(
+    fields: &[&str],
+) -> HashMap<String, crate::class_registry::RuntimeProperty> {
+    fields
+        .iter()
+        .map(|name| {
+            (
+                (*name).to_string(),
+                crate::class_registry::RuntimeProperty {
+                    name: (*name).to_string(),
+                    is_static: false,
+                    is_constant: true,
+                    is_dependent: false,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Private,
+                    default_value: None,
+                },
+            )
+        })
+        .collect()
+}
+
+fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
+    if object
+        .properties
+        .keys()
+        .any(|name| name.starts_with("__runmat_"))
+    {
+        return Err(format!(
+            "immutable FEA class `{}` contains an opaque runtime property",
+            object.class_name
+        ));
+    }
+    Ok(())
+}
+
+fn validate_condition_object(object: &ObjectInstance) -> Result<(), String> {
+    validate_fea_object(object)?;
+    let variants = ["constraint", "boundary"]
+        .into_iter()
+        .filter(|name| object.properties.contains_key(*name))
+        .count();
+    if variants != 1 {
+        return Err(
+            "fea.BoundaryCondition must contain exactly one typed condition variant".into(),
+        );
+    }
+    Ok(())
 }
 
 fn workflow_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
@@ -4913,13 +4998,7 @@ mod tests {
     }
 
     fn boundary_payload(value: Value) -> ModelConditionPayload {
-        let Value::Object(object) = value else {
-            panic!("expected boundary condition object");
-        };
-        let Some(Value::String(payload)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY) else {
-            panic!("expected boundary condition JSON payload");
-        };
-        serde_json::from_str(payload).expect("boundary condition payload should decode")
+        object_payload(&value)
     }
 
     #[test]
@@ -4969,30 +5048,15 @@ mod tests {
             action_ids: vec![excitation_id],
             activation: runmat_analysis_core::ExcitationCaseActivation::Always,
         };
-        let signal_value = serializable_to_object(
-            STUDY_NAME,
-            &ERROR_INTERNAL,
-            "fea.Signal",
-            &signal,
-            Some(FEA_PAYLOAD_JSON_PROPERTY),
-        )
-        .expect("canonical signal should convert to a RunMat object");
-        let excitation_value = serializable_to_object(
-            STUDY_NAME,
-            &ERROR_INTERNAL,
-            "fea.Excitation",
-            &excitation,
-            Some(FEA_PAYLOAD_JSON_PROPERTY),
-        )
-        .expect("canonical excitation should convert to a RunMat object");
-        let case_value = serializable_to_object(
-            STUDY_NAME,
-            &ERROR_INTERNAL,
-            "fea.ExcitationCase",
-            &case,
-            Some(FEA_PAYLOAD_JSON_PROPERTY),
-        )
-        .expect("canonical excitation case should convert to a RunMat object");
+        let signal_value =
+            serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, "fea.Signal", &signal)
+                .expect("canonical signal should convert to a RunMat object");
+        let excitation_value =
+            serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, "fea.Excitation", &excitation)
+                .expect("canonical excitation should convert to a RunMat object");
+        let case_value =
+            serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, "fea.ExcitationCase", &case)
+                .expect("canonical excitation case should convert to a RunMat object");
 
         let options = StudyConstructorOptions::parse(&[
             Value::String("Signals".into()),
@@ -5010,13 +5074,8 @@ mod tests {
     }
 
     fn object_payload<T: DeserializeOwned>(value: &Value) -> T {
-        let Value::Object(object) = value else {
-            panic!("expected FEA object");
-        };
-        let Some(Value::String(payload)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY) else {
-            panic!("expected FEA JSON payload");
-        };
-        serde_json::from_str(payload).expect("FEA payload should decode")
+        let json = value_to_json("fea.test", value).expect("typed FEA value should encode");
+        serde_json::from_value(json).expect("typed FEA value should decode")
     }
 
     fn boundary_args(kind: &str, fields: Vec<(&str, Value)>) -> Vec<Value> {
@@ -5084,7 +5143,6 @@ mod tests {
                 floating: 1.0,
                 floating_vector: vec![2.0, 3.0],
             },
-            None,
         )
         .expect("integer-preserving public mirror");
         assert!(matches!(
@@ -5133,7 +5191,6 @@ mod tests {
                 available_mode_indices: Vec::new(),
                 iteration_counts: Vec::new(),
             },
-            None,
             &[],
             &["available_mode_indices", "iteration_counts"],
         )
@@ -5274,7 +5331,7 @@ mod tests {
             value_to_json(INTERFACE_NAME, &Value::Tensor(tensor))
                 .expect("tensor json")
                 .to_string(),
-            "[42,18446744073709551615]"
+            "[[42,18446744073709551615]]"
         );
     }
 
@@ -5473,7 +5530,6 @@ mod tests {
                 quality_reason_count_delta: -4,
                 optional_delta: None,
             },
-            None,
             &["quality_reason_count_delta", "optional_delta"],
             &["study_count", "study_index"],
         )
@@ -5489,10 +5545,7 @@ mod tests {
             object.properties.get("quality_reason_count_delta"),
             Some(&Value::Int(IntValue::I64(-4)))
         );
-        assert!(matches!(
-            object.properties.get("optional_delta"),
-            Some(Value::Tensor(tensor)) if tensor.is_empty()
-        ));
+        assert!(!object.properties.contains_key("optional_delta"));
         let Some(Value::Cell(entries)) = object.properties.get("failure_entries") else {
             panic!("expected failure entry cell");
         };
@@ -5662,13 +5715,22 @@ geometry:
   units: meter
 model:
   template: linear_static_structural
+constraints:
+  - structural:
+      constraint_id: fixed_support
+      frame: global
+      kind:
+        fixed:
+          target:
+            region_id: region_default
+            entity_dimension: face
+            expected_topology: boundary_face
+            cardinality: one_or_more
 sequence: {}
 execution:
   - step: static
     backend: cpu
     requirement: experimental
-    solver: structural_linear
-    options: {{}}
 "#,
                 static_sequence_json("bracket_static")
             ),
@@ -5681,9 +5743,31 @@ execution:
             panic!("expected loaded FEA study object");
         };
         assert_eq!(study_object.class_name, FEA_STUDY_CLASS);
-        assert!(study_object
+        assert_eq!(
+            study_object.properties.get("study_id"),
+            Some(&Value::CharArray(runmat_value::CharArray::new_row(
+                "bracket_static"
+            )))
+        );
+        let inline = crate::execution::value_codec::encode_inline_value(&study)
+            .expect("typed FEA study should cross an execution boundary");
+        let decoded = crate::execution::value_codec::decode_inline_value(&inline)
+            .expect("typed FEA study should decode from an execution boundary");
+        assert_eq!(decoded, study);
+        let mut invalid = study.clone();
+        let Value::Object(invalid_object) = &mut invalid else {
+            unreachable!("loaded study is an object")
+        };
+        invalid_object
             .properties
-            .contains_key(FEA_STUDY_SPEC_JSON_PROPERTY));
+            .insert("unknown".into(), Value::Bool(true));
+        assert!(crate::execution::value_codec::encode_inline_value(&invalid).is_err());
+        let (study_id_property, owner) =
+            crate::class_registry::lookup_property(FEA_STUDY_CLASS, "study_id")
+                .expect("FEA study properties should be registered");
+        assert_eq!(owner, FEA_STUDY_CLASS);
+        assert!(study_id_property.is_constant);
+        assert_eq!(study_id_property.set_access, MemberAccess::Private);
 
         let validation =
             block_on(fea_validate_builtin(study.clone())).expect("FEA study should validate");
@@ -5693,7 +5777,9 @@ execution:
         assert_eq!(validation_object.class_name, FEA_VALIDATION_CLASS);
         assert_eq!(
             validation_object.properties.get("valid"),
-            Some(&Value::Bool(true))
+            Some(&Value::Bool(true)),
+            "validation properties: {:?}",
+            validation_object.properties,
         );
 
         let plan = block_on(fea_plan_builtin(study)).expect("FEA study should plan");
@@ -5720,14 +5806,7 @@ execution:
         .expect("prescribed rotation boundary condition should build");
         assert_object_class(&boundary, FEA_BOUNDARY_CONDITION_CLASS);
 
-        let Value::Object(object) = boundary else {
-            panic!("expected boundary condition object");
-        };
-        let Some(Value::String(payload)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY) else {
-            panic!("expected boundary condition JSON payload");
-        };
-        let decoded: ModelConditionPayload =
-            serde_json::from_str(payload).expect("boundary condition payload should decode");
+        let decoded: ModelConditionPayload = object_payload(&boundary);
         let ModelConditionPayload::Constraint(AnalysisConstraint::Structural(constraint)) = decoded
         else {
             panic!("expected structural constraint")
@@ -6032,7 +6111,7 @@ execution:
         );
         assert!(results_object
             .properties
-            .contains_key(FEA_STUDY_CONTEXT_JSON_PROPERTY));
+            .contains_key(FEA_STUDY_CONTEXT_PROPERTY));
 
         let field = block_on(fea_field_builtin(vec![
             results,
@@ -6082,9 +6161,9 @@ execution:
         assert_eq!(values.materialize_f64(), vec![42.0]);
         assert!(field_object
             .properties
-            .contains_key(FEA_STUDY_CONTEXT_JSON_PROPERTY));
+            .contains_key(FEA_STUDY_CONTEXT_PROPERTY));
         assert_eq!(
-            field_object.properties.get(FEA_RUN_ID_CONTEXT_PROPERTY),
+            field_object.properties.get("run_id"),
             Some(&Value::String("synthetic_plot_run".to_string()))
         );
     }
@@ -6222,8 +6301,6 @@ execution:
   - step: static
     backend: cpu
     requirement: experimental
-    solver: structural_linear
-    options: {{}}
 "#,
                 static_sequence_json("synthetic_plot")
             ),
@@ -6231,14 +6308,6 @@ execution:
         .expect("FEA fixture should write");
         let study = block_on(fea_load_builtin(fea_path.to_string_lossy().to_string()))
             .expect("study should load");
-        let Value::Object(study_object) = &study else {
-            panic!("expected study object");
-        };
-        let study_json = match study_object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY) {
-            Some(Value::String(json)) => json.clone(),
-            _ => panic!("expected study spec payload"),
-        };
-
         let identity = test_run_identity(runmat_analysis_core::AnalysisProcedure::Static);
         let run = crate::analysis::AnalysisRunResult {
             run_id: "synthetic_plot_run".to_string(),
@@ -6285,7 +6354,7 @@ execution:
             production_publication_reasons: vec![
                 crate::analysis::ProductionPublicationReason {
                     code: crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
-                    detail: "test formulation is experimental".to_string(),
+                    detail: "the admitted Structural/Static formulation is Experimental, not production-qualified".to_string(),
                 },
             ],
             provenance: crate::analysis::RunProvenance {
@@ -6309,14 +6378,9 @@ execution:
             "run_id".to_string(),
             Value::String("synthetic_plot_run".to_string()),
         );
-        object.properties.insert(
-            FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
-            Value::String("synthetic_plot_run".to_string()),
-        );
-        object.properties.insert(
-            FEA_STUDY_CONTEXT_JSON_PROPERTY.to_string(),
-            Value::String(study_json),
-        );
+        object
+            .properties
+            .insert(FEA_STUDY_CONTEXT_PROPERTY.to_string(), study.clone());
         (Value::Object(object), study)
     }
 
@@ -6390,7 +6454,7 @@ execution:
             production_publication_reasons: vec![
                 crate::analysis::ProductionPublicationReason {
                     code: crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
-                    detail: "test formulation is experimental".to_string(),
+                    detail: "the admitted Structural/TransientResponse formulation is Experimental, not production-qualified".to_string(),
                 },
             ],
             provenance: crate::analysis::RunProvenance {
@@ -6461,10 +6525,10 @@ execution:
             panic!("expected object value");
         };
         assert_eq!(object.class_name, expected);
-        assert!(
-            object.properties.contains_key(FEA_PAYLOAD_JSON_PROPERTY)
-                || object.properties.contains_key(FEA_STUDY_SPEC_JSON_PROPERTY)
-                || object.properties.contains_key(FEA_SWEEP_SPEC_JSON_PROPERTY)
-        );
+        assert!(!object.properties.is_empty());
+        assert!(object
+            .properties
+            .keys()
+            .all(|name| !name.starts_with("__runmat_")));
     }
 }

@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::fs;
+use std::path::PathBuf;
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
@@ -24,6 +25,71 @@ fn runmat_with_env(temp: &TempDir, args: &[&str], env: &[(&str, &str)]) -> Outpu
         command.env(key, value);
     }
     command.output().expect("run runmat check")
+}
+
+fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let config = temp.path().join("runmat.toml");
+    fs::write(
+        &config,
+        "[runtime.accelerate]\nenabled = false\nprovider = \"inprocess\"\n",
+    )
+    .unwrap();
+    Command::new(env!("CARGO_BIN_EXE_runmat"))
+        .current_dir(repository)
+        .args(args)
+        .env("RUNMAT_CONFIG", config)
+        .env("RUNMAT_FEA_ARTIFACT_ROOT", temp.path().join("artifacts"))
+        .env(
+            "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+            temp.path().join("study-artifacts"),
+        )
+        .output()
+        .expect("run repository FEA example")
+}
+
+fn assert_fea_checks(temp: &TempDir, path: &str) {
+    let output = runmat_from_repository(temp, &["check", path, "--json"]);
+    assert!(
+        output.status.success(),
+        "{path} failed check:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["validation"]["valid"], true, "{path}");
+}
+
+#[test]
+fn canonical_fea_documentation_examples_check_cleanly() {
+    let temp = TempDir::new().unwrap();
+    for name in [
+        "structural-static-experimental.fea",
+        "structural-transient-experimental.fea",
+        "modal-response-spectrum-experimental.fea",
+        "acoustic-production-rejected.fea",
+    ] {
+        let path = format!("docs/fea/examples/{name}");
+        assert_fea_checks(&temp, &path);
+    }
+}
+
+#[test]
+fn production_example_rejects_an_unqualified_formulation() {
+    let temp = TempDir::new().unwrap();
+    let path = "docs/fea/examples/acoustic-production-rejected.fea";
+    let output = runmat_from_repository(&temp, &["run", path, "--json"]);
+
+    assert!(
+        !output.status.success(),
+        "{path} must reject its explicit Production requirement"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("RM.FEA.RUN_ACOUSTIC.FORMULATION_NOT_ADMITTED"),
+        "unexpected rejection for {path}:\nstdout={}\nstderr={stderr}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 #[test]

@@ -1,0 +1,165 @@
+version: 1
+kind: study
+id: structural_transient_experimental
+
+geometry:
+  path: geometry/tetrahedron.stl
+  units: meter
+
+model:
+  template: transient_structural
+  defaults: template_scaffold
+
+constraints:
+  - structural:
+      constraint_id: fixed_support
+      frame: global
+      kind:
+        fixed:
+          target:
+            region_id: region_default
+            entity_dimension: face
+            expected_topology: boundary_face
+            cardinality: one_or_more
+
+signals:
+  - force:
+      signal_id: pulse_force
+      shape: scalar
+      frame: null
+      representation:
+        waveform:
+          kind: half_sine_pulse
+          amplitude: { scalar: { newtons: 500.0 } }
+          offset: null
+          start_seconds: 0.0
+          duration_seconds: 0.25
+          frequency_hz: null
+          phase_radians: 0.0
+          duty_cycle: null
+      precision: real64
+      evidence:
+        max_absolute_error: null
+        max_relative_error: null
+        derivative_max_absolute_error: null
+        sample_count: 0
+      provenance: authored
+  - velocity:
+      signal_id: initial_velocity
+      shape: vector3
+      frame: global
+      representation:
+        constant:
+          vector3:
+            - { meters_per_second: 0.0 }
+            - { meters_per_second: 0.0 }
+            - { meters_per_second: 0.0 }
+      precision: real64
+      evidence:
+        max_absolute_error: null
+        max_relative_error: null
+        derivative_max_absolute_error: null
+        sample_count: 1
+      provenance: authored
+
+excitation_cases:
+  - case_id: transient_load
+    action_ids: [pulse]
+    activation: { steps: [transient] }
+
+excitations:
+  - force:
+      excitation_id: pulse
+      case_id: transient_load
+      target:
+        region:
+          region_id: region_default
+          entity_dimension: face
+          expected_topology: boundary_face
+          cardinality: one_or_more
+      frame: global
+      direction: { vector: [0.0, -1.0, 0.0] }
+      distribution: preserve_resultant
+      kinematics: fixed_frame
+      signal_id: pulse_force
+      active_step_ids: [transient]
+      combination_group: null
+      projection:
+        preserve_resultant: true
+        preserve_moment: false
+        relative_tolerance: 1.0e-10
+
+initial_conditions:
+  - velocity:
+      initial_condition_id: initial_velocity_state
+      target: whole_model
+      frame: global
+      value:
+        signal_sample:
+          signal_id: initial_velocity
+          abscissa: 0.0
+      applies_before_step_id: transient
+
+sequence:
+  sequence_id: structural_transient_sequence
+  steps:
+    - step_id: transient
+      family: structural
+      procedure: transient_response
+      solution_space: direct
+      independent_domain:
+        time_seconds: { origin: 0.0, start: 0.0, end: 1.0 }
+      activations:
+        - object: { constraint: fixed_support }
+          lifecycle: activate
+        - object: { excitation: pulse }
+          lifecycle: activate
+        - object: { initial_condition: initial_velocity_state }
+          lifecycle: activate
+      state_inputs:
+        - input_id: initial_kinematics
+          required_kind: structural_kinematics
+          source: initial_conditions
+          use_as: physical_initial_state
+          conflict: reject
+      state_outputs:
+        - state_id: structural_primary
+          kind: structural_primary
+          completeness: complete
+          persistence: until_dependents_complete
+        - state_id: structural_kinematics
+          kind: structural_kinematics
+          completeness: complete
+          persistence: until_dependents_complete
+        - state_id: integrator
+          kind: integrator
+          completeness: complete
+          persistence: until_dependents_complete
+      observations: []
+      accuracy:
+        accuracy_plan_id: transient.accuracy
+        criteria:
+          - criterion_id: algebraic_residual
+            target: global_equilibrium
+            contribution: algebraic
+            tolerance: { relative: 1.0e-8 }
+            evidence: residual_bound
+            mandatory: true
+        unavailable_evidence: mark_indeterminate_experimental
+        exceeded_limit: fail
+        equivalence: { relative_tolerance: 1.0e-10 }
+        resources:
+          maximum_refinement_cycles: 0
+          maximum_solver_tightenings: 0
+          maximum_samples: 1000000
+          maximum_wall_time_milliseconds: 3600000
+          maximum_resident_bytes: 8589934592
+      restart: fresh
+  dependencies: []
+  transitions: []
+  branches: []
+
+execution:
+  - step: transient
+    backend: cpu
+    requirement: experimental
