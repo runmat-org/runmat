@@ -134,9 +134,15 @@ pub enum AggregateInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ArrayInferenceRule {
+    Binning(BinningInferenceRule),
     Combinatorics(CombinatoricsInferenceRule),
     Creation(ArrayCreationInferenceRule),
     Introspection(ArrayIntrospectionInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BinningInferenceRule {
+    Discretize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

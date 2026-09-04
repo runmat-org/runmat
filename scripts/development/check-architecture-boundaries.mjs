@@ -401,12 +401,63 @@ for (const sourcePath of [
     fail(`${sourcePath} is obsolete deterministic-combinatorics debt and must not return`);
   }
 }
+
+for (const rootPath of [
+  "crates/runmat-builtins/src/catalog/entries/array/binning",
+  "crates/runmat-builtins/src/catalog/inference/array/binning",
+  "crates/runmat-runtime/src/builtins/array/binning",
+]) {
+  for (const { path: sourcePath, text } of rustSources(rootPath)) {
+    const lines = text.split("\n").length;
+    const isTest = sourcePath.includes("/tests/") || sourcePath.endsWith("/tests.rs");
+    const isDocumentation = sourcePath.endsWith("/documentation.rs");
+    const relativePath = sourcePath.slice(rootPath.length + 1);
+    const isCompositionRoot = relativePath === "mod.rs";
+    const ownsIdentity = text.includes("_CATALOG_ENTRY") || text.includes("#[runtime_builtin(");
+    let ceiling = 256;
+    if (isTest) ceiling = 256;
+    else if (isDocumentation) ceiling = 256;
+    else if (isCompositionRoot) ceiling = ownsIdentity ? 192 : 64;
+    if (lines > ceiling) {
+      fail(
+        `${sourcePath} exceeds its numeric-binning role boundary ` +
+        `(found ${lines} lines; maximum ${ceiling})`
+      );
+    }
+    if (
+      rootPath.includes("runmat-runtime") &&
+      /\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)
+    ) {
+      fail(`${sourcePath} duplicates catalog-owned numeric-binning metadata`);
+    }
+  }
+}
+for (const sourcePath of [
+  "docs/builtins/reference/discretize.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/discretize.json",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete discretize documentation debt and must not return`);
+  }
+}
+for (const [sourcePath, ceiling] of [
+  ["crates/runmat-builtins/src/catalog/inference.rs", 64],
+  ["crates/runmat-builtins/src/catalog/inference/array/mod.rs", 64],
+]) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its typed inference-router boundary ` +
+      `(found ${lines} lines; maximum ${ceiling}); route policy to its owning domain module`
+    );
+  }
+}
 const legacyGroupingSource = read("crates/runmat-runtime/src/builtins/array/grouping.rs");
 const legacyGroupingLines = legacyGroupingSource.split("\n").length;
-if (legacyGroupingLines > 4940) {
+if (legacyGroupingLines > 4261) {
   fail(
     "array/grouping.rs is a shrink-only legacy godfile " +
-    `(found ${legacyGroupingLines} lines; ceiling 4940); extract each migrated identity into its domain package`
+    `(found ${legacyGroupingLines} lines; ceiling 4261); extract each migrated identity into its domain package`
   );
 }
 for (const forbidden of [
@@ -414,6 +465,10 @@ for (const forbidden of [
   "COMBINATIONS_DESCRIPTOR",
   "COMBINATIONS_INTEGER_CAPABILITIES",
   "combinations_impl",
+  'name = "discretize"',
+  "DISCRETIZE_DESCRIPTOR",
+  "DISCRETIZE_INTEGER_CAPABILITIES",
+  "discretize_impl",
 ]) {
   if (legacyGroupingSource.includes(forbidden)) {
     fail(`array/grouping.rs retains migrated combinations responsibility (${forbidden})`);

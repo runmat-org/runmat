@@ -106,10 +106,10 @@ fn discretize_to_dlmwrite_builtins_are_public_completions_with_integer_metadata(
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
     for name in DISCRETIZE_TO_DLMWRITE_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        let descriptor = builtin
-            .descriptor
+        let descriptor = runmat_builtins::builtin_descriptor_by_name(name)
             .unwrap_or_else(|| panic!("{name} must expose a descriptor"));
+        let integer = runmat_builtins::builtin_integer_metadata_by_name(name)
+            .unwrap_or_else(|| panic!("{name} must expose integer metadata"));
         assert_eq!(
             descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
@@ -120,7 +120,7 @@ fn discretize_to_dlmwrite_builtins_are_public_completions_with_integer_metadata(
             "{name} must expose descriptor-backed signatures"
         );
         assert!(
-            !builtin.integer_capabilities.is_empty(),
+            !integer.capabilities.is_empty(),
             "{name} must expose its settled integer capability records"
         );
 
@@ -152,9 +152,10 @@ fn matlab_mode_keeps_discretize_to_dlmwrite_extension_metadata_visible() {
         let source = format!("x = {name}(uint8(1));");
         let analysis = analyze_document_with_compat(&source, CompatMode::Matlab);
         assert!(analysis.syntax_error.is_none(), "{source}");
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let extensions = runmat_builtins::builtin_extensions_by_name(name)
+            .unwrap_or_else(|| panic!("catalog entry or runtime binding for {name}"));
         assert!(
-            builtin.extensions.iter().any(|extension| {
+            extensions.iter().any(|extension| {
                 extension.id == extension_id
                     && extension.mode == runmat_builtins::BuiltinExtensionMode::RunMatOnly
             }),
