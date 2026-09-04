@@ -95,7 +95,7 @@ fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() 
 fn fea_text_and_typed_object_workflow_roles_never_coerce_integers() {
     for constructor in INTEGER_CONSTRUCTORS {
         for source in [
-            format!("value = fea.step({constructor}(1), \"modal\");"),
+            format!("value = fea.StructuralStep.modal({constructor}(1));"),
             format!("value = fea.study({constructor}(1), {constructor}(2));"),
             format!("value = fea.sweep({constructor}(1), {constructor}(2));"),
             format!("value = fea.run({constructor}(1));"),

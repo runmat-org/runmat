@@ -608,71 +608,6 @@ pub(super) fn create_material_assignment_object_from_args(
     })
 }
 
-pub(super) fn create_step_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() != 4 {
-        return Err(builtin_error(
-            STEP_NAME,
-            &ERROR_INPUT,
-            "fea.step requires id, physics family, procedure, and solution space",
-        ));
-    }
-    let step_id = scalar_string(&args[0], STEP_NAME, &ERROR_INPUT)?;
-    let family_text = scalar_string(&args[1], STEP_NAME, &ERROR_INPUT)?;
-    let procedure_text = scalar_string(&args[2], STEP_NAME, &ERROR_INPUT)?;
-    let solution_space_text = scalar_string(&args[3], STEP_NAME, &ERROR_INPUT)?;
-    let family = parse_scalar_enum::<PhysicsFamily>(&family_text, "PhysicsFamily")?;
-    let procedure = parse_scalar_enum::<AnalysisProcedure>(&procedure_text, "AnalysisProcedure")?;
-    let solution_space = parse_scalar_enum::<SolutionSpace>(&solution_space_text, "SolutionSpace")?;
-    let mut step = default_procedure_step(step_id, family, procedure)?;
-    step.solution_space = solution_space;
-    step_to_object(step)
-}
-
-fn default_procedure_step(
-    step_id: String,
-    family: PhysicsFamily,
-    procedure: AnalysisProcedure,
-) -> BuiltinResult<ProcedureStep> {
-    let step = match (family, procedure) {
-        (PhysicsFamily::Structural, AnalysisProcedure::Static) => {
-            ProcedureStep::structural_static(step_id)
-        }
-        (PhysicsFamily::Structural, AnalysisProcedure::ModalExtraction) => {
-            ProcedureStep::structural_modal(step_id)
-        }
-        (PhysicsFamily::Structural, AnalysisProcedure::TransientResponse) => {
-            ProcedureStep::structural_transient(step_id)
-        }
-        (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear) => {
-            ProcedureStep::structural_nonlinear(step_id)
-        }
-        (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse) => {
-            ProcedureStep::thermal_transient(step_id)
-        }
-        (PhysicsFamily::Electromagnetic, AnalysisProcedure::HarmonicResponse) => {
-            ProcedureStep::electromagnetic_harmonic(step_id)
-        }
-        (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse) => {
-            ProcedureStep::acoustic_harmonic(step_id)
-        }
-        (PhysicsFamily::Fluid, AnalysisProcedure::Static) => ProcedureStep::fluid_static(step_id),
-        (PhysicsFamily::Fluid, AnalysisProcedure::TransientResponse) => {
-            ProcedureStep::fluid_transient(step_id)
-        }
-        (PhysicsFamily::Coupled(family), procedure) => {
-            ProcedureStep::coupled(step_id, family, procedure)
-        }
-        _ => {
-            return Err(builtin_error(
-                STEP_NAME,
-                &ERROR_INPUT,
-                "unsupported physics-family and procedure combination",
-            ))
-        }
-    };
-    Ok(step)
-}
-
 pub(super) fn create_domain_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Err(builtin_error(
@@ -1159,10 +1094,6 @@ fn material_assignment_to_object(assignment: MaterialAssignment) -> BuiltinResul
     )
 }
 
-fn step_to_object(step: ProcedureStep) -> BuiltinResult<Value> {
-    serializable_to_object(STEP_NAME, &ERROR_INTERNAL, FEA_STEP_CLASS, &step)
-}
-
 fn domain_to_object(domain: DomainPayload) -> BuiltinResult<Value> {
     serializable_to_object_preserving_integers(
         DOMAIN_NAME,
@@ -1333,7 +1264,46 @@ fn typed_vec_from_value<T: DeserializeOwned>(
 }
 
 fn step_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<ProcedureStep>> {
-    object_vec_from_value(builtin, value, FEA_STEP_CLASS)
+    let values = match value {
+        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Object(_) => vec![value],
+        other => {
+            return Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("expected a typed FEA step object or cell array; got {other:?}"),
+            ))
+        }
+    };
+    values
+        .into_iter()
+        .map(|value| {
+            let Value::Object(object) = value else {
+                unreachable!("step inputs were classified above")
+            };
+            let class_name = match object.class_name.as_str() {
+                FEA_STRUCTURAL_STEP_CLASS => FEA_STRUCTURAL_STEP_CLASS,
+                FEA_THERMAL_STEP_CLASS => FEA_THERMAL_STEP_CLASS,
+                FEA_ELECTROMAGNETIC_STEP_CLASS => FEA_ELECTROMAGNETIC_STEP_CLASS,
+                FEA_ACOUSTIC_STEP_CLASS => FEA_ACOUSTIC_STEP_CLASS,
+                FEA_FLUID_STEP_CLASS => FEA_FLUID_STEP_CLASS,
+                FEA_THERMOMECHANICAL_STEP_CLASS => FEA_THERMOMECHANICAL_STEP_CLASS,
+                FEA_ELECTROTHERMAL_STEP_CLASS => FEA_ELECTROTHERMAL_STEP_CLASS,
+                FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS => FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS,
+                FEA_FLUID_STRUCTURE_STEP_CLASS => FEA_FLUID_STRUCTURE_STEP_CLASS,
+                other => {
+                    return Err(builtin_error(
+                        builtin,
+                        &ERROR_INPUT,
+                        format!("unsupported FEA step class `{other}`"),
+                    ))
+                }
+            };
+            let step: ProcedureStep = object_payload(builtin, value, class_name)?;
+            require_step_class(builtin, class_name, &step)?;
+            Ok(step)
+        })
+        .collect()
 }
 
 fn domain_vec_from_value(

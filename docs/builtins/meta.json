@@ -52249,6 +52249,64 @@
       }
     },
     {
+      "name": "fea.AcousticStep.harmonic",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.AcousticStep.harmonic(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
       "name": "fea.ComplexPhase.degrees",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -52413,6 +52471,122 @@
           "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
         }
       ]
+    },
+    {
+      "name": "fea.ConjugateHeatTransferStep.steadyState",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.ConjugateHeatTransferStep.steadyState(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.ConjugateHeatTransferStep.transient",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.ConjugateHeatTransferStep.transient(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
     },
     {
       "name": "fea.CoordinateFrame.boundaryNormalTangent",
@@ -53775,6 +53949,180 @@
       }
     },
     {
+      "name": "fea.ElectroThermalStep.nonlinear",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.ElectroThermalStep.nonlinear(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.ElectroThermalStep.transient",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.ElectroThermalStep.transient(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.ElectromagneticStep.harmonic",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.ElectromagneticStep.harmonic(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
       "name": "fea.FluidBoundary.outletPressure",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -54341,6 +54689,180 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "Concrete constraint constructors accept identifiers, immutable geometry regions, and already-dimensioned values; they have no direct integer input role."
+      }
+    },
+    {
+      "name": "fea.FluidStep.steadyState",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.FluidStep.steadyState(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.FluidStep.transient",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.FluidStep.transient(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.FluidStructureStep.transient",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.FluidStructureStep.transient(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
       }
     },
     {
@@ -57296,6 +57818,238 @@
       }
     },
     {
+      "name": "fea.StructuralStep.modal",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.StructuralStep.modal(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.StructuralStep.nonlinear",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.StructuralStep.nonlinear(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.StructuralStep.static",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.StructuralStep.static(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.StructuralStep.transient",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.StructuralStep.transient(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
       "name": "fea.Temperature.celsius",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -58106,6 +58860,122 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "Concrete constraint constructors accept identifiers, immutable geometry regions, and already-dimensioned values; they have no direct integer input role."
+      }
+    },
+    {
+      "name": "fea.ThermalStep.transient",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.ThermalStep.transient(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.ThermoMechanicalStep.transient",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.ThermoMechanicalStep.transient(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
       }
     },
     {
@@ -59557,71 +60427,6 @@
               "arity": "Required",
               "default": null,
               "description": "A .fea path, fea.Study object, or fea.Sweep object."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "FEA object or operation result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
-          "identifier": "RunMat:fea:LoadFailed",
-          "when": "A .fea document cannot be read, parsed, or resolved.",
-          "message": "fea: failed to load FEA document"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
-          "identifier": "RunMat:fea:InvalidInput",
-          "when": "A builtin receives an unsupported argument pattern or object type.",
-          "message": "fea: invalid input"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
-          "identifier": "RunMat:fea:OperationFailed",
-          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
-          "message": "fea: operation failed"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INTERNAL",
-          "identifier": "RunMat:fea:Internal",
-          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
-          "message": "fea: internal error"
-        }
-      ],
-      "integer_audit": {
-        "kind": "NotApplicable",
-        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
-      }
-    },
-    {
-      "name": "fea.step",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "step = fea.step(id, kind)",
-          "inputs": [
-            {
-              "name": "id",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Analysis-step id."
-            },
-            {
-              "name": "kind",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Static, modal, transient, thermal, nonlinear, electromagnetic, or CFD step kind."
             }
           ],
           "outputs": [

@@ -11,7 +11,7 @@ const PACKET: [&str; 9] = [
     "feedback",
     "fea.results",
     "fea.run",
-    "fea.step",
+    "fea.StructuralStep.modal",
     "fea.study",
     "fea.sweep",
     "fea.trends",
@@ -21,7 +21,7 @@ const PACKET: [&str; 9] = [
 
 const FEA_INTEGER_INAPPLICABLE: [&str; 5] = [
     "fea.run",
-    "fea.step",
+    "fea.StructuralStep.modal",
     "fea.study",
     "fea.sweep",
     "fea.validate",
@@ -67,9 +67,9 @@ fn fea_execution_and_feedback_file_status_signatures_are_exact_and_visible() {
             "run = fea.run(studyOrSweepOrPath)",
         ),
         (
-            "step",
-            "out = fea.step(\"s\", \"modal\");",
-            "step = fea.step(id, kind)",
+            "modal",
+            "out = fea.StructuralStep.modal(\"s\");",
+            "step = fea.StructuralStep.modal(id)",
         ),
         (
             "study",

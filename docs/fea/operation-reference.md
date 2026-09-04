@@ -92,7 +92,7 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.material(...)`, `fea.materialAssignment(...)` | Create typed material data and region assignments. |
 | `fea.<Family>Constraint.<kind>(...)` | Create typed essential, kinematic, gauge, pairing, and reference constraints. |
 | `fea.<Family>Boundary.<kind>(...)`, `fea.loadCase(...)` | Create typed natural/Robin boundaries, loads, and sources. |
-| `fea.step(...)`, `fea.domain(...)`, `fea.interface(...)` | Create typed analysis steps, physics domains, and interfaces. |
+| `fea.<Family>Step.<procedure>(id)`, `fea.domain(...)`, `fea.interface(...)` | Create concrete typed analysis steps, physics domains, and interfaces. |
 | `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
 | `fea.model(id, geometry, Name, Value, ...)` | Assemble an explicit model from geometry and typed components. |
 | `fea.study(id, geometry, Name, Value, ...)` | Create a `fea.Study` from geometry, optional validated `Mesh`, physics profile/model data, backend, and run options. |
@@ -132,7 +132,10 @@ These constructors, planning operations, field projections, comparisons, and plo
 
 | Builtin | Exact signature | Validation boundary |
 | --- | --- | --- |
-| `fea.step` | `step = fea.step(id, kind)` | Both inputs are text scalars; numeric inputs reject before construction. |
+| `fea.StructuralStep.static/modal/transient/nonlinear` | `step = fea.StructuralStep.<procedure>(id)` | The id is a non-empty text scalar; family, procedure, direct solution space, independent domain, and state outputs come from the concrete method. |
+| `fea.ThermalStep.transient`, `fea.ElectromagneticStep.harmonic`, `fea.AcousticStep.harmonic` | `step = fea.<Family>Step.<procedure>(id)` | Only currently supported family/procedure combinations are constructible. |
+| `fea.FluidStep.steadyState/transient` | `step = fea.FluidStep.<procedure>(id)` | Steady-state produces a static domain; transient produces a time domain. |
+| `fea.ThermoMechanicalStep.transient`, `fea.ElectroThermalStep.transient/nonlinear`, `fea.ConjugateHeatTransferStep.steadyState/transient`, `fea.FluidStructureStep.transient` | `step = fea.<CoupledFamily>Step.<procedure>(id)` | Coupled family and procedure are fixed by the concrete method and cannot be supplied as strings. |
 | `fea.study` | `study = fea.study(path)` or `study = fea.study(id, geometry, Name, Value, ...)` | The path must resolve to a study. Constructor identity, geometry class, option spelling, component classes, and profile/run-kind agreement are checked before construction. |
 | `fea.sweep` | `sweep = fea.sweep(id, studies, Name, Value, ...)` | The id and study object classes are checked before `FailFast`; `FailFast` is a logical scalar and defaults to true. |
 | `fea.validate` | `result = fea.validate(studyOrSweepOrPath)` | Object/path identity is checked before document validation; no solver executes. |

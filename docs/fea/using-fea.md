@@ -268,7 +268,7 @@ The typed constructors are:
 | `fea.<Family>Constraint.<kind>(...)` | Essential, kinematic, gauge, pairing, and reference constraints bound to a `geometry.Region`. |
 | `fea.<Family>Boundary.<kind>(...)` | Natural and Robin boundary operators such as pressure, heat flux, convection, radiation, impedance, and outlet pressure. |
 | `fea.loadCase(...)` | Force, moment/torque, pressure, body force, current density, or coil current. |
-| `fea.step(...)` | Analysis step. |
+| `fea.<Family>Step.<procedure>(id)` | A concrete direct-solution procedure step; family and procedure are selected by the class method rather than text. |
 | `fea.domain(...)` | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
 | `fea.interface(...)` | Contact, conjugate heat-transfer, or fluid-structure interfaces. |
 | `fea.runOptions(...)` | Family-specific solver and quality options. |

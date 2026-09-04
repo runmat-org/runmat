@@ -59,6 +59,7 @@ mod boundaries;
 pub(crate) mod classes;
 mod constraints;
 mod modeling;
+mod steps;
 #[cfg(test)]
 mod test_support;
 mod values;
@@ -67,6 +68,7 @@ use boundaries::*;
 use classes::*;
 use constraints::*;
 use modeling::*;
+use steps::*;
 #[cfg(test)]
 use visualization::{mesh_request_from_args, plot_request_from_args};
 
@@ -77,7 +79,6 @@ const SWEEP_NAME: &str = "fea.sweep";
 const MODEL_NAME: &str = "fea.model";
 const MATERIAL_NAME: &str = "fea.material";
 const MATERIAL_ASSIGNMENT_NAME: &str = "fea.materialAssignment";
-const STEP_NAME: &str = "fea.step";
 const DOMAIN_NAME: &str = "fea.domain";
 const INTERFACE_NAME: &str = "fea.interface";
 const VALIDATE_NAME: &str = "fea.validate";
@@ -290,23 +291,6 @@ const INTERFACE_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Interface kind and numeric fields.",
     },
 ];
-const STEP_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Analysis-step id.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description:
-            "Static, modal, transient, thermal, nonlinear, electromagnetic, or CFD step kind.",
-    },
-];
 const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "id",
@@ -491,11 +475,6 @@ const COMPONENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     inputs: &IN_VARIADIC_ARGS,
     outputs: &OUT_ANY,
 }];
-const STEP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "step = fea.step(id, kind)",
-    inputs: &STEP_INPUTS,
-    outputs: &OUT_ANY,
-}];
 const RESULTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "results = fea.results(runOrRunId, Name, Value, ...)",
     inputs: &RESULTS_INPUTS,
@@ -632,13 +611,6 @@ pub const FEA_COMPONENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
-pub const FEA_STEP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STEP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 const fn fea_floating_input(
     name: &'static str,
     scalar_double: BuiltinIntegerScalarDoubleRule,
@@ -935,19 +907,6 @@ pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     create_material_assignment_object_from_args(args)
-}
-
-#[runtime_builtin(
-    name = "fea.step",
-    category = "fea",
-    summary = "Create a typed FEA analysis step.",
-    keywords = "fea,step,static,modal,transient",
-    descriptor(crate::builtins::fea::FEA_STEP_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::fea"
-)]
-pub async fn fea_step_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    create_step_object_from_args(args)
 }
 
 #[runtime_builtin(
@@ -3267,13 +3226,9 @@ mod tests {
 
     #[test]
     fn fea_execution_controls_enforce_exact_structural_boundaries() {
-        let extra_step = block_on(fea_step_builtin(vec![
-            Value::String("step".into()),
-            Value::String("modal".into()),
-            Value::Num(1.0),
-        ]))
-        .expect_err("step has exact arity");
-        assert_eq!(extra_step.identifier(), Some("RunMat:fea:InvalidInput"));
+        let empty_step = block_on(structural_modal_builtin(Value::String(String::new())))
+            .expect_err("step identity must not be empty");
+        assert_eq!(empty_step.identifier(), Some("RunMat:fea:InvalidInput"));
 
         let zero_window = block_on(fea_trends_builtin(vec![
             Value::String("WindowSize".into()),
@@ -3980,14 +3935,11 @@ execution:
         .expect("structural constraint should build");
         assert_object_class(&fixed, FEA_STRUCTURAL_CONSTRAINT_CLASS);
 
-        let step = block_on(fea_step_builtin(vec![
-            Value::String("static_step".to_string()),
-            Value::String("structural".to_string()),
-            Value::String("static".to_string()),
-            Value::String("direct".to_string()),
-        ]))
+        let step = block_on(structural_static_builtin(Value::String(
+            "static_step".to_string(),
+        )))
         .expect("analysis step should build");
-        assert_object_class(&step, FEA_STEP_CLASS);
+        assert_object_class(&step, FEA_STRUCTURAL_STEP_CLASS);
 
         let selector = format!("id:{region_id}");
         let mut regional_delta = StructValue::new();

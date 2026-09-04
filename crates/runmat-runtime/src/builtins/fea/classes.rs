@@ -20,7 +20,15 @@ pub(super) const FEA_THERMAL_BOUNDARY_CLASS: &str = "fea.ThermalBoundary";
 pub(super) const FEA_MAGNETIC_BOUNDARY_CLASS: &str = "fea.MagneticBoundary";
 pub(super) const FEA_ACOUSTIC_BOUNDARY_CLASS: &str = "fea.AcousticBoundary";
 pub(super) const FEA_FLUID_BOUNDARY_CLASS: &str = "fea.FluidBoundary";
-pub(super) const FEA_STEP_CLASS: &str = "fea.Step";
+pub(super) const FEA_STRUCTURAL_STEP_CLASS: &str = "fea.StructuralStep";
+pub(super) const FEA_THERMAL_STEP_CLASS: &str = "fea.ThermalStep";
+pub(super) const FEA_ELECTROMAGNETIC_STEP_CLASS: &str = "fea.ElectromagneticStep";
+pub(super) const FEA_ACOUSTIC_STEP_CLASS: &str = "fea.AcousticStep";
+pub(super) const FEA_FLUID_STEP_CLASS: &str = "fea.FluidStep";
+pub(super) const FEA_THERMOMECHANICAL_STEP_CLASS: &str = "fea.ThermoMechanicalStep";
+pub(super) const FEA_ELECTROTHERMAL_STEP_CLASS: &str = "fea.ElectroThermalStep";
+pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS: &str = "fea.ConjugateHeatTransferStep";
+pub(super) const FEA_FLUID_STRUCTURE_STEP_CLASS: &str = "fea.FluidStructureStep";
 pub(super) const FEA_DOMAIN_CLASS: &str = "fea.Domain";
 pub(super) const FEA_INTERFACE_CLASS: &str = "fea.Interface";
 pub(super) const FEA_RESULTS_CLASS: &str = "fea.Results";
@@ -264,6 +272,15 @@ pub(crate) fn ensure_fea_classes_registered() {
                 FEA_MAGNETIC_BOUNDARY_CLASS => magnetic_boundary_methods(),
                 FEA_ACOUSTIC_BOUNDARY_CLASS => acoustic_boundary_methods(),
                 FEA_FLUID_BOUNDARY_CLASS => fluid_boundary_methods(),
+                FEA_STRUCTURAL_STEP_CLASS => structural_step_methods(),
+                FEA_THERMAL_STEP_CLASS => thermal_step_methods(),
+                FEA_ELECTROMAGNETIC_STEP_CLASS => electromagnetic_step_methods(),
+                FEA_ACOUSTIC_STEP_CLASS => acoustic_step_methods(),
+                FEA_FLUID_STEP_CLASS => fluid_step_methods(),
+                FEA_THERMOMECHANICAL_STEP_CLASS => thermomechanical_step_methods(),
+                FEA_ELECTROTHERMAL_STEP_CLASS => electrothermal_step_methods(),
+                FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS => conjugate_heat_transfer_step_methods(),
+                FEA_FLUID_STRUCTURE_STEP_CLASS => fluid_structure_step_methods(),
                 FEA_RUN_RESULT_CLASS => run_result_methods(),
                 FEA_RESULTS_CLASS => results_methods(),
                 FEA_FIELD_CLASS => field_methods(),
@@ -500,6 +517,56 @@ fn fluid_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMet
     static_methods(&[("outletPressure", "fea.FluidBoundary.outletPressure")])
 }
 
+fn structural_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("static", "fea.StructuralStep.static"),
+        ("modal", "fea.StructuralStep.modal"),
+        ("transient", "fea.StructuralStep.transient"),
+        ("nonlinear", "fea.StructuralStep.nonlinear"),
+    ])
+}
+
+fn thermal_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("transient", "fea.ThermalStep.transient")])
+}
+
+fn electromagnetic_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("harmonic", "fea.ElectromagneticStep.harmonic")])
+}
+
+fn acoustic_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("harmonic", "fea.AcousticStep.harmonic")])
+}
+
+fn fluid_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("steadyState", "fea.FluidStep.steadyState"),
+        ("transient", "fea.FluidStep.transient"),
+    ])
+}
+
+fn thermomechanical_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("transient", "fea.ThermoMechanicalStep.transient")])
+}
+
+fn electrothermal_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("transient", "fea.ElectroThermalStep.transient"),
+        ("nonlinear", "fea.ElectroThermalStep.nonlinear"),
+    ])
+}
+
+fn conjugate_heat_transfer_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("steadyState", "fea.ConjugateHeatTransferStep.steadyState"),
+        ("transient", "fea.ConjugateHeatTransferStep.transient"),
+    ])
+}
+
+fn fluid_structure_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("transient", "fea.FluidStructureStep.transient")])
+}
+
 fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_registry::RuntimeMethod> {
     names
         .iter()
@@ -520,7 +587,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 29] {
+fn fea_class_schemas() -> [FeaClassSchema; 37] {
     [
         (
             FEA_STUDY_CLASS,
@@ -716,8 +783,64 @@ fn fea_class_schemas() -> [FeaClassSchema; 29] {
             validate_bound_boundary_object,
         ),
         (
-            FEA_STEP_CLASS,
-            "runmat.fea.step",
+            FEA_STRUCTURAL_STEP_CLASS,
+            "runmat.fea.structural-step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_THERMAL_STEP_CLASS,
+            "runmat.fea.thermal-step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_ELECTROMAGNETIC_STEP_CLASS,
+            "runmat.fea.electromagnetic-step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_ACOUSTIC_STEP_CLASS,
+            "runmat.fea.acoustic-step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_FLUID_STEP_CLASS,
+            "runmat.fea.fluid-step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_THERMOMECHANICAL_STEP_CLASS,
+            "runmat.fea.thermomechanical-step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_ELECTROTHERMAL_STEP_CLASS,
+            "runmat.fea.electrothermal-step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS,
+            "runmat.fea.conjugate-heat-transfer-step",
+            STEP_FIELDS,
+            STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_FLUID_STRUCTURE_STEP_CLASS,
+            "runmat.fea.fluid-structure-step",
             STEP_FIELDS,
             STEP_FIELDS,
             validate_fea_object,

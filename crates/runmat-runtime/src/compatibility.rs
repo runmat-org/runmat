@@ -2213,7 +2213,6 @@ mod tests {
                 "fea.model",
                 "fea.plan",
                 "fea.run",
-                "fea.step",
                 "fea.study",
                 "fea.sweep",
                 "fea.validate",
