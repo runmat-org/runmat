@@ -728,6 +728,16 @@ pub fn builtin_name_is_known(name: &str) -> bool {
     builtin_catalog_entry_by_name(name).is_some() || builtin_function_by_name(name).is_some()
 }
 
+/// Returns the canonical public call descriptor for a builtin.
+///
+/// Catalog-owned identities take precedence. Runtime registration remains the
+/// bounded fallback for identities whose atomic catalog cutover has not occurred.
+pub fn builtin_descriptor_by_name(name: &str) -> Option<&'static BuiltinDescriptor> {
+    builtin_catalog_entry_by_name(name)
+        .map(|entry| entry.descriptor)
+        .or_else(|| builtin_function_by_name(name).and_then(|function| function.descriptor))
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinIntegerMetadata {
     pub capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
@@ -810,10 +820,7 @@ pub fn suppresses_auto_output(name: &str) -> bool {
 /// may suppress implicit `ans` display while still returning a value when one
 /// is explicitly requested.
 pub fn builtin_declares_zero_outputs(name: &str) -> bool {
-    let descriptor = builtin_catalog_entry_by_name(name)
-        .map(|entry| entry.descriptor)
-        .or_else(|| builtin_function_by_name(name).and_then(|function| function.descriptor));
-    descriptor.is_some_and(|descriptor| {
+    builtin_descriptor_by_name(name).is_some_and(|descriptor| {
         descriptor.output_mode == BuiltinOutputMode::Fixed
             && !descriptor.signatures.is_empty()
             && descriptor
