@@ -454,10 +454,10 @@ for (const [sourcePath, ceiling] of [
 }
 const legacyGroupingSource = read("crates/runmat-runtime/src/builtins/array/grouping/legacy.rs");
 const legacyGroupingLines = legacyGroupingSource.split("\n").length;
-if (legacyGroupingLines > 3871) {
+if (legacyGroupingLines > 1524) {
   fail(
     "array/grouping/legacy.rs is a shrink-only legacy godfile " +
-    `(found ${legacyGroupingLines} lines; ceiling 3871); extract each migrated identity into its domain package`
+      `(found ${legacyGroupingLines} lines; ceiling 1524); extract each migrated identity into its domain package`
   );
 }
 for (const forbidden of [
@@ -473,6 +473,18 @@ for (const forbidden of [
   "GRP2IDX_DESCRIPTOR",
   "GRP2IDX_INTEGER_CAPABILITIES",
   "grp2idx_builtin",
+  'name = "findgroups"',
+  "FINDGROUPS_DESCRIPTOR",
+  "FINDGROUPS_INTEGER_CAPABILITIES",
+  "findgroups_builtin",
+  'name = "groupcounts"',
+  "GROUPCOUNTS_DESCRIPTOR",
+  "GROUPCOUNTS_INTEGER_CAPABILITIES",
+  "groupcounts_builtin",
+  'name = "splitapply"',
+  "SPLITAPPLY_DESCRIPTOR",
+  "SPLITAPPLY_INTEGER_CAPABILITIES",
+  "splitapply_builtin",
 ]) {
   if (legacyGroupingSource.includes(forbidden)) {
     fail(`array/grouping/legacy.rs retains migrated responsibility (${forbidden})`);
@@ -481,6 +493,12 @@ for (const forbidden of [
 for (const sourcePath of [
   "docs/builtins/reference/grp2idx.json",
   "crates/runmat-runtime/src/builtins/builtins-json/grp2idx.json",
+  "docs/builtins/reference/findgroups.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/findgroups.json",
+  "docs/builtins/reference/groupcounts.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/groupcounts.json",
+  "docs/builtins/reference/splitapply.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/splitapply.json",
 ]) {
   if (fs.existsSync(path.join(repo, sourcePath))) {
     fail(`${sourcePath} is obsolete grp2idx documentation debt and must not return`);
@@ -492,6 +510,7 @@ const groupingCompositionRoots = new Set([
   "crates/runmat-builtins/src/catalog/inference/array/grouping/mod.rs",
   "crates/runmat-runtime/src/builtins/array/grouping/mod.rs",
   "crates/runmat-runtime/src/builtins/array/grouping/keys/mod.rs",
+  "crates/runmat-runtime/src/builtins/array/grouping/variables/mod.rs",
 ]);
 for (const rootPath of [
   "crates/runmat-builtins/src/catalog/entries/array/grouping",

@@ -1674,7 +1674,10 @@ pub(crate) fn calendar_duration_tensors_from_value(
     }
 }
 
-fn calendar_duration_object_from_tensors(months: Tensor, days: Tensor) -> BuiltinResult<Value> {
+pub(crate) fn calendar_duration_object_from_tensors(
+    months: Tensor,
+    days: Tensor,
+) -> BuiltinResult<Value> {
     ensure_calendar_duration_class_registered();
     let mut object = ObjectInstance::new(CALENDAR_DURATION_CLASS.to_string());
     object

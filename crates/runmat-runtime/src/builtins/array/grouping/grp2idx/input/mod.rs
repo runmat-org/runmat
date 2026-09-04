@@ -75,20 +75,11 @@ impl GroupingInput {
 }
 
 pub(super) fn numeric_atom(value: NumericScalar) -> Option<Vec<KeyAtom>> {
-    match value {
-        NumericScalar::F64(value) if value.is_nan() => None,
-        NumericScalar::F64(value) => Some(vec![KeyAtom::Number(value)]),
-        NumericScalar::F32(value) if value.is_nan() => None,
-        NumericScalar::F32(value) => Some(vec![KeyAtom::Number(f64::from(value))]),
-        value => value
-            .into_int_value()
-            .map(|value| vec![KeyAtom::Integer(value)]),
-    }
+    KeyAtom::from_numeric(value).map(|atom| vec![atom])
 }
 
 pub(super) fn text_atom(value: &str) -> Option<Vec<KeyAtom>> {
-    (!crate::builtins::strings::common::is_missing_string(value))
-        .then(|| vec![KeyAtom::Text(value.into())])
+    KeyAtom::from_text(value).map(|atom| vec![atom])
 }
 
 pub(super) fn ensure_vector(shape: &[usize], kind: &str) -> BuiltinResult<()> {
