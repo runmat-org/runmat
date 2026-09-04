@@ -92,7 +92,8 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.material(...)`, `fea.materialAssignment(...)` | Create typed material data and region assignments. |
 | `fea.<Family>Constraint.<kind>(...)` | Create typed essential, kinematic, gauge, pairing, and reference constraints. |
 | `fea.<Family>Boundary.<kind>(...)`, `fea.loadCase(...)` | Create typed natural/Robin boundaries, loads, and sources. |
-| `fea.<Family>Step.<procedure>(id)`, `fea.domain(...)`, `fea.interface(...)` | Create concrete typed analysis steps, physics domains, and interfaces. |
+| `fea.<Family>Step.<procedure>(id)`, `fea.domain(...)` | Create concrete typed analysis steps and physics domains. |
+| `fea.ContactInterface.frictionless(...)`, `.coulomb(...)`; `fea.FluidStructureInterface.noSlip(...)`; `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Create a concrete typed interface between two `geometry.Region` values. |
 | `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
 | `fea.model(id, geometry, Name, Value, ...)` | Assemble an explicit model from geometry and typed components. |
 | `fea.study(id, geometry, Name, Value, ...)` | Create a `fea.Study` from geometry, optional validated `Mesh`, physics profile/model data, backend, and run options. |
@@ -122,7 +123,18 @@ Family-specific constraints and boundaries require immutable `geometry.Region` v
 
 Fluid inlet velocity, moving/no-slip/slip walls, and symmetry are kinematic constraints and therefore live on `fea.FluidConstraint`. A fluid outlet pressure is a natural boundary. Thermal prescribed temperature is an essential constraint, while heat flux and convection are natural/Robin boundaries. This division follows the mathematical role of the condition rather than its placement on a geometric boundary.
 
-`fea.material`, `fea.loadCase`, `fea.domain`, and `fea.interface` are also RunMat-native host constructors. Their documented finite real physical fields accept all eight built-in integer classes, preserve exact input through kind/field/shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. The nested thermo-field-source revision is a structural nonnegative integer and remains exact.
+| Interface constructor | Typed parameters |
+| --- | --- |
+| `fea.ContactInterface.frictionless(id, primary, secondary)` | None |
+| `fea.ContactInterface.coulomb(id, primary, secondary, coefficient)` | `fea.FrictionCoefficient` |
+| `fea.FluidStructureInterface.noSlip(id, fluid, structure)` | None |
+| `fea.ConjugateHeatTransferInterface.perfect(id, fluid, solid)` | None |
+| `fea.ConjugateHeatTransferInterface.conductance(id, fluid, solid, conductance)` | `fea.HeatTransferCoefficient` |
+| `fea.ConjugateHeatTransferInterface.resistance(id, fluid, solid, resistance)` | `fea.ThermalContactResistance` |
+
+Each interface joins two distinct `geometry.Region` values from one geometry revision. Contact does not choose an FSI or CHT transfer law, and coupled interfaces do not double as contact constraints. Their orientation is explicit: FSI and CHT use the fluid region as the primary side, with the structure or solid region as the secondary side.
+
+`fea.material`, `fea.loadCase`, and `fea.domain` are RunMat-native host constructors. Their documented finite real physical fields accept all eight built-in integer classes, preserve exact input through kind/field/shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. The nested thermo-field-source revision is a structural nonnegative integer and remains exact. Interface constructors accept only typed `geometry.Region` selections and, where required, a semantic physical parameter. CHT selects exactly one of perfect transfer, conductance, or resistance, so redundant or contradictory transfer laws cannot be authored. Contact penalty, stabilization, damping, and relaxation are numerical policy owned by the step and solver rather than interface physics.
 
 `fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, and `fea.compare` accept structural objects and text rather than integer arrays. FEA objects overload the ordinary `plot` and `mesh` functions through the runtime object protocol; numeric calls keep their MATLAB-compatible behavior. Discrete output metadata remains integer typed: model and geometry revisions, plan counts and indexes, field shape/component/element/size metadata, and comparison count deltas do not pass through a physical-value binary64 boundary. The conventional figure handle remains a double at the scripting boundary. Input arity and structural identity are validated before artifact lookup, planning, field projection, comparison, or figure creation.
 

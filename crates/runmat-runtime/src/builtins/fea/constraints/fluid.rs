@@ -9,6 +9,7 @@ define_simple_constraint!(
     "constraint = fea.FluidConstraint.noSlipWall(id, region)",
     "Create a fluid no-slip wall constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::fluid",
     |constraint_id, target| FluidConstraint {
         constraint_id,
         kind: FluidConstraintKind::NoSlipWall { target },
@@ -23,6 +24,7 @@ define_simple_constraint!(
     "constraint = fea.FluidConstraint.slipWall(id, region)",
     "Create a fluid slip-wall constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::fluid",
     |constraint_id, target| FluidConstraint {
         constraint_id,
         kind: FluidConstraintKind::SlipWall { target },
@@ -37,6 +39,7 @@ define_simple_constraint!(
     "constraint = fea.FluidConstraint.symmetry(id, region)",
     "Create a fluid symmetry constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::fluid",
     |constraint_id, target| FluidConstraint {
         constraint_id,
         kind: FluidConstraintKind::Symmetry { target },
@@ -52,6 +55,7 @@ define_quantity_constraint!(
     "constraint = fea.FluidConstraint.prescribedVelocity(id, region, velocity)",
     "Create a prescribed fluid-velocity constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::fluid",
     "velocity",
     VELOCITY_CLASS,
     "meters_per_second",
@@ -73,6 +77,7 @@ define_quantity_constraint!(
     "constraint = fea.FluidConstraint.movingWall(id, region, velocity)",
     "Create a moving-wall velocity constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::fluid",
     "velocity",
     VELOCITY_CLASS,
     "meters_per_second",
@@ -94,6 +99,7 @@ define_quantity_constraint!(
     "constraint = fea.FluidConstraint.pressureReference(id, region, pressure)",
     "Create a fluid pressure-reference constraint.",
     FEA_FLUID_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::fluid",
     "pressure",
     PRESSURE_CLASS,
     "pascals",

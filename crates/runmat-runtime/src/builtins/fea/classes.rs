@@ -30,7 +30,10 @@ pub(super) const FEA_ELECTROTHERMAL_STEP_CLASS: &str = "fea.ElectroThermalStep";
 pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS: &str = "fea.ConjugateHeatTransferStep";
 pub(super) const FEA_FLUID_STRUCTURE_STEP_CLASS: &str = "fea.FluidStructureStep";
 pub(super) const FEA_DOMAIN_CLASS: &str = "fea.Domain";
-pub(super) const FEA_INTERFACE_CLASS: &str = "fea.Interface";
+pub(super) const FEA_CONTACT_INTERFACE_CLASS: &str = "fea.ContactInterface";
+pub(super) const FEA_FLUID_STRUCTURE_INTERFACE_CLASS: &str = "fea.FluidStructureInterface";
+pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS: &str =
+    "fea.ConjugateHeatTransferInterface";
 pub(super) const FEA_RESULTS_CLASS: &str = "fea.Results";
 pub(super) const FEA_FIELD_CLASS: &str = "fea.Field";
 pub(super) const FEA_COMPARE_CLASS: &str = "fea.Compare";
@@ -170,12 +173,7 @@ pub(super) const STEP_FIELDS: &[&str] = &[
     "restart",
 ];
 pub(super) const DOMAIN_FIELDS: &[&str] = &["kind", "data"];
-pub(super) const INTERFACE_FIELDS: &[&str] = &[
-    "interface_id",
-    "primary_region_id",
-    "secondary_region_id",
-    "kind",
-];
+pub(super) const INTERFACE_FIELDS: &[&str] = &["geometry_id", "geometry_revision", "interface"];
 pub(super) const RESULTS_FIELDS: &[&str] = &[
     "identity",
     "field_descriptors",
@@ -281,6 +279,11 @@ pub(crate) fn ensure_fea_classes_registered() {
                 FEA_ELECTROTHERMAL_STEP_CLASS => electrothermal_step_methods(),
                 FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS => conjugate_heat_transfer_step_methods(),
                 FEA_FLUID_STRUCTURE_STEP_CLASS => fluid_structure_step_methods(),
+                FEA_CONTACT_INTERFACE_CLASS => contact_interface_methods(),
+                FEA_FLUID_STRUCTURE_INTERFACE_CLASS => fluid_structure_interface_methods(),
+                FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS => {
+                    conjugate_heat_transfer_interface_methods()
+                }
                 FEA_RUN_RESULT_CLASS => run_result_methods(),
                 FEA_RESULTS_CLASS => results_methods(),
                 FEA_FIELD_CLASS => field_methods(),
@@ -384,6 +387,35 @@ fn validate_bound_boundary_object(object: &ObjectInstance) -> Result<(), String>
     if !matches!(object.properties.get("boundary"), Some(Value::Struct(_))) {
         return Err(format!(
             "{}.boundary must be a typed structure",
+            object.class_name
+        ));
+    }
+    Ok(())
+}
+
+fn validate_bound_interface_object(object: &ObjectInstance) -> Result<(), String> {
+    validate_fea_object(object)?;
+    match object.properties.get("geometry_id") {
+        Some(Value::String(value)) if !value.is_empty() => {}
+        _ => {
+            return Err(format!(
+                "{}.geometry_id must be a non-empty string",
+                object.class_name
+            ))
+        }
+    }
+    if !matches!(
+        object.properties.get("geometry_revision"),
+        Some(Value::Int(IntValue::U32(_)))
+    ) {
+        return Err(format!(
+            "{}.geometry_revision must be uint32",
+            object.class_name
+        ));
+    }
+    if !matches!(object.properties.get("interface"), Some(Value::Struct(_))) {
+        return Err(format!(
+            "{}.interface must be a typed structure",
             object.class_name
         ));
     }
@@ -517,6 +549,32 @@ fn fluid_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMet
     static_methods(&[("outletPressure", "fea.FluidBoundary.outletPressure")])
 }
 
+fn contact_interface_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("frictionless", "fea.ContactInterface.frictionless"),
+        ("coulomb", "fea.ContactInterface.coulomb"),
+    ])
+}
+
+fn fluid_structure_interface_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("noSlip", "fea.FluidStructureInterface.noSlip")])
+}
+
+fn conjugate_heat_transfer_interface_methods(
+) -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[
+        ("perfect", "fea.ConjugateHeatTransferInterface.perfect"),
+        (
+            "conductance",
+            "fea.ConjugateHeatTransferInterface.conductance",
+        ),
+        (
+            "resistance",
+            "fea.ConjugateHeatTransferInterface.resistance",
+        ),
+    ])
+}
+
 fn structural_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     static_methods(&[
         ("static", "fea.StructuralStep.static"),
@@ -587,7 +645,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 37] {
+fn fea_class_schemas() -> [FeaClassSchema; 39] {
     [
         (
             FEA_STUDY_CLASS,
@@ -853,11 +911,25 @@ fn fea_class_schemas() -> [FeaClassSchema; 37] {
             validate_fea_object,
         ),
         (
-            FEA_INTERFACE_CLASS,
-            "runmat.fea.interface",
+            FEA_CONTACT_INTERFACE_CLASS,
+            "runmat.fea.contact-interface",
             INTERFACE_FIELDS,
             INTERFACE_FIELDS,
-            validate_fea_object,
+            validate_bound_interface_object,
+        ),
+        (
+            FEA_FLUID_STRUCTURE_INTERFACE_CLASS,
+            "runmat.fea.fluid-structure-interface",
+            INTERFACE_FIELDS,
+            INTERFACE_FIELDS,
+            validate_bound_interface_object,
+        ),
+        (
+            FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS,
+            "runmat.fea.conjugate-heat-transfer-interface",
+            INTERFACE_FIELDS,
+            INTERFACE_FIELDS,
+            validate_bound_interface_object,
         ),
         (
             FEA_RESULTS_CLASS,

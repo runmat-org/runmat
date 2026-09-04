@@ -215,7 +215,7 @@ thermalModel = fea.model("cooled_bracket", geom, ...
 
 Use `Constraints` for prescribed values and kinematic relations, and `Boundaries` for natural or Robin operators. For fluid models, inlet velocity and wall motion are constraints; outlet pressure is a boundary. For thermal models, prescribed temperature is a constraint; heat flux and convection are boundaries.
 
-The same host-only physical-value boundary applies to the documented numeric fields of `fea.material`, `fea.loadCase`, `fea.domain`, and `fea.interface`: field names, scalar/vector shape, finiteness, and kind-specific requirements are validated before one binary64 model-storage conversion, and sufficiently wide integers can round. Nested domain revision values, geometry/model revisions, plan counts, field shape/count metadata, and comparison count deltas are structural integers instead; they remain exact and do not enter the physical-value conversion. The conventional plotting handle remains a double at the scripting boundary. Resident numeric constructor fields are rejected because typed FEA object construction performs no provider execution.
+The same host-only physical-value boundary applies to the documented numeric fields of `fea.material`, `fea.loadCase`, and `fea.domain`: field names, scalar/vector shape, finiteness, and kind-specific requirements are validated before one binary64 model-storage conversion, and sufficiently wide integers can round. Interface transfer values use semantic constructors such as `fea.FrictionCoefficient`, `fea.HeatTransferCoefficient`, and `fea.ThermalContactResistance`; bare numbers are not accepted. Numerical enforcement controls such as contact penalties and coupling relaxation belong to typed step or solver policy, not to interface physics. Nested domain revision values, geometry/model revisions, plan counts, field shape/count metadata, and comparison count deltas are structural integers instead; they remain exact and do not enter the physical-value conversion. The conventional plotting handle remains a double at the scripting boundary. Resident numeric constructor fields are rejected because typed FEA object construction performs no provider execution.
 
 `fea.runOptions` distinguishes structural controls from physical solver settings. Mode, step, iteration, retry, backtrack, and tangent-refresh counts accept all eight integer classes and ordinary integral doubles exactly; tolerances, time steps, scales, ratios, frequencies, and residual thresholds cross one checked binary64 boundary. Logical settings require logical scalars. The complete per-family option/default table is in the [operation reference](./operation-reference).
 
@@ -270,7 +270,9 @@ The typed constructors are:
 | `fea.loadCase(...)` | Force, moment/torque, pressure, body force, current density, or coil current. |
 | `fea.<Family>Step.<procedure>(id)` | A concrete direct-solution procedure step; family and procedure are selected by the class method rather than text. |
 | `fea.domain(...)` | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
-| `fea.interface(...)` | Contact, conjugate heat-transfer, or fluid-structure interfaces. |
+| `fea.ContactInterface.frictionless(...)`, `fea.ContactInterface.coulomb(...)` | Contact between two typed regions, optionally with typed Coulomb friction. |
+| `fea.FluidStructureInterface.noSlip(...)` | No-slip fluid-to-structure transfer across two typed regions. |
+| `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Fluid-to-solid heat transfer with exactly one physical transfer law. |
 | `fea.runOptions(...)` | Family-specific solver and quality options. |
 | `fea.model(...)` | Explicit model assembled from typed components. |
 | `fea.study(...)` | Study assembled from geometry, physics profile/model data, backend, and run options. |
@@ -278,7 +280,7 @@ The typed constructors are:
 | `plot(field, ...)` | Plot an `fea.Field` through the ordinary plotting function. |
 | `mesh(runOrResultsOrField, ...)` | Display solver topology, CAD geometry, or both through the ordinary mesh function. |
 
-Region strings in these constructors use the same selector grammar as `.fea`: direct region id, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, or `tag:<tag>`.
+Resolve typed region arguments with `geometry.region`. Its selector accepts a direct region id, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, or `tag:<tag>`. Constraints, boundaries, and interfaces then retain the resolved geometry identity and revision instead of an unqualified selector string.
 
 Moment loads are structural load resultants in N*m. Use `"moment"` as the canonical load kind; `"torque"` is accepted as an alias and resolves to the same model load kind. Direct moment loads require structural elements with rotational DOFs, such as beams or shells. Solid-only displacement regions reject direct moment loads because continuum solids do not own nodal rotations.
 

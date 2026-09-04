@@ -9,6 +9,7 @@ define_simple_constraint!(
     "constraint = fea.MagneticConstraint.vectorPotentialGround(id, region)",
     "Create a magnetic vector-potential ground constraint.",
     FEA_MAGNETIC_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::magnetic",
     |constraint_id, target| MagneticConstraint {
         constraint_id,
         kind: MagneticConstraintKind::VectorPotentialGround { target },
@@ -23,6 +24,7 @@ define_simple_constraint!(
     "constraint = fea.MagneticConstraint.coulombGauge(id, region)",
     "Create a magnetic Coulomb-gauge constraint.",
     FEA_MAGNETIC_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::magnetic",
     |constraint_id, target| MagneticConstraint {
         constraint_id,
         kind: MagneticConstraintKind::CoulombGauge { target },
@@ -38,6 +40,7 @@ define_quantity_constraint!(
     "constraint = fea.MagneticConstraint.prescribedVectorPotential(id, region, potential)",
     "Create a prescribed magnetic vector-potential constraint.",
     FEA_MAGNETIC_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::magnetic",
     "potential",
     MAGNETIC_VECTOR_POTENTIAL_CLASS,
     "webers_per_meter",

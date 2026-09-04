@@ -872,18 +872,8 @@ fn resolve_typed_region_targets(
         }
     }
     for interface in &mut model.interfaces {
-        resolve_region_id(
-            &mut interface.primary_region_id,
-            geometry,
-            aliases,
-            &mut failure,
-        );
-        resolve_region_id(
-            &mut interface.secondary_region_id,
-            geometry,
-            aliases,
-            &mut failure,
-        );
+        resolve_region_target(&mut interface.primary, geometry, aliases, &mut failure);
+        resolve_region_target(&mut interface.secondary, geometry, aliases, &mut failure);
     }
     for action in &mut model.excitations {
         if let ExcitationTarget::Region(target) = &mut action.excitation_mut().target {
@@ -1113,12 +1103,20 @@ mod tests {
                 vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
                 vec![[0, 1, 2]],
             )],
-            regions: vec![Region {
-                region_id: "tip".to_string(),
-                name: "Tip".to_string(),
-                tag: Some("tip".to_string()),
-                cad_ownership: None,
-            }],
+            regions: vec![
+                Region {
+                    region_id: "tip".to_string(),
+                    name: "Tip".to_string(),
+                    tag: Some("tip".to_string()),
+                    cad_ownership: None,
+                },
+                Region {
+                    region_id: "base".to_string(),
+                    name: "Base".to_string(),
+                    tag: Some("base".to_string()),
+                    cad_ownership: None,
+                },
+            ],
             region_entity_mappings: Vec::new(),
             diagnostics: Vec::new(),
         }
@@ -1453,13 +1451,11 @@ mod tests {
         }];
         model.interfaces = vec![AnalysisInterface {
             interface_id: "contact".into(),
-            primary_region_id: "loaded".into(),
-            secondary_region_id: "loaded".into(),
+            primary: RegionTarget::boundary("loaded"),
+            secondary: RegionTarget::boundary("base"),
             kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                 runmat_analysis_core::ContactInterfaceModel {
-                    penalty_stiffness_scale: 1.0,
-                    max_penetration_ratio: 0.01,
-                    friction_coefficient: 0.0,
+                    friction: runmat_analysis_core::ContactFriction::Frictionless,
                 },
             ),
         }];
@@ -1505,7 +1501,8 @@ mod tests {
             model.connectors[0].secondary.as_ref().unwrap().region_id,
             "tip"
         );
-        assert_eq!(model.interfaces[0].primary_region_id, "tip");
+        assert_eq!(model.interfaces[0].primary.region_id, "tip");
+        assert_eq!(model.interfaces[0].secondary.region_id, "base");
         assert!(matches!(
             &model.excitations[0].excitation().target,
             ExcitationTarget::Region(target) if target.region_id == "tip"

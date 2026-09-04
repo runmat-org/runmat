@@ -19,6 +19,8 @@ pub(super) const LENGTH_CLASS: &str = "fea.Length";
 pub(super) const POSITION_CLASS: &str = "fea.Position";
 pub(super) const TRANSLATION_CLASS: &str = "fea.Translation";
 pub(super) const COMPLEX_PHASE_CLASS: &str = "fea.ComplexPhase";
+pub(super) const THERMAL_CONTACT_RESISTANCE_CLASS: &str = "fea.ThermalContactResistance";
+pub(super) const FRICTION_COEFFICIENT_CLASS: &str = "fea.FrictionCoefficient";
 
 const METERS: &[&str] = &["meters"];
 const RADIANS: &[&str] = &["radians"];
@@ -31,6 +33,8 @@ const PASCAL_SECONDS_PER_METER: &[&str] = &["pascal_seconds_per_meter"];
 const VOLTS: &[&str] = &["volts"];
 const AMPERES: &[&str] = &["amperes"];
 const WEBERS_PER_METER: &[&str] = &["webers_per_meter"];
+const SQUARE_METER_KELVIN_PER_WATT: &[&str] = &["square_meter_kelvin_per_watt"];
+const RATIO: &[&str] = &["ratio"];
 
 const QUANTITY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "value",
@@ -142,6 +146,30 @@ scalar_quantity_builtin!(
     "Create a displacement value from meters.",
     DISPLACEMENT_CLASS,
     "meters",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    thermal_contact_resistance_builtin,
+    THERMAL_CONTACT_RESISTANCE_DESCRIPTOR,
+    THERMAL_CONTACT_RESISTANCE_SIGNATURES,
+    "fea.ThermalContactResistance.squareMeterKelvinPerWatt",
+    "value = fea.ThermalContactResistance.squareMeterKelvinPerWatt(value)",
+    "Create a thermal contact resistance from square meter-kelvin per watt.",
+    THERMAL_CONTACT_RESISTANCE_CLASS,
+    "square_meter_kelvin_per_watt",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    friction_coefficient_builtin,
+    FRICTION_COEFFICIENT_DESCRIPTOR,
+    FRICTION_COEFFICIENT_SIGNATURES,
+    "fea.FrictionCoefficient.ratio",
+    "value = fea.FrictionCoefficient.ratio(value)",
+    "Create a non-negative friction coefficient.",
+    FRICTION_COEFFICIENT_CLASS,
+    "ratio",
     1.0,
     0.0
 );
@@ -505,7 +533,7 @@ pub(super) fn ensure_quantity_classes_registered() {
     });
 }
 
-fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 16] {
+fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 18] {
     [
         (DISPLACEMENT_CLASS, "runmat.fea.displacement", METERS),
         (ROTATION_CLASS, "runmat.fea.rotation", RADIANS),
@@ -551,6 +579,16 @@ fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]);
         (POSITION_CLASS, "runmat.fea.position", METERS),
         (TRANSLATION_CLASS, "runmat.fea.translation", METERS),
         (COMPLEX_PHASE_CLASS, "runmat.fea.complex-phase", RADIANS),
+        (
+            THERMAL_CONTACT_RESISTANCE_CLASS,
+            "runmat.fea.thermal-contact-resistance",
+            SQUARE_METER_KELVIN_PER_WATT,
+        ),
+        (
+            FRICTION_COEFFICIENT_CLASS,
+            "runmat.fea.friction-coefficient",
+            RATIO,
+        ),
     ]
 }
 
@@ -629,6 +667,11 @@ fn quantity_methods(class_name: &str) -> HashMap<String, crate::class_registry::
             ("radians", "fea.ComplexPhase.radians"),
             ("degrees", "fea.ComplexPhase.degrees"),
         ],
+        THERMAL_CONTACT_RESISTANCE_CLASS => &[(
+            "squareMeterKelvinPerWatt",
+            "fea.ThermalContactResistance.squareMeterKelvinPerWatt",
+        )],
+        FRICTION_COEFFICIENT_CLASS => &[("ratio", "fea.FrictionCoefficient.ratio")],
         _ => unreachable!("quantity schemas contain only known classes"),
     };
     names
@@ -675,7 +718,12 @@ fn validate_quantity_range(class_name: &str, value: f64) -> Result<(), String> {
         TEMPERATURE_CLASS if value < 0.0 => {
             Err("fea.Temperature cannot be below zero kelvin".into())
         }
-        LENGTH_CLASS | HEAT_TRANSFER_COEFFICIENT_CLASS if value < 0.0 => {
+        LENGTH_CLASS
+        | HEAT_TRANSFER_COEFFICIENT_CLASS
+        | THERMAL_CONTACT_RESISTANCE_CLASS
+        | FRICTION_COEFFICIENT_CLASS
+            if value < 0.0 =>
+        {
             Err(format!("{class_name} cannot be negative"))
         }
         ACOUSTIC_IMPEDANCE_CLASS if value <= 0.0 => {

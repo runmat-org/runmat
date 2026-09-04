@@ -10,6 +10,7 @@ define_quantity_constraint!(
     "constraint = fea.AcousticConstraint.prescribedPressure(id, region, pressure)",
     "Create a prescribed acoustic-pressure constraint.",
     FEA_ACOUSTIC_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::acoustic",
     "pressure",
     PRESSURE_CLASS,
     "pascals",

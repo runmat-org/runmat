@@ -61,8 +61,9 @@ pub use problem::initial_condition::{
     InitialValue,
 };
 pub use problem::interfaces::{
-    AnalysisInterface, AnalysisInterfaceKind, ConjugateHeatTransferInterfaceModel,
-    ContactInterfaceModel, FluidStructureInterfaceModel,
+    AnalysisInterface, AnalysisInterfaceKind, ConjugateHeatTransferInterfaceModel, ContactFriction,
+    ContactInterfaceModel, FluidStructureInterfaceModel, FluidStructureKinematics,
+    ThermalInterfaceTransfer,
 };
 pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
 pub use problem::materials::{
@@ -74,10 +75,10 @@ pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{
     Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, ComplexPhase, Damping,
     Displacement, ElectricCharge, ElectricChargeDensity, ElectricCurrent, ElectricCurrentDensity,
-    ElectricPotential, Force, HeatFlux, HeatGenerationDensity, HeatTransferCoefficient, Length,
-    MagneticVectorPotential, MassFlowRate, Moment, Position, Pressure, Rotation,
-    SpecificAcousticImpedance, Stiffness, Temperature, TemperatureDifference, Traction,
-    Translation, Velocity,
+    ElectricPotential, Force, FrictionCoefficient, HeatFlux, HeatGenerationDensity,
+    HeatTransferCoefficient, Length, MagneticVectorPotential, MassFlowRate, Moment, Position,
+    Pressure, Rotation, SpecificAcousticImpedance, Stiffness, Temperature, TemperatureDifference,
+    ThermalContactResistance, Traction, Translation, Velocity,
 };
 pub use problem::reference_point::ReferencePoint;
 pub use problem::response_spectrum::{

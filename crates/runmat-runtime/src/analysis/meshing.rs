@@ -63,8 +63,8 @@ fn meshing_contact_definitions(
             )
         })
         .map(|interface| crate::meshing::MeshingContactDefinition {
-            side_a_face_selectors: vec![interface.primary_region_id.clone()],
-            side_b_face_selectors: vec![interface.secondary_region_id.clone()],
+            side_a_face_selectors: vec![interface.primary.region_id.clone()],
+            side_b_face_selectors: vec![interface.secondary.region_id.clone()],
         })
         .collect()
 }

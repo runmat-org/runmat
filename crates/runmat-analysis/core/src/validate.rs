@@ -37,6 +37,13 @@ pub enum AnalysisValidationError {
         connector_id: String,
         detail: String,
     },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_INTERFACE: interface `{interface_id}` is invalid: {detail}"
+    )]
+    InvalidInterface {
+        interface_id: String,
+        detail: String,
+    },
     #[error("ANALYSIS_VALIDATION_INVALID_SIGNAL: signal `{signal_id}` is invalid: {detail}")]
     InvalidSignal { signal_id: String, detail: String },
     #[error("ANALYSIS_VALIDATION_INVALID_DOMAIN: {domain} domain is invalid: {detail}")]

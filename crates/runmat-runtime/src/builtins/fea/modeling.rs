@@ -46,7 +46,7 @@ pub(super) struct StudyConstructorOptions {
     pub(super) excitation_cases: Vec<ExcitationCase>,
     pub(super) steps: Vec<ProcedureStep>,
     pub(super) domains: Vec<DomainPayload>,
-    pub(super) interfaces: Vec<AnalysisInterface>,
+    pub(super) interfaces: Vec<GeometryBoundInterface>,
     pub(super) mesh: Option<crate::meshing::MeshingExecutionOutput>,
 }
 
@@ -277,7 +277,7 @@ struct ModelConstructorOptions {
     excitation_cases: Vec<ExcitationCase>,
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
-    interfaces: Vec<AnalysisInterface>,
+    interfaces: Vec<GeometryBoundInterface>,
 }
 
 pub(super) fn create_sweep_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -709,108 +709,6 @@ pub(super) fn create_domain_object_from_args(args: Vec<Value>) -> BuiltinResult<
     domain_to_object(payload)
 }
 
-pub(super) fn create_interface_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() < 3 {
-        return Err(builtin_error(
-            INTERFACE_NAME,
-            &ERROR_INPUT,
-            "fea.interface requires id, primary region, and secondary region arguments",
-        ));
-    }
-    let interface_id = scalar_string(&args[0], INTERFACE_NAME, &ERROR_INPUT)?;
-    let primary_region_id = scalar_string(&args[1], INTERFACE_NAME, &ERROR_INPUT)?;
-    let secondary_region_id = scalar_string(&args[2], INTERFACE_NAME, &ERROR_INPUT)?;
-    let mut kind = "contact".to_string();
-    let mut kind_seen = false;
-    let mut fields = serde_json::Map::new();
-    for pair in expect_name_value_tail(INTERFACE_NAME, &args[3..])? {
-        if pair.key == "kind" {
-            if kind_seen {
-                return Err(builtin_error(
-                    INTERFACE_NAME,
-                    &ERROR_INPUT,
-                    "duplicate fea.interface option `kind`",
-                ));
-            }
-            kind_seen = true;
-            kind = scalar_string(pair.value, INTERFACE_NAME, &ERROR_INPUT)?;
-        } else {
-            let key =
-                canonical_field_name(&scalar_string(pair.name, INTERFACE_NAME, &ERROR_INPUT)?);
-            if fields
-                .insert(key.clone(), value_to_json(INTERFACE_NAME, pair.value)?)
-                .is_some()
-            {
-                return Err(builtin_error(
-                    INTERFACE_NAME,
-                    &ERROR_INPUT,
-                    format!("duplicate fea.interface option `{key}`"),
-                ));
-            }
-        }
-    }
-    let kind = match normalize_token(&kind).as_str() {
-        "contact" => AnalysisInterfaceKind::Contact(json_deserialize(
-            INTERFACE_NAME,
-            json_with_overrides(
-                INTERFACE_NAME,
-                serde_json::json!({
-                    "penalty_stiffness_scale": 1.0,
-                    "max_penetration_ratio": 0.0,
-                    "friction_coefficient": 0.0
-                }),
-                fields,
-                "contact interface",
-            )?,
-            "contact interface",
-        )?),
-        "fluid_structure" | "fluidstructure" | "fsi" => {
-            AnalysisInterfaceKind::FluidStructure(json_deserialize(
-                INTERFACE_NAME,
-                json_with_overrides(
-                    INTERFACE_NAME,
-                    serde_json::json!({
-                        "normal_stiffness_pa_per_m": 1.0e9,
-                        "damping_ratio": 0.0,
-                        "relaxation_factor": 0.5
-                    }),
-                    fields,
-                    "fluid-structure interface",
-                )?,
-                "fluid-structure interface",
-            )?)
-        }
-        "conjugate_heat_transfer" | "conjugateheattransfer" | "cht" => {
-            AnalysisInterfaceKind::ConjugateHeatTransfer(json_deserialize(
-                INTERFACE_NAME,
-                json_with_overrides(
-                    INTERFACE_NAME,
-                    serde_json::json!({
-                        "thermal_conductance_w_per_m2k": 500.0,
-                        "contact_resistance_m2k_per_w": 0.0,
-                        "relaxation_factor": 0.5
-                    }),
-                    fields,
-                    "conjugate heat-transfer interface",
-                )?,
-                "conjugate heat-transfer interface",
-            )?)
-        }
-        other => {
-            return Err(builtin_error(
-                INTERFACE_NAME,
-                &ERROR_INPUT,
-                format!("unsupported interface kind `{other}`"),
-            ));
-        }
-    };
-    interface_to_object(AnalysisInterface {
-        interface_id,
-        primary_region_id,
-        secondary_region_id,
-        kind,
-    })
-}
 fn build_model_from_parts(
     builtin: &'static str,
     geometry: &GeometryAsset,
@@ -827,7 +725,7 @@ fn build_model_from_parts(
     excitation_cases: Vec<ExcitationCase>,
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
-    interfaces: Vec<AnalysisInterface>,
+    interfaces: Vec<GeometryBoundInterface>,
 ) -> BuiltinResult<AnalysisModel> {
     let mut model = match defaults {
         ModelDefaultsMode::TemplateScaffold => analysis_create_model_op(
@@ -974,16 +872,11 @@ fn build_model_from_parts(
         }
     }
     if !interfaces.is_empty() {
-        model.interfaces = interfaces
-            .into_iter()
-            .map(|mut interface| {
-                interface.primary_region_id =
-                    resolve_region_selector(builtin, &interface.primary_region_id, geometry)?;
-                interface.secondary_region_id =
-                    resolve_region_selector(builtin, &interface.secondary_region_id, geometry)?;
-                Ok(interface)
-            })
-            .collect::<BuiltinResult<Vec<_>>>()?;
+        model.interfaces.clear();
+        for interface in interfaces {
+            interface.require_geometry(builtin, geometry)?;
+            model.interfaces.push(interface.interface);
+        }
     }
     Ok(model)
 }
@@ -1102,15 +995,6 @@ fn domain_to_object(domain: DomainPayload) -> BuiltinResult<Value> {
         &domain,
         &[],
         &["revision"],
-    )
-}
-
-fn interface_to_object(interface: AnalysisInterface) -> BuiltinResult<Value> {
-    serializable_to_object(
-        INTERFACE_NAME,
-        &ERROR_INTERNAL,
-        FEA_INTERFACE_CLASS,
-        &interface,
     )
 }
 
@@ -1316,8 +1200,43 @@ fn domain_vec_from_value(
 fn interface_vec_from_value(
     builtin: &'static str,
     value: &Value,
-) -> BuiltinResult<Vec<AnalysisInterface>> {
-    object_vec_from_value(builtin, value, FEA_INTERFACE_CLASS)
+) -> BuiltinResult<Vec<GeometryBoundInterface>> {
+    let values = match value {
+        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Object(_) => vec![value],
+        other => {
+            return Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("expected typed FEA interface object or cell array; got {other:?}"),
+            ))
+        }
+    };
+    values
+        .into_iter()
+        .map(|value| {
+            let Value::Object(object) = value else {
+                unreachable!("interface inputs were classified above")
+            };
+            let class_name = match object.class_name.as_str() {
+                FEA_CONTACT_INTERFACE_CLASS => FEA_CONTACT_INTERFACE_CLASS,
+                FEA_FLUID_STRUCTURE_INTERFACE_CLASS => FEA_FLUID_STRUCTURE_INTERFACE_CLASS,
+                FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS => {
+                    FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS
+                }
+                other => {
+                    return Err(builtin_error(
+                        builtin,
+                        &ERROR_INPUT,
+                        format!("unsupported FEA interface class `{other}`"),
+                    ))
+                }
+            };
+            let interface: GeometryBoundInterface = object_payload(builtin, value, class_name)?;
+            interface.require_class(builtin, class_name)?;
+            Ok(interface)
+        })
+        .collect()
 }
 
 fn object_vec_from_value<T: DeserializeOwned>(

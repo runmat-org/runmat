@@ -2,19 +2,21 @@ use runmat_analysis_core::{
     AcousticConstraint, AcousticConstraintKind, AnalysisBoundary, AnalysisConstraint,
     AnalysisField, AnalysisFieldValues, AnalysisInterface, AnalysisInterfaceKind, AnalysisModel,
     AnalysisModelId, AnalysisProcedure, AnalysisSequence, BoundaryOperator, CfdDomain,
-    ComplexPhase, CoordinateFrame, Displacement, ElectricCurrent, ElectricPotential,
-    ElectricalConstraint, ElectricalConstraintKind, ElectroThermalDomain, ElectromagneticDomain,
-    EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationTarget, FluidConstraint,
-    FluidConstraintKind, FormulationRequirement, HeatFlux, HeatTransferCoefficient,
-    MagneticConstraint, MagneticConstraintKind, MagneticVectorPotential, MaterialAcousticModel,
-    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialPlasticModel, MaterialThermalModel, PairedConstraint, PairingPolicy,
-    PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint, PhysicalSignal,
-    PhysicsFamily, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
-    RegionTarget, Rotation, RotationDofValue, SolutionSpace, SpecificAcousticImpedance,
-    StructuralConstraint, StructuralConstraintKind, StructuralRotationDof,
-    StructuralTranslationDof, Temperature, TemperatureDifference, ThermalConstraint,
-    ThermalConstraintKind, ThermoMechanicalDomain, Translation, TranslationDofValue, Velocity,
+    ComplexPhase, ConjugateHeatTransferInterfaceModel, ContactFriction, ContactInterfaceModel,
+    CoordinateFrame, Displacement, ElectricCurrent, ElectricPotential, ElectricalConstraint,
+    ElectricalConstraintKind, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence,
+    ExcitationAction, ExcitationCase, ExcitationTarget, FluidConstraint, FluidConstraintKind,
+    FluidStructureInterfaceModel, FluidStructureKinematics, FormulationRequirement,
+    FrictionCoefficient, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
+    MagneticConstraintKind, MagneticVectorPotential, MaterialAcousticModel, MaterialAssignment,
+    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
+    MaterialThermalModel, PairedConstraint, PairingPolicy, PeriodicConstraint, PeriodicTransform,
+    PhaseShiftedPeriodicConstraint, PhysicalSignal, PhysicsFamily, PrescribedStructuralDofs,
+    PrescribedValue, Pressure, ProcedureStep, RegionTarget, Rotation, RotationDofValue,
+    SolutionSpace, SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
+    StructuralRotationDof, StructuralTranslationDof, Temperature, TemperatureDifference,
+    ThermalConstraint, ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
+    ThermoMechanicalDomain, Translation, TranslationDofValue, Velocity,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
@@ -55,18 +57,20 @@ use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvel
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod author_study;
-mod boundaries;
+pub(crate) mod boundaries;
 pub(crate) mod classes;
-mod constraints;
+pub(crate) mod constraints;
+pub(crate) mod interfaces;
 mod modeling;
-mod steps;
+pub(crate) mod steps;
 #[cfg(test)]
 mod test_support;
-mod values;
+pub(crate) mod values;
 mod visualization;
 use boundaries::*;
 use classes::*;
 use constraints::*;
+use interfaces::*;
 use modeling::*;
 use steps::*;
 #[cfg(test)]
@@ -80,7 +84,6 @@ const MODEL_NAME: &str = "fea.model";
 const MATERIAL_NAME: &str = "fea.material";
 const MATERIAL_ASSIGNMENT_NAME: &str = "fea.materialAssignment";
 const DOMAIN_NAME: &str = "fea.domain";
-const INTERFACE_NAME: &str = "fea.interface";
 const VALIDATE_NAME: &str = "fea.validate";
 const PLAN_NAME: &str = "fea.plan";
 const RUN_NAME: &str = "fea.run";
@@ -261,36 +264,6 @@ const DOMAIN_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Typed fields for the selected domain kind.",
     },
 ];
-const INTERFACE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Interface id.",
-    },
-    BuiltinParamDescriptor {
-        name: "primaryRegion",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Primary geometry region selector.",
-    },
-    BuiltinParamDescriptor {
-        name: "secondaryRegion",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Secondary geometry region selector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Interface kind and numeric fields.",
-    },
-];
 const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "id",
@@ -465,11 +438,6 @@ const DOMAIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
     inputs: &DOMAIN_INPUTS,
     outputs: &OUT_ANY,
 }];
-const INTERFACE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "interface = fea.interface(id, primaryRegion, secondaryRegion, Name, Value, ...)",
-    inputs: &INTERFACE_INPUTS,
-    outputs: &OUT_ANY,
-}];
 const COMPONENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "component = fea.component(args, ...)",
     inputs: &IN_VARIADIC_ARGS,
@@ -599,12 +567,6 @@ pub const FEA_DOMAIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
-pub const FEA_INTERFACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INTERFACE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 pub const FEA_COMPONENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &COMPONENT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -717,28 +679,6 @@ pub const FEA_DOMAIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
     fea_floating_capability("electro-thermal physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
     fea_floating_capability("electromagnetic physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
     fea_floating_capability("CFD physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
-];
-
-const INTERFACE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
-    "interface numeric fields",
-    BuiltinIntegerScalarDoubleRule::Allowed,
-)];
-pub const FEA_INTERFACE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    fea_floating_capability(
-        "contact interface fields",
-        &INTERFACE_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::Multiple,
-    ),
-    fea_floating_capability(
-        "fluid-structure interface fields",
-        &INTERFACE_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::Multiple,
-    ),
-    fea_floating_capability(
-        "conjugate-heat-transfer interface fields",
-        &INTERFACE_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::Multiple,
-    ),
 ];
 
 pub const FEA_STRUCTURAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
@@ -920,19 +860,6 @@ pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<
 )]
 pub async fn fea_domain_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     create_domain_object_from_args(args)
-}
-
-#[runtime_builtin(
-    name = "fea.interface",
-    category = "fea",
-    summary = "Create a typed FEA interface object.",
-    keywords = "fea,interface,contact,region",
-    descriptor(crate::builtins::fea::FEA_INTERFACE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_INTERFACE_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::fea"
-)]
-pub async fn fea_interface_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    create_interface_object_from_args(args)
 }
 
 #[runtime_builtin(
@@ -1817,8 +1744,6 @@ fn canonical_field_name(text: &str) -> String {
         "speedofsoundmpers" => "speed_of_sound_m_per_s".to_string(),
         "volumetricwperm3" => "volumetric_w_per_m3".to_string(),
         "inletvelocitympers" => "inlet_velocity_m_per_s".to_string(),
-        "thermalconductancewperm2k" => "thermal_conductance_w_per_m2k".to_string(),
-        "contactresistancem2kperw" => "contact_resistance_m2k_per_w".to_string(),
         "deterministicmode" => "deterministic_mode".to_string(),
         "precisionmode" => "precision_mode".to_string(),
         "preconditionermode" => "preconditioner_mode".to_string(),
@@ -3113,24 +3038,24 @@ mod tests {
         use runmat_value::{IntValue, IntegerStorage};
 
         assert_eq!(
-            usize_from_value(INTERFACE_NAME, &Value::Int(IntValue::U16(7))).unwrap(),
+            usize_from_value("fea.test", &Value::Int(IntValue::U16(7))).unwrap(),
             7
         );
-        assert!(usize_from_value(INTERFACE_NAME, &Value::Int(IntValue::I8(-1))).is_err());
-        assert!(usize_from_value(INTERFACE_NAME, &Value::Num(1.5)).is_err());
+        assert!(usize_from_value("fea.test", &Value::Int(IntValue::I8(-1))).is_err());
+        assert!(usize_from_value("fea.test", &Value::Num(1.5)).is_err());
         assert!(usize_vec_from_value(
-            INTERFACE_NAME,
+            "fea.test",
             &Value::Tensor(Tensor::new_2d(vec![1.0, -1.0], 1, 2).unwrap())
         )
         .is_err());
         let typed_indices =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 4]), vec![1, 2]).unwrap();
         assert_eq!(
-            usize_vec_from_value(INTERFACE_NAME, &Value::Tensor(typed_indices)).unwrap(),
+            usize_vec_from_value("fea.test", &Value::Tensor(typed_indices)).unwrap(),
             vec![2, 4]
         );
 
-        let maximum = usize_from_value(INTERFACE_NAME, &Value::Int(IntValue::U64(u64::MAX)));
+        let maximum = usize_from_value("fea.test", &Value::Int(IntValue::U64(u64::MAX)));
         if usize::BITS == 64 {
             assert_eq!(maximum.unwrap(), usize::MAX);
         } else {
@@ -3403,7 +3328,7 @@ mod tests {
     fn fea_json_preserves_native_integer_scalars_and_tensors() {
         let maximum = runmat_value::IntValue::U64(u64::MAX);
         assert_eq!(
-            value_to_json(INTERFACE_NAME, &Value::Int(maximum.clone()))
+            value_to_json("fea.test", &Value::Int(maximum.clone()))
                 .expect("scalar json")
                 .to_string(),
             maximum.decimal_string()
@@ -3415,7 +3340,7 @@ mod tests {
         )
         .expect("scalar tensor");
         assert_eq!(
-            value_to_json(INTERFACE_NAME, &Value::Tensor(scalar))
+            value_to_json("fea.test", &Value::Tensor(scalar))
                 .expect("scalar tensor json")
                 .to_string(),
             u64::MAX.to_string()
@@ -3427,7 +3352,7 @@ mod tests {
         )
         .expect("tensor");
         assert_eq!(
-            value_to_json(INTERFACE_NAME, &Value::Tensor(tensor))
+            value_to_json("fea.test", &Value::Tensor(tensor))
                 .expect("tensor json")
                 .to_string(),
             "[[42,18446744073709551615]]"
@@ -3458,20 +3383,6 @@ mod tests {
                 json_deserialize(DOMAIN_NAME, domain.data, "electromagnetic domain")
                     .expect("typed domain storage boundary");
             assert_eq!(domain.applied_current_a, expected);
-
-            let interface = block_on(fea_interface_builtin(vec![
-                Value::String("contact".into()),
-                Value::String("left".into()),
-                Value::String("right".into()),
-                Value::String("FrictionCoefficient".into()),
-                Value::Int(integer.clone()),
-            ]))
-            .expect("interface integer field");
-            let interface: AnalysisInterface = object_payload(&interface);
-            let AnalysisInterfaceKind::Contact(contact) = interface.kind else {
-                panic!("expected contact interface");
-            };
-            assert_eq!(contact.friction_coefficient, expected);
 
             let material = block_on(fea_material_builtin(vec![
                 Value::String("material".into()),
@@ -3584,13 +3495,6 @@ mod tests {
                 Value::String("AppliedCurrentA".into()),
                 resident(),
             ])),
-            block_on(fea_interface_builtin(vec![
-                Value::String("contact".into()),
-                Value::String("left".into()),
-                Value::String("right".into()),
-                Value::String("FrictionCoefficient".into()),
-                resident(),
-            ])),
             block_on(fea_material_builtin(vec![
                 Value::String("material".into()),
                 Value::String("YoungsModulusPa".into()),
@@ -3666,8 +3570,6 @@ mod tests {
             ("SpeedOfSoundMPerS", "speed_of_sound_m_per_s"),
             ("VolumetricWPerM3", "volumetric_w_per_m3"),
             ("InletVelocityMPerS", "inlet_velocity_m_per_s"),
-            ("ThermalConductanceWPerM2K", "thermal_conductance_w_per_m2k"),
-            ("ContactResistanceM2KPerW", "contact_resistance_m2k_per_w"),
         ] {
             assert_eq!(canonical_field_name(alias), expected, "{alias}");
         }

@@ -409,12 +409,10 @@ pub struct PlasticityConstitutiveOptions {
     pub saturation_exponent: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ContactInterfaceOptions {
-    pub enabled: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ContactEnforcementOptions {
     pub penalty_stiffness_scale: f64,
     pub max_penetration_ratio: f64,
-    pub friction_coefficient: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -836,6 +834,8 @@ pub struct AnalysisNonlinearRunOptions {
     pub line_search_reduction: f64,
     pub tangent_refresh_interval: usize,
     #[serde(default)]
+    pub contact_enforcement: Option<ContactEnforcementOptions>,
+    #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
 }
 
@@ -854,6 +854,7 @@ impl Default for AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 6,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
+            contact_enforcement: None,
             solver_mesh_artifact_path: None,
         }
     }
@@ -874,6 +875,7 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 0,
             line_search_reduction: 0.6,
             tangent_refresh_interval: 4,
+            contact_enforcement: None,
             solver_mesh_artifact_path: None,
         }
     }
@@ -896,6 +898,7 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 10,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 1,
+            contact_enforcement: None,
             solver_mesh_artifact_path: None,
         }
     }
@@ -914,6 +917,7 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 8,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
+            contact_enforcement: None,
             solver_mesh_artifact_path: None,
         }
     }

@@ -174,6 +174,7 @@ define_simple_constraint!(
     "constraint = fea.StructuralConstraint.symmetry(id, region)",
     "Create a structural symmetry constraint.",
     FEA_STRUCTURAL_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::structural",
     |constraint_id, target| StructuralConstraint {
         constraint_id,
         frame: CoordinateFrame::Global,
@@ -189,6 +190,7 @@ define_simple_constraint!(
     "constraint = fea.StructuralConstraint.antisymmetry(id, region)",
     "Create a structural antisymmetry constraint.",
     FEA_STRUCTURAL_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::structural",
     |constraint_id, target| StructuralConstraint {
         constraint_id,
         frame: CoordinateFrame::Global,
@@ -205,6 +207,7 @@ define_quantity_constraint!(
     "constraint = fea.StructuralConstraint.normalDisplacement(id, region, displacement)",
     "Create a prescribed normal-displacement constraint.",
     FEA_STRUCTURAL_CONSTRAINT_CLASS,
+    "crate::builtins::fea::constraints::structural",
     "displacement",
     DISPLACEMENT_CLASS,
     "meters",

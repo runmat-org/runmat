@@ -20,9 +20,15 @@ const INTEGER_CLASSES: [BuiltinIntegerClass; 8] = [
     BuiltinIntegerClass::Uint64,
 ];
 
-const FEA_INTEGER_CONSTRUCTORS: [&str; 3] = ["fea.domain", "fea.interface", "fea.material"];
+const FEA_INTEGER_CONSTRUCTORS: [&str; 2] = ["fea.domain", "fea.material"];
 
-const FEA_INTEGER_INAPPLICABLE: [&str; 5] = [
+const FEA_INTEGER_INAPPLICABLE: [&str; 11] = [
+    "fea.ConjugateHeatTransferInterface.conductance",
+    "fea.ConjugateHeatTransferInterface.perfect",
+    "fea.ConjugateHeatTransferInterface.resistance",
+    "fea.ContactInterface.coulomb",
+    "fea.ContactInterface.frictionless",
+    "fea.FluidStructureInterface.noSlip",
     "fea.compare",
     "fea.field",
     "fea.materialAssignment",
@@ -37,8 +43,6 @@ fn fea_numeric_constructors_accept_every_host_integer_class() {
             r#"
             domain = fea.domain("electromagnetic", ...
                 "AppliedCurrentA", {constructor}(2));
-            interface = fea.interface("contact", "left", "right", ...
-                "FrictionCoefficient", {constructor}(1));
             material = fea.material("steel", ...
                 "YoungsModulusPa", {constructor}(200), ...
                 "PoissonRatio", {constructor}(0));
@@ -46,7 +50,7 @@ fn fea_numeric_constructors_accept_every_host_integer_class() {
         );
         let values = execute_source(&source)
             .unwrap_or_else(|error| panic!("{constructor} compiled FEA constructors: {error}"));
-        for class_name in ["fea.Domain", "fea.Interface", "fea.Material"] {
+        for class_name in ["fea.Domain", "fea.Material"] {
             assert!(
                 values.iter().any(|value| {
                     matches!(value, Value::Object(object) if object.class_name == class_name)
@@ -63,6 +67,12 @@ fn fea_object_and_text_roles_reject_every_integer_class_without_coercion() {
         for source in [
             format!("value = fea.compare({constructor}(1), \"candidate\");"),
             format!("value = fea.field({constructor}(1), \"stress\");"),
+            format!("value = fea.ContactInterface.frictionless({constructor}(1), 2, 3);"),
+            format!("value = fea.ContactInterface.coulomb({constructor}(1), 2, 3, 4);"),
+            format!("value = fea.FluidStructureInterface.noSlip({constructor}(1), 2, 3);"),
+            format!("value = fea.ConjugateHeatTransferInterface.perfect({constructor}(1), 2, 3);"),
+            format!("value = fea.ConjugateHeatTransferInterface.conductance({constructor}(1), 2, 3, 4);"),
+            format!("value = fea.ConjugateHeatTransferInterface.resistance({constructor}(1), 2, 3, 4);"),
             format!("value = fea.materialAssignment({constructor}(1), \"steel\");"),
             format!("value = fea.model({constructor}(1), {constructor}(2));"),
             format!("value = fea.plan({constructor}(1));"),

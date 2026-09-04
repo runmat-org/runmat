@@ -607,19 +607,22 @@ fn set_model_plasticity(model: &mut AnalysisModel, plasticity: PlasticityConstit
     }
 }
 
-fn set_model_contact(model: &mut AnalysisModel, contact: ContactInterfaceOptions) {
-    if !contact.enabled {
-        return;
-    }
+fn set_model_contact(model: &mut AnalysisModel, friction_coefficient: f64) {
     model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
         interface_id: "contact_1".to_string(),
-        primary_region_id: "root".to_string(),
-        secondary_region_id: "tip".to_string(),
+        primary: runmat_analysis_core::RegionTarget::boundary("root"),
+        secondary: runmat_analysis_core::RegionTarget::boundary("tip"),
         kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
             runmat_analysis_core::ContactInterfaceModel {
-                penalty_stiffness_scale: contact.penalty_stiffness_scale,
-                max_penetration_ratio: contact.max_penetration_ratio,
-                friction_coefficient: contact.friction_coefficient,
+                friction: if friction_coefficient == 0.0 {
+                    runmat_analysis_core::ContactFriction::Frictionless
+                } else {
+                    runmat_analysis_core::ContactFriction::Coulomb {
+                        coefficient: runmat_analysis_core::FrictionCoefficient::new(
+                            friction_coefficient,
+                        ),
+                    }
+                },
             },
         ),
     }];
@@ -6109,15 +6112,7 @@ fn analysis_run_cht_rejects_moment_excitations() {
 fn analysis_run_cht_rejects_contact_interface_mapping() {
     let _guard = analysis_test_guard();
     let mut model = sample_cht_model();
-    set_model_contact(
-        &mut model,
-        ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 1.0,
-            max_penetration_ratio: 0.01,
-            friction_coefficient: 0.0,
-        },
-    );
+    set_model_contact(&mut model, 0.0);
     let err = analysis_run_cht_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -6138,13 +6133,13 @@ fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
     let mut model = sample_cht_model();
     model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
         interface_id: "cht_channel_slab_interface".to_string(),
-        primary_region_id: "fluid_channel".to_string(),
-        secondary_region_id: "solid_slab".to_string(),
+        primary: runmat_analysis_core::RegionTarget::boundary("fluid_channel"),
+        secondary: runmat_analysis_core::RegionTarget::boundary("solid_slab"),
         kind: runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(
             runmat_analysis_core::ConjugateHeatTransferInterfaceModel {
-                thermal_conductance_w_per_m2k: 750.0,
-                contact_resistance_m2k_per_w: 0.0,
-                relaxation_factor: 0.5,
+                transfer: runmat_analysis_core::ThermalInterfaceTransfer::Conductance(
+                    runmat_analysis_core::HeatTransferCoefficient::new(750.0),
+                ),
             },
         ),
     }];
@@ -6248,15 +6243,7 @@ fn analysis_run_fsi_rejects_moment_excitations() {
 fn analysis_run_fsi_rejects_contact_interface_mapping() {
     let _guard = analysis_test_guard();
     let mut model = sample_fsi_model();
-    set_model_contact(
-        &mut model,
-        ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 1.0,
-            max_penetration_ratio: 0.01,
-            friction_coefficient: 0.0,
-        },
-    );
+    set_model_contact(&mut model, 0.0);
     let err = analysis_run_fsi_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -6277,13 +6264,11 @@ fn analysis_run_fsi_uses_authored_fluid_structure_interface() {
     let mut model = sample_fsi_model();
     model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
         interface_id: "fsi_pipe_plate_interface".to_string(),
-        primary_region_id: "fluid_pipe".to_string(),
-        secondary_region_id: "plate_wall".to_string(),
+        primary: runmat_analysis_core::RegionTarget::boundary("fluid_pipe"),
+        secondary: runmat_analysis_core::RegionTarget::boundary("plate_wall"),
         kind: runmat_analysis_core::AnalysisInterfaceKind::FluidStructure(
             runmat_analysis_core::FluidStructureInterfaceModel {
-                normal_stiffness_pa_per_m: 8.0e8,
-                damping_ratio: 0.04,
-                relaxation_factor: 0.5,
+                kinematics: runmat_analysis_core::FluidStructureKinematics::NoSlip,
             },
         ),
     }];
@@ -8638,32 +8623,15 @@ fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_invalid_contact_interface_options() {
+fn nonlinear_solver_rejects_invalid_contact_enforcement_options() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
-    set_model_contact(
-        &mut model,
-        ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 0.0,
-            max_penetration_ratio: 0.01,
-            friction_coefficient: 0.0,
-        },
-    );
-
-    let err = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisNonlinearRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("nonlinear run should reject invalid contact options");
-
-    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS");
+    let error = validate_contact_interface_options(&ResolvedContactOptions {
+        penalty_stiffness_scale: 0.0,
+        max_penetration_ratio: 0.01,
+        friction_coefficient: 0.0,
+    })
+    .expect_err("nonlinear solver should reject an invalid contact penalty");
+    assert!(error.0.contains("penalty_stiffness_scale"));
 }
 
 #[test]
@@ -9103,15 +9071,7 @@ fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
         "nonlinear_1".to_string(),
     )];
-    set_model_contact(
-        &mut model,
-        ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 0.15,
-            max_penetration_ratio: 0.035,
-            friction_coefficient: 0.9,
-        },
-    );
+    set_model_contact(&mut model, 0.9);
 
     let run = analysis_run_nonlinear_with_options_op(
         &model,
@@ -9119,6 +9079,10 @@ fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
         FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
+            contact_enforcement: Some(ContactEnforcementOptions {
+                penalty_stiffness_scale: 0.15,
+                max_penetration_ratio: 0.035,
+            }),
             ..AnalysisNonlinearRunOptions::balanced()
         },
         OperationContext::new(None, None),

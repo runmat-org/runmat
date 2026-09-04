@@ -152,7 +152,7 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_runtime::analysis::{
-    AnalysisRunResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
+    AnalysisRunResult, ContactEnforcementOptions, ElectroRegionConductivityScale,
     ElectroThermalCouplingOptions, PlasticityConstitutiveOptions, ThermoMechanicalCouplingOptions,
     ThermoRegionTemperatureDelta,
 };
@@ -763,6 +763,7 @@ fn nonlinear_options_for_spec(
 ) -> AnalysisNonlinearRunOptions {
     let mut options = AnalysisNonlinearRunOptions::solid_recommended();
     options.solver_mesh_artifact_path = solver_mesh_artifact_path;
+    options.contact_enforcement = contact_for_fixture(spec.id).map(|contact| contact.enforcement);
     options.increment_count = spec.transient_step_count.unwrap_or(options.increment_count);
 
     if let Some(value) = env_usize("RUNMAT_NONLINEAR_INCREMENT_COUNT") {
@@ -838,31 +839,41 @@ fn plasticity_for_fixture(spec_id: &str) -> Option<PlasticityConstitutiveOptions
     }
 }
 
-fn contact_for_fixture(spec_id: &str) -> Option<ContactInterfaceOptions> {
+#[derive(Debug, Clone, Copy)]
+struct FixtureContactOptions {
+    enforcement: ContactEnforcementOptions,
+    friction_coefficient: f64,
+}
+
+fn contact_for_fixture(spec_id: &str) -> Option<FixtureContactOptions> {
     match spec_id {
-        "nonlinear_contact_benchmark_gpu_provider" => Some(ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 0.15,
-            max_penetration_ratio: 0.035,
+        "nonlinear_contact_benchmark_gpu_provider" => Some(FixtureContactOptions {
+            enforcement: ContactEnforcementOptions {
+                penalty_stiffness_scale: 0.15,
+                max_penetration_ratio: 0.035,
+            },
             friction_coefficient: 0.9,
         }),
-        "nonlinear_invalid_contact_options" => Some(ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 0.0,
-            max_penetration_ratio: 0.01,
+        "nonlinear_invalid_contact_options" => Some(FixtureContactOptions {
+            enforcement: ContactEnforcementOptions {
+                penalty_stiffness_scale: 0.0,
+                max_penetration_ratio: 0.01,
+            },
             friction_coefficient: 0.0,
         }),
-        "nonlinear_contact_frictionless_reference_gpu_provider" => Some(ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 2.0,
-            max_penetration_ratio: 0.01,
+        "nonlinear_contact_frictionless_reference_gpu_provider" => Some(FixtureContactOptions {
+            enforcement: ContactEnforcementOptions {
+                penalty_stiffness_scale: 2.0,
+                max_penetration_ratio: 0.01,
+            },
             friction_coefficient: 0.0,
         }),
         "nonlinear_contact_frictionless_reference_complex_gpu_provider" => {
-            Some(ContactInterfaceOptions {
-                enabled: true,
-                penalty_stiffness_scale: 1.2,
-                max_penetration_ratio: 0.014,
+            Some(FixtureContactOptions {
+                enforcement: ContactEnforcementOptions {
+                    penalty_stiffness_scale: 1.2,
+                    max_penetration_ratio: 0.014,
+                },
                 friction_coefficient: 0.0,
             })
         }
@@ -1602,13 +1613,13 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             ));
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("cht_channel_slab_interface_{spec_id}"),
-                primary_region_id: "fluid_channel".to_string(),
-                secondary_region_id: "solid_slab".to_string(),
+                primary: runmat_analysis_core::RegionTarget::boundary("fluid_channel"),
+                secondary: runmat_analysis_core::RegionTarget::boundary("solid_slab"),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(
                     runmat_analysis_core::ConjugateHeatTransferInterfaceModel {
-                        thermal_conductance_w_per_m2k: 2000.0,
-                        contact_resistance_m2k_per_w: 0.0,
-                        relaxation_factor: 0.5,
+                        transfer: runmat_analysis_core::ThermalInterfaceTransfer::Conductance(
+                            runmat_analysis_core::HeatTransferCoefficient::new(2000.0),
+                        ),
                     },
                 ),
             }];
@@ -1645,13 +1656,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         if spec_id == "cht_coupled_invalid_interface_mapping" {
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("cht_invalid_contact_{spec_id}"),
-                primary_region_id: "fluid_channel".to_string(),
-                secondary_region_id: "solid_wall".to_string(),
+                primary: runmat_analysis_core::RegionTarget::boundary("fluid_channel"),
+                secondary: runmat_analysis_core::RegionTarget::boundary("solid_wall"),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                     runmat_analysis_core::ContactInterfaceModel {
-                        penalty_stiffness_scale: 1.0,
-                        max_penetration_ratio: 0.01,
-                        friction_coefficient: 0.0,
+                        friction: runmat_analysis_core::ContactFriction::Frictionless,
                     },
                 ),
             }];
@@ -1698,13 +1707,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             );
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("fsi_pipe_plate_interface_{spec_id}"),
-                primary_region_id: "fluid_pipe".to_string(),
-                secondary_region_id: "plate_wall".to_string(),
+                primary: runmat_analysis_core::RegionTarget::boundary("fluid_pipe"),
+                secondary: runmat_analysis_core::RegionTarget::boundary("plate_wall"),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::FluidStructure(
                     runmat_analysis_core::FluidStructureInterfaceModel {
-                        normal_stiffness_pa_per_m: 8.0e8,
-                        damping_ratio: 0.04,
-                        relaxation_factor: 0.5,
+                        kinematics: runmat_analysis_core::FluidStructureKinematics::NoSlip,
                     },
                 ),
             }];
@@ -1717,13 +1724,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         if spec_id == "fsi_coupled_invalid_interface_mapping" {
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("fsi_invalid_contact_{spec_id}"),
-                primary_region_id: "fluid_channel".to_string(),
-                secondary_region_id: "structure_wall".to_string(),
+                primary: runmat_analysis_core::RegionTarget::boundary("fluid_channel"),
+                secondary: runmat_analysis_core::RegionTarget::boundary("structure_wall"),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                     runmat_analysis_core::ContactInterfaceModel {
-                        penalty_stiffness_scale: 1.0,
-                        max_penetration_ratio: 0.01,
-                        friction_coefficient: 0.0,
+                        friction: runmat_analysis_core::ContactFriction::Frictionless,
                     },
                 ),
             }];
@@ -2831,13 +2836,19 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             .unwrap_or_else(|| "tip".to_string());
         model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
             interface_id: format!("contact_{spec_id}"),
-            primary_region_id: primary,
-            secondary_region_id: secondary,
+            primary: runmat_analysis_core::RegionTarget::boundary(primary),
+            secondary: runmat_analysis_core::RegionTarget::boundary(secondary),
             kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                 runmat_analysis_core::ContactInterfaceModel {
-                    penalty_stiffness_scale: contact.penalty_stiffness_scale,
-                    max_penetration_ratio: contact.max_penetration_ratio,
-                    friction_coefficient: contact.friction_coefficient,
+                    friction: if contact.friction_coefficient == 0.0 {
+                        runmat_analysis_core::ContactFriction::Frictionless
+                    } else {
+                        runmat_analysis_core::ContactFriction::Coulomb {
+                            coefficient: runmat_analysis_core::FrictionCoefficient::new(
+                                contact.friction_coefficient,
+                            ),
+                        }
+                    },
                 },
             ),
         }];
@@ -4649,8 +4660,8 @@ fn write_fixture_solver_mesh_artifact(
         }
     }
     for interface in &model.interfaces {
-        boundary_regions.insert(interface.primary_region_id.clone());
-        boundary_regions.insert(interface.secondary_region_id.clone());
+        boundary_regions.insert(interface.primary.region_id.clone());
+        boundary_regions.insert(interface.secondary.region_id.clone());
     }
     let boundary_face_count = mesh.topology.boundary_faces.len();
     for (index, region_id) in boundary_regions.into_iter().enumerate() {

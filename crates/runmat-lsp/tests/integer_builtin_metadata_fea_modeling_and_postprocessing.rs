@@ -7,20 +7,31 @@ use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, signature_help_at, CompatMode,
 };
 
-const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 8] = [
+const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 13] = [
+    "fea.ConjugateHeatTransferInterface.conductance",
+    "fea.ConjugateHeatTransferInterface.perfect",
+    "fea.ConjugateHeatTransferInterface.resistance",
+    "fea.ContactInterface.coulomb",
+    "fea.ContactInterface.frictionless",
+    "fea.FluidStructureInterface.noSlip",
     "fea.compare",
     "fea.domain",
     "fea.field",
-    "fea.interface",
     "fea.material",
     "fea.materialAssignment",
     "fea.model",
     "fea.plan",
 ];
 
-const FEA_INTEGER_CONSTRUCTORS: [&str; 3] = ["fea.domain", "fea.interface", "fea.material"];
+const FEA_INTEGER_CONSTRUCTORS: [&str; 2] = ["fea.domain", "fea.material"];
 
-const FEA_INTEGER_INAPPLICABLE: [&str; 5] = [
+const FEA_INTEGER_INAPPLICABLE: [&str; 11] = [
+    "fea.ConjugateHeatTransferInterface.conductance",
+    "fea.ConjugateHeatTransferInterface.perfect",
+    "fea.ConjugateHeatTransferInterface.resistance",
+    "fea.ContactInterface.coulomb",
+    "fea.ContactInterface.frictionless",
+    "fea.FluidStructureInterface.noSlip",
     "fea.compare",
     "fea.field",
     "fea.materialAssignment",
@@ -42,8 +53,16 @@ const INTEGER_CLASSES: [BuiltinIntegerClass; 8] = [
 fn signature_help(source: &str, lookup: &str) -> SignatureHelp {
     let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
     assert!(analysis.syntax_error.is_none(), "{source}");
-    assert!(analysis.lowering_error.is_none(), "{source}");
-    assert!(analysis.compile_error.is_none(), "{source}");
+    assert!(
+        analysis.lowering_error.is_none(),
+        "{source}: {:?}",
+        analysis.lowering_error
+    );
+    assert!(
+        analysis.compile_error.is_none(),
+        "{source}: {:?}",
+        analysis.compile_error
+    );
     let column = source.find(lookup).expect("builtin call") as u32;
     signature_help_at(source, &analysis, &Position::new(0, column))
         .unwrap_or_else(|| panic!("descriptor-backed signature help for {lookup}"))
@@ -52,13 +71,33 @@ fn signature_help(source: &str, lookup: &str) -> SignatureHelp {
 #[test]
 fn fea_modeling_and_postprocessing_descriptors_are_visible_to_signature_help() {
     for (lookup, source) in [
+        (
+            "ConjugateHeatTransferInterface.perfect",
+            "out = fea.ConjugateHeatTransferInterface.perfect(\"cht\", 0, 0);",
+        ),
+        (
+            "ConjugateHeatTransferInterface.conductance",
+            "out = fea.ConjugateHeatTransferInterface.conductance(\"cht\", 0, 0, 0);",
+        ),
+        (
+            "ConjugateHeatTransferInterface.resistance",
+            "out = fea.ConjugateHeatTransferInterface.resistance(\"cht\", 0, 0, 0);",
+        ),
+        (
+            "ContactInterface.frictionless",
+            "out = fea.ContactInterface.frictionless(\"contact\", 0, 0);",
+        ),
+        (
+            "ContactInterface.coulomb",
+            "out = fea.ContactInterface.coulomb(\"contact\", 0, 0, 0);",
+        ),
+        (
+            "FluidStructureInterface.noSlip",
+            "out = fea.FluidStructureInterface.noSlip(\"fsi\", 0, 0);",
+        ),
         ("compare", "out = fea.compare(\"base\", \"candidate\");"),
         ("domain", "out = fea.domain(\"electromagnetic\");"),
         ("field", "out = fea.field(\"run\", \"stress\");"),
-        (
-            "interface",
-            "out = fea.interface(\"contact\", \"left\", \"right\");",
-        ),
         (
             "material",
             "out = fea.material(\"steel\", \"YoungsModulusPa\", 200, \"PoissonRatio\", 0);",

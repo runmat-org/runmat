@@ -192,14 +192,14 @@ pub(super) fn require_step_class(
 macro_rules! step_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $summary:literal, $build:expr) => {
         #[runtime_builtin(
-                                    name = $name,
-                                    category = "fea",
-                                    summary = $summary,
-                                    keywords = "fea,procedure,step,typed",
-                                    descriptor(crate::builtins::fea::steps::$descriptor),
-                                    integer_audit(TYPED_STEP_INTEGER_AUDIT),
-                                    builtin_path = "crate::builtins::fea::steps"
-                                )]
+                                            name = $name,
+                                            category = "fea",
+                                            summary = $summary,
+                                            keywords = "fea,procedure,step,typed",
+                                            descriptor(crate::builtins::fea::steps::$descriptor),
+                                            integer_audit(TYPED_STEP_INTEGER_AUDIT),
+                                            builtin_path = "crate::builtins::fea::steps"
+                                        )]
         pub async fn $function(id: Value) -> BuiltinResult<Value> {
             let id = scalar_string(&id, $name, &ERROR_INPUT)?;
             step_to_object($name, $class, ($build)(id))

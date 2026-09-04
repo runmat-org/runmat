@@ -57,6 +57,8 @@ scalar_quantity!(ElectricCurrentDensity, amperes_per_square_meter);
 scalar_quantity!(ElectricChargeDensity, coulombs_per_cubic_meter);
 scalar_quantity!(Stiffness, newtons_per_meter);
 scalar_quantity!(Damping, newton_seconds_per_meter);
+scalar_quantity!(ThermalContactResistance, square_meter_kelvin_per_watt);
+scalar_quantity!(FrictionCoefficient, ratio);
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

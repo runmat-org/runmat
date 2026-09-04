@@ -52473,6 +52473,236 @@
       ]
     },
     {
+      "name": "fea.ConjugateHeatTransferInterface.conductance",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "interface = fea.ConjugateHeatTransferInterface.conductance(id, fluidRegion, solidRegion, conductance)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Interface identifier."
+            },
+            {
+              "name": "fluid_region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fluid-side geometry.Region."
+            },
+            {
+              "name": "structure_region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Structure-side geometry.Region."
+            },
+            {
+              "name": "transfer_value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed conductance or thermal contact resistance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA interface constructors accept identifiers, immutable geometry.Region values, and typed interface parameters; they have no direct integer input role."
+      }
+    },
+    {
+      "name": "fea.ConjugateHeatTransferInterface.perfect",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "interface = fea.ConjugateHeatTransferInterface.perfect(id, fluidRegion, solidRegion)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Interface identifier."
+            },
+            {
+              "name": "fluid_region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fluid-side geometry.Region."
+            },
+            {
+              "name": "structure_region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Structure-side geometry.Region."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA interface constructors accept identifiers, immutable geometry.Region values, and typed interface parameters; they have no direct integer input role."
+      }
+    },
+    {
+      "name": "fea.ConjugateHeatTransferInterface.resistance",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "interface = fea.ConjugateHeatTransferInterface.resistance(id, fluidRegion, solidRegion, resistance)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Interface identifier."
+            },
+            {
+              "name": "fluid_region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fluid-side geometry.Region."
+            },
+            {
+              "name": "structure_region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Structure-side geometry.Region."
+            },
+            {
+              "name": "transfer_value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed conductance or thermal contact resistance."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA interface constructors accept identifiers, immutable geometry.Region values, and typed interface parameters; they have no direct integer input role."
+      }
+    },
+    {
       "name": "fea.ConjugateHeatTransferStep.steadyState",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -52586,6 +52816,157 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.ContactInterface.coulomb",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "interface = fea.ContactInterface.coulomb(id, primary, secondary, friction)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Interface identifier."
+            },
+            {
+              "name": "primary",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Primary geometry.Region."
+            },
+            {
+              "name": "secondary",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Secondary geometry.Region."
+            },
+            {
+              "name": "friction",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed fea.FrictionCoefficient."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA interface constructors accept identifiers, immutable geometry.Region values, and typed interface parameters; they have no direct integer input role."
+      }
+    },
+    {
+      "name": "fea.ContactInterface.frictionless",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "interface = fea.ContactInterface.frictionless(id, primary, secondary)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Interface identifier."
+            },
+            {
+              "name": "primary",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Primary geometry.Region."
+            },
+            {
+              "name": "secondary",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Secondary geometry.Region."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA interface constructors accept identifiers, immutable geometry.Region values, and typed interface parameters; they have no direct integer input role."
       }
     },
     {
@@ -54808,6 +55189,78 @@
       }
     },
     {
+      "name": "fea.FluidStructureInterface.noSlip",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "interface = fea.FluidStructureInterface.noSlip(id, fluidRegion, structureRegion)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Interface identifier."
+            },
+            {
+              "name": "fluid_region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Fluid-side geometry.Region."
+            },
+            {
+              "name": "structure_region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Structure-side geometry.Region."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA interface constructors accept identifiers, immutable geometry.Region values, and typed interface parameters; they have no direct integer input role."
+      }
+    },
+    {
       "name": "fea.FluidStructureStep.transient",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -54864,6 +55317,89 @@
         "kind": "NotApplicable",
         "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
       }
+    },
+    {
+      "name": "fea.FrictionCoefficient.ratio",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.FrictionCoefficient.ratio(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real scalar in the unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
     },
     {
       "name": "fea.HeatFlux.wattsPerSquareMeter",
@@ -58863,6 +59399,89 @@
       }
     },
     {
+      "name": "fea.ThermalContactResistance.squareMeterKelvinPerWatt",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ThermalContactResistance.squareMeterKelvinPerWatt(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real scalar in the unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.ThermalStep.transient",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -59629,164 +60248,6 @@
         "kind": "NotApplicable",
         "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
       }
-    },
-    {
-      "name": "fea.interface",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "interface = fea.interface(id, primaryRegion, secondaryRegion, Name, Value, ...)",
-          "inputs": [
-            {
-              "name": "id",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Interface id."
-            },
-            {
-              "name": "primaryRegion",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Primary geometry region selector."
-            },
-            {
-              "name": "secondaryRegion",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Secondary geometry region selector."
-            },
-            {
-              "name": "Name, Value",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Interface kind and numeric fields."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "FEA object or operation result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
-          "identifier": "RunMat:fea:LoadFailed",
-          "when": "A .fea document cannot be read, parsed, or resolved.",
-          "message": "fea: failed to load FEA document"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
-          "identifier": "RunMat:fea:InvalidInput",
-          "when": "A builtin receives an unsupported argument pattern or object type.",
-          "message": "fea: invalid input"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
-          "identifier": "RunMat:fea:OperationFailed",
-          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
-          "message": "fea: operation failed"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INTERNAL",
-          "identifier": "RunMat:fea:Internal",
-          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
-          "message": "fea: internal error"
-        }
-      ],
-      "integer_capabilities": [
-        {
-          "form": "contact interface fields",
-          "inputs": [
-            {
-              "name": "interface numeric fields",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
-              "availability": "Documented",
-              "scalar_double": "Allowed",
-              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
-            }
-          ],
-          "computation_domain": "FloatingPoint",
-          "output_class": "NotApplicable",
-          "overflow": "NotApplicable",
-          "backend": "HostOnly",
-          "overload": "Multiple",
-          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
-        },
-        {
-          "form": "fluid-structure interface fields",
-          "inputs": [
-            {
-              "name": "interface numeric fields",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
-              "availability": "Documented",
-              "scalar_double": "Allowed",
-              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
-            }
-          ],
-          "computation_domain": "FloatingPoint",
-          "output_class": "NotApplicable",
-          "overflow": "NotApplicable",
-          "backend": "HostOnly",
-          "overload": "Multiple",
-          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
-        },
-        {
-          "form": "conjugate-heat-transfer interface fields",
-          "inputs": [
-            {
-              "name": "interface numeric fields",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
-              "availability": "Documented",
-              "scalar_double": "Allowed",
-              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
-            }
-          ],
-          "computation_domain": "FloatingPoint",
-          "output_class": "NotApplicable",
-          "overflow": "NotApplicable",
-          "backend": "HostOnly",
-          "overload": "Multiple",
-          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
-        }
-      ]
     },
     {
       "name": "fea.load",

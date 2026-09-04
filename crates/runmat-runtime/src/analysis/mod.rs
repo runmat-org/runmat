@@ -9,11 +9,12 @@ use chrono::Utc;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisBoundary, AnalysisConstraint, AnalysisField,
     AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisProcedure, AnalysisSequence,
-    AnalysisValidationError, BoundaryOperator, CoordinateFrame, CoupledPhysicsFamily,
-    EvidenceConfidence, ExcitationAction, FluidConstraint, FluidConstraintKind, MagneticConstraint,
-    MagneticConstraintKind, MaterialAssignment, MaterialMechanicalModel, MaterialModel,
-    MaterialThermalModel, PhysicsFamily, PrescribedValue, Pressure, ProcedureStep, RegionTarget,
-    StructuralConstraint, StructuralConstraintKind, Velocity,
+    AnalysisValidationError, BoundaryOperator, ContactFriction, CoordinateFrame,
+    CoupledPhysicsFamily, EvidenceConfidence, ExcitationAction, FluidConstraint,
+    FluidConstraintKind, MagneticConstraint, MagneticConstraintKind, MaterialAssignment,
+    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicsFamily, PrescribedValue,
+    Pressure, ProcedureStep, RegionTarget, StructuralConstraint, StructuralConstraintKind,
+    ThermalInterfaceTransfer, Velocity,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -206,7 +207,7 @@ pub use contracts::{
     AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
     AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
+    AnalysisValidateResult, ContactEnforcementOptions, ElectroRegionConductivityScale,
     ElectroThermalCouplingOptions, ElectromagneticResultsData, FallbackEvent, FallbackReason,
     FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
     NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
@@ -4904,15 +4905,17 @@ fn cht_interface_conductance_w_per_m2k(model: &AnalysisModel) -> Option<f64> {
         .interfaces
         .iter()
         .find_map(|interface| match &interface.kind {
-            AnalysisInterfaceKind::ConjugateHeatTransfer(interface)
-                if interface.thermal_conductance_w_per_m2k.is_finite()
-                    && interface.thermal_conductance_w_per_m2k > 0.0 =>
-            {
-                Some(interface.thermal_conductance_w_per_m2k)
+            AnalysisInterfaceKind::ConjugateHeatTransfer(interface) => Some(interface),
+            AnalysisInterfaceKind::FluidStructure(_) | AnalysisInterfaceKind::Contact(_) => None,
+        })
+        .and_then(|interface| match interface.transfer {
+            ThermalInterfaceTransfer::Perfect => None,
+            ThermalInterfaceTransfer::Conductance(conductance) => {
+                Some(conductance.watts_per_square_meter_kelvin)
             }
-            AnalysisInterfaceKind::ConjugateHeatTransfer(_)
-            | AnalysisInterfaceKind::FluidStructure(_)
-            | AnalysisInterfaceKind::Contact(_) => None,
+            ThermalInterfaceTransfer::Resistance(resistance) => {
+                Some(1.0 / resistance.square_meter_kelvin_per_watt)
+            }
         })
 }
 
@@ -5704,10 +5707,6 @@ fn fsi_known_answer_diagnostic(
 }
 
 fn fsi_structural_compliance_per_pa(model: &AnalysisModel) -> f64 {
-    if let Some(stiffness) = fsi_interface_normal_stiffness_pa_per_m(model) {
-        return 1.0 / stiffness.max(1.0e-18);
-    }
-
     let mean_modulus = model
         .materials
         .iter()
@@ -5724,23 +5723,6 @@ fn fsi_structural_compliance_per_pa(model: &AnalysisModel) -> f64 {
         200.0e9
     };
     1.0 / youngs_modulus.max(1.0e6)
-}
-
-fn fsi_interface_normal_stiffness_pa_per_m(model: &AnalysisModel) -> Option<f64> {
-    model
-        .interfaces
-        .iter()
-        .find_map(|interface| match &interface.kind {
-            AnalysisInterfaceKind::FluidStructure(fluid_structure)
-                if fluid_structure.normal_stiffness_pa_per_m.is_finite()
-                    && fluid_structure.normal_stiffness_pa_per_m > 0.0 =>
-            {
-                Some(fluid_structure.normal_stiffness_pa_per_m)
-            }
-            AnalysisInterfaceKind::FluidStructure(_)
-            | AnalysisInterfaceKind::ConjugateHeatTransfer(_)
-            | AnalysisInterfaceKind::Contact(_) => None,
-        })
 }
 
 pub fn analysis_run_transient_op(
@@ -8589,7 +8571,23 @@ pub fn analysis_run_nonlinear_with_options_op(
             ));
         }
     }
-    let contact_options = model_contact_interface_options(model);
+    let contact_options =
+        model_contact_interface_options(model, options.contact_enforcement.as_ref());
+    if options.contact_enforcement.is_some() && contact_options.is_none() {
+        return Err(operation_error(
+            AnalysisOperation::Nonlinear.name(),
+            AnalysisOperation::Nonlinear.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "contact enforcement options require a contact interface in the model",
+            BTreeMap::new(),
+        ));
+    }
     if let Some(contact_options) = contact_options.as_ref() {
         if let Err((detail, metadata)) = validate_contact_interface_options(contact_options) {
             return Err(operation_error(
@@ -11147,16 +11145,34 @@ fn model_plasticity_constitutive_options(
     })
 }
 
-fn model_contact_interface_options(model: &AnalysisModel) -> Option<ContactInterfaceOptions> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ResolvedContactOptions {
+    penalty_stiffness_scale: f64,
+    max_penetration_ratio: f64,
+    friction_coefficient: f64,
+}
+
+fn model_contact_interface_options(
+    model: &AnalysisModel,
+    enforcement: Option<&ContactEnforcementOptions>,
+) -> Option<ResolvedContactOptions> {
+    let penalty_stiffness_scale = enforcement
+        .map(|value| value.penalty_stiffness_scale)
+        .unwrap_or(1.0);
+    let max_penetration_ratio = enforcement
+        .map(|value| value.max_penetration_ratio)
+        .unwrap_or(0.01);
     model
         .interfaces
         .iter()
         .filter_map(|interface| match &interface.kind {
-            AnalysisInterfaceKind::Contact(contact) => Some(ContactInterfaceOptions {
-                enabled: true,
-                penalty_stiffness_scale: contact.penalty_stiffness_scale,
-                max_penetration_ratio: contact.max_penetration_ratio,
-                friction_coefficient: contact.friction_coefficient,
+            AnalysisInterfaceKind::Contact(contact) => Some(ResolvedContactOptions {
+                penalty_stiffness_scale,
+                max_penetration_ratio,
+                friction_coefficient: match contact.friction {
+                    ContactFriction::Frictionless => 0.0,
+                    ContactFriction::Coulomb { coefficient } => coefficient.ratio,
+                },
             }),
             AnalysisInterfaceKind::FluidStructure(_)
             | AnalysisInterfaceKind::ConjugateHeatTransfer(_) => None,
@@ -11244,10 +11260,10 @@ fn to_fea_plasticity_constitutive_context(
 }
 
 fn to_fea_contact_interface_context(
-    options: Option<ContactInterfaceOptions>,
+    options: Option<ResolvedContactOptions>,
 ) -> Option<runmat_analysis_fea::FeaContactInterfaceContext> {
     options.map(|contact| runmat_analysis_fea::FeaContactInterfaceContext {
-        enabled: contact.enabled,
+        enabled: true,
         penalty_stiffness_scale: contact.penalty_stiffness_scale,
         max_penetration_ratio: contact.max_penetration_ratio,
         friction_coefficient: contact.friction_coefficient,
@@ -11530,11 +11546,8 @@ fn validate_plasticity_constitutive_options(
 }
 
 fn validate_contact_interface_options(
-    options: &ContactInterfaceOptions,
+    options: &ResolvedContactOptions,
 ) -> Result<(), (String, BTreeMap<String, String>)> {
-    if !options.enabled {
-        return Ok(());
-    }
     if !options.penalty_stiffness_scale.is_finite() || options.penalty_stiffness_scale <= 0.0 {
         return Err((
             "contact interface model requires finite positive penalty_stiffness_scale".to_string(),
@@ -11581,17 +11594,17 @@ fn validate_coupled_flow_interfaces(
                         ("interface_id".to_string(), interface.interface_id.clone()),
                         (
                             "primary_region_id".to_string(),
-                            interface.primary_region_id.clone(),
+                            interface.primary.region_id.clone(),
                         ),
                         (
                             "secondary_region_id".to_string(),
-                            interface.secondary_region_id.clone(),
+                            interface.secondary.region_id.clone(),
                         ),
                         ("interface_kind".to_string(), "contact".to_string()),
                     ]),
                 ));
             }
-            AnalysisInterfaceKind::FluidStructure(fluid_structure) => {
+            AnalysisInterfaceKind::FluidStructure(_) => {
                 if family != "FSI" {
                     return Err((
                         format!(
@@ -11601,61 +11614,13 @@ fn validate_coupled_flow_interfaces(
                             ("interface_id".to_string(), interface.interface_id.clone()),
                             (
                                 "primary_region_id".to_string(),
-                                interface.primary_region_id.clone(),
+                                interface.primary.region_id.clone(),
                             ),
                             (
                                 "secondary_region_id".to_string(),
-                                interface.secondary_region_id.clone(),
+                                interface.secondary.region_id.clone(),
                             ),
                             ("interface_kind".to_string(), "fluid_structure".to_string()),
-                        ]),
-                    ));
-                }
-                if !fluid_structure.normal_stiffness_pa_per_m.is_finite()
-                    || fluid_structure.normal_stiffness_pa_per_m <= 0.0
-                {
-                    return Err((
-                        format!(
-                            "{family} fluid-structure interface requires finite positive normal_stiffness_pa_per_m"
-                        ),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "normal_stiffness_pa_per_m".to_string(),
-                                fluid_structure.normal_stiffness_pa_per_m.to_string(),
-                            ),
-                        ]),
-                    ));
-                }
-                if !fluid_structure.damping_ratio.is_finite() || fluid_structure.damping_ratio < 0.0
-                {
-                    return Err((
-                        format!(
-                            "{family} fluid-structure interface requires finite non-negative damping_ratio"
-                        ),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "damping_ratio".to_string(),
-                                fluid_structure.damping_ratio.to_string(),
-                            ),
-                        ]),
-                    ));
-                }
-                if !fluid_structure.relaxation_factor.is_finite()
-                    || fluid_structure.relaxation_factor <= 0.0
-                    || fluid_structure.relaxation_factor > 1.0
-                {
-                    return Err((
-                        format!(
-                            "{family} fluid-structure interface requires relaxation_factor in (0, 1]"
-                        ),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "relaxation_factor".to_string(),
-                                fluid_structure.relaxation_factor.to_string(),
-                            ),
                         ]),
                     ));
                 }
@@ -11670,11 +11635,11 @@ fn validate_coupled_flow_interfaces(
                             ("interface_id".to_string(), interface.interface_id.clone()),
                             (
                                 "primary_region_id".to_string(),
-                                interface.primary_region_id.clone(),
+                                interface.primary.region_id.clone(),
                             ),
                             (
                                 "secondary_region_id".to_string(),
-                                interface.secondary_region_id.clone(),
+                                interface.secondary.region_id.clone(),
                             ),
                             (
                                 "interface_kind".to_string(),
@@ -11683,52 +11648,21 @@ fn validate_coupled_flow_interfaces(
                         ]),
                     ));
                 }
-                if !cht_interface.thermal_conductance_w_per_m2k.is_finite()
-                    || cht_interface.thermal_conductance_w_per_m2k <= 0.0
-                {
+                let invalid_transfer = match cht_interface.transfer {
+                    ThermalInterfaceTransfer::Perfect => false,
+                    ThermalInterfaceTransfer::Conductance(conductance) => {
+                        !conductance.is_finite() || conductance.watts_per_square_meter_kelvin <= 0.0
+                    }
+                    ThermalInterfaceTransfer::Resistance(resistance) => {
+                        !resistance.is_finite() || resistance.square_meter_kelvin_per_watt <= 0.0
+                    }
+                };
+                if invalid_transfer {
                     return Err((
-                        format!(
-                            "{family} conjugate heat-transfer interface requires finite positive thermal_conductance_w_per_m2k"
-                        ),
+                        format!("{family} conjugate heat-transfer interface has an invalid transfer law"),
                         BTreeMap::from([
                             ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "thermal_conductance_w_per_m2k".to_string(),
-                                cht_interface.thermal_conductance_w_per_m2k.to_string(),
-                            ),
-                        ]),
-                    ));
-                }
-                if !cht_interface.contact_resistance_m2k_per_w.is_finite()
-                    || cht_interface.contact_resistance_m2k_per_w < 0.0
-                {
-                    return Err((
-                        format!(
-                            "{family} conjugate heat-transfer interface requires finite non-negative contact_resistance_m2k_per_w"
-                        ),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "contact_resistance_m2k_per_w".to_string(),
-                                cht_interface.contact_resistance_m2k_per_w.to_string(),
-                            ),
-                        ]),
-                    ));
-                }
-                if !cht_interface.relaxation_factor.is_finite()
-                    || cht_interface.relaxation_factor <= 0.0
-                    || cht_interface.relaxation_factor > 1.0
-                {
-                    return Err((
-                        format!(
-                            "{family} conjugate heat-transfer interface requires relaxation_factor in (0, 1]"
-                        ),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "relaxation_factor".to_string(),
-                                cht_interface.relaxation_factor.to_string(),
-                            ),
+                            ("transfer_law".to_string(), format!("{:?}", cht_interface.transfer)),
                         ]),
                     ));
                 }
@@ -12564,6 +12498,17 @@ fn map_validate_error(
             format!("connector `{connector_id}` is invalid: {detail}"),
             BTreeMap::from([
                 ("connector_id".to_string(), connector_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidInterface {
+            interface_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_INTERFACE",
+            format!("interface `{interface_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("interface_id".to_string(), interface_id),
                 ("detail".to_string(), detail),
             ]),
         ),

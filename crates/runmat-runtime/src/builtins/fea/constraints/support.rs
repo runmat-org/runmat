@@ -1,9 +1,9 @@
-pub(super) mod direction;
-pub(super) mod dof;
-pub(super) mod frame;
-pub(super) mod pairing;
-pub(super) mod periodic_transform;
-pub(super) mod reference_point;
+pub(crate) mod direction;
+pub(crate) mod dof;
+pub(crate) mod frame;
+pub(crate) mod pairing;
+pub(crate) mod periodic_transform;
+pub(crate) mod reference_point;
 
 use std::collections::HashMap;
 

@@ -156,7 +156,7 @@ pub(super) fn bound_region(
     Ok((id, geometry_id, geometry_revision, target))
 }
 
-fn bound_region_target(
+pub(super) fn bound_region_target(
     builtin: &'static str,
     region: &Value,
 ) -> BuiltinResult<(String, u32, RegionTarget)> {
@@ -330,6 +330,7 @@ macro_rules! define_simple_constraint {
     (
         $function:ident, $descriptor:ident, $signatures:ident,
         $builtin_name:literal, $label:literal, $summary:literal, $class:expr,
+        $builtin_path:literal,
         $build:expr
     ) => {
         const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -344,14 +345,14 @@ macro_rules! define_simple_constraint {
             errors: &ERRORS,
         };
         #[runtime_builtin(
-                                            name = $builtin_name,
-                                            category = "fea",
-                                            summary = $summary,
-                                            keywords = "fea,constraint,region,typed",
-                                            descriptor($descriptor),
-                                            integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
-                                            builtin_path = "crate::builtins::fea::constraints"
-                                        )]
+                                                    name = $builtin_name,
+                                                    category = "fea",
+                                                    summary = $summary,
+                                                    keywords = "fea,constraint,region,typed",
+                                                    descriptor($descriptor),
+                                                    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+                                                    builtin_path = $builtin_path
+                                                )]
         pub async fn $function(id: String, region: Value) -> BuiltinResult<Value> {
             let (id, geometry_id, geometry_revision, target) =
                 bound_region($builtin_name, id, &region)?;
@@ -371,6 +372,7 @@ macro_rules! define_quantity_constraint {
     (
         $function:ident, $descriptor:ident, $signatures:ident, $inputs:ident,
         $builtin_name:literal, $label:literal, $summary:literal, $class:expr,
+        $builtin_path:literal,
         $value_name:literal, $value_class:expr, $value_field:literal, $build:expr
     ) => {
         const $inputs: [BuiltinParamDescriptor; 3] = [
@@ -414,7 +416,7 @@ macro_rules! define_quantity_constraint {
                                             keywords = "fea,constraint,region,quantity,typed",
                                             descriptor($descriptor),
                                             integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
-                                            builtin_path = "crate::builtins::fea::constraints"
+                                            builtin_path = $builtin_path
                                         )]
         pub async fn $function(id: String, region: Value, value: Value) -> BuiltinResult<Value> {
             let (id, geometry_id, geometry_revision, target) =
@@ -432,13 +434,13 @@ macro_rules! define_quantity_constraint {
     };
 }
 
-mod acoustic;
-mod electrical;
-mod fluid;
-mod magnetic;
-mod paired;
-mod structural;
-mod support;
+pub(crate) mod acoustic;
+pub(crate) mod electrical;
+pub(crate) mod fluid;
+pub(crate) mod magnetic;
+pub(crate) mod paired;
+pub(crate) mod structural;
+pub(crate) mod support;
 
 pub(super) fn ensure_constraint_support_classes_registered() {
     support::ensure_constraint_support_classes_registered();
