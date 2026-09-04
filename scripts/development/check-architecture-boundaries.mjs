@@ -368,7 +368,11 @@ for (const rootPath of [
     const isTest = sourcePath.includes("/tests/") || sourcePath.endsWith("/tests.rs");
     const isDocumentation = sourcePath.endsWith("/documentation.rs");
     const isCompositionRoot = sourcePath.endsWith("/mod.rs") && !isTest;
-    const ceiling = isTest ? 512 : isDocumentation ? 256 : isCompositionRoot ? 192 : 256;
+    const ownsIdentity = text.includes("_CATALOG_ENTRY") || text.includes("#[runtime_builtin(");
+    let ceiling = 256;
+    if (isTest) ceiling = 512;
+    else if (isDocumentation) ceiling = 256;
+    else if (isCompositionRoot) ceiling = ownsIdentity ? 192 : 64;
     if (lines > ceiling) {
       fail(
         `${sourcePath} exceeds its deterministic-combinatorics role boundary ` +
@@ -384,8 +388,10 @@ for (const rootPath of [
   }
 }
 for (const sourcePath of [
+  "docs/builtins/reference/combinations.json",
   "docs/builtins/reference/nchoosek.json",
   "docs/builtins/reference/perms.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/combinations.json",
   "crates/runmat-runtime/src/builtins/builtins-json/nchoosek.json",
   "crates/runmat-runtime/src/builtins/builtins-json/perms.json",
   "crates/runmat-runtime/src/builtins/array/creation/nchoosek.rs",
@@ -393,6 +399,24 @@ for (const sourcePath of [
 ]) {
   if (fs.existsSync(path.join(repo, sourcePath))) {
     fail(`${sourcePath} is obsolete deterministic-combinatorics debt and must not return`);
+  }
+}
+const legacyGroupingSource = read("crates/runmat-runtime/src/builtins/array/grouping.rs");
+const legacyGroupingLines = legacyGroupingSource.split("\n").length;
+if (legacyGroupingLines > 4940) {
+  fail(
+    "array/grouping.rs is a shrink-only legacy godfile " +
+    `(found ${legacyGroupingLines} lines; ceiling 4940); extract each migrated identity into its domain package`
+  );
+}
+for (const forbidden of [
+  'name = "combinations"',
+  "COMBINATIONS_DESCRIPTOR",
+  "COMBINATIONS_INTEGER_CAPABILITIES",
+  "combinations_impl",
+]) {
+  if (legacyGroupingSource.includes(forbidden)) {
+    fail(`array/grouping.rs retains migrated combinations responsibility (${forbidden})`);
   }
 }
 

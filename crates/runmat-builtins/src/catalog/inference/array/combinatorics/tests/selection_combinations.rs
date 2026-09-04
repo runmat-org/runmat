@@ -10,7 +10,7 @@ fn distinguishes_scalar_and_vector_results() {
     assert_eq!(
         entry.contract.inference_rule,
         BuiltinInferenceRule::Array(ArrayInferenceRule::Combinatorics(
-            CombinatoricsInferenceRule::Combinations,
+            CombinatoricsInferenceRule::SelectionCombinations,
         ))
     );
     let selection = numeric(NumericClass::Double, ShapeFact::Scalar);

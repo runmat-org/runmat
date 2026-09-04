@@ -141,8 +141,9 @@ pub enum ArrayInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CombinatoricsInferenceRule {
-    Combinations,
+    CartesianProduct,
     Permutations,
+    SelectionCombinations,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -147,7 +147,7 @@ pub const NCHOOSEK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Array(ArrayInferenceRule::Combinatorics(
-            CombinatoricsInferenceRule::Combinations,
+            CombinatoricsInferenceRule::SelectionCombinations,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
