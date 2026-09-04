@@ -75,6 +75,9 @@ pub(in crate::catalog::inference) fn infer(
                 request, entry, function,
             )
         }
+        MathInferenceRule::PowerOfTwo(rule) => {
+            super::super::math::powers_of_two::infer(rule, request, entry)
+        }
         MathInferenceRule::DegreeTrigonometric(function) => {
             super::super::math_degree_trigonometric::infer_degree_trigonometric(
                 request, entry, function,

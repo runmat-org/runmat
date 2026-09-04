@@ -834,6 +834,46 @@ for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/
   }
 }
 
+for (const sourcePath of [
+  "crates/runmat-runtime/src/builtins/math/elementwise/nextpow2.rs",
+  "docs/builtins/reference/nextpow2.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/nextpow2.json",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete next-power-of-two migration debt and must not return`);
+  }
+}
+const powersOfTwoRoots = new Set([
+  "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/nextpow2/mod.rs",
+  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/mod.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/mod.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/nextpow2/mod.rs",
+]);
+for (const rootPath of [
+  "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two",
+  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two",
+  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two",
+]) {
+  for (const { path: sourcePath, text } of rustSources(rootPath)) {
+    const lines = text.split("\n").length;
+    const isTest = sourcePath.includes("/tests/") || sourcePath.endsWith("/tests.rs");
+    const ceiling = powersOfTwoRoots.has(sourcePath) ? 64 : isTest ? 320 : 192;
+    if (lines > ceiling || Buffer.byteLength(text, "utf8") > 24 * 1024) {
+      fail(
+        `${sourcePath} exceeds its powers-of-two role boundary ` +
+        `(found ${lines} lines; maximum ${ceiling} and 24 KiB)`
+      );
+    }
+    if (
+      rootPath.includes("runmat-runtime") &&
+      /\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)
+    ) {
+      fail(`${sourcePath} duplicates catalog-owned powers-of-two metadata`);
+    }
+  }
+}
+
 const gammaFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/mod.rs", 40],
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/common.rs", 64],

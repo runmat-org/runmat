@@ -251,9 +251,15 @@ pub enum MathInferenceRule {
     Trigonometric(TrigonometricFunction),
     Hyperbolic(HyperbolicFunction),
     PiScaledTrigonometric(PiScaledTrigonometricFunction),
+    PowerOfTwo(PowerOfTwoInferenceRule),
     DegreeTrigonometric(DegreeTrigonometricFunction),
     InverseTrigonometric(InverseTrigonometricFunction),
     InverseHyperbolic(InverseHyperbolicFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum PowerOfTwoInferenceRule {
+    NextExponent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
